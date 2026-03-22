@@ -1,0 +1,496 @@
+-- =============================================================
+-- NAAP Evaluation System
+-- Normalized MySQL / MariaDB schema for XAMPP
+-- Schema only. Seed data lives in database/datauser.txt
+-- =============================================================
+
+CREATE DATABASE IF NOT EXISTS `naap_evaluation_system`
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
+
+USE `naap_evaluation_system`;
+
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- -------------------------------------------------------------
+-- Lookup tables
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `campuses` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `slug` VARCHAR(50) NOT NULL,
+    `name` VARCHAR(100) NOT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_campuses_slug` (`slug`),
+    UNIQUE KEY `uq_campuses_name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `departments` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `campus_id` BIGINT UNSIGNED NOT NULL,
+    `code` VARCHAR(30) NOT NULL,
+    `name` VARCHAR(100) NOT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_departments_campus_code` (`campus_id`, `code`),
+    UNIQUE KEY `uq_departments_campus_name` (`campus_id`, `name`),
+    CONSTRAINT `fk_departments_campus`
+        FOREIGN KEY (`campus_id`) REFERENCES `campuses` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `roles` (
+    `id` SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `code` VARCHAR(30) NOT NULL,
+    `label` VARCHAR(80) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_roles_code` (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `employment_types` (
+    `id` SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `code` VARCHAR(30) NOT NULL,
+    `label` VARCHAR(80) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_employment_types_code` (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `evaluation_types` (
+    `id` SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `code` VARCHAR(40) NOT NULL,
+    `label` VARCHAR(120) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_evaluation_types_code` (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `question_types` (
+    `id` SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `code` VARCHAR(30) NOT NULL,
+    `label` VARCHAR(80) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_question_types_code` (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -------------------------------------------------------------
+-- Core academic structure
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `semesters` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `slug` VARCHAR(100) NOT NULL,
+    `label` VARCHAR(150) NOT NULL,
+    `academic_year` VARCHAR(20) NOT NULL,
+    `is_current` TINYINT(1) NOT NULL DEFAULT 0,
+    `start_date` DATE DEFAULT NULL,
+    `end_date` DATE DEFAULT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_semesters_slug` (`slug`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `subjects` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `department_id` BIGINT UNSIGNED NOT NULL,
+    `subject_code` VARCHAR(50) NOT NULL,
+    `subject_name` VARCHAR(150) NOT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_subjects_department_code` (`department_id`, `subject_code`),
+    CONSTRAINT `fk_subjects_department`
+        FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -------------------------------------------------------------
+-- Users and profiles
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `users` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `role_id` SMALLINT UNSIGNED NOT NULL,
+    `campus_id` BIGINT UNSIGNED NOT NULL,
+    `department_id` BIGINT UNSIGNED DEFAULT NULL,
+    `name` VARCHAR(150) NOT NULL,
+    `email` VARCHAR(190) NOT NULL,
+    `password` VARCHAR(255) NOT NULL DEFAULT '',
+    `status` ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_users_email` (`email`),
+    KEY `idx_users_role` (`role_id`),
+    KEY `idx_users_campus` (`campus_id`),
+    KEY `idx_users_department` (`department_id`),
+    KEY `idx_users_status` (`status`),
+    CONSTRAINT `fk_users_role`
+        FOREIGN KEY (`role_id`) REFERENCES `roles` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+    CONSTRAINT `fk_users_campus`
+        FOREIGN KEY (`campus_id`) REFERENCES `campuses` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+    CONSTRAINT `fk_users_department`
+        FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `staff_profiles` (
+    `user_id` BIGINT UNSIGNED NOT NULL,
+    `employee_id` VARCHAR(50) NOT NULL,
+    `employment_type_id` SMALLINT UNSIGNED DEFAULT NULL,
+    `position` VARCHAR(150) NOT NULL DEFAULT '',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`user_id`),
+    UNIQUE KEY `uq_staff_profiles_employee_id` (`employee_id`),
+    CONSTRAINT `fk_staff_profiles_user`
+        FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_staff_profiles_employment_type`
+        FOREIGN KEY (`employment_type_id`) REFERENCES `employment_types` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `student_profiles` (
+    `user_id` BIGINT UNSIGNED NOT NULL,
+    `student_number` VARCHAR(50) NOT NULL,
+    `year_section` VARCHAR(100) NOT NULL DEFAULT '',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`user_id`),
+    UNIQUE KEY `uq_student_profiles_student_number` (`student_number`),
+    CONSTRAINT `fk_student_profiles_user`
+        FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `profile_photos` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `user_id` BIGINT UNSIGNED NOT NULL,
+    `photo_data` LONGTEXT NOT NULL,
+    `mime_type` VARCHAR(100) DEFAULT NULL,
+    `uploaded_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_profile_photos_user` (`user_id`),
+    CONSTRAINT `fk_profile_photos_user`
+        FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -------------------------------------------------------------
+-- Scheduling and enrollment
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `course_offerings` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `subject_id` BIGINT UNSIGNED NOT NULL,
+    `semester_id` BIGINT UNSIGNED NOT NULL,
+    `professor_id` BIGINT UNSIGNED NOT NULL,
+    `section_name` VARCHAR(50) NOT NULL DEFAULT '',
+    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_course_offerings` (`subject_id`, `semester_id`, `professor_id`, `section_name`),
+    KEY `idx_course_offerings_semester` (`semester_id`),
+    KEY `idx_course_offerings_professor` (`professor_id`),
+    CONSTRAINT `fk_course_offerings_subject`
+        FOREIGN KEY (`subject_id`) REFERENCES `subjects` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+    CONSTRAINT `fk_course_offerings_semester`
+        FOREIGN KEY (`semester_id`) REFERENCES `semesters` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_course_offerings_professor`
+        FOREIGN KEY (`professor_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `student_course_enrollments` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `student_id` BIGINT UNSIGNED NOT NULL,
+    `course_offering_id` BIGINT UNSIGNED NOT NULL,
+    `status` ENUM('enrolled', 'dropped', 'completed') NOT NULL DEFAULT 'enrolled',
+    `enrolled_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_student_course_enrollment` (`student_id`, `course_offering_id`),
+    CONSTRAINT `fk_student_course_enrollments_student`
+        FOREIGN KEY (`student_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_student_course_enrollments_course`
+        FOREIGN KEY (`course_offering_id`) REFERENCES `course_offerings` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -------------------------------------------------------------
+-- Evaluation configuration
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `evaluation_periods` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `semester_id` BIGINT UNSIGNED NOT NULL,
+    `evaluation_type_id` SMALLINT UNSIGNED NOT NULL,
+    `start_date` DATE DEFAULT NULL,
+    `end_date` DATE DEFAULT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_evaluation_periods_semester_type` (`semester_id`, `evaluation_type_id`),
+    CONSTRAINT `fk_evaluation_periods_semester`
+        FOREIGN KEY (`semester_id`) REFERENCES `semesters` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_evaluation_periods_type`
+        FOREIGN KEY (`evaluation_type_id`) REFERENCES `evaluation_types` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `questionnaires` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `semester_id` BIGINT UNSIGNED NOT NULL,
+    `evaluation_type_id` SMALLINT UNSIGNED NOT NULL,
+    `title` VARCHAR(200) NOT NULL,
+    `description` TEXT DEFAULT NULL,
+    `status` ENUM('draft', 'published', 'archived') NOT NULL DEFAULT 'published',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_questionnaires_semester_type` (`semester_id`, `evaluation_type_id`),
+    CONSTRAINT `fk_questionnaires_semester`
+        FOREIGN KEY (`semester_id`) REFERENCES `semesters` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_questionnaires_type`
+        FOREIGN KEY (`evaluation_type_id`) REFERENCES `evaluation_types` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `questionnaire_sections` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `questionnaire_id` BIGINT UNSIGNED NOT NULL,
+    `section_code` VARCHAR(10) NOT NULL DEFAULT '',
+    `title` VARCHAR(150) NOT NULL,
+    `description` TEXT DEFAULT NULL,
+    `sort_order` INT NOT NULL DEFAULT 0,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_questionnaire_sections_code` (`questionnaire_id`, `section_code`),
+    KEY `idx_questionnaire_sections_order` (`questionnaire_id`, `sort_order`),
+    CONSTRAINT `fk_questionnaire_sections_questionnaire`
+        FOREIGN KEY (`questionnaire_id`) REFERENCES `questionnaires` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `questions` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `questionnaire_id` BIGINT UNSIGNED NOT NULL,
+    `section_id` BIGINT UNSIGNED DEFAULT NULL,
+    `question_type_id` SMALLINT UNSIGNED NOT NULL,
+    `question_text` TEXT NOT NULL,
+    `rating_max` TINYINT UNSIGNED NOT NULL DEFAULT 5,
+    `max_length` SMALLINT UNSIGNED NOT NULL DEFAULT 500,
+    `is_required` TINYINT(1) NOT NULL DEFAULT 0,
+    `sort_order` INT NOT NULL DEFAULT 0,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_questions_questionnaire` (`questionnaire_id`),
+    KEY `idx_questions_section` (`section_id`),
+    KEY `idx_questions_type` (`question_type_id`),
+    CONSTRAINT `fk_questions_questionnaire`
+        FOREIGN KEY (`questionnaire_id`) REFERENCES `questionnaires` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_questions_section`
+        FOREIGN KEY (`section_id`) REFERENCES `questionnaire_sections` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+    CONSTRAINT `fk_questions_type`
+        FOREIGN KEY (`question_type_id`) REFERENCES `question_types` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -------------------------------------------------------------
+-- Evaluation transactions
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `evaluations` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `semester_id` BIGINT UNSIGNED NOT NULL,
+    `questionnaire_id` BIGINT UNSIGNED DEFAULT NULL,
+    `evaluation_type_id` SMALLINT UNSIGNED NOT NULL,
+    `evaluator_user_id` BIGINT UNSIGNED DEFAULT NULL,
+    `evaluatee_user_id` BIGINT UNSIGNED DEFAULT NULL,
+    `course_offering_id` BIGINT UNSIGNED DEFAULT NULL,
+    `general_comments` TEXT DEFAULT NULL,
+    `submitted_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `status` ENUM('submitted', 'draft', 'archived') NOT NULL DEFAULT 'submitted',
+    PRIMARY KEY (`id`),
+    KEY `idx_evaluations_semester` (`semester_id`),
+    KEY `idx_evaluations_type` (`evaluation_type_id`),
+    KEY `idx_evaluations_evaluator` (`evaluator_user_id`),
+    KEY `idx_evaluations_evaluatee` (`evaluatee_user_id`),
+    KEY `idx_evaluations_course` (`course_offering_id`),
+    CONSTRAINT `fk_evaluations_semester`
+        FOREIGN KEY (`semester_id`) REFERENCES `semesters` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_evaluations_questionnaire`
+        FOREIGN KEY (`questionnaire_id`) REFERENCES `questionnaires` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+    CONSTRAINT `fk_evaluations_type`
+        FOREIGN KEY (`evaluation_type_id`) REFERENCES `evaluation_types` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+    CONSTRAINT `fk_evaluations_evaluator`
+        FOREIGN KEY (`evaluator_user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+    CONSTRAINT `fk_evaluations_evaluatee`
+        FOREIGN KEY (`evaluatee_user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+    CONSTRAINT `fk_evaluations_course`
+        FOREIGN KEY (`course_offering_id`) REFERENCES `course_offerings` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `evaluation_responses` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `evaluation_id` BIGINT UNSIGNED NOT NULL,
+    `question_id` BIGINT UNSIGNED NOT NULL,
+    `rating_value` DECIMAL(5,2) DEFAULT NULL,
+    `text_value` TEXT DEFAULT NULL,
+    `display_order` INT NOT NULL DEFAULT 0,
+    PRIMARY KEY (`id`),
+    KEY `idx_evaluation_responses_evaluation` (`evaluation_id`),
+    KEY `idx_evaluation_responses_question` (`question_id`),
+    CONSTRAINT `fk_evaluation_responses_evaluation`
+        FOREIGN KEY (`evaluation_id`) REFERENCES `evaluations` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_evaluation_responses_question`
+        FOREIGN KEY (`question_id`) REFERENCES `questions` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -------------------------------------------------------------
+-- Notifications, logs, and settings
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `activity_log` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `user_id` BIGINT UNSIGNED DEFAULT NULL,
+    `log_code` VARCHAR(30) DEFAULT NULL,
+    `action` VARCHAR(100) NOT NULL,
+    `description` TEXT NOT NULL,
+    `entry_type` VARCHAR(50) NOT NULL DEFAULT 'system',
+    `ip_address` VARCHAR(45) NOT NULL DEFAULT '',
+    `happened_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_activity_log_code` (`log_code`),
+    KEY `idx_activity_log_user` (`user_id`),
+    KEY `idx_activity_log_type` (`entry_type`),
+    KEY `idx_activity_log_happened_at` (`happened_at`),
+    CONSTRAINT `fk_activity_log_user`
+        FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `announcements` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `created_by_user_id` BIGINT UNSIGNED DEFAULT NULL,
+    `title` VARCHAR(200) NOT NULL,
+    `message` TEXT NOT NULL,
+    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_announcements_created_by` (`created_by_user_id`),
+    KEY `idx_announcements_active` (`is_active`),
+    CONSTRAINT `fk_announcements_created_by`
+        FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `announcement_targets` (
+    `announcement_id` BIGINT UNSIGNED NOT NULL,
+    `role_id` SMALLINT UNSIGNED NOT NULL,
+    PRIMARY KEY (`announcement_id`, `role_id`),
+    CONSTRAINT `fk_announcement_targets_announcement`
+        FOREIGN KEY (`announcement_id`) REFERENCES `announcements` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_announcement_targets_role`
+        FOREIGN KEY (`role_id`) REFERENCES `roles` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `system_settings` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `setting_key` VARCHAR(100) NOT NULL,
+    `setting_value` LONGTEXT DEFAULT NULL,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_system_settings_key` (`setting_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -------------------------------------------------------------
+-- Dean peer evaluation rooms
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `peer_evaluation_rooms` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `semester_id` BIGINT UNSIGNED NOT NULL,
+    `dean_user_id` BIGINT UNSIGNED DEFAULT NULL,
+    `room_name` VARCHAR(150) NOT NULL,
+    `coordinator_user_id` BIGINT UNSIGNED DEFAULT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_peer_evaluation_rooms` (`semester_id`, `dean_user_id`, `room_name`),
+    CONSTRAINT `fk_peer_evaluation_rooms_semester`
+        FOREIGN KEY (`semester_id`) REFERENCES `semesters` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_peer_evaluation_rooms_dean`
+        FOREIGN KEY (`dean_user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+    CONSTRAINT `fk_peer_evaluation_rooms_coordinator`
+        FOREIGN KEY (`coordinator_user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `peer_evaluation_room_members` (
+    `room_id` BIGINT UNSIGNED NOT NULL,
+    `professor_user_id` BIGINT UNSIGNED NOT NULL,
+    `assigned_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`room_id`, `professor_user_id`),
+    CONSTRAINT `fk_peer_evaluation_room_members_room`
+        FOREIGN KEY (`room_id`) REFERENCES `peer_evaluation_rooms` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_peer_evaluation_room_members_professor`
+        FOREIGN KEY (`professor_user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SET FOREIGN_KEY_CHECKS = 1;

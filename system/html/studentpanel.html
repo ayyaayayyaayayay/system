@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Dashboard - National Aviation Academy of the Philippines</title>
+    <link rel="stylesheet" href="../css/studentpanel.css">
+    <link rel="stylesheet" href="../css/panel-theme.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+</head>
+
+<body>
+    <div class="dashboard-container">
+        <!-- Left Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-container">
+                    <div class="logo-shield">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <h2 class="logo-text">NAAP Evaluation System</h2>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-link active" data-view="dashboard">
+                    <i class="fas fa-home"></i>
+                    <span>Home</span>
+                </a>
+                <a href="#" class="nav-link" data-view="evaluationForm">
+                    <i class="fas fa-file-alt"></i>
+                    <span>Evaluation Forms</span>
+                </a>
+                <a href="#" class="nav-link" data-view="history">
+                    <i class="fas fa-clock"></i>
+                    <span>History</span>
+                </a>
+                <a href="#" class="nav-link" data-view="profile">
+                    <i class="fas fa-user"></i>
+                    <span>Profile</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <a href="#" class="nav-link logout"
+                    onclick="SharedData.clearSession(); window.location.href='mainpage.html';">
+                    <i class="fas fa-sign-out-alt"></i>
+                    <span>Logout</span>
+                </a>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Top Header -->
+            <header class="top-header">
+                <h1 class="page-title" id="mainPageTitle">Student Dashboard</h1>
+                <div class="user-info">
+                    <button class="user-action-btn" id="notificationBtn" aria-label="View announcements">
+                        <i class="fas fa-bell"></i>
+                        <span class="notification-dot" aria-hidden="true"></span>
+                    </button>
+                    <button class="user-profile" id="profileBtn" aria-label="View profile">
+                        <i class="fas fa-user-circle"></i>
+                        <span>John Student</span>
+                    </button>
+
+                    <div class="dropdown-panel" id="announcementPanel">
+                        <div class="panel-header">
+                            <h3>Announcements</h3>
+                            <span class="panel-subtitle">Evaluation schedule</span>
+                        </div>
+                        <ul class="panel-list">
+                            <li>
+                                <div class="panel-title">Evaluation Period Started</div>
+                                <div class="panel-meta">Start date: February 1, 2026</div>
+                            </li>
+                            <li>
+                                <div class="panel-title">Evaluation Period Ends</div>
+                                <div class="panel-meta">End date: February 28, 2026</div>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div class="dropdown-panel" id="profilePanel">
+                        <div class="panel-header">
+                            <h3>Student Profile</h3>
+                            <span class="panel-subtitle">Quick info</span>
+                        </div>
+                        <div class="profile-grid">
+                            <div class="profile-item">
+                                <span class="profile-label">Student ID</span>
+                                <span class="profile-value" id="profileStudentIdMini">ST-000001</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">Program</span>
+                                <span class="profile-value">BS Aviation</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Dashboard View -->
+            <div id="dashboardView" class="content-view">
+                <!-- Summary Cards -->
+                <div class="summary-cards">
+                    <div class="summary-card pending">
+                        <div class="card-icon">
+                            <i class="fas fa-clock"></i>
+                        </div>
+                        <div class="card-content">
+                            <h3>Pending Evaluations</h3>
+                            <p class="card-number">4</p>
+                        </div>
+                    </div>
+
+                    <div class="summary-card completed">
+                        <div class="card-icon">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <div class="card-content">
+                            <h3>Completed</h3>
+                            <p class="card-number">4</p>
+                        </div>
+                    </div>
+
+                    <div class="summary-card total">
+                        <div class="card-icon">
+                            <i class="fas fa-file-alt"></i>
+                        </div>
+                        <div class="card-content">
+                            <h3>Total Submissions</h3>
+                            <p class="card-number">4</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- My Evaluations Section -->
+                <section class="evaluations-section">
+                    <div class="section-header">
+                        <div class="section-title">
+                            <h2>My Evaluations</h2>
+                            <p>Pending and completed Professor evaluations.</p>
+                        </div>
+                        <button class="btn-submit-new">
+                            <i class="fas fa-plus"></i>
+                            Submit New Evaluation
+                        </button>
+                    </div>
+
+                    <div class="evaluations-list">
+                        <!-- Pending Evaluations -->
+                        <div class="evaluation-item">
+                            <div class="evaluation-info">
+                                <div class="teacher-name">Arvin Lauron</div>
+                                <span class="status-badge pending">Pending</span>
+                                <div class="course-info">
+                                    <span class="course-code">SF 5</span>
+                                    <span class="course-name">- Student Formation 5</span>
+                                </div>
+                                <div class="due-date">Due: 2025-11-20</div>
+                            </div>
+                            <button class="btn-start">Start Evaluation</button>
+                        </div>
+
+                        <div class="evaluation-item">
+                            <div class="evaluation-info">
+                                <div class="teacher-name">Maria Santos</div>
+                                <span class="status-badge pending">Pending</span>
+                                <div class="course-info">
+                                    <span class="course-code">MATH 101</span>
+                                    <span class="course-name">- College Algebra</span>
+                                </div>
+                                <div class="due-date">Due: 2025-11-22</div>
+                            </div>
+                            <button class="btn-start">Start Evaluation</button>
+                        </div>
+
+                        <div class="evaluation-item">
+                            <div class="evaluation-info">
+                                <div class="teacher-name">Juan Dela Cruz</div>
+                                <span class="status-badge pending">Pending</span>
+                                <div class="course-info">
+                                    <span class="course-code">ENG 201</span>
+                                    <span class="course-name">- Technical Writing</span>
+                                </div>
+                                <div class="due-date">Due: 2025-11-25</div>
+                            </div>
+                            <button class="btn-start">Start Evaluation</button>
+                        </div>
+
+                        <div class="evaluation-item">
+                            <div class="evaluation-info">
+                                <div class="teacher-name">Ana Garcia</div>
+                                <span class="status-badge pending">Pending</span>
+                                <div class="course-info">
+                                    <span class="course-code">CS 301</span>
+                                    <span class="course-name">- Data Structures</span>
+                                </div>
+                                <div class="due-date">Due: 2025-11-28</div>
+                            </div>
+                            <button class="btn-start">Start Evaluation</button>
+                        </div>
+
+                        <!-- Completed Evaluations -->
+                        <div class="evaluation-item">
+                            <div class="evaluation-info">
+                                <div class="teacher-name">Ryan Billera</div>
+                                <span class="status-badge completed">Completed</span>
+                                <div class="course-info">
+                                    <span class="course-code">IT 304</span>
+                                    <span class="course-name">- Information Assurance and Security 1</span>
+                                </div>
+                                <div class="due-date">Due: 2025-11-18</div>
+                            </div>
+                            <span class="submitted-text">Submitted</span>
+                        </div>
+
+                        <div class="evaluation-item">
+                            <div class="evaluation-info">
+                                <div class="teacher-name">Sarah Johnson</div>
+                                <span class="status-badge completed">Completed</span>
+                                <div class="course-info">
+                                    <span class="course-code">PHY 201</span>
+                                    <span class="course-name">- Physics for Engineers</span>
+                                </div>
+                                <div class="due-date">Due: 2025-11-15</div>
+                            </div>
+                            <span class="submitted-text">Submitted</span>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Evaluation Form View -->
+            <div id="evaluationFormView" class="content-view" style="display: none;">
+
+                <!-- Form Card -->
+                <div class="form-card">
+                    <div class="form-header" id="dynamic-form-header">
+                        <h2 id="dynamic-form-title">Student Professor Evaluation Form</h2>
+                        <p id="dynamic-form-description">Please rate your Professor honestly and constructively. Your
+                            feedback helps improve the quality
+                            of education.</p>
+                    </div>
+
+                    <form id="evaluationForm" class="evaluation-form">
+                        <!-- Select Professor and Subject -->
+                        <div class="form-section">
+                            <h3 class="section-title">Select Professor and Subject</h3>
+                            <div class="form-group">
+                                <select id="professorSubject" name="professorSubject" class="form-select" required>
+                                    <option value="">Choose a Professor to evaluate</option>
+                                    <option value="arvin-lauron-sf5">Arvin Lauron - SF 5 (Student Formation 5)</option>
+                                    <option value="maria-santos-math101">Maria Santos - MATH 101 (College Algebra)
+                                    </option>
+                                    <option value="juan-delacruz-eng201">Juan Dela Cruz - ENG 201 (Technical Writing)
+                                    </option>
+                                    <option value="ana-garcia-cs301">Ana Garcia - CS 301 (Data Structures)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Dynamic Questions Container -->
+                        <div id="dynamic-questions-container">
+                            <!-- Questions will be dynamically loaded here by studentpanel.js -->
+                            <div class="loading-questions" style="text-align: center; padding: 2rem;">
+                                <i class="fas fa-spinner fa-spin"></i> Loading questionnaire...
+                            </div>
+                        </div>
+
+                        <!-- API Integration Info -->
+                        <div class="api-info-box">
+                            <i class="fas fa-info-circle"></i>
+                            <span>API Integration: Form submission will trigger POST request to
+                                /api/evaluations/submit</span>
+                        </div>
+
+                        <!-- Form Actions -->
+                        <div class="form-actions">
+                            <button type="submit" class="btn-submit">Submit Evaluation</button>
+                            <button type="button" class="btn-cancel" id="cancelBtn">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- History View -->
+            <div id="historyView" class="content-view" style="display: none;">
+                <div class="history-card">
+                    <div class="history-header">
+                        <div class="history-title">
+                            <h2>Past Evaluations</h2>
+                            <p>Review your submitted evaluations by academic year, semester, or professor.</p>
+                        </div>
+                        <div class="history-filters">
+                            <div class="filter-group">
+                                <label for="historyAy">Academic Year</label>
+                                <select id="historyAy" class="filter-select">
+                                    <option value="all">All</option>
+                                    <option value="2025-2026">2025-2026</option>
+                                    <option value="2024-2025">2024-2025</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <label for="historySem">Semester</label>
+                                <select id="historySem" class="filter-select">
+                                    <option value="all">All</option>
+                                    <option value="1">1st Semester</option>
+                                    <option value="2">2nd Semester</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <label for="historySearch">Professor / Subject</label>
+                                <input id="historySearch" type="text" class="filter-input"
+                                    placeholder="Search by professor name, ID, subject, or course"
+                                    aria-label="Professor or subject search">
+                            </div>
+                            <button class="btn-filter" id="historyFilterBtn" type="button">
+                                <i class="fas fa-filter"></i>
+                                Apply Filters
+                            </button>
+                        </div>
+                    </div>
+                    <div id="historyList" class="history-list"></div>
+                </div>
+            </div>
+
+            <!-- Profile View -->
+            <div id="profileView" class="content-view" style="display: none;">
+                <div class="form-card">
+                    <div class="form-header">
+                        <h2>Student Information</h2>
+                        <p>View-only details for your student profile.</p>
+                    </div>
+                    <div class="profile-grid profile-grid-wide">
+                        <div class="profile-item">
+                            <span class="profile-label">Student ID</span>
+                            <span class="profile-value" id="profileStudentId">ST-000001</span>
+                        </div>
+                        <div class="profile-item">
+                            <span class="profile-label">Full Name</span>
+                            <span class="profile-value" id="profileStudentName">John Student</span>
+                        </div>
+                        <div class="profile-item">
+                            <span class="profile-label">Program</span>
+                            <span class="profile-value">BS Aviation</span>
+                        </div>
+                        <div class="profile-item">
+                            <span class="profile-label">Year Level</span>
+                            <span class="profile-value">3rd Year</span>
+                        </div>
+                        <div class="profile-item">
+                            <span class="profile-label">Academic Year</span>
+                            <span class="profile-value">2025-2026</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-card account-action-card">
+                    <div class="form-header">
+                        <h2>Change Password</h2>
+                        <p>Update your account password. This is the only editable section.</p>
+                    </div>
+                    <form id="changePasswordForm" class="evaluation-form">
+                        <div class="form-section">
+                            <h3 class="section-title">Account Credentials</h3>
+                            <div class="form-group">
+                                <label for="currentPassword">Current Password</label>
+                                <div class="password-field">
+                                    <input type="password" id="currentPassword" name="currentPassword"
+                                        class="form-select" placeholder="Enter current password" required>
+                                    <button type="button" class="toggle-password" data-target="currentPassword"
+                                        aria-label="Show password">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="newPassword">New Password</label>
+                                <div class="password-field">
+                                    <input type="password" id="newPassword" name="newPassword" class="form-select"
+                                        placeholder="Enter new password" required>
+                                    <button type="button" class="toggle-password" data-target="newPassword"
+                                        aria-label="Show password">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="confirmPassword">Confirm New Password</label>
+                                <div class="password-field">
+                                    <input type="password" id="confirmPassword" name="confirmPassword"
+                                        class="form-select" placeholder="Re-enter new password" required>
+                                    <button type="button" class="toggle-password" data-target="confirmPassword"
+                                        aria-label="Show password">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="api-info-box">
+                            <i class="fas fa-database"></i>
+                            <span>SQL Ready: connect to /api/student/change-password (POST)</span>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn-submit">Update Password</button>
+                            <button type="reset" class="btn-cancel">Reset</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- History Modal -->
+    <div class="history-modal" id="historyModal" aria-hidden="true">
+        <div class="history-modal-content" role="dialog" aria-modal="true">
+            <div class="history-modal-header">
+                <h3>Submitted Answers</h3>
+                <button type="button" class="history-modal-close" id="historyModalClose" aria-label="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="history-modal-body" id="historyModalBody"></div>
+        </div>
+    </div>
+    <script src="../JsScrip/db-data.js"></script>
+    <script src="../JsScrip/studentpanel.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - National Aviation Academy of the Philippines</title>
+    <link rel="stylesheet" href="../css/hrpanel.css">
+    <link rel="stylesheet" href="../css/panel-theme.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+
+<body class="hr-panel">
+    <div class="dashboard-container">
+        <div class="main-wrapper">
+            <!-- Left Sidebar -->
+            <aside class="sidebar">
+                <div class="sidebar-header">
+                    <div class="logo-container">
+                        <div class="logo-shield">
+                            <i class="fas fa-shield-alt"></i>
+                        </div>
+                        <h2 class="logo-text">NAAP Evaluation System</h2>
+                    </div>
+                </div>
+
+                <nav class="sidebar-nav">
+                    <a href="#" class="nav-link active">
+                        <i class="fas fa-home"></i>
+                        <span>Dashboard</span>
+                    </a>
+                    <a href="#" class="nav-link">
+                        <i class="fas fa-users"></i>
+                        <span>User Management</span>
+                    </a>
+                    <a href="#" class="nav-link">
+                        <i class="fas fa-clipboard-list"></i>
+                        <span>Activity Log</span>
+                    </a>
+                    <a href="#" class="nav-link">
+                        <i class="fas fa-sliders-h"></i>
+                        <span>Evaluation Settings</span>
+                    </a>
+                    <a href="#" class="nav-link">
+                        <i class="fas fa-clipboard-list"></i>
+                        <span>Questionnaire</span>
+                    </a>
+                    <a href="#" class="nav-link">
+                        <i class="fas fa-id-card"></i>
+                        <span>Profile</span>
+                    </a>
+                </nav>
+
+                <div class="sidebar-footer">
+                    <a href="#" class="nav-link logout"
+                        onclick="SharedData.clearSession(); window.location.href='mainpage.html';">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>Logout</span>
+                    </a>
+                </div>
+            </aside>
+
+            <!-- Main Content Area -->
+            <main class="main-content">
+                <!-- Top Header -->
+                <header class="top-header">
+                    <h1 class="page-title" id="mainPageTitle">HR Dashboard</h1>
+                    <div class="header-right">
+                        <div class="notification-wrapper">
+                            <div class="notification-icon" id="notification-icon">
+                                <i class="fas fa-bell"></i>
+                                <span class="notification-badge" id="notification-badge">3</span>
+                            </div>
+                            <div class="notification-dropdown" id="notification-dropdown" aria-hidden="true">
+                                <div class="notification-dropdown-header">Notifications</div>
+                                <div class="notification-list" id="notification-list"></div>
+                            </div>
+                        </div>
+                        <div class="user-profile">
+                            <i class="fas fa-user-circle"></i>
+                            <span>Admin User</span>
+                        </div>
+                    </div>
+                </header>
+
+                <!-- Dashboard View (Default) -->
+                <div id="dashboard-view" class="content-view">
+                    <!-- Overview Cards -->
+                    <div class="overview-cards">
+                        <div class="overview-card users">
+                            <div class="card-icon">
+                                <i class="fas fa-users"></i>
+                            </div>
+                            <div class="card-content">
+                                <h3>Total Students</h3>
+                                <p class="card-number">0</p>
+                            </div>
+                        </div>
+
+                        <div class="overview-card evaluations">
+                            <div class="card-icon">
+                                <i class="fas fa-calendar-check"></i>
+                            </div>
+                            <div class="card-content">
+                                <h3>Completion Rate</h3>
+                                <p class="card-number">0%</p>
+                            </div>
+                        </div>
+
+                        <div class="overview-card completed">
+                            <div class="card-icon">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <div class="card-content">
+                                <h3>Completed Evaluations</h3>
+                                <p class="card-number">0</p>
+                            </div>
+                        </div>
+
+                        <div class="overview-card professors">
+                            <div class="card-icon">
+                                <i class="fas fa-hourglass-half"></i>
+                            </div>
+                            <div class="card-content">
+                                <h3>Pending Evaluations</h3>
+                                <p class="card-number">0</p>
+                            </div>
+                        </div>
+
+                        <div class="overview-card status">
+                            <div class="card-icon">
+                                <i class="fas fa-user-check"></i>
+                            </div>
+                            <div class="card-content">
+                                <h3>Number of Active Professors</h3>
+                                <p class="card-number">0</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Two Column Layout -->
+                    <div class="content-grid">
+                        <!-- Left Column -->
+                        <div class="content-column">
+                            <!-- User Management Section -->
+                            <!-- Professor Ranking Section -->
+                            <section class="admin-section">
+                                <div class="section-header">
+                                    <div class="section-title">
+                                        <h2>Professor Ranking</h2>
+                                        <p>Top performing professors by department.</p>
+                                    </div>
+                                    <div class="section-filters">
+                                        <select id="ranking-employment-filter" class="filter-select">
+                                            <option value="all">All Employment Types</option>
+                                            <option value="Regular">Regular</option>
+                                            <option value="Temporary">Temporary</option>
+                                        </select>
+                                        <select id="ranking-dept-filter" class="filter-select">
+                                            <option value="all">All Departments</option>
+                                            <option value="ICS">ICS</option>
+                                            <option value="ILAS">ILAS</option>
+                                            <option value="ENGI">ENGI</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="user-list" id="professor-ranking-list">
+                                    <div class="empty-state">
+                                        <i class="fas fa-spinner fa-spin"></i>
+                                        <p>Loading professor ranking...</p>
+                                    </div>
+                                </div>
+                            </section>
+
+
+                        </div>
+
+                        <!-- Right Column -->
+                        <div class="content-column">
+                            <!-- System Notifications Section -->
+                            <section class="admin-section">
+                                <div class="section-header">
+                                    <div class="section-title">
+                                        <h2>System Notifications</h2>
+                                        <p>Recent system events and alerts.</p>
+                                    </div>
+                                </div>
+
+                                <div class="notification-alert">
+                                    <div class="alert-icon">
+                                        <i class="fas fa-exclamation-triangle"></i>
+                                    </div>
+                                    <div class="alert-content">
+                                        <div class="alert-message">Evaluation period ends in 7 days</div>
+                                        <div class="alert-date">2025-11-13</div>
+                                    </div>
+                                </div>
+                            </section>
+                        </div>
+                    </div>
+
+                    <!-- Reports & Analytics (moved from Reports view) -->
+                    <div class="reports-container">
+                        <div class="reports-header">
+                            <div class="reports-title">
+                                <h1>Evaluation Reports</h1>
+                                <p>Comprehensive analytics and statistics for all evaluation types</p>
+                            </div>
+                        </div>
+
+                        <!-- Student to Professor Evaluation -->
+                        <div class="evaluation-type-section">
+                            <div class="section-card">
+                                <h2 class="section-card-title">
+                                    <i class="fas fa-user-graduate"></i>
+                                    Student to Professor Evaluation
+                                </h2>
+                                <div class="charts-grid">
+                                    <div class="chart-container">
+                                        <h3 class="chart-title">Average Scores by Category</h3>
+                                        <p class="chart-subtitle">Performance across different evaluation criteria</p>
+                                        <canvas id="student-professor-bar-chart"></canvas>
+                                    </div>
+                                    <div class="chart-container">
+                                        <h3 class="chart-title">Rating Distribution</h3>
+                                        <p class="chart-subtitle">Breakdown of student ratings</p>
+                                        <canvas id="student-professor-pie-chart"></canvas>
+                                    </div>
+                                </div>
+                                <div class="stats-summary">
+                                    <div class="stat-item">
+                                        <i class="fas fa-star"></i>
+                                        <span>Average Rating: <strong
+                                                id="student-prof-avg-rating">0.0</strong>/5.0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <i class="fas fa-user-check"></i>
+                                        <span>Total Evaluations: <strong id="student-prof-total">0</strong></span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <i class="fas fa-chalkboard-user"></i>
+                                        <span>Professors Evaluated: <strong id="student-prof-count">0</strong></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Professor to Professor Analytics -->
+                        <div class="evaluation-type-section">
+                            <div class="section-card">
+                                <h2 class="section-card-title">
+                                    <i class="fas fa-users"></i>
+                                    Professor to Professor Analytics
+                                </h2>
+                                <div class="charts-grid">
+                                    <div class="chart-container">
+                                        <h3 class="chart-title">Average Scores by Category</h3>
+                                        <p class="chart-subtitle">Performance across different evaluation criteria</p>
+                                        <canvas id="professor-professor-bar-chart"></canvas>
+                                    </div>
+                                    <div class="chart-container">
+                                        <h3 class="chart-title">Rating Distribution</h3>
+                                        <p class="chart-subtitle">Breakdown of professor ratings</p>
+                                        <canvas id="professor-professor-pie-chart"></canvas>
+                                    </div>
+                                </div>
+                                <div class="stats-summary">
+                                    <div class="stat-item">
+                                        <i class="fas fa-star"></i>
+                                        <span>Average Rating: <strong
+                                                id="professor-professor-avg-rating">0.0</strong>/5.0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <i class="fas fa-user-check"></i>
+                                        <span>Total Evaluations: <strong
+                                                id="professor-professor-total">0</strong></span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <i class="fas fa-chalkboard-user"></i>
+                                        <span>Professors Evaluated: <strong
+                                                id="professor-professor-count">0</strong></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Supervisor to Professor Evaluation -->
+                        <div class="evaluation-type-section">
+                            <div class="section-card">
+                                <h2 class="section-card-title">
+                                    <i class="fas fa-user-tie"></i>
+                                    Supervisor to Professor Evaluation
+                                </h2>
+                                <div class="charts-grid">
+                                    <div class="chart-container">
+                                        <h3 class="chart-title">Average Scores by Category</h3>
+                                        <p class="chart-subtitle">Performance across different evaluation criteria</p>
+                                        <canvas id="supervisor-professor-bar-chart"></canvas>
+                                    </div>
+                                    <div class="chart-container">
+                                        <h3 class="chart-title">Rating Distribution</h3>
+                                        <p class="chart-subtitle">Breakdown of supervisor ratings</p>
+                                        <canvas id="supervisor-professor-pie-chart"></canvas>
+                                    </div>
+                                </div>
+                                <div class="stats-summary">
+                                    <div class="stat-item">
+                                        <i class="fas fa-star"></i>
+                                        <span>Average Rating: <strong
+                                                id="supervisor-prof-avg-rating">0.0</strong>/5.0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <i class="fas fa-user-check"></i>
+                                        <span>Total Evaluations: <strong id="supervisor-prof-total">0</strong></span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <i class="fas fa-chalkboard-user"></i>
+                                        <span>Professors Evaluated: <strong id="supervisor-prof-count">0</strong></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Evaluation Settings View -->
+                <div id="settings-view" class="content-view" style="display: none;">
+                    <div class="settings-container" style="padding: 20px;">
+                        <div class="view-header" style="margin-bottom: 24px;">
+                            <h1
+                                style="font-size: 28px; font-weight: 700; display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                                <i class="fas fa-sliders-h" style="color: #667eea;"></i> Evaluation Settings
+                            </h1>
+                            <p style="font-size: 14px; color: #64748b;">Configure evaluation periods, questionnaires,
+                                and criteria</p>
+                        </div>
+
+                        <!-- Evaluation Period Configuration -->
+                        <section class="admin-section eval-period-section" style="margin-bottom: 24px;">
+                            <div class="section-header">
+                                <div class="section-title">
+                                    <h2><i class="fas fa-calendar-alt"></i> Evaluation Period</h2>
+                                    <p>Set start and end dates for each evaluation type</p>
+                                </div>
+                            </div>
+                            <div class="eval-period-list">
+                                <div class="eval-period-card">
+                                    <div class="eval-period-icon">
+                                        <i class="fas fa-user-graduate"></i>
+                                    </div>
+                                    <div class="eval-period-content">
+                                        <h3>Student to Professor</h3>
+                                        <p>Set the evaluation window for student submissions</p>
+                                    </div>
+                                    <div class="eval-period-fields">
+                                        <div class="eval-period-range">
+                                            <input type="date" class="eval-date" id="student-professor-start">
+                                            <span class="eval-to">to</span>
+                                            <input type="date" class="eval-date" id="student-professor-end">
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="eval-period-card">
+                                    <div class="eval-period-icon">
+                                        <i class="fas fa-users"></i>
+                                    </div>
+                                    <div class="eval-period-content">
+                                        <h3>Professor to Professor</h3>
+                                        <p>Set the evaluation window for professor-to-professor evaluations</p>
+                                    </div>
+                                    <div class="eval-period-fields">
+                                        <div class="eval-period-range">
+                                            <input type="date" class="eval-date" id="professor-professor-start">
+                                            <span class="eval-to">to</span>
+                                            <input type="date" class="eval-date" id="professor-professor-end">
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="eval-period-card">
+                                    <div class="eval-period-icon">
+                                        <i class="fas fa-user-tie"></i>
+                                    </div>
+                                    <div class="eval-period-content">
+                                        <h3>Supervisor to Professor</h3>
+                                        <p>Set the evaluation window for Supervisor reviews</p>
+                                    </div>
+                                    <div class="eval-period-fields">
+                                        <div class="eval-period-range">
+                                            <input type="date" class="eval-date" id="supervisor-professor-start">
+                                            <span class="eval-to">to</span>
+                                            <input type="date" class="eval-date" id="supervisor-professor-end">
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Save button for Evaluation Periods -->
+                                <div
+                                    style="display: flex; justify-content: flex-end; margin-top: 16px; padding-top: 12px; border-top: 1px solid #e2e8f0;">
+                                    <button class="btn-setting purple" id="save-eval-periods-btn" type="button"
+                                        style="padding: 10px 28px;">
+                                        <i class="fas fa-save"></i> Save Evaluation Periods
+                                    </button>
+                                </div>
+
+                                <div class="eval-period-card eval-term-card">
+                                    <div class="eval-period-icon">
+                                        <i class="fas fa-graduation-cap"></i>
+                                    </div>
+                                    <div class="eval-period-content">
+                                        <h3>Current Semester</h3>
+                                        <p>Edit the active term or add a new one</p>
+                                    </div>
+                                    <div class="eval-period-fields eval-term-fields">
+                                        <select id="current-semester">
+                                            <!-- Populated dynamically from SharedData -->
+                                        </select>
+                                        <input type="text" id="new-term-input" placeholder="e.g. 1st Semester 2027-2028"
+                                            style="padding: 8px 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; min-width: 220px;">
+                                        <button class="btn-add-term" type="button" id="btn-add-term">Add
+                                            Term</button>
+                                    </div>
+                                </div>
+
+                                <!-- Save button for Current Semester -->
+                                <div
+                                    style="display: flex; justify-content: flex-end; margin-top: 16px; padding-top: 12px; border-top: 1px solid #e2e8f0;">
+                                    <button class="btn-setting purple" id="save-current-semester-btn" type="button"
+                                        style="padding: 10px 28px;">
+                                        <i class="fas fa-save"></i> Save Current Semester
+                                    </button>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Rating Criteria Settings -->
+                        <section class="admin-section" style="margin-bottom: 24px;">
+                            <div class="section-header">
+                                <div class="section-title">
+                                    <h2><i class="fas fa-star" style="color: #f59e0b;"></i> Rating Criteria</h2>
+                                    <p>Configure rating scales and evaluation criteria</p>
+                                </div>
+                            </div>
+                            <div class="settings-list">
+                                <div class="setting-item">
+                                    <div class="setting-icon">
+                                        <i class="fas fa-sort-numeric-up"></i>
+                                    </div>
+                                    <div class="setting-content">
+                                        <h3>Rating Scale</h3>
+                                        <p>Choose the rating scale for evaluations</p>
+                                    </div>
+                                    <select id="rating-scale"
+                                        style="padding: 10px 16px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; min-width: 150px;">
+                                        <option value="1-5" selected>1 to 5 Stars</option>
+                                        <option value="1-10">1 to 10 Scale</option>
+                                    </select>
+                                </div>
+
+                            </div>
+                        </section>
+
+                        <!-- Notification Settings -->
+                        <section class="admin-section" style="margin-bottom: 24px;">
+                            <div class="section-header">
+                                <div class="section-title">
+                                    <h2><i class="fas fa-bell" style="color: #10b981;"></i> Notifications</h2>
+                                    <p>Configure email and system alerts</p>
+                                </div>
+                            </div>
+                            <div class="settings-list">
+                                <div class="setting-item">
+                                    <div class="setting-icon">
+                                        <i class="fas fa-envelope"></i>
+                                    </div>
+                                    <div class="setting-content">
+                                        <h3>Email Reminders</h3>
+                                        <p>Send email reminders for pending evaluations</p>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" checked>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+
+                                <div class="setting-item">
+                                    <div class="setting-icon">
+                                        <i class="fas fa-bullhorn"></i>
+                                    </div>
+                                    <div class="setting-content">
+                                        <h3>Announcements</h3>
+                                        <p>Enable system-wide announcements</p>
+                                    </div>
+                                    <button class="btn-setting purple">Create Announcement</button>
+                                </div>
+
+                                <div class="setting-item">
+                                    <div class="setting-icon">
+                                        <i class="fas fa-clock"></i>
+                                    </div>
+                                    <div class="setting-content">
+                                        <h3>Reminder Frequency</h3>
+                                        <p>How often to send reminders</p>
+                                    </div>
+                                    <select id="reminder-freq"
+                                        style="padding: 10px 16px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; min-width: 150px;">
+                                        <option value="daily">Daily</option>
+                                        <option value="weekly" selected>Weekly</option>
+                                        <option value="biweekly">Bi-weekly</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Save Button -->
+                        <div
+                            style="display: flex; gap: 16px; justify-content: flex-end; margin-top: 24px; padding-top: 24px; border-top: 1px solid #e2e8f0;">
+                            <button class="btn-setting"
+                                style="background: transparent; color: #64748b; border: 2px solid #e2e8f0;">Reset to
+                                Default</button>
+                            <button class="btn-setting purple" style="padding: 12px 32px;">Save All Settings</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- User Management View -->
+                <div id="user-management-view" class="content-view" style="display: none;">
+                    <div class="user-management-container">
+                        <div class="um-header">
+                            <div class="um-title">
+                                <h1>Professor Management</h1>
+                                <p>Manage professors across different departments</p>
+                            </div>
+                            <button class="btn-add-professor" id="add-professor-btn">
+                                <i class="fas fa-user-plus"></i>
+                                Add Professor
+                            </button>
+                        </div>
+
+                        <div class="professor-search">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="professor-search" placeholder="Search by employee ID or name">
+                        </div>
+
+                        <!-- Department Tabs -->
+                        <div class="department-tabs">
+                            <button class="dept-tab active" data-department="all">
+                                <i class="fas fa-users"></i>
+                                All Departments
+                            </button>
+                            <button class="dept-tab" data-department="ICS">
+                                <i class="fas fa-laptop-code"></i>
+                                ICS
+                            </button>
+                            <button class="dept-tab" data-department="ILAS">
+                                <i class="fas fa-language"></i>
+                                ILAS
+                            </button>
+                            <button class="dept-tab" data-department="ENGI">
+                                <i class="fas fa-tools"></i>
+                                ENGI
+                            </button>
+                        </div>
+
+                        <!-- Professors List -->
+                        <div class="professors-list-container">
+                            <div class="professors-list" id="professors-list">
+                                <!-- Professors will be dynamically loaded here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Profile View -->
+                <div id="profile-view" class="content-view" style="display: none;">
+                    <div class="form-card profile-card">
+                        <div class="form-header">
+                            <h2>HR Profile</h2>
+                            <p>View-only information synced from HR records.</p>
+                        </div>
+                        <div class="profile-photo-block">
+                            <div class="profile-photo" aria-hidden="true">
+                                <img id="profilePhotoPreview" alt="Profile photo">
+                                <div class="profile-photo-placeholder" id="profilePhotoPlaceholder">HR</div>
+                            </div>
+                            <div class="profile-photo-actions">
+                                <p class="profile-photo-help">Upload a profile photo (JPG/PNG).</p>
+                                <label class="btn-submit profile-photo-btn" for="profilePhotoInput">Upload Photo</label>
+                                <input type="file" id="profilePhotoInput" class="profile-photo-input" accept="image/*">
+                            </div>
+                        </div>
+                        <div class="profile-grid profile-grid-wide">
+                            <div class="profile-item">
+                                <span class="profile-label">Faculty ID</span>
+                                <span class="profile-value">HR-10527</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">Full Name</span>
+                                <span class="profile-value">Liza M. Santos</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">Department</span>
+                                <span class="profile-value">Human Resources</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">Rank</span>
+                                <span class="profile-value">HR Manager</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">Gmail</span>
+                                <span class="profile-value" id="profileEmail">hr.manager@naap.edu</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">AY/SEM</span>
+                                <span class="profile-value">AY 2025-2026, 2nd Semester</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-card profile-card">
+                        <div class="form-header">
+                            <h2>Account Actions</h2>
+                            <p>Choose what you want to update.</p>
+                        </div>
+                        <div class="form-actions profile-actions">
+                            <button type="button" class="btn-submit js-toggle-account-form"
+                                data-target="emailUpdateCard">Change Gmail</button>
+                            <button type="button" class="btn-cancel js-toggle-account-form"
+                                data-target="passwordUpdateCard">Change Password</button>
+                        </div>
+                    </div>
+
+                    <div class="form-card profile-card account-action-card" id="emailUpdateCard" style="display: none;">
+                        <div class="form-header">
+                            <h2>Update Gmail</h2>
+                            <p>Enter your new email and confirm to proceed.</p>
+                        </div>
+                        <form id="changeEmailForm" class="evaluation-form">
+                            <div class="form-section">
+                                <h3 class="section-title">Email Details</h3>
+                                <div class="form-group">
+                                    <label for="currentEmail">Current Gmail</label>
+                                    <input type="email" id="currentEmail" name="currentEmail" class="form-input"
+                                        value="hr.manager@naap.edu" readonly>
+                                </div>
+                                <div class="form-group">
+                                    <label for="newEmail">New Gmail</label>
+                                    <input type="email" id="newEmail" name="newEmail" class="form-input"
+                                        placeholder="Enter new Gmail address" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="confirmEmail">Confirm New Gmail</label>
+                                    <input type="email" id="confirmEmail" name="confirmEmail" class="form-input"
+                                        placeholder="Re-enter new Gmail address" required>
+                                </div>
+                            </div>
+
+                            <div class="api-info-box">
+                                <i class="fas fa-database"></i>
+                                <span>SQL Ready: connect to /api/hr/change-email (POST)</span>
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="submit" class="btn-submit">Update Gmail</button>
+                                <button type="button" class="btn-cancel js-close-account-form"
+                                    data-target="emailUpdateCard">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="form-card profile-card account-action-card" id="passwordUpdateCard"
+                        style="display: none;">
+                        <div class="form-header">
+                            <h2>Update Account Password</h2>
+                            <p>Placeholder form ready for SQL connection.</p>
+                        </div>
+
+                        <form id="changePasswordForm" class="evaluation-form">
+                            <div class="form-section">
+                                <h3 class="section-title">Account Credentials</h3>
+                                <div class="form-group">
+                                    <label for="currentPassword">Current Password</label>
+                                    <div class="password-field">
+                                        <input type="password" id="currentPassword" name="currentPassword"
+                                            class="form-input" placeholder="Enter current password" required>
+                                        <button type="button" class="toggle-password" data-target="currentPassword"
+                                            aria-label="Show password">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="newPassword">New Password</label>
+                                    <div class="password-field">
+                                        <input type="password" id="newPassword" name="newPassword" class="form-input"
+                                            placeholder="Enter new password" required>
+                                        <button type="button" class="toggle-password" data-target="newPassword"
+                                            aria-label="Show password">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="confirmPassword">Confirm New Password</label>
+                                    <div class="password-field">
+                                        <input type="password" id="confirmPassword" name="confirmPassword"
+                                            class="form-input" placeholder="Re-enter new password" required>
+                                        <button type="button" class="toggle-password" data-target="confirmPassword"
+                                            aria-label="Show password">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="api-info-box">
+                                <i class="fas fa-database"></i>
+                                <span>SQL Ready: connect to /api/hr/change-password (POST)</span>
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="submit" class="btn-submit">Update Password</button>
+                                <button type="button" class="btn-cancel js-close-account-form"
+                                    data-target="passwordUpdateCard">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Reports View -->
+                <div id="reports-view" class="content-view" style="display: none;">
+                    <div class="reports-container">
+                        <div class="reports-header">
+                            <div class="reports-title">
+                                <h1>Evaluation Reports</h1>
+                                <p>The reports and analytics have been moved to the Dashboard.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Activity Log View -->
+                <div id="activity-log-view" class="content-view" style="display: none;">
+                    <div class="view-header">
+                        <h1><i class="fas fa-clipboard-list"></i> Activity Log</h1>
+                        <p>Monitor all system events and user actions</p>
+                    </div>
+                    <div class="activity-log-controls">
+                        <div class="log-control">
+                            <label for="hr-activity-from">From</label>
+                            <input type="date" id="hr-activity-from">
+                        </div>
+                        <div class="log-control">
+                            <label for="hr-activity-to">To</label>
+                            <input type="date" id="hr-activity-to">
+                        </div>
+                        <div class="log-control">
+                            <label for="hr-activity-type">Search Type</label>
+                            <select id="hr-activity-type">
+                                <option value="all">All Types</option>
+                                <option value="login">User Login</option>
+                                <option value="user">User Update</option>
+                                <option value="evaluation">Evaluation</option>
+                                <option value="system">System</option>
+                            </select>
+                        </div>
+                        <div class="log-control log-search">
+                            <label for="hr-activity-search">Search</label>
+                            <input type="text" id="hr-activity-search" placeholder="Search activity...">
+                        </div>
+                        <button class="btn-save" id="hr-activity-search-btn">Search</button>
+                    </div>
+                    <div class="activity-log-table">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ip_address</th>
+                                    <th>timestamp</th>
+                                    <th>description</th>
+                                    <th>action</th>
+                                    <th>role</th>
+                                    <th>user_id</th>
+                                    <th>log_id</th>
+                                </tr>
+                            </thead>
+                            <tbody id="hr-activity-log-body">
+                                <!-- Activity log rows injected by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Questionnaire View -->
+                <div id="questionnaire-view" class="content-view" style="display: none;">
+                    <div class="questionnaire-container">
+                        <div class="questionnaire-header">
+                            <div class="questionnaire-title-section">
+                                <h1>Evaluation Questionnaire</h1>
+                                <p>Create and manage questions for student evaluations</p>
+                            </div>
+                            <div class="questionnaire-actions">
+                                <div class="questionnaire-semester-selector">
+                                    <label for="semester-select">Semester:</label>
+                                    <select id="semester-select" class="questionnaire-type-dropdown"></select>
+                                </div>
+                                <div class="questionnaire-type-selector">
+                                    <label for="questionnaire-type-select">Questionnaire Type:</label>
+                                    <select id="questionnaire-type-select" class="questionnaire-type-dropdown">
+                                        <option value="student-to-professor">Student to Professor</option>
+                                        <option value="professor-to-professor">Professor to Professor</option>
+                                        <option value="supervisor-to-professor">Supervisor to Professor</option>
+                                    </select>
+                                </div>
+                                <button class="btn-add-section" id="add-section-btn">
+                                    <i class="fas fa-folder-plus"></i>
+                                    Add Section
+                                </button>
+                                <button class="btn-add-question" id="add-question-btn">
+                                    <i class="fas fa-plus"></i>
+                                    Add Question
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Questionnaire Form Preview -->
+                        <div class="questionnaire-form-preview">
+                            <div class="form-header-preview">
+                                <h2 class="form-title-preview" id="form-title-preview" contenteditable="true"
+                                    role="textbox" aria-label="Form title">Student Evaluation Form</h2>
+                                <p class="form-description-preview" id="form-description-preview" contenteditable="true"
+                                    role="textbox" aria-label="Form description">Please provide your
+                                    honest feedback about your professors.</p>
+                            </div>
+
+                            <div class="questions-list" id="questions-list">
+                                <!-- Questions will be dynamically loaded here -->
+                            </div>
+
+                            <div class="form-actions-preview">
+                                <button class="btn-save-questionnaire" id="save-questionnaire-btn">
+                                    <i class="fas fa-save"></i>
+                                    Save Questionnaire
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Add/Edit Professor Modal -->
+    <div id="professor-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">Add Professor</h2>
+                <button class="modal-close" id="close-modal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="professor-form">
+                <div class="form-group">
+                    <label for="professor-name">Full Name</label>
+                    <input type="text" id="professor-name" name="name" required>
+                </div>
+                <div class="form-group">
+                    <label for="professor-email">Email</label>
+                    <input type="email" id="professor-email" name="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="professor-employee-id">Employee ID</label>
+                    <input type="text" id="professor-employee-id" name="employeeId" placeholder="e.g., EMP-1001">
+                </div>
+                <div class="form-group">
+                    <label for="professor-department">Department</label>
+                    <select id="professor-department" name="department" required>
+                        <option value="">Select Department</option>
+                        <option value="ICS">ICS</option>
+                        <option value="ILAS">ILAS</option>
+                        <option value="ENGI">ENGI</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="professor-position">Position</label>
+                    <input type="text" id="professor-position" name="position"
+                        placeholder="e.g., Professor, Associate Professor">
+                </div>
+                <div class="form-group">
+                    <label for="professor-employment-type">Employment Type</label>
+                    <select id="professor-employment-type" name="employmentType" required>
+                        <option value="Regular">Regular</option>
+                        <option value="Temporary">Temporary</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <div class="checkbox-row">
+                        <input type="checkbox" id="professor-active" name="active" checked>
+                        <label for="professor-active">Active Professor</label>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" id="cancel-form">Cancel</button>
+                    <button type="submit" class="btn-submit">Save Professor</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Professor Details Modal -->
+    <div id="professor-details-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Professor Details</h2>
+                <button class="modal-close" id="close-details-modal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div id="professor-details-content">
+                <!-- Professor details will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Professor Analytics Modal -->
+    <div id="professor-analytics-modal" class="modal">
+        <div class="modal-content analytics-modal-content">
+            <div class="modal-header">
+                <h2>Professor Analytics</h2>
+                <button class="modal-close" id="close-analytics-modal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div id="professor-analytics-content">
+                <!-- Professor analytics will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Section Modal -->
+    <div id="section-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="section-modal-title">Add Section</h2>
+                <button class="modal-close" id="close-section-modal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="section-form">
+                <div class="form-group">
+                    <label for="section-letter">Section Letter</label>
+                    <input type="text" id="section-letter" name="sectionLetter" placeholder="e.g., A, B, C"
+                        maxlength="1" pattern="[A-Za-z]" required>
+                    <small class="form-hint">Enter a single letter (A, B, C, etc.)</small>
+                </div>
+                <div class="form-group">
+                    <label for="section-title">Section Title</label>
+                    <input type="text" id="section-title" name="sectionTitle"
+                        placeholder="e.g., Management of Teaching and Learning" required>
+                </div>
+                <div class="form-group">
+                    <label for="section-description">Section Description</label>
+                    <textarea id="section-description" name="sectionDescription" rows="4"
+                        placeholder="Enter a detailed description of this section..." required></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" id="cancel-section-form">Cancel</button>
+                    <button type="submit" class="btn-submit">Save Section</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add/Edit Question Modal -->
+    <div id="question-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="question-modal-title">Add Question</h2>
+                <button class="modal-close" id="close-question-modal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="question-form">
+                <div class="form-group">
+                    <label for="question-section">Section</label>
+                    <select id="question-section" name="questionSection" required>
+                        <option value="">Select a section</option>
+                    </select>
+                    <small class="form-hint">Select which section this question belongs to</small>
+                </div>
+                <div class="form-group">
+                    <label for="question-text">Question Text</label>
+                    <input type="text" id="question-text" name="questionText" placeholder="Enter your question"
+                        required>
+                </div>
+                <div class="form-group">
+                    <label for="question-type">Question Type</label>
+                    <select id="question-type" name="questionType" required>
+                        <option value="">Select Type</option>
+                        <option value="rating">Rating (Numeric Scale)</option>
+                        <option value="qualitative">Qualitative (Text Response)</option>
+                    </select>
+                </div>
+                <div class="form-group" id="rating-options-group" style="display: none;">
+                    <label for="rating-max">Maximum Rating Number</label>
+                    <input type="number" id="rating-max" name="ratingMax" min="2" max="10" value="5" placeholder="5">
+                    <small class="form-hint">Set the highest rating number (default: 5)</small>
+                </div>
+                <div class="form-group" id="qualitative-options-group" style="display: none;">
+                    <label for="max-length">Maximum Length (characters)</label>
+                    <input type="number" id="max-length" name="maxLength" min="50" max="2000" value="500"
+                        placeholder="500">
+                </div>
+                <div class="form-group">
+                    <div class="checkbox-row">
+                        <input type="checkbox" id="question-required" name="required">
+                        <label for="question-required">Required Question</label>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" id="cancel-question-form">Cancel</button>
+                    <button type="submit" class="btn-submit">Save Question</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="../JsScrip/db-data.js"></script>
+    <script src="../JsScrip/hrpanel.js"></script>
+</body>
+
+</html>

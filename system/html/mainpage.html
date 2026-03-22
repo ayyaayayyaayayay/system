@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>
+      National Aviation Academy of the Philippines - Student Professor
+      Evaluation System
+    </title>
+    <link rel="stylesheet" href="../css/panel-theme.css" />
+    <link rel="stylesheet" href="../css/mainpage.css" />
+  </head>
+
+  <body>
+    <div class="container">
+      <div class="main-card">
+        <!-- Header Section -->
+        <div class="header">
+          <h1 class="institution-name">
+            National Aviation Academy of the Philippines
+          </h1>
+          <p class="system-title">Student Professor Evaluation System</p>
+        </div>
+
+        <!-- Login Form -->
+        <div class="login-form">
+          <div class="form-group">
+            <label for="username">Username</label>
+            <input
+              type="text"
+              id="username"
+              name="username"
+              placeholder="Enter your username"
+            />
+          </div>
+          <div class="form-group">
+            <label for="password">Password</label>
+            <input
+              type="password"
+              id="password"
+              name="password"
+              placeholder="Enter your password"
+            />
+          </div>
+          <button type="submit" class="login-button" id="loginBtn">
+            <span>Login</span>
+          </button>
+          <div class="forgot-password-container">
+            <a href="#" id="forgotPasswordLink" class="forgot-password-link"
+              >Forgot Password?</a
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Forgot Password Modal -->
+    <div id="forgotPasswordModal" class="modal">
+      <div class="modal-content main-card">
+        <span class="close-modal">&times;</span>
+        <h2>Reset Password</h2>
+        <p>
+          Enter your Gmail address and we'll send you a link to reset your
+          password.
+        </p>
+        <div class="form-group">
+          <label for="resetEmail">Gmail Address</label>
+          <input
+            type="email"
+            id="resetEmail"
+            placeholder="e.g., yourname@gmail.com"
+          />
+        </div>
+        <button id="sendResetLinkBtn" class="login-button">
+          <span>Send Reset Link</span>
+        </button>
+      </div>
+    </div>
+
+    <script src="../JsScrip/db-data.js"></script>
+    <script src="../JsScrip/mainpage.js"></script>
+  </body>
+</html>

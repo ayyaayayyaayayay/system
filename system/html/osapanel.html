@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OSA Dashboard - National Aviation Academy of the Philippines</title>
+    <link rel="stylesheet" href="../css/osapanel.css">
+    <link rel="stylesheet" href="../css/panel-theme.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+    <div class="dashboard-container">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-container">
+                    <div class="logo-shield">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <h2 class="logo-text">NAAP Evaluation System</h2>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-link active" data-view="dashboardView">
+                    <i class="fas fa-home"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="#" class="nav-link" data-view="profileView">
+                    <i class="fas fa-id-card"></i>
+                    <span>Profile</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <a href="#" class="nav-link logout" id="logoutBtn"
+                    onclick="SharedData.clearSession(); window.location.href='mainpage.html';">
+                    <i class="fas fa-sign-out-alt"></i>
+                    <span>Logout</span>
+                </a>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div id="dashboardView" class="content-view active">
+                <header class="top-header">
+                    <h1 class="page-title">OSA Evaluation Monitoring</h1>
+                    <div class="user-profile">
+                        <i class="fas fa-user-circle"></i>
+                        <span id="profileName">OSA User</span>
+                    </div>
+                </header>
+
+                <section class="summary-cards">
+                    <div class="summary-card total">
+                        <div class="card-icon"><i class="fas fa-users"></i></div>
+                        <div class="card-content">
+                            <h3>Total Students</h3>
+                            <p class="card-number" id="totalCount">0</p>
+                        </div>
+                    </div>
+                    <div class="summary-card done">
+                        <div class="card-icon"><i class="fas fa-circle-check"></i></div>
+                        <div class="card-content">
+                            <h3>Done</h3>
+                            <p class="card-number" id="doneCount">0</p>
+                        </div>
+                    </div>
+                    <div class="summary-card not-done">
+                        <div class="card-icon"><i class="fas fa-circle-xmark"></i></div>
+                        <div class="card-content">
+                            <h3>Not Done</h3>
+                            <p class="card-number" id="notDoneCount">0</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="status-section">
+                    <div class="section-header">
+                        <div class="section-title">
+                            <h2>Student Evaluation Status</h2>
+                            <p>Search by full name or student number.</p>
+                        </div>
+                        <div class="search-wrap">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="studentSearch" class="search-input"
+                                placeholder="Search full name or student number">
+                        </div>
+                    </div>
+
+                    <div class="status-legend">
+                        <span class="legend-item">
+                            <span class="legend-dot done"></span>
+                            Done
+                        </span>
+                        <span class="legend-item">
+                            <span class="legend-dot not-done"></span>
+                            Not Done
+                        </span>
+                    </div>
+
+                    <div class="api-info-box">
+                        <i class="fas fa-database"></i>
+                        <span>SQL Ready: connect to <strong>/api/osa/student-evaluation-status</strong>. Expected
+                            fields: Student Number, Full Name, Program, Year/Section, Status.</span>
+                    </div>
+
+                    <div class="table-container">
+                        <table class="status-table">
+                            <thead>
+                                <tr>
+                                    <th>Student Number</th>
+                                    <th>Full Name</th>
+                                    <th>Program</th>
+                                    <th>Year/Section</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="statusTableBody"></tbody>
+                        </table>
+                    </div>
+
+                    <p class="empty-state" id="emptyState" style="display: none;">
+                        No students found.
+                    </p>
+                </section>
+            </div>
+
+            <div id="profileView" class="content-view">
+                <header class="top-header">
+                    <h1 class="page-title">OSA Profile</h1>
+                    <div class="user-profile">
+                        <i class="fas fa-user-circle"></i>
+                        <span id="profileNameDuplicate">OSA User</span>
+                    </div>
+                </header>
+
+                <section class="profile-section">
+                    <div class="form-card">
+                        <div class="form-header">
+                            <h2>OSA Profile</h2>
+                            <p>View-only information synced from HR records.</p>
+                        </div>
+                        <div class="profile-photo-block">
+                            <div class="profile-photo" aria-hidden="true">
+                                <img id="profilePhotoPreview" alt="Profile photo">
+                                <div class="profile-photo-placeholder" id="profilePhotoPlaceholder">OS</div>
+                            </div>
+                            <div class="profile-photo-actions">
+                                <p class="profile-photo-help">Upload a profile photo (JPG/PNG).</p>
+                                <label class="btn-submit profile-photo-btn" for="profilePhotoInput">Upload Photo</label>
+                                <input type="file" id="profilePhotoInput" class="profile-photo-input" accept="image/*">
+                            </div>
+                        </div>
+                        <div class="profile-grid profile-grid-wide">
+                            <div class="profile-item">
+                                <span class="profile-label">Full Name</span>
+                                <span class="profile-value" id="profileFullName">Office of Student Affairs</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">Gmail</span>
+                                <span class="profile-value" id="profileEmail">osa@naap.edu.ph</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">Username</span>
+                                <span class="profile-value" id="profileUsername">osa</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">Department</span>
+                                <span class="profile-value">Office of Student Affairs</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="action-toggle">
+                        <button type="button" class="toggle-btn active" data-target="gmailCard">Change Gmail</button>
+                        <button type="button" class="toggle-btn" data-target="passwordCard">Change Password</button>
+                    </div>
+
+                    <div class="form-card action-card active" id="gmailCard">
+                        <div class="form-header">
+                            <h2>Gmail</h2>
+                            <p>Enter your new email and confirm to proceed.</p>
+                        </div>
+                        <form id="gmailForm" class="form-grid" novalidate>
+                            <div class="form-field">
+                                <label for="currentEmail">Current Gmail</label>
+                                <input type="email" id="currentEmail" name="currentEmail" readonly>
+                            </div>
+                            <div class="form-field">
+                                <label for="newEmail">New Gmail</label>
+                                <input type="email" id="newEmail" name="newEmail" placeholder="you@gmail.com"
+                                    autocomplete="email" required>
+                                <p class="form-hint">Use a valid Gmail address (example@gmail.com).</p>
+                            </div>
+                            <div class="form-field">
+                                <label for="confirmEmail">Confirm New Gmail</label>
+                                <input type="email" id="confirmEmail" name="confirmEmail" placeholder="Repeat new Gmail"
+                                    autocomplete="email" required>
+                            </div>
+                            <div class="form-actions form-actions-left">
+                                <button type="submit" class="btn-submit">Save Gmail</button>
+                                <button type="button" class="btn-ghost" data-reset-target="gmailForm">Cancel</button>
+                                <span class="form-message" id="gmailFormMessage" aria-live="polite"></span>
+                            </div>
+                            <div class="api-inline">
+                                <i class="fas fa-database"></i>
+                                <span>SQL Ready: connect to <strong>/api/osa/change-email</strong> (POST)</span>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="form-card action-card" id="passwordCard">
+                        <div class="form-header">
+                            <h2>Password</h2>
+                            <p>Placeholder form ready for SQL connection.</p>
+                        </div>
+                        <form id="passwordForm" class="form-grid" novalidate>
+                            <div class="form-field">
+                                <label for="currentPassword">Current Password</label>
+                                <div class="input-with-icon">
+                                    <input type="password" id="currentPassword" name="currentPassword"
+                                        autocomplete="current-password" required>
+                                    <button type="button" class="eye-toggle" data-target="currentPassword"
+                                        aria-label="Toggle current password visibility">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="form-field">
+                                <label for="newPassword">New Password</label>
+                                <div class="input-with-icon">
+                                    <input type="password" id="newPassword" name="newPassword"
+                                        placeholder="Enter new password" autocomplete="new-password" required>
+                                    <button type="button" class="eye-toggle" data-target="newPassword"
+                                        aria-label="Toggle new password visibility">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                                <p class="form-hint">Include at least 8 characters with a number.</p>
+                            </div>
+                            <div class="form-field">
+                                <label for="confirmPassword">Confirm New Password</label>
+                                <div class="input-with-icon">
+                                    <input type="password" id="confirmPassword" name="confirmPassword"
+                                        placeholder="Re-enter new password" autocomplete="new-password" required>
+                                    <button type="button" class="eye-toggle" data-target="confirmPassword"
+                                        aria-label="Toggle confirm password visibility">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="form-actions form-actions-left">
+                                <button type="submit" class="btn-submit">Save Password</button>
+                                <button type="button" class="btn-ghost" data-reset-target="passwordForm">Cancel</button>
+                                <span class="form-message" id="passwordFormMessage" aria-live="polite"></span>
+                            </div>
+                            <div class="api-inline">
+                                <i class="fas fa-database"></i>
+                                <span>SQL Ready: connect to <strong>/api/osa/change-password</strong> (POST)</span>
+                            </div>
+                        </form>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script src="../JsScrip/db-data.js"></script>
+    <script src="../JsScrip/osapanel.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VPAA Evaluation Overview - National Aviation Academy of the Philippines</title>
+    <link rel="stylesheet" href="../css/vpaapanel.css">
+    <link rel="stylesheet" href="../css/panel-theme.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+</head>
+
+<body class="vpaa-panel">
+    <div class="dashboard-container">
+        <div class="main-wrapper">
+            <!-- Left Sidebar -->
+            <aside class="sidebar">
+                <div class="sidebar-header">
+                    <div class="logo-container">
+                        <div class="logo-shield">
+                            <i class="fas fa-shield-alt"></i>
+                        </div>
+                        <h2 class="logo-text">NAAP Evaluation System</h2>
+                    </div>
+                </div>
+
+                <nav class="sidebar-nav">
+                    <a href="#" class="nav-link active" data-view="dashboard-view">
+                        <i class="fas fa-chart-pie"></i>
+                        <span>Overview</span>
+                    </a>
+                    <a href="#" class="nav-link" data-view="reports-view">
+                        <i class="fas fa-clipboard-check"></i>
+                        <span>Reports</span>
+                    </a>
+                    <a href="#" class="nav-link" data-view="profile-view">
+                        <i class="fas fa-id-card"></i>
+                        <span>Profile</span>
+                    </a>
+                </nav>
+
+                <div class="sidebar-footer">
+                    <a href="#" class="nav-link logout"
+                        onclick="SharedData.clearSession(); window.location.href='mainpage.html';">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>Logout</span>
+                    </a>
+                </div>
+            </aside>
+
+            <!-- Main Content Area -->
+            <main class="main-content">
+                <div id="dashboard-view" class="content-view active">
+                    <header class="top-header">
+                        <h1 class="page-title">VPAA Evaluation Overview</h1>
+                        <div class="header-right">
+                            <div class="notification-icon">
+                                <i class="fas fa-bell"></i>
+                                <span class="notification-badge">3</span>
+                            </div>
+                            <div class="user-profile">
+                                <i class="fas fa-user-circle"></i>
+                                <span>VPAA Office</span>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div class="overview-cards">
+                        <div class="overview-card users">
+                            <div class="card-icon">
+                                <i class="fas fa-user-graduate"></i>
+                            </div>
+                            <div class="card-content">
+                                <h3>Total Students</h3>
+                                <p class="card-number" id="totalStudents">0</p>
+                            </div>
+                        </div>
+
+                        <div class="overview-card completed">
+                            <div class="card-icon">
+                                <i class="fas fa-circle-check"></i>
+                            </div>
+                            <div class="card-content">
+                                <h3>Completion Rate</h3>
+                                <p class="card-number" id="completionRate">0%</p>
+                            </div>
+                        </div>
+
+                        <div class="overview-card status">
+                            <div class="card-icon">
+                                <i class="fas fa-hourglass-half"></i>
+                            </div>
+                            <div class="card-content">
+                                <h3>Pending Evaluations</h3>
+                                <p class="card-number" id="pendingEvaluations">0</p>
+                            </div>
+                        </div>
+
+                        <div class="overview-card professors">
+                            <div class="card-icon">
+                                <i class="fas fa-user-tie"></i>
+                            </div>
+                            <div class="card-content">
+                                <h3>Active Professors</h3>
+                                <p class="card-number" id="activeProfessors">0</p>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <div class="evaluation-type-section">
+                        <div class="section-card">
+                            <h2 class="section-card-title">
+                                <i class="fas fa-user-graduate"></i>
+                                Student to Professor Evaluation
+                            </h2>
+                            <div class="charts-grid">
+                                <div class="chart-container">
+                                    <h3 class="chart-title">Average Scores by Category</h3>
+                                    <p class="chart-subtitle">Performance across different evaluation criteria</p>
+                                    <canvas id="vpaa-student-professor-bar-chart"></canvas>
+                                </div>
+                                <div class="chart-container">
+                                    <h3 class="chart-title">Rating Distribution</h3>
+                                    <p class="chart-subtitle">Breakdown of student ratings</p>
+                                    <canvas id="vpaa-student-professor-pie-chart"></canvas>
+                                </div>
+                            </div>
+                            <div class="stats-summary">
+                                <div class="stat-item">
+                                    <i class="fas fa-star"></i>
+                                    <span>Average Rating: <strong
+                                            id="vpaa-student-prof-avg-rating">0.0</strong>/5.0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <i class="fas fa-user-check"></i>
+                                    <span>Total Evaluations: <strong id="vpaa-student-prof-total">0</strong></span>
+                                </div>
+                                <div class="stat-item">
+                                    <i class="fas fa-chalkboard-user"></i>
+                                    <span>Professors Evaluated: <strong id="vpaa-student-prof-count">0</strong></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="evaluation-type-section">
+                        <div class="section-card">
+                            <h2 class="section-card-title">
+                                <i class="fas fa-users"></i>
+                                Professor to Professor Evaluation
+                            </h2>
+                            <div class="charts-grid">
+                                <div class="chart-container">
+                                    <h3 class="chart-title">Average Scores by Category</h3>
+                                    <p class="chart-subtitle">Performance across different evaluation criteria</p>
+                                    <canvas id="vpaa-professor-professor-bar-chart"></canvas>
+                                </div>
+                                <div class="chart-container">
+                                    <h3 class="chart-title">Rating Distribution</h3>
+                                    <p class="chart-subtitle">Breakdown of professor ratings</p>
+                                    <canvas id="vpaa-professor-professor-pie-chart"></canvas>
+                                </div>
+                            </div>
+                            <div class="stats-summary">
+                                <div class="stat-item">
+                                    <i class="fas fa-star"></i>
+                                    <span>Average Rating: <strong
+                                            id="vpaa-professor-prof-avg-rating">0.0</strong>/5.0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <i class="fas fa-user-check"></i>
+                                    <span>Total Evaluations: <strong id="vpaa-professor-prof-total">0</strong></span>
+                                </div>
+                                <div class="stat-item">
+                                    <i class="fas fa-chalkboard-user"></i>
+                                    <span>Professors Evaluated: <strong id="vpaa-professor-prof-count">0</strong></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="evaluation-type-section">
+                        <div class="section-card">
+                            <h2 class="section-card-title">
+                                <i class="fas fa-user-tie"></i>
+                                Supervisor to Professor Evaluation
+                            </h2>
+                            <div class="charts-grid">
+                                <div class="chart-container">
+                                    <h3 class="chart-title">Average Scores by Category</h3>
+                                    <p class="chart-subtitle">Performance across different evaluation criteria</p>
+                                    <canvas id="vpaa-supervisor-professor-bar-chart"></canvas>
+                                </div>
+                                <div class="chart-container">
+                                    <h3 class="chart-title">Rating Distribution</h3>
+                                    <p class="chart-subtitle">Breakdown of supervisor ratings</p>
+                                    <canvas id="vpaa-supervisor-professor-pie-chart"></canvas>
+                                </div>
+                            </div>
+                            <div class="stats-summary">
+                                <div class="stat-item">
+                                    <i class="fas fa-star"></i>
+                                    <span>Average Rating: <strong
+                                            id="vpaa-supervisor-prof-avg-rating">0.0</strong>/5.0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <i class="fas fa-user-check"></i>
+                                    <span>Total Evaluations: <strong id="vpaa-supervisor-prof-total">0</strong></span>
+                                </div>
+                                <div class="stat-item">
+                                    <i class="fas fa-chalkboard-user"></i>
+                                    <span>Professors Evaluated: <strong
+                                            id="vpaa-supervisor-prof-count">0</strong></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div id="reports-view" class="content-view">
+                    <header class="top-header">
+                        <h1 class="page-title">Reports & Insights</h1>
+                        <div class="header-right">
+                            <div class="user-profile">
+                                <i class="fas fa-user-circle"></i>
+                                <span>VPAA Office</span>
+                            </div>
+                        </div>
+                    </header>
+
+                    <section class="admin-section">
+                        <div class="section-header">
+                            <div class="section-title">
+                                <h2>Key Highlights</h2>
+                                <p>Automatic insights based on current evaluation summaries.</p>
+                            </div>
+                        </div>
+                        <div class="stats-summary vpaa-summary">
+                            <div class="stat-item">
+                                <i class="fas fa-trophy"></i>
+                                <div>
+                                    <strong id="topPerformerName">--</strong>
+                                    <span id="topPerformerMeta">--</span>
+                                </div>
+                            </div>
+                            <div class="stat-item">
+                                <i class="fas fa-comment-dots"></i>
+                                <div>
+                                    <strong id="mostFeedbackName">--</strong>
+                                    <span id="mostFeedbackMeta">--</span>
+                                </div>
+                            </div>
+                            <div class="stat-item">
+                                <i class="fas fa-triangle-exclamation"></i>
+                                <div>
+                                    <strong id="needsAttentionName">--</strong>
+                                    <span id="needsAttentionMeta">--</span>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="admin-section">
+                        <div class="section-header">
+                            <div class="section-title">
+                                <h2>Evaluation Filters</h2>
+                                <p>Filter professor evaluation reports by department, rating, and keyword.</p>
+                            </div>
+                        </div>
+
+                        <div class="analytics-filters vpaa-filters">
+                            <div class="analytics-filter vpaa-search-group">
+                                <label for="searchInput">Search professor / subject</label>
+                                <div class="vpaa-search-row">
+                                    <input type="text" id="searchInput" placeholder="Search by name, ID, or subject"
+                                        aria-label="Professor or subject search">
+                                    <button class="btn-add-professor vpaa-search" type="button" id="searchBtn">
+                                        <i class="fas fa-search"></i>
+                                        Search
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="analytics-filter">
+                                <label for="semesterFilter">Semester</label>
+                                <select id="semesterFilter"></select>
+                            </div>
+                            <div class="analytics-filter">
+                                <label for="departmentFilter">Department</label>
+                                <select id="departmentFilter">
+                                    <option value="all">All departments</option>
+                                </select>
+                            </div>
+                            <div class="analytics-filter">
+                                <label for="sortFilter">Sort by</label>
+                                <select id="sortFilter">
+                                    <option value="rating-high">Rating (high to low)</option>
+                                    <option value="rating-low">Rating (low to high)</option>
+                                    <option value="response">Response rate</option>
+                                    <option value="name">Professor name</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="vpaa-filter-actions">
+                            <button class="btn-add-professor vpaa-reset" type="button" id="resetFilters">
+                                <i class="fas fa-rotate-left"></i>
+                                Reset Filters
+                            </button>
+                        </div>
+                    </section>
+
+                    <section class="admin-section">
+                        <div class="section-header">
+                            <div class="section-title">
+                                <h2>Professor Evaluation Reports</h2>
+                                <p>Ratings, distribution graphs, and feedback from students and peers.</p>
+                            </div>
+                        </div>
+                        <div class="professors-list-container">
+                            <div class="professors-list" id="professorGrid"></div>
+                        </div>
+                    </section>
+                </div>
+
+                <div id="profile-view" class="content-view">
+                    <header class="top-header">
+                        <h1 class="page-title">VPAA Profile</h1>
+                        <div class="header-right">
+                            <div class="user-profile">
+                                <i class="fas fa-user-circle"></i>
+                                <span>VPAA Office</span>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div class="form-card profile-card">
+                        <div class="form-header">
+                            <h2>VPAA Profile</h2>
+                            <p>View-only information synced from HR records.</p>
+                        </div>
+                        <div class="profile-photo-block">
+                            <div class="profile-photo" aria-hidden="true">
+                                <img id="profilePhotoPreview" alt="Profile photo">
+                                <div class="profile-photo-placeholder" id="profilePhotoPlaceholder">VP</div>
+                            </div>
+                            <div class="profile-photo-actions">
+                                <p class="profile-photo-help">Upload a profile photo (JPG/PNG).</p>
+                                <label class="btn-submit profile-photo-btn" for="profilePhotoInput">Upload Photo</label>
+                                <input type="file" id="profilePhotoInput" class="profile-photo-input" accept="image/*">
+                            </div>
+                        </div>
+                        <div class="profile-grid profile-grid-wide">
+                            <div class="profile-item">
+                                <span class="profile-label">Faculty ID</span>
+                                <span class="profile-value">VPAA-0001</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">Full Name</span>
+                                <span class="profile-value">VPAA Office</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">Department</span>
+                                <span class="profile-value">Academic Affairs</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">Rank</span>
+                                <span class="profile-value">Vice President for Academic Affairs</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">Gmail</span>
+                                <span class="profile-value" id="profileEmail">vpaa.office@naap.edu</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">AY/SEM</span>
+                                <span class="profile-value">AY 2025-2026, 2nd Semester</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-card profile-card">
+                        <div class="form-header">
+                            <h2>Account Actions</h2>
+                            <p>Choose what you want to update.</p>
+                        </div>
+                        <div class="form-actions profile-actions">
+                            <button type="button" class="btn-submit js-toggle-account-form"
+                                data-target="emailUpdateCard">Change Gmail</button>
+                            <button type="button" class="btn-cancel js-toggle-account-form"
+                                data-target="passwordUpdateCard">Change Password</button>
+                        </div>
+                    </div>
+
+                    <div class="form-card profile-card account-action-card" id="emailUpdateCard" style="display: none;">
+                        <div class="form-header">
+                            <h2>Update Gmail</h2>
+                            <p>Enter your new email and confirm to proceed.</p>
+                        </div>
+                        <form id="changeEmailForm" class="evaluation-form">
+                            <div class="form-section">
+                                <h3 class="section-title">Email Details</h3>
+                                <div class="form-group">
+                                    <label for="currentEmail">Current Gmail</label>
+                                    <input type="email" id="currentEmail" name="currentEmail" class="form-input"
+                                        value="vpaa.office@naap.edu" readonly>
+                                </div>
+                                <div class="form-group">
+                                    <label for="newEmail">New Gmail</label>
+                                    <input type="email" id="newEmail" name="newEmail" class="form-input"
+                                        placeholder="Enter new Gmail address" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="confirmEmail">Confirm New Gmail</label>
+                                    <input type="email" id="confirmEmail" name="confirmEmail" class="form-input"
+                                        placeholder="Re-enter new Gmail address" required>
+                                </div>
+                            </div>
+
+                            <div class="api-info-box">
+                                <i class="fas fa-database"></i>
+                                <span>SQL Ready: connect to /api/vpaa/change-email (POST)</span>
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="submit" class="btn-submit">Update Gmail</button>
+                                <button type="button" class="btn-cancel js-close-account-form"
+                                    data-target="emailUpdateCard">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="form-card profile-card account-action-card" id="passwordUpdateCard"
+                        style="display: none;">
+                        <div class="form-header">
+                            <h2>Update Account Password</h2>
+                            <p>Placeholder form ready for SQL connection.</p>
+                        </div>
+
+                        <form id="changePasswordForm" class="evaluation-form">
+                            <div class="form-section">
+                                <h3 class="section-title">Account Credentials</h3>
+                                <div class="form-group">
+                                    <label for="currentPassword">Current Password</label>
+                                    <div class="password-field">
+                                        <input type="password" id="currentPassword" name="currentPassword"
+                                            class="form-input" placeholder="Enter current password" required>
+                                        <button type="button" class="toggle-password" data-target="currentPassword"
+                                            aria-label="Show password">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="newPassword">New Password</label>
+                                    <div class="password-field">
+                                        <input type="password" id="newPassword" name="newPassword" class="form-input"
+                                            placeholder="Enter new password" required>
+                                        <button type="button" class="toggle-password" data-target="newPassword"
+                                            aria-label="Show password">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="confirmPassword">Confirm New Password</label>
+                                    <div class="password-field">
+                                        <input type="password" id="confirmPassword" name="confirmPassword"
+                                            class="form-input" placeholder="Re-enter new password" required>
+                                        <button type="button" class="toggle-password" data-target="confirmPassword"
+                                            aria-label="Show password">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="api-info-box">
+                                <i class="fas fa-database"></i>
+                                <span>SQL Ready: connect to /api/vpaa/change-password (POST)</span>
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="submit" class="btn-submit">Update Password</button>
+                                <button type="button" class="btn-cancel js-close-account-form"
+                                    data-target="passwordUpdateCard">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="../JsScrip/db-data.js"></script>
+    <script src="../JsScrip/vpaapanel.js"></script>
+</body>
+
+</html>
