@@ -5,9 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Panel - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/hrpanel.css">
-    <link rel="stylesheet" href="../css/adminpanel.css">
-    <link rel="stylesheet" href="../css/panel-theme.css">
+    <link rel="stylesheet" href="../css/hrpanel.css?v=20260322a">
+    <link rel="stylesheet" href="../css/adminpanel.css?v=20260322a">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260322a">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -43,6 +43,10 @@
                         <i class="fas fa-chalkboard-user"></i>
                         <span>Professor Management</span>
                     </a>
+                    <a href="#" class="nav-link" data-view="subject-management">
+                        <i class="fas fa-book"></i>
+                        <span>Subject Management</span>
+                    </a>
                     <a href="#" class="nav-link" data-view="hr-evaluation-settings">
                         <i class="fas fa-sliders-h"></i>
                         <span>Evaluation Settings</span>
@@ -73,10 +77,6 @@
                     <header class="top-header">
                         <h1 class="page-title">Admin Dashboard</h1>
                         <div class="header-right">
-                            <div class="notification-icon">
-                                <i class="fas fa-bell"></i>
-                                <span class="notification-badge">5</span>
-                            </div>
                             <div class="user-profile">
                                 <i class="fas fa-user-shield"></i>
                                 <span id="admin-username">Administrator</span>
@@ -160,6 +160,10 @@
                                 <button class="quick-action-btn" data-action="manage-users">
                                     <i class="fas fa-users-cog"></i>
                                     <span>Manage Users</span>
+                                </button>
+                                <button class="quick-action-btn" data-action="manage-subjects">
+                                    <i class="fas fa-book-open"></i>
+                                    <span>Manage Subjects</span>
                                 </button>
                                 <button class="quick-action-btn" data-action="manage-campus">
                                     <i class="fas fa-building"></i>
@@ -358,6 +362,9 @@
                                 <button class="btn-secondary" id="manage-campuses-btn">
                                     <i class="fas fa-cog"></i> Manage Campuses
                                 </button>
+                                <button class="btn-secondary" id="manage-programs-btn">
+                                    <i class="fas fa-diagram-project"></i> Manage Programs
+                                </button>
                             </div>
                             <button class="btn-bulk-register" id="bulk-register-btn">
                                 <i class="fas fa-file-import"></i>
@@ -389,9 +396,9 @@
                                             <th>ID Number</th>
                                             <th>Full Name</th>
                                             <th>Email</th>
-                                            <th>Password</th>
                                             <th>Campus</th>
                                             <th>Institute</th>
+                                            <th>Program</th>
                                             <th>Regular/Temporary</th>
                                             <th>Position</th>
                                             <th>Status</th>
@@ -703,6 +710,30 @@
                                 </button>
                             </div>
                         </div>
+                        <div class="settings-group credential-distributor-group">
+                            <h3><i class="fas fa-envelope"></i> Bulk Credential Distributor</h3>
+                            <p class="credential-distributor-description">
+                                Upload an Excel file with columns: <strong>name, email, role, campus, employee_or_student_number, password</strong> to send login credentials to existing users via email.
+                            </p>
+                            <div class="credential-distributor-upload">
+                                <button class="btn-save" id="credential-distributor-select-btn" type="button">
+                                    <i class="fas fa-file-excel"></i> Select XLSX File
+                                </button>
+                                <span class="credential-file-name" id="credential-distributor-file-name">No file
+                                    selected</span>
+                                <button class="btn-save credential-send-btn" id="credential-distributor-send-btn" type="button">
+                                    <i class="fas fa-paper-plane"></i> Distribute Credentials
+                                </button>
+                                <input type="file" id="credential-distributor-input" accept=".xlsx,.xls"
+                                    style="display:none">
+                            </div>
+                            <div class="credential-distributor-feedback" id="credential-distributor-feedback"
+                                aria-live="polite"></div>
+                            <button class="btn-reset credential-download-failures-btn"
+                                id="credential-download-failures-btn" type="button" style="display:none;">
+                                <i class="fas fa-download"></i> Download Failed Rows CSV
+                            </button>
+                        </div>
                         <div class="settings-group">
                             <h3>Activity Log</h3>
                             <div class="setting-item">
@@ -883,8 +914,15 @@
                                         <select id="current-semester">
                                             <!-- Populated dynamically from SharedData -->
                                         </select>
-                                        <input type="text" id="new-term-input" placeholder="e.g. 1st Semester 2027-2028"
-                                            style="padding: 8px 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; min-width: 220px;">
+                                        <select id="new-term-year-start" aria-label="Academic year start"></select>
+                                        <select id="new-term-year-end" aria-label="Academic year end"></select>
+                                        <select id="new-term-semester-type" aria-label="Semester type">
+                                            <option value="1st Semester">1st Semester</option>
+                                            <option value="2nd Semester">2nd Semester</option>
+                                            <option value="3rd Semester">3rd Semester</option>
+                                        </select>
+                                        <input type="text" id="new-term-preview" placeholder="Latest semester preview"
+                                            readonly>
                                         <button class="btn-add-term" type="button" id="btn-add-term">Add Term</button>
                                     </div>
                                 </div>
@@ -1021,6 +1059,113 @@
                     </div>
                 </div>
 
+                <!-- Subject Management View -->
+                <div id="subject-management-view" class="content-view" style="display: none;">
+                    <header class="top-header">
+                        <h1 class="page-title">Subject Management</h1>
+                        <div class="header-right">
+                            <div class="user-profile">
+                                <i class="fas fa-user-shield"></i>
+                                <span class="admin-username">Administrator</span>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div class="view-header">
+                        <h1><i class="fas fa-book"></i> Subject Management</h1>
+                        <p>Manage subject catalog, assign professors, and assign students per semester and section</p>
+                    </div>
+
+                    <div class="subject-management-layout">
+                        <section class="admin-section subject-catalog-section">
+                            <div class="section-header">
+                                <div class="section-title">
+                                    <h2><i class="fas fa-list"></i> Subject Catalog</h2>
+                                    <p>Create or edit subjects by campus and department</p>
+                                </div>
+                            </div>
+                            <div class="subject-toolbar">
+                                <select id="subject-campus-filter" class="subject-select"></select>
+                                <select id="subject-department-filter" class="subject-select"></select>
+                                <button class="btn-add-professor" id="add-subject-btn">
+                                    <i class="fas fa-plus"></i> Add Subject
+                                </button>
+                                <button class="btn-bulk-register" id="bulk-subject-import-btn">
+                                    <i class="fas fa-file-import"></i> Import Subjects
+                                </button>
+                                <input type="file" id="bulk-subject-import-input" accept=".xlsx,.xls"
+                                    style="display:none">
+                            </div>
+                            <div class="subject-table-wrap subject-catalog-table-wrap">
+                                <table class="professor-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Campus</th>
+                                            <th>Department</th>
+                                            <th>Subject Code</th>
+                                            <th>Subject Name</th>
+                                            <th class="actions-col">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="subject-catalog-body"></tbody>
+                                </table>
+                            </div>
+                        </section>
+
+                        <section class="admin-section subject-offering-section">
+                            <div class="section-header">
+                                <div class="section-title">
+                                    <h2><i class="fas fa-user-check"></i> Offering Assignment</h2>
+                                    <p>Assign subject + section to professor, bulk import offerings, then manage students</p>
+                                </div>
+                            </div>
+                            <div class="subject-toolbar offering-toolbar">
+                                <button class="btn-bulk-register" id="bulk-offering-import-btn">
+                                    <i class="fas fa-file-import"></i> Import Offerings
+                                </button>
+                                <input type="file" id="bulk-offering-import-input" accept=".xlsx,.xls"
+                                    style="display:none">
+                                <div class="offering-search-box">
+                                    <i class="fas fa-search"></i>
+                                    <input type="text" id="offering-search"
+                                        placeholder="Search professor, employee ID, subject, or section">
+                                </div>
+                            </div>
+                            <form id="offering-form" class="subject-form-grid offering-form-grid">
+                                <select id="offering-semester" class="subject-select"></select>
+                                <select id="offering-campus" class="subject-select"></select>
+                                <select id="offering-department" class="subject-select"></select>
+                                <select id="offering-program" class="subject-select"></select>
+                                <select id="offering-subject" class="subject-select"></select>
+                                <select id="offering-professor" class="subject-select"></select>
+                                <input type="text" id="offering-section" class="subject-input"
+                                    placeholder="Section (e.g., 3/1)" required>
+                                <button type="submit" class="btn-submit" id="offering-save-btn">
+                                    Save Assignment
+                                </button>
+                            </form>
+
+                            <div class="subject-table-wrap offering-table-wrap">
+                                <table class="professor-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Subject</th>
+                                            <th>Section</th>
+                                            <th>Professor</th>
+                                            <th>Professor Employee ID</th>
+                                            <th>Program Code</th>
+                                            <th>Campus/Dept</th>
+                                            <th>Status</th>
+                                            <th class="actions-col">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="offering-list-body"></tbody>
+                                </table>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+
                 <!-- HR Questionnaire View -->
                 <div id="hr-questionnaire-view" class="content-view" style="display: none;">
                     <header class="top-header">
@@ -1091,6 +1236,123 @@
         </div>
     </div>
 
+    <!-- Subject Modal -->
+    <div id="subject-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="subject-modal-title">Add Subject</h2>
+                <button class="modal-close" id="close-subject-modal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="subject-form">
+                <input type="hidden" id="subject-id">
+                <div class="form-group">
+                    <label for="subject-campus">Campus</label>
+                    <select id="subject-campus" required></select>
+                </div>
+                <div class="form-group">
+                    <label for="subject-department">Department</label>
+                    <select id="subject-department" required></select>
+                </div>
+                <div class="form-group">
+                    <label for="subject-code">Subject Code</label>
+                    <input type="text" id="subject-code" maxlength="50" required>
+                </div>
+                <div class="form-group">
+                    <label for="subject-name">Subject Name</label>
+                    <input type="text" id="subject-name" maxlength="150" required>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" id="cancel-subject-form">Cancel</button>
+                    <button type="submit" class="btn-submit">Save Subject</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Offering Students Modal -->
+    <div id="offering-students-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Assign Students</h2>
+                <button class="modal-close" id="close-offering-students-modal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <input type="hidden" id="students-offering-id">
+            <div class="form-group">
+                <label for="offering-students-program-filter">Program</label>
+                <select id="offering-students-program-filter"></select>
+            </div>
+            <div class="form-group">
+                <label for="offering-students-search">Search Student</label>
+                <input type="text" id="offering-students-search" placeholder="Search by name or student number">
+            </div>
+            <div id="offering-students-list" class="offering-students-list"></div>
+            <div class="modal-actions">
+                <button type="button" class="btn-cancel" id="cancel-offering-students-form">Cancel</button>
+                <button type="button" class="btn-submit" id="save-offering-students-btn">Save Students</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Announcement Compose Modal -->
+    <div id="announcement-compose-modal" class="modal">
+        <div class="modal-content announcement-compose-modal-content">
+            <div class="modal-header">
+                <h2>Create Professor/Dean/Student Announcement</h2>
+                <button class="modal-close" id="close-announcement-compose-modal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="announcement-compose-form">
+                <div class="form-group">
+                    <label for="announcement-compose-title">Title</label>
+                    <input type="text" id="announcement-compose-title" maxlength="200" required>
+                </div>
+                <div class="form-group">
+                    <label for="announcement-compose-message">Message</label>
+                    <textarea id="announcement-compose-message" rows="5" maxlength="3000" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="announcement-target-role">Target Role</label>
+                    <select id="announcement-target-role" required>
+                        <option value="student">Student</option>
+                        <option value="dean">Dean</option>
+                        <option value="professor">Professor</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="announcement-target-campus">Campus (Optional)</label>
+                    <select id="announcement-target-campus">
+                        <option value="">All Campuses</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="announcement-target-program">Program (Optional)</label>
+                    <select id="announcement-target-program">
+                        <option value="">All Programs</option>
+                    </select>
+                </div>
+                <div class="form-group" id="announcement-student-completion-wrap" style="display:none;">
+                    <label for="announcement-student-completion">Student Completion Filter</label>
+                    <select id="announcement-student-completion">
+                        <option value="all">All Students</option>
+                        <option value="completed">Completed</option>
+                        <option value="not_completed">Not Completed</option>
+                    </select>
+                </div>
+                <p class="form-hint">If campus/program are blank, the announcement targets all users of the selected role.</p>
+                <p class="announcement-compose-feedback" id="announcement-compose-feedback" aria-live="polite"></p>
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" id="cancel-announcement-compose-btn">Cancel</button>
+                    <button type="submit" class="btn-submit">Publish Announcement</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Add User Modal -->
     <div id="add-user-modal" class="modal">
         <div class="modal-content">
@@ -1140,7 +1402,7 @@
                     </div>
                     <label for="new-user-year-section">Year & Section</label>
                     <input type="text" id="new-user-year-section" name="yearSection"
-                        placeholder="e.g., 3rd Year - Section A">
+                        placeholder="e.g., 3-1">
                 </div>
                 <!-- Dynamic fields for Employee (Admin, HR, Professor) -->
                 <div class="form-group employee-fields" id="employee-fields">
@@ -1192,7 +1454,7 @@
                 </div>
                 <div class="form-group">
                     <label for="edit-user-password">Password</label>
-                    <input type="text" id="edit-user-password" name="password" required>
+                    <input type="text" id="edit-user-password" name="password" placeholder="Leave blank to keep current password">
                 </div>
                 <div class="form-group">
                     <label for="edit-user-campus">Campus</label>
@@ -1208,7 +1470,11 @@
                     <label for="edit-user-institute">Institute</label>
                     <input type="text" id="edit-user-institute" name="institute" required>
                 </div>
-                <div class="form-group">
+                <div class="form-group" id="edit-user-year-section-group" style="display:none;">
+                    <label for="edit-user-year-section">Year & Section</label>
+                    <input type="text" id="edit-user-year-section" name="yearSection" placeholder="e.g., 3-1">
+                </div>
+                <div class="form-group" id="edit-user-employment-type-group">
                     <label for="edit-user-employment-type">Regular/Temporary</label>
                     <select id="edit-user-employment-type" name="employmentType">
                         <option value="Regular">Regular</option>
@@ -1216,7 +1482,7 @@
                         <option value="Student">Student</option>
                     </select>
                 </div>
-                <div class="form-group">
+                <div class="form-group" id="edit-user-position-group">
                     <label for="edit-user-position">Position</label>
                     <input type="text" id="edit-user-position" name="position">
                 </div>
@@ -1266,6 +1532,63 @@
                     <div class="campus-detail" id="campus-detail">
                         <!-- Selected campus detail -->
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manage Programs Modal -->
+    <div id="manage-programs-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Manage Programs</h2>
+                <button class="modal-close" id="close-manage-programs-modal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="program-manager-filters">
+                    <div class="form-group">
+                        <label for="program-manager-campus">Campus</label>
+                        <select id="program-manager-campus"></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="program-manager-department">Department</label>
+                        <select id="program-manager-department"></select>
+                    </div>
+                </div>
+
+                <form id="program-form" class="program-form">
+                    <input type="hidden" id="program-id">
+                    <div class="form-group">
+                        <label for="program-code">Program Code</label>
+                        <input type="text" id="program-code" placeholder="e.g., AIS" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="program-name">Program Name</label>
+                        <input type="text" id="program-name" placeholder="e.g., Associate in Information Systems" required>
+                    </div>
+                    <div class="program-form-actions">
+                        <button type="button" class="btn-cancel" id="program-cancel-edit-btn" style="display:none;">Cancel Edit</button>
+                        <button type="submit" class="btn-submit" id="program-submit-btn">
+                            <i class="fas fa-plus-circle"></i> Save Program
+                        </button>
+                    </div>
+                </form>
+
+                <div class="program-list-wrapper">
+                    <table class="program-list-table">
+                        <thead>
+                            <tr>
+                                <th>Program Code</th>
+                                <th>Program Name</th>
+                                <th>Campus</th>
+                                <th>Department</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="program-list-body"></tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -1446,10 +1769,27 @@
         </div>
     </div>
 
+    <div id="bulk-register-loading" class="bulk-register-loading" aria-hidden="true">
+        <div class="bulk-register-loading-card" role="status" aria-live="polite" aria-label="Bulk registration in progress">
+            <div class="bulk-register-loading-spinner"></div>
+            <h3>Processing Bulk Register</h3>
+            <p id="bulk-register-loading-text">Please wait while the system validates and saves your Excel file.</p>
+        </div>
+    </div>
+
+    <div id="credential-distributor-loading" class="credential-distributor-loading" aria-hidden="true">
+        <div class="credential-distributor-loading-card" role="status" aria-live="polite" aria-label="Sending credentials in progress">
+            <div class="credential-distributor-loading-spinner"></div>
+            <h3 id="credential-distributor-loading-title">Distributing Credentials</h3>
+            <p id="credential-distributor-loading-text">Please wait while the system sends login credentials via email. This may take a few minutes depending on the number of recipients.</p>
+            <div class="credential-distributor-loading-progress" id="credential-distributor-loading-progress"></div>
+        </div>
+    </div>
 
 
-    <script src="../JsScrip/db-data.js"></script>
-    <script src="../JsScrip/adminpanel.js"></script>
+    <script src="../JsScrip/db-data.js?v=20260322a"></script>
+    <script src="../JsScrip/vendor/xlsx.full.min.js?v=20260323a"></script>
+    <script src="../JsScrip/adminpanel.js?v=20260326a"></script>
 </body>
 
 </html>

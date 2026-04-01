@@ -33,9 +33,9 @@
                     <i class="fas fa-people-group"></i>
                     <span>Evaluation</span>
                 </a>
-                <a href="#" class="nav-link" data-view="reports">
-                    <i class="fas fa-chart-bar"></i>
-                    <span>Reports</span>
+                <a href="#" class="nav-link" data-view="facultyPaperInbox">
+                    <i class="fas fa-file-signature"></i>
+                    <span>Faculty Paper Inbox</span>
                 </a>
                 <a href="#" class="nav-link" data-view="profile">
                     <i class="fas fa-id-card"></i>
@@ -74,7 +74,7 @@
                         </button>
                         <button class="user-profile js-profile-btn" aria-label="View profile">
                             <i class="fas fa-user-circle"></i>
-                            <span>Efrhain Louis Pajota</span>
+                            <span>Dean User</span>
                         </button>
 
                         <div class="dropdown-panel js-announcement-panel">
@@ -107,19 +107,19 @@
                             <div class="profile-grid">
                                 <div class="profile-item">
                                     <span class="profile-label">Faculty ID</span>
-                                    <span class="profile-value" id="profileFacultyId">FAC-20451</span>
+                                    <span class="profile-value" id="profileFacultyId">N/A</span>
                                 </div>
                                 <div class="profile-item">
                                     <span class="profile-label">Department</span>
-                                    <span class="profile-value">ICS</span>
+                                    <span class="profile-value">N/A</span>
                                 </div>
                                 <div class="profile-item">
                                     <span class="profile-label">Rank</span>
-                                    <span class="profile-value">Assistant Professor</span>
+                                    <span class="profile-value">N/A</span>
                                 </div>
                                 <div class="profile-item">
                                     <span class="profile-label">AY/SEM</span>
-                                    <span class="profile-value">AY 2025-2026, 2nd Semester</span>
+                                    <span class="profile-value">Selected semester</span>
                                 </div>
                             </div>
                         </div>
@@ -134,17 +134,7 @@
                         </div>
                         <div class="card-content">
                             <h3>Evaluations Received</h3>
-                            <p class="card-number">45/100</p>
-                        </div>
-                    </div>
-
-                    <div class="summary-card score">
-                        <div class="card-icon">
-                            <i class="fas fa-star"></i>
-                        </div>
-                        <div class="card-content">
-                            <h3>Average Score</h3>
-                            <p class="card-number score-text">4.7/5.0</p>
+                            <p class="card-number">0/0</p>
                         </div>
                     </div>
 
@@ -164,25 +154,9 @@
                         </div>
                         <div class="card-content">
                             <h3>Response Rate</h3>
-                            <p class="card-number">45%</p>
+                            <p class="card-number">0%</p>
                         </div>
                     </div>
-                </div>
-
-                <!-- Action Cards -->
-                <div class="action-cards">
-                    <div class="action-card">
-                        <div class="action-icon">
-                            <i class="fas fa-file-alt"></i>
-                        </div>
-                        <div class="action-content">
-                            <h3>View Reports</h3>
-                            <p>Access detailed evaluation reports and analytics.</p>
-                        </div>
-                        <button class="btn-action">Generate Paper</button>
-                    </div>
-
-
                 </div>
 
                 <!-- Faculty Summary Section -->
@@ -198,18 +172,8 @@
                         <div class="summary-block">
                             <h3>Average Rating per Criteria</h3>
                             <ul class="criteria-list" id="criteriaList">
-                                <li><span>Teaching Effectiveness</span><strong>4.7</strong></li>
-                                <li><span>Classroom Management</span><strong>4.5</strong></li>
-                                <li><span>Student Engagement</span><strong>4.8</strong></li>
-                                <li><span>Communication Skills</span><strong>4.6</strong></li>
-                                <li><span>Assessment Methods</span><strong>4.4</strong></li>
+                                <li><span>No data available</span><strong>-</strong></li>
                             </ul>
-                        </div>
-                        <div class="summary-block">
-                            <h3>Evaluations Received</h3>
-                            <div class="evaluation-count" id="evaluationCount">45/100</div>
-                            <p class="summary-note">Required = enrolled students. Received = submissions.</p>
-                            <p class="summary-note">Stats are filtered by AY/SEM.</p>
                         </div>
                     </div>
 
@@ -229,7 +193,7 @@
                     <div class="charts-section">
                         <div class="chart-card">
                             <div class="chart-header">
-                                <h3>Student Evaluation � Average Scores</h3>
+                                <h3>Student Evaluation - Average Scores</h3>
                                 <p>Performance across evaluation criteria (student feedback)</p>
                             </div>
                             <div class="chart-container">
@@ -239,7 +203,7 @@
 
                         <div class="chart-card">
                             <div class="chart-header">
-                                <h3>Student Evaluation � Rating Distribution</h3>
+                                <h3>Student Evaluation - Rating Distribution</h3>
                                 <p>Breakdown of student ratings</p>
                             </div>
                             <div class="chart-container">
@@ -252,7 +216,7 @@
                     <div class="charts-section">
                         <div class="chart-card">
                             <div class="chart-header">
-                                <h3>Peer Evaluation � Average Scores</h3>
+                                <h3>Peer Evaluation - Average Scores</h3>
                                 <p>Professor-to-professor evaluation averages</p>
                             </div>
                             <div class="chart-container">
@@ -262,7 +226,7 @@
 
                         <div class="chart-card">
                             <div class="chart-header">
-                                <h3>Peer Evaluation � Rating Distribution</h3>
+                                <h3>Peer Evaluation - Rating Distribution</h3>
                                 <p>Distribution of peer ratings</p>
                             </div>
                             <div class="chart-container">
@@ -290,78 +254,19 @@
                                         <th>Excellent (5)</th>
                                         <th>Good (4)</th>
                                         <th>Fair (3)</th>
+                                        <th>Poor (2)</th>
+                                        <th>Very Poor (1)</th>
                                     </tr>
                                 </thead>
-                                <tbody>
+                                <tbody id="detailedSummaryTableBody">
                                     <tr>
-                                        <td>Teaching Effectiveness</td>
-                                        <td><span class="avg-score">4.7</span></td>
-                                        <td>45</td>
-                                        <td><span class="count excellent">32</span></td>
-                                        <td><span class="count good">10</span></td>
-                                        <td><span class="count fair">3</span></td>
-                                    </tr>
-                                    <tr>
-                                        <td>Classroom Management</td>
-                                        <td><span class="avg-score">4.5</span></td>
-                                        <td>45</td>
-                                        <td><span class="count excellent">28</span></td>
-                                        <td><span class="count good">13</span></td>
-                                        <td><span class="count fair">4</span></td>
-                                    </tr>
-                                    <tr>
-                                        <td>Student Engagement</td>
-                                        <td><span class="avg-score">4.8</span></td>
-                                        <td>45</td>
-                                        <td><span class="count excellent">35</span></td>
-                                        <td><span class="count good">8</span></td>
-                                        <td><span class="count fair">2</span></td>
-                                    </tr>
-                                    <tr>
-                                        <td>Communication Skills</td>
-                                        <td><span class="avg-score">4.6</span></td>
-                                        <td>45</td>
-                                        <td><span class="count excellent">30</span></td>
-                                        <td><span class="count good">12</span></td>
-                                        <td><span class="count fair">3</span></td>
-                                    </tr>
-                                    <tr>
-                                        <td>Assessment Methods</td>
-                                        <td><span class="avg-score">4.4</span></td>
-                                        <td>45</td>
-                                        <td><span class="count excellent">26</span></td>
-                                        <td><span class="count good">15</span></td>
-                                        <td><span class="count fair">4</span></td>
+                                        <td colspan="8">No data available.</td>
                                     </tr>
                                 </tbody>
                             </table>
                         </div>
                     </section>
 
-                    <!-- Student Comments Section -->
-                    <section class="comments-section">
-                        <div class="section-header">
-                            <div class="section-title">
-                                <h2>Student Comments Summary</h2>
-                                <p>Feedback and suggestions from students.</p>
-                            </div>
-                        </div>
-
-                        <div class="comments-list">
-                            <div class="comment-card">
-                                <div class="comment-icon">
-                                    <i class="fas fa-quote-left"></i>
-                                </div>
-                                <p class="comment-text">"Students generally appreciate the clarity of explanations and
-                                    the
-                                    approachable nature of the instructor. Many highlighted the effectiveness of office
-                                    hours and the organized teaching style. However, there are suggestions for
-                                    incorporating
-                                    more real-world examples in lectures to enhance practical understanding."</p>
-                                <p class="comment-author">- Automated Student Feedback Summary</p>
-                            </div>
-                        </div>
-                    </section>
                 </section>
             </div>
 
@@ -376,7 +281,7 @@
                         </button>
                         <button class="user-profile js-profile-btn" aria-label="View profile">
                             <i class="fas fa-user-circle"></i>
-                            <span>Efrhain Louis Pajota</span>
+                            <span>Dean User</span>
                         </button>
 
                         <div class="dropdown-panel js-announcement-panel">
@@ -400,11 +305,11 @@
                             <div class="profile-grid">
                                 <div class="profile-item">
                                     <span class="profile-label">Faculty ID</span>
-                                    <span class="profile-value">FAC-20451</span>
+                                    <span class="profile-value">N/A</span>
                                 </div>
                                 <div class="profile-item">
                                     <span class="profile-label">Department</span>
-                                    <span class="profile-value">ICS</span>
+                                    <span class="profile-value">N/A</span>
                                 </div>
                             </div>
                         </div>
@@ -423,12 +328,15 @@
                         <div class="form-section">
                             <h3 class="section-title" id="peerTargetLabel">Select Employee</h3>
                             <div class="form-group">
-                                <select id="peerProfessor" name="peerProfessor" class="form-select" required>
-                                    <option value="" id="peerTargetPlaceholder">Choose an employee to evaluate</option>
-                                    <option value="prof-maria-santos">Maria Santos - ICS</option>
-                                    <option value="prof-juan-delacruz">Juan Dela Cruz - ICS</option>
-                                    <option value="prof-ana-garcia">Ana Garcia - ICS</option>
-                                </select>
+                                <label for="peerProfessorSearch">Search Employee / Program</label>
+                                <input type="text" id="peerProfessorSearch" class="form-input"
+                                    placeholder="Search or choose an employee"
+                                    list="peerProfessorOptions"
+                                    autocomplete="off"
+                                    required>
+                                <datalist id="peerProfessorOptions"></datalist>
+                                <input type="hidden" id="peerProfessor" name="peerProfessor" value="">
+                                <p class="field-note" id="peerProfessorSearchMeta">Choose an employee from suggestions.</p>
                             </div>
                         </div>
 
@@ -454,10 +362,10 @@
                 </div>
             </div>
 
-            <!-- Reports View -->
-            <div id="reportsView" class="content-view" style="display: none;">
+            <!-- Faculty Paper Inbox View -->
+            <div id="facultyPaperInboxView" class="content-view" style="display: none;">
                 <header class="top-header">
-                    <h1 class="page-title">Evaluation Reports</h1>
+                    <h1 class="page-title">Faculty Paper Inbox</h1>
                     <div class="user-info">
                         <button class="user-action-btn js-notification-btn" aria-label="View announcements">
                             <i class="fas fa-bell"></i>
@@ -465,7 +373,7 @@
                         </button>
                         <button class="user-profile js-profile-btn" aria-label="View profile">
                             <i class="fas fa-user-circle"></i>
-                            <span>Efrhain Louis Pajota</span>
+                            <span>Dean User</span>
                         </button>
 
                         <div class="dropdown-panel js-announcement-panel">
@@ -475,12 +383,8 @@
                             </div>
                             <ul class="panel-list">
                                 <li>
-                                    <div class="panel-title">Evaluation Window</div>
-                                    <div class="panel-meta">Faculty reports will unlock after Feb 10, 2026.</div>
-                                </li>
-                                <li>
-                                    <div class="panel-title">Report Access</div>
-                                    <div class="panel-meta">Reports are viewable after the evaluation period ends.</div>
+                                    <div class="panel-title">Section C Ownership</div>
+                                    <div class="panel-meta">Section C can be updated by both professor and dean.</div>
                                 </li>
                             </ul>
                         </div>
@@ -493,131 +397,85 @@
                             <div class="profile-grid">
                                 <div class="profile-item">
                                     <span class="profile-label">Faculty ID</span>
-                                    <span class="profile-value">FAC-20451</span>
+                                    <span class="profile-value">N/A</span>
                                 </div>
                                 <div class="profile-item">
                                     <span class="profile-label">Department</span>
-                                    <span class="profile-value">ICS</span>
-                                </div>
-                                <div class="profile-item">
-                                    <span class="profile-label">AY/SEM</span>
-                                    <span class="profile-value">AY 2025-2026, 2nd Semester</span>
+                                    <span class="profile-value">N/A</span>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </header>
 
-                <div class="reports-blackout" id="reportsBlackout" style="display: none;">
-                    <h2>Reports not available yet</h2>
-                    <p>Reports will be available after the evaluation period ends on <span id="reportUnlockDate">Feb 10,
-                            2026</span>.</p>
-                </div>
-
-                <div class="reports-content" id="reportsContent">
-                    <section class="detail-report-section">
-                        <div class="section-header">
-                            <div class="section-title">
-                                <h2>Faculty Response Rate & Counts</h2>
-                                <p>Evaluations received per subject/section. Counts are per subject evaluation.</p>
-                                <p class="semester-display">Showing: <span id="selectedEvalType">Student
-                                        Evaluation</span> � <span id="selectedSemester">AY 2025-2026, 2nd
-                                        Semester</span></p>
-                            </div>
-                            <div class="filters-row">
-                                <div class="eval-type-filter">
-                                    <label for="evaluationTypeFilter">Evaluation</label>
-                                    <select id="evaluationTypeFilter">
-                                        <option value="student" selected>Student Evaluation</option>
-                                        <option value="professor">Professor Evaluation</option>
-                                    </select>
-                                </div>
-                                <div class="semester-filter">
-                                    <label for="semesterFilter">Semester</label>
-                                    <select id="semesterFilter">
-                                        <option value="2025-2026|2" selected>AY 2025-2026, 2nd Semester</option>
-                                        <option value="2025-2026|1">AY 2025-2026, 1st Semester</option>
-                                        <option value="2024-2025|2">AY 2024-2025, 2nd Semester</option>
-                                        <option value="2024-2025|1">AY 2024-2025, 1st Semester</option>
-                                    </select>
-                                </div>
-                            </div>
+                <section class="detail-report-section faculty-paper-section">
+                    <div class="section-header">
+                        <div class="section-title">
+                            <h2>Assigned Faculty Papers</h2>
+                            <p>Open a paper to complete Section C and finalize acknowledgement records.</p>
                         </div>
+                    </div>
 
-                        <div class="table-container">
-                            <table class="faculty-breakdown-table" id="facultyBreakdownTable">
-                                <thead>
-                                    <tr>
-                                        <th>Subject</th>
-                                        <th>Section</th>
-                                        <th>Evaluations Received</th>
-                                        <th>Response Rate</th>
-                                        <th>Avg Rating</th>
-                                        <th>Comments</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr data-required="40" data-received="18" data-avg="4.6">
-                                        <td>IT 307 - Web Systems and Technologies 2</td>
-                                        <td>BSIT 3A</td>
-                                        <td><span class="count-pill">18/40</span></td>
-                                        <td>45%</td>
-                                        <td>4.6</td>
-                                        <td><button type="button"
-                                                class="btn-submit faculty-comments-btn js-dean-comments"
-                                                data-subject="IT 307 - Web Systems and Technologies 2"
-                                                data-section="BSIT 3A">View</button></td>
-                                    </tr>
-                                    <tr data-required="35" data-received="17" data-avg="4.8">
-                                        <td>IT 303 - Event-Driven Programming</td>
-                                        <td>BSIT 3A</td>
-                                        <td><span class="count-pill">17/35</span></td>
-                                        <td>49%</td>
-                                        <td>4.8</td>
-                                        <td><button type="button"
-                                                class="btn-submit faculty-comments-btn js-dean-comments"
-                                                data-subject="IT 303 - Event-Driven Programming"
-                                                data-section="BSIT 3A">View</button></td>
-                                    </tr>
-                                    <tr data-required="25" data-received="10" data-avg="4.5">
-                                        <td>IT 305 - Integrative Programming</td>
-                                        <td>BSIT 3A</td>
-                                        <td><span class="count-pill">10/25</span></td>
-                                        <td>40%</td>
-                                        <td>4.5</td>
-                                        <td><button type="button"
-                                                class="btn-submit faculty-comments-btn js-dean-comments"
-                                                data-subject="IT 305 - Integrative Programming"
-                                                data-section="BSIT 3A">View</button></td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
+                    <div class="table-container">
+                        <table class="summary-table" id="deanFacultyPaperTable">
+                            <thead>
+                                <tr>
+                                    <th>Paper ID</th>
+                                    <th>Professor</th>
+                                    <th>Semester</th>
+                                    <th>Status</th>
+                                    <th>Sent At</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="deanFacultyPaperTableBody">
+                                <tr>
+                                    <td colspan="6">No faculty papers assigned.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
 
-                        <div class="faculty-comments-panel" id="deanSubjectCommentsPanel" aria-live="polite">
-                            <div class="faculty-comments-header">
-                                <div>
-                                    <h3 id="deanSubjectCommentsTitle">Section Feedback Summary</h3>
-                                    <p class="faculty-comments-meta" id="deanSubjectCommentsMeta">Select a subject and
-                                        section to view the summary.</p>
-                                </div>
-                                <button type="button" class="btn-cancel faculty-comments-close"
-                                    id="deanSubjectCommentsClose">Close</button>
+                <div class="form-card faculty-paper-detail-card" id="deanFacultyPaperDetailCard" style="display: none;">
+                    <div class="form-header">
+                        <h2>Faculty Paper Detail</h2>
+                        <p id="deanFacultyPaperDetailMeta">Select a paper to continue.</p>
+                    </div>
+
+                    <div class="profile-grid profile-grid-wide">
+                        <div class="profile-item"><span class="profile-label">Paper ID</span><span class="profile-value" id="deanFpDetailId">N/A</span></div>
+                        <div class="profile-item"><span class="profile-label">Status</span><span class="profile-value" id="deanFpDetailStatus">N/A</span></div>
+                        <div class="profile-item"><span class="profile-label">Professor Name</span><span class="profile-value" id="deanFpDetailFacultyName">N/A</span></div>
+                        <div class="profile-item"><span class="profile-label">Department</span><span class="profile-value" id="deanFpDetailDepartment">N/A</span></div>
+                        <div class="profile-item"><span class="profile-label">Rank</span><span class="profile-value" id="deanFpDetailRank">N/A</span></div>
+                        <div class="profile-item"><span class="profile-label">Semester</span><span class="profile-value" id="deanFpDetailSemester">N/A</span></div>
+                        <div class="profile-item"><span class="profile-label">SET Rating (%)</span><span class="profile-value" id="deanFpDetailSetRating">N/A</span></div>
+                        <div class="profile-item"><span class="profile-label">SAF Rating (%)</span><span class="profile-value" id="deanFpDetailSafRating">N/A</span></div>
+                    </div>
+
+                    <form id="deanFacultyPaperSectionCForm" class="evaluation-form">
+                        <div class="form-section">
+                            <h3 class="section-title">Section C (Editable by Professor and Dean)</h3>
+                            <div class="form-group">
+                                <label for="deanSectionCAreas">Areas for Improvement</label>
+                                <textarea id="deanSectionCAreas" class="form-input" rows="3" placeholder="Input areas for improvement"></textarea>
                             </div>
-                            <ul class="faculty-comments-list" id="deanSubjectCommentsList">
-                                <li class="faculty-comments-empty">No summaries loaded yet.</li>
-                            </ul>
-                            <div class="api-info-box compact">
-                                <i class="fas fa-database"></i>
-                                <span>SQL Ready: connect to /api/dean/subjects/summary (POST)</span>
+                            <div class="form-group">
+                                <label for="deanSectionCActivities">Proposed Learning and Development Activities</label>
+                                <textarea id="deanSectionCActivities" class="form-input" rows="3" placeholder="Input proposed activities"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="deanSectionCActionPlan">Action Plan</label>
+                                <textarea id="deanSectionCActionPlan" class="form-input" rows="3" placeholder="Input action plan"></textarea>
                             </div>
                         </div>
 
-                        <div class="api-info-box compact">
-                            <i class="fas fa-database"></i>
-                            <span>SQL Ready: connect to /api/dean/evaluations/summary (POST)</span>
+                        <div class="form-actions">
+                            <button type="submit" class="btn-submit" id="deanFacultyPaperSaveBtn">Save Section C</button>
+                            <button type="button" class="btn-cancel" id="deanFacultyPaperPreviewBtn">Preview PDF</button>
                         </div>
-                    </section>
+                    </form>
                 </div>
             </div>
 
@@ -632,7 +490,7 @@
                         </button>
                         <button class="user-profile js-profile-btn" aria-label="View profile">
                             <i class="fas fa-user-circle"></i>
-                            <span>Efrhain Louis Pajota</span>
+                            <span>Dean User</span>
                         </button>
 
                         <div class="dropdown-panel js-announcement-panel">
@@ -661,11 +519,11 @@
                             <div class="profile-grid">
                                 <div class="profile-item">
                                     <span class="profile-label">Faculty ID</span>
-                                    <span class="profile-value">FAC-20451</span>
+                                    <span class="profile-value">N/A</span>
                                 </div>
                                 <div class="profile-item">
                                     <span class="profile-label">Department</span>
-                                    <span class="profile-value">ICS</span>
+                                    <span class="profile-value">N/A</span>
                                 </div>
                             </div>
                         </div>
@@ -691,31 +549,30 @@
                     <div class="profile-grid profile-grid-wide">
                         <div class="profile-item">
                             <span class="profile-label">Faculty ID</span>
-                            <span class="profile-value">FAC-20451</span>
+                            <span class="profile-value">N/A</span>
                         </div>
                         <div class="profile-item">
                             <span class="profile-label">Full Name</span>
-                            <span class="profile-value">Efrhain Louis Pajota</span>
+                            <span class="profile-value">Dean User</span>
                         </div>
                         <div class="profile-item">
                             <span class="profile-label">Department</span>
-                            <span class="profile-value">ICS</span>
+                            <span class="profile-value">N/A</span>
                         </div>
                         <div class="profile-item">
                             <span class="profile-label">Rank</span>
-                            <span class="profile-value">Assistant Professor</span>
+                            <span class="profile-value">N/A</span>
                         </div>
                         <div class="profile-item">
                             <span class="profile-label">Gmail</span>
-                            <span class="profile-value" id="profileEmail">dean@gmail.com</span>
+                            <span class="profile-value" id="profileEmail">N/A</span>
                         </div>
                         <div class="profile-item">
                             <span class="profile-label">AY/SEM</span>
-                            <span class="profile-value">AY 2025-2026, 2nd Semester</span>
+                            <span class="profile-value">Selected semester</span>
                         </div>
                     </div>
                 </div>
-                x
                 <div class="form-card">
                     <div class="form-header">
                         <h2>Account Actions</h2>
@@ -729,10 +586,10 @@
                     </div>
                 </div>
 
-                <div class="form-card account-action-card" id="emailUpdateCard" style="display: none;">
+                <div class="form-card account-action-card" id="emailUpdateCard">
                     <div class="form-header">
                         <h2>Update Gmail</h2>
-                        <p>Enter your new email and confirm to proceed.</p>
+                        <p>Read-only in this phase. Update endpoint is not available yet.</p>
                     </div>
                     <form id="changeEmailForm" class="evaluation-form">
                         <div class="form-section">
@@ -740,23 +597,23 @@
                             <div class="form-group">
                                 <label for="currentEmail">Current Gmail</label>
                                 <input type="email" id="currentEmail" name="currentEmail" class="form-input"
-                                    value="dean@gmail.com" readonly>
+                                    value="N/A" readonly>
                             </div>
                             <div class="form-group">
                                 <label for="newEmail">New Gmail</label>
                                 <input type="email" id="newEmail" name="newEmail" class="form-input"
-                                    placeholder="Enter new Gmail address" required>
+                                    placeholder="Enter new Gmail address" disabled>
                             </div>
                             <div class="form-group">
                                 <label for="confirmEmail">Confirm New Gmail</label>
                                 <input type="email" id="confirmEmail" name="confirmEmail" class="form-input"
-                                    placeholder="Re-enter new Gmail address" required>
+                                    placeholder="Re-enter new Gmail address" disabled>
                             </div>
                         </div>
 
                         <div class="api-info-box">
                             <i class="fas fa-database"></i>
-                            <span>SQL Ready: connect to /api/dean/change-email (POST)</span>
+                            <span>Not available yet: change-email endpoint is not enabled.</span>
                         </div>
 
                         <div class="form-actions">
@@ -767,10 +624,10 @@
                     </form>
                 </div>
 
-                <div class="form-card account-action-card" id="passwordUpdateCard" style="display: none;">
+                <div class="form-card account-action-card" id="passwordUpdateCard">
                     <div class="form-header">
                         <h2>Update Account Password</h2>
-                        <p>Placeholder form ready for SQL connection.</p>
+                        <p>Read-only in this phase. Update endpoint is not available yet.</p>
                     </div>
 
                     <form id="changePasswordForm" class="evaluation-form">
@@ -780,7 +637,7 @@
                                 <label for="currentPassword">Current Password</label>
                                 <div class="password-field">
                                     <input type="password" id="currentPassword" name="currentPassword"
-                                        class="form-input" placeholder="Enter current password" required>
+                                        class="form-input" placeholder="Enter current password" disabled>
                                     <button type="button" class="toggle-password" data-target="currentPassword"
                                         aria-label="Show password">
                                         <i class="fas fa-eye"></i>
@@ -791,7 +648,7 @@
                                 <label for="newPassword">New Password</label>
                                 <div class="password-field">
                                     <input type="password" id="newPassword" name="newPassword" class="form-input"
-                                        placeholder="Enter new password" required>
+                                        placeholder="Enter new password" disabled>
                                     <button type="button" class="toggle-password" data-target="newPassword"
                                         aria-label="Show password">
                                         <i class="fas fa-eye"></i>
@@ -802,7 +659,7 @@
                                 <label for="confirmPassword">Confirm New Password</label>
                                 <div class="password-field">
                                     <input type="password" id="confirmPassword" name="confirmPassword"
-                                        class="form-input" placeholder="Re-enter new password" required>
+                                        class="form-input" placeholder="Re-enter new password" disabled>
                                     <button type="button" class="toggle-password" data-target="confirmPassword"
                                         aria-label="Show password">
                                         <i class="fas fa-eye"></i>
@@ -813,7 +670,7 @@
 
                         <div class="api-info-box">
                             <i class="fas fa-database"></i>
-                            <span>SQL Ready: connect to /api/dean/change-password (POST)</span>
+                            <span>Not available yet: change-password endpoint is not enabled.</span>
                         </div>
 
                         <div class="form-actions">
@@ -836,7 +693,7 @@
                         </button>
                         <button class="user-profile js-profile-btn" aria-label="View profile">
                             <i class="fas fa-user-circle"></i>
-                            <span>Efrhain Louis Pajota</span>
+                            <span>Dean User</span>
                         </button>
 
                         <div class="dropdown-panel js-announcement-panel">
@@ -847,8 +704,8 @@
                             <ul class="panel-list">
                                 <li>
                                     <div class="panel-title">Search Scope</div>
-                                    <div class="panel-meta">Search by faculty name or employee ID across your assigned
-                                        institutes.</div>
+                                    <div class="panel-meta">Search by faculty name or employee ID across your department
+                                        scope.</div>
                                 </li>
                             </ul>
                         </div>
@@ -861,11 +718,11 @@
                             <div class="profile-grid">
                                 <div class="profile-item">
                                     <span class="profile-label">Faculty ID</span>
-                                    <span class="profile-value">FAC-20451</span>
+                                    <span class="profile-value">N/A</span>
                                 </div>
                                 <div class="profile-item">
                                     <span class="profile-label">Department</span>
-                                    <span class="profile-value">ICS</span>
+                                    <span class="profile-value">N/A</span>
                                 </div>
                             </div>
                         </div>
@@ -878,6 +735,12 @@
                             <label for="facultySearchInput">Search Faculty Name or Employee ID</label>
                             <input type="text" id="facultySearchInput" class="form-input"
                                 placeholder="Type faculty name or employee ID">
+                        </div>
+                        <div class="form-group">
+                            <label for="facultyResponseSemesterFilter">Semester</label>
+                            <select id="facultyResponseSemesterFilter" class="form-select">
+                                <option value="">Loading semesters...</option>
+                            </select>
                         </div>
                         <div class="faculty-response-actions">
                             <button type="button" class="btn-submit" id="facultySearchBtn">Search</button>
@@ -893,10 +756,10 @@
                         <button type="button" class="btn-cancel response-toggle-btn" id="supervisorResultsBtn"
                             data-view="supervisor">Supervisor Evaluation Results</button>
                     </div>
-                    <p class="faculty-response-result" id="facultySearchResult">Showing all faculty under assigned
-                        institutes.</p>
+                    <p class="faculty-response-result" id="facultySearchResult">Showing Student Evaluation Results under
+                        your department scope for Selected semester. Total: 0</p>
 
-                    <div class="table-container">
+                    <div class="table-container faculty-response-table-container">
                         <table class="summary-table" id="facultyResponseCountsTable">
                             <thead>
                                 <tr>
@@ -933,15 +796,6 @@
                         <ul class="faculty-comments-list" id="facultyCommentsList">
                             <li class="faculty-comments-empty">No comments loaded yet.</li>
                         </ul>
-                        <div class="api-info-box compact">
-                            <i class="fas fa-database"></i>
-                            <span>SQL Ready: connect to /api/dean/faculty/comments (POST)</span>
-                        </div>
-                    </div>
-
-                    <div class="api-info-box compact">
-                        <i class="fas fa-database"></i>
-                        <span>SQL Ready: connect to /api/dean/faculty/response-counts (POST)</span>
                     </div>
                 </section>
             </div>
@@ -957,7 +811,7 @@
                         </button>
                         <button class="user-profile js-profile-btn" aria-label="View profile">
                             <i class="fas fa-user-circle"></i>
-                            <span>Efrhain Louis Pajota</span>
+                            <span>Dean User</span>
                         </button>
 
                         <div class="dropdown-panel js-announcement-panel">
@@ -982,11 +836,11 @@
                             <div class="profile-grid">
                                 <div class="profile-item">
                                     <span class="profile-label">Faculty ID</span>
-                                    <span class="profile-value">FAC-20451</span>
+                                    <span class="profile-value">N/A</span>
                                 </div>
                                 <div class="profile-item">
                                     <span class="profile-label">Department</span>
-                                    <span class="profile-value">ICS</span>
+                                    <span class="profile-value">N/A</span>
                                 </div>
                             </div>
                         </div>
@@ -996,103 +850,101 @@
                 <section class="detail-report-section peer-mgmt-section">
                     <div class="peer-mgmt-grid">
                         <div class="peer-mgmt-card">
-                            <h2>Create Section/Room</h2>
-                            <p class="peer-mgmt-subtitle">Select multiple professors who will evaluate each other.</p>
+                            <h2>Auto-Generate Peer Room</h2>
+                            <p class="peer-mgmt-subtitle">Generate rooms for your department scope using current semester only.</p>
+
+                            <div class="form-group">
+                                <label for="peerMgmtProgramSelect">Program</label>
+                                <select id="peerMgmtProgramSelect" class="form-select">
+                                    <option value="">Loading programs...</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="peerMgmtProfessorCount">Professor Count</label>
+                                <input type="number" id="peerMgmtProfessorCount" class="form-input" min="2" step="1" value="5"
+                                    placeholder="Enter number of professors">
+                            </div>
 
                             <div class="form-group">
                                 <label for="peerMgmtRoomName">Room Name</label>
                                 <input type="text" id="peerMgmtRoomName" class="form-input"
-                                    placeholder="Example: ICS-Faculty-Peer-Room-A">
-                            </div>
-                            <div class="form-group">
-                                <label for="peerMgmtDirectorySearch">Find Professor</label>
-                                <input type="text" id="peerMgmtDirectorySearch" class="form-input"
-                                    placeholder="Search by name or employee ID">
-                            </div>
-
-                            <div class="peer-mgmt-picker" id="peerMgmtProfessorPicker">
-                                <p>Loading professors...</p>
+                                    placeholder="Optional. Leave blank for auto-generated name.">
                             </div>
 
                             <div class="form-actions">
-                                <button type="button" class="btn-submit" id="peerMgmtCreateRoomBtn">Create Room</button>
+                                <button type="button" class="btn-submit" id="peerMgmtCreateRoomBtn">Generate Room</button>
                                 <button type="button" class="btn-cancel" id="peerMgmtClearSelectionBtn">Clear</button>
                             </div>
                             <p class="peer-mgmt-message" id="peerMgmtMessage"></p>
-
-                            <div class="api-info-box compact">
-                                <i class="fas fa-database"></i>
-                                <span>SQL Ready: connect to /api/dean/peer-management/rooms/create (POST)</span>
-                            </div>
                         </div>
 
                         <div class="peer-mgmt-card">
                             <h2>Existing Rooms</h2>
-                            <p class="peer-mgmt-subtitle">Manage room membership and remove rooms.</p>
+                            <p class="peer-mgmt-subtitle">Current semester rooms generated under your dean scope.</p>
 
-                            <div class="table-container">
+                            <div class="table-container peer-mgmt-rooms-table-container">
                                 <table class="summary-table" id="peerMgmtRoomsTable">
                                     <thead>
                                         <tr>
                                             <th>Room Name</th>
-                                            <th>Scope</th>
+                                            <th>Program</th>
                                             <th>Members</th>
+                                            <th>Assignments</th>
+                                            <th>Created</th>
                                             <th>Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         <tr>
-                                            <td colspan="4">No rooms created yet.</td>
+                                            <td colspan="6">No rooms created yet.</td>
                                         </tr>
                                     </tbody>
                                 </table>
                             </div>
-                        </div>
-                    </div>
 
-                    <div class="peer-mgmt-card peer-mgmt-manage" id="peerMgmtManagePanel">
-                        <div class="peer-mgmt-header-row">
-                            <div>
-                                <h2 id="peerMgmtActiveRoomTitle">Manage Room Members</h2>
-                                <p class="peer-mgmt-subtitle">Add or remove professors from the selected room.</p>
+                            <div class="peer-mgmt-ops-card">
+                                <h2>Room Operations</h2>
+                                <p class="peer-mgmt-subtitle">View members, add professors manually, or dismantle a room.</p>
+
+                                <div class="form-group">
+                                    <label for="peerMgmtRoomDisplay">Selected Room</label>
+                                    <input type="hidden" id="peerMgmtRoomSelect" value="">
+                                    <input type="text" id="peerMgmtRoomDisplay" class="form-input peer-mgmt-room-display"
+                                        value="No rooms available" readonly>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="peerMgmtManualProfessorSelect">Eligible Professor</label>
+                                    <select id="peerMgmtManualProfessorSelect" class="form-select">
+                                        <option value="">Select a room first</option>
+                                    </select>
+                                </div>
+
+                                <div class="form-actions peer-mgmt-ops-actions">
+                                    <button type="button" class="btn-submit" id="peerMgmtAddProfessorBtn">Add Professor</button>
+                                    <button type="button" class="btn-cancel" id="peerMgmtViewMembersBtn">View Members</button>
+                                    <button type="button" class="btn-cancel" id="peerMgmtDismantleRoomBtn">Dismantle Room</button>
+                                </div>
+
+                                <div class="table-container peer-mgmt-members-table-container">
+                                    <table class="summary-table" id="peerMgmtRoomMembersTable">
+                                        <thead>
+                                            <tr>
+                                                <th>Name</th>
+                                                <th>Email</th>
+                                                <th>Employee ID</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td colspan="4">Select a room to view members.</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
-                            <div class="peer-mgmt-coordinator-label">
-                                Coordinator:
-                                <span id="peerMgmtCoordinatorLabel">None assigned</span>
-                            </div>
-                        </div>
-
-                        <div class="peer-mgmt-add-row">
-                            <div class="form-group">
-                                <label for="peerMgmtAddProfessorInput">Add Professor to Active Room</label>
-                                <input type="text" id="peerMgmtAddProfessorInput" class="form-input"
-                                    list="peerMgmtAddProfessorList" placeholder="Select a room first" disabled>
-                                <datalist id="peerMgmtAddProfessorList"></datalist>
-                            </div>
-                            <button type="button" class="btn-submit" id="peerMgmtAddProfessorBtn">Add Professor</button>
-                        </div>
-
-                        <div class="table-container">
-                            <table class="summary-table" id="peerMgmtMembersTable">
-                                <thead>
-                                    <tr>
-                                        <th>Employee ID</th>
-                                        <th>Name</th>
-                                        <th>Institute</th>
-                                        <th>Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr>
-                                        <td colspan="4">Select a room to manage members.</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-
-                        <div class="api-info-box compact">
-                            <i class="fas fa-database"></i>
-                            <span>SQL Ready: connect to /api/dean/peer-management/rooms/update-members (POST)</span>
                         </div>
                     </div>
                 </section>
@@ -1105,3 +957,4 @@
 </body>
 
 </html>
+

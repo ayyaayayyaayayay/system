@@ -1,118 +1,513 @@
-﻿const currentSemesterLabel = SharedData.getCurrentSemester() || "2nd Semester 2025-2026";
-const previousSemesterLabel = "1st Semester 2025-2026";
-const olderSemesterLabel = "2nd Semester 2024-2025";
+﻿const criteriaKeys = [
+    "Teaching Effectiveness",
+    "Clarity of Instruction",
+    "Assessment Fairness",
+    "Student Engagement",
+    "Professionalism"
+];
 
-/**
- * Build professor evaluation data from SharedData (centralized users).
- * Maps each professor user into the structure expected by the VPAA dashboard.
- */
-function buildProfessorDataFromSharedData() {
-    const users = SharedData.getUsers();
-    const professors = users.filter(function (u) { return u.role === 'professor'; });
-    if (!professors.length) return [];
+let currentSemesterLabel = SharedData.getCurrentSemester() || "";
+let allProfessorData = [];
+let availableSemesterLabels = [];
+let hasSubmittedSearch = false;
+let vpaaChartDataByType = {
+    student: createEmptyChartData(),
+    professor: createEmptyChartData(),
+    supervisor: createEmptyChartData()
+};
 
-    const criteriaKeys = [
-        "Teaching Effectiveness",
-        "Clarity of Instruction",
-        "Assessment Fairness",
-        "Student Engagement",
-        "Professionalism"
-    ];
-
-    return professors.map(function (prof, index) {
-        const baseRating = prof.averageRating || 0;
-        const criteria = {};
-        criteriaKeys.forEach(function (key) {
-            criteria[key] = parseFloat(baseRating.toFixed(1));
-        });
-
-        const totalStudents = prof.totalStudents || 0;
-        const evaluatedCount = prof.evaluatedCount || 0;
-        const responseRate = totalStudents > 0 ? Math.round((evaluatedCount / totalStudents) * 100) : 0;
-
-        return {
-            id: prof.id || ("prof-" + (index + 1)),
-            employeeId: prof.employeeId || ("FAC-" + (10000 + index)),
-            name: prof.name || "Professor " + (index + 1),
-            department: prof.department || "General",
-            rank: prof.position || "Instructor",
-            semester: currentSemesterLabel,
-            overall: parseFloat(baseRating.toFixed(1)),
-            responseRate: responseRate,
-            evaluations: evaluatedCount,
-            students: totalStudents,
-            subjects: [],
-            criteria: criteria,
-            distribution: {
-                5: Math.floor(evaluatedCount * 0.4),
-                4: Math.floor(evaluatedCount * 0.3),
-                3: Math.floor(evaluatedCount * 0.15),
-                2: Math.floor(evaluatedCount * 0.1),
-                1: Math.floor(evaluatedCount * 0.05)
-            },
-            trend: [baseRating - 0.2, baseRating - 0.1, baseRating, baseRating, baseRating + 0.1].map(function (v) { return parseFloat(v.toFixed(1)); }),
-            studentComments: prof.qualitativeResponses || [],
-            peerComments: [],
-            supervisorComments: []
-        };
-    });
+function createEmptyChartData(categoriesInput) {
+    const categories = Array.isArray(categoriesInput) && categoriesInput.length
+        ? categoriesInput
+        : criteriaKeys;
+    return {
+        categoryScores: categories.map(function (category) { return { category: category, score: 0 }; }),
+        ratingDistribution: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 },
+        averageRating: 0,
+        totalEvaluations: 0,
+        evaluatedCount: 0
+    };
 }
 
-const professorData = buildProfessorDataFromSharedData();
+function getQuestionnaireTypeForEvalType(typeKey) {
+    if (typeKey === "professor") return "professor-to-professor";
+    if (typeKey === "supervisor") return "supervisor-to-professor";
+    return "student-to-professor";
+}
 
-const previousSemesterData = professorData.map(function (prof) {
-    return Object.assign({}, prof, {
-        id: prof.id + "-prev",
-        semester: previousSemesterLabel,
-        overall: Math.max(0, prof.overall - 0.15),
-        responseRate: Math.max(0, prof.responseRate - 6),
-        evaluations: Math.max(0, prof.evaluations - 8),
-        students: Math.max(0, prof.students - 10),
-        criteria: Object.fromEntries(
-            Object.entries(prof.criteria).map(function (entry) { return [entry[0], Math.max(0, entry[1] - 0.15)]; })
-        ),
-        trend: prof.trend.map(function (v) { return Math.max(0, v - 0.15); }),
-        studentComments: prof.studentComments.slice(0, 2),
-        peerComments: prof.peerComments.slice(0, 1),
-        supervisorComments: (prof.supervisorComments || []).slice(0, 1)
+function buildVpaaQuestionMeta(typeKey, semesterLabel) {
+    const questionnaires = (SharedData.getQuestionnaires && SharedData.getQuestionnaires()) || {};
+    const desiredSemester = String(semesterLabel || currentSemesterLabel || "").trim();
+    const semesterKeys = Object.keys(questionnaires || {});
+
+    let bucket = {};
+    if (desiredSemester && questionnaires[desiredSemester]) {
+        bucket = questionnaires[desiredSemester] || {};
+    } else if (semesterKeys.length) {
+        const latestKey = semesterKeys.slice().sort().reverse()[0];
+        bucket = questionnaires[latestKey] || {};
+    }
+
+    const questionnaireType = getQuestionnaireTypeForEvalType(typeKey);
+    const sectionBucket = bucket[questionnaireType] || { sections: [], questions: [] };
+    const sections = Array.isArray(sectionBucket.sections) ? sectionBucket.sections : [];
+    const questions = Array.isArray(sectionBucket.questions) ? sectionBucket.questions : [];
+
+    const categoryByQuestionId = {};
+    const categoryOrder = [];
+    const sectionTitleById = {};
+
+    sections.forEach(function (section) {
+        const sectionId = String(section && section.id || "").trim();
+        const title = String(section && (section.title || section.letter) || "").trim();
+        if (!sectionId || !title) return;
+        sectionTitleById[sectionId] = title;
+        if (!categoryOrder.includes(title)) {
+            categoryOrder.push(title);
+        }
     });
-});
 
-const olderSemesterData = professorData.map(function (prof) {
-    return Object.assign({}, prof, {
-        id: prof.id + "-older",
-        semester: olderSemesterLabel,
-        overall: Math.max(0, prof.overall - 0.3),
-        responseRate: Math.max(0, prof.responseRate - 12),
-        evaluations: Math.max(0, prof.evaluations - 14),
-        students: Math.max(0, prof.students - 15),
-        criteria: Object.fromEntries(
-            Object.entries(prof.criteria).map(function (entry) { return [entry[0], Math.max(0, entry[1] - 0.3)]; })
-        ),
-        trend: prof.trend.map(function (v) { return Math.max(0, v - 0.3); }),
-        studentComments: prof.studentComments.slice(0, 1),
-        peerComments: prof.peerComments.slice(0, 1),
-        supervisorComments: (prof.supervisorComments || []).slice(0, 1)
+    questions.forEach(function (question) {
+        const questionId = String(question && question.id || "").trim();
+        if (!questionId) return;
+        const sectionId = String(question && question.sectionId || "").trim();
+        const category = sectionTitleById[sectionId] || "General Questions";
+        categoryByQuestionId[questionId] = category;
+        categoryByQuestionId[questionId.toLowerCase()] = category;
+        if (!categoryOrder.includes(category)) {
+            categoryOrder.push(category);
+        }
     });
-});
 
-const allProfessorData = [].concat(professorData, previousSemesterData, olderSemesterData);
+    return {
+        categoryByQuestionId: categoryByQuestionId,
+        categoryOrder: categoryOrder
+    };
+}
 
-const exampleHighlights = {
-    topPerformer: { name: "—", meta: "No data" },
-    mostFeedback: { name: "—", meta: "No data" },
-    needsAttention: { name: "—", meta: "No data" }
-};
+function normalizeVpaaToken(value) {
+    return String(value || "").trim().toLowerCase();
+}
 
-const exampleWordFrequency = {
-    positive: [],
-    negative: []
-};
+function normalizeVpaaUserId(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const matchPrefixed = raw.match(/^u(\d+)$/i);
+    if (matchPrefixed) return "u" + String(parseInt(matchPrefixed[1], 10));
+    if (/^\d+$/.test(raw)) return "u" + String(parseInt(raw, 10));
+    return raw;
+}
 
-const wordLexicon = {
-    positive: ["great teaching", "great", "helpful", "clear", "engaging", "supportive", "organized", "fair"],
-    negative: ["bad teaching", "bad", "late", "boring", "unclear", "unfair", "strict", "confusing", "harsh", "lenient"]
-};
+function resolveVpaaEvaluationType(evaluation) {
+    const token = normalizeVpaaToken(evaluation && (evaluation.evaluatorRole || evaluation.evaluationType));
+    if (token === "student" || token === "student-to-professor" || token === "student-professor") return "student";
+    if (token === "peer" || token === "professor" || token === "professor-to-professor" || token === "professor-professor") return "professor";
+    if (token === "supervisor" || token === "dean" || token === "hr" || token === "vpaa" || token === "admin" || token === "supervisor-to-professor" || token === "supervisor-professor") return "supervisor";
+    return "";
+}
+
+function normalizeSemesterLabel(value) {
+    return String(value || "").trim().toLowerCase();
+}
+
+function isVpaaEvaluationInSemester(evaluation, semesterLabel) {
+    const selected = normalizeSemesterLabel(semesterLabel);
+    if (!selected || selected === "all") return true;
+    const evalSemester = normalizeSemesterLabel(evaluation && evaluation.semesterId);
+    if (!evalSemester) return selected === normalizeSemesterLabel(currentSemesterLabel);
+    return evalSemester === selected;
+}
+
+function getEvaluationNumericRatings(evaluation) {
+    const ratings = evaluation && typeof evaluation.ratings === "object" && evaluation.ratings ? evaluation.ratings : {};
+    const values = [];
+    Object.keys(ratings).forEach(function (key) {
+        const parsed = parseFloat(ratings[key]);
+        if (Number.isFinite(parsed)) {
+            values.push(Math.max(1, Math.min(5, parsed)));
+        }
+    });
+    return values;
+}
+
+function collectEvaluationComments(evaluation) {
+    const output = [];
+    const addText = function (value) {
+        const text = String(value || "").trim();
+        if (text) output.push(text);
+    };
+
+    addText(evaluation && evaluation.comments);
+    addText(evaluation && evaluation.comment);
+    addText(evaluation && evaluation.feedback);
+
+    const qualitativeResponses = evaluation && evaluation.qualitativeResponses;
+    if (Array.isArray(qualitativeResponses)) {
+        qualitativeResponses.forEach(function (item) {
+            if (typeof item === "string") {
+                addText(item);
+                return;
+            }
+            if (item && typeof item === "object") {
+                addText(item.text || item.answer || item.comment || item.response);
+            }
+        });
+    }
+
+    const qualitative = evaluation && evaluation.qualitative;
+    if (qualitative && typeof qualitative === "object") {
+        Object.keys(qualitative).forEach(function (key) {
+            addText(qualitative[key]);
+        });
+    }
+
+    return output;
+}
+
+function buildVpaaDatabaseContext() {
+    const users = (SharedData.getUsers && SharedData.getUsers()) || [];
+    const evaluations = (SharedData.getEvaluations && SharedData.getEvaluations()) || [];
+    const semesterList = (SharedData.getSemesterList && SharedData.getSemesterList()) || [];
+    const subjectManagement = SharedData.getSubjectManagement
+        ? SharedData.getSubjectManagement()
+        : { offerings: [], enrollments: [] };
+
+    const professors = users.filter(function (user) {
+        return normalizeVpaaToken(user && user.role) === "professor";
+    });
+
+    const professorById = {};
+    const professorByEmployeeId = {};
+    const professorByName = {};
+
+    professors.forEach(function (professor) {
+        const idToken = normalizeVpaaUserId(professor && professor.id);
+        if (idToken) professorById[idToken] = professor;
+
+        const employeeToken = normalizeVpaaToken(professor && professor.employeeId);
+        if (employeeToken && !professorByEmployeeId[employeeToken]) {
+            professorByEmployeeId[employeeToken] = professor;
+        }
+
+        const nameToken = normalizeVpaaToken(professor && professor.name);
+        if (nameToken && !professorByName[nameToken]) {
+            professorByName[nameToken] = professor;
+        }
+    });
+
+    const offerings = Array.isArray(subjectManagement && subjectManagement.offerings)
+        ? subjectManagement.offerings
+        : [];
+    const enrollments = Array.isArray(subjectManagement && subjectManagement.enrollments)
+        ? subjectManagement.enrollments
+        : [];
+
+    const offeringsById = {};
+    offerings.forEach(function (offering) {
+        const offeringId = String(offering && offering.id || "").trim();
+        if (offeringId) offeringsById[offeringId] = offering;
+    });
+
+    return {
+        users: Array.isArray(users) ? users : [],
+        evaluations: Array.isArray(evaluations) ? evaluations : [],
+        semesterList: Array.isArray(semesterList) ? semesterList : [],
+        currentSemester: String((SharedData.getCurrentSemester && SharedData.getCurrentSemester()) || "").trim(),
+        professors: professors,
+        professorById: professorById,
+        professorByEmployeeId: professorByEmployeeId,
+        professorByName: professorByName,
+        offerings: offerings,
+        offeringsById: offeringsById,
+        enrollments: enrollments
+    };
+}
+
+function resolveTargetProfessorIdFromEvaluation(evaluation, evaluationType, context) {
+    if (evaluationType === "student") {
+        const offeringId = String(evaluation && evaluation.courseOfferingId || "").trim();
+        const offering = offeringId ? context.offeringsById[offeringId] : null;
+        if (offering) {
+            const professorIdFromOffering = normalizeVpaaUserId(offering.professorUserId);
+            if (professorIdFromOffering && context.professorById[professorIdFromOffering]) {
+                return professorIdFromOffering;
+            }
+        }
+    }
+
+    const candidateIds = [
+        evaluation && evaluation.targetProfessorId,
+        evaluation && evaluation.targetId,
+        evaluation && evaluation.colleagueId,
+        evaluation && evaluation.professorId,
+        evaluation && evaluation.evaluateeUserId
+    ];
+
+    for (let index = 0; index < candidateIds.length; index += 1) {
+        const token = normalizeVpaaUserId(candidateIds[index]);
+        if (token && context.professorById[token]) return token;
+    }
+
+    const employeeToken = normalizeVpaaToken(evaluation && evaluation.targetProfessorEmployeeId);
+    if (employeeToken && context.professorByEmployeeId[employeeToken]) {
+        return normalizeVpaaUserId(context.professorByEmployeeId[employeeToken].id);
+    }
+
+    const textCandidates = [
+        evaluation && evaluation.targetProfessor,
+        evaluation && evaluation.targetName,
+        evaluation && evaluation.professorSubject
+    ];
+
+    for (let idx = 0; idx < textCandidates.length; idx += 1) {
+        const rawText = String(textCandidates[idx] || "").trim();
+        if (!rawText) continue;
+        const byName = normalizeVpaaToken(rawText.split(" - ")[0]);
+        if (byName && context.professorByName[byName]) {
+            return normalizeVpaaUserId(context.professorByName[byName].id);
+        }
+    }
+
+    return "";
+}
+
+function buildVpaaChartDataForType(typeKey, semesterLabel, context) {
+    const questionMeta = buildVpaaQuestionMeta(typeKey, semesterLabel);
+    const baseCategories = questionMeta.categoryOrder.length ? questionMeta.categoryOrder.slice() : criteriaKeys.slice();
+    const result = createEmptyChartData(baseCategories);
+    const categoryTotals = {};
+    baseCategories.forEach(function (category) {
+        categoryTotals[category] = { sum: 0, count: 0 };
+    });
+    const categoryOrder = baseCategories.slice();
+    const targetedProfessors = new Set();
+
+    (context.evaluations || []).forEach(function (evaluation) {
+        const evalType = resolveVpaaEvaluationType(evaluation);
+        if (evalType !== typeKey) return;
+        if (!isVpaaEvaluationInSemester(evaluation, semesterLabel)) return;
+
+        const targetProfessorId = resolveTargetProfessorIdFromEvaluation(evaluation, typeKey, context);
+        if (!targetProfessorId) return;
+
+        const ratings = getEvaluationNumericRatings(evaluation);
+        if (!ratings.length) return;
+
+        targetedProfessors.add(targetProfessorId);
+        result.totalEvaluations += 1;
+
+        const ratingMap = evaluation && typeof evaluation.ratings === "object" && evaluation.ratings ? evaluation.ratings : {};
+        const ratingKeys = Object.keys(ratingMap);
+
+        ratings.forEach(function (value, index) {
+            const questionId = String(ratingKeys[index] || "").trim();
+            const mappedCategory = questionMeta.categoryByQuestionId[questionId]
+                || questionMeta.categoryByQuestionId[questionId.toLowerCase()]
+                || "";
+            const fallbackCategory = baseCategories[Math.min(index, baseCategories.length - 1)] || "General Questions";
+            const category = mappedCategory || fallbackCategory;
+
+            if (!categoryTotals[category]) {
+                categoryTotals[category] = { sum: 0, count: 0 };
+                categoryOrder.push(category);
+            }
+
+            categoryTotals[category].sum += value;
+            categoryTotals[category].count += 1;
+        });
+
+        const average = ratings.reduce(function (sum, value) { return sum + value; }, 0) / ratings.length;
+        const rounded = Math.max(1, Math.min(5, Math.round(average)));
+        result.ratingDistribution[rounded] += 1;
+    });
+
+    result.categoryScores = categoryOrder.map(function (category) {
+        const bucket = categoryTotals[category] || { sum: 0, count: 0 };
+        const score = bucket.count ? (bucket.sum / bucket.count) : 0;
+        return { category: category, score: Number(score.toFixed(1)) };
+    });
+
+    const weightedTotal = Object.keys(result.ratingDistribution).reduce(function (sum, key) {
+        return sum + (Number(key) * Number(result.ratingDistribution[key] || 0));
+    }, 0);
+    const distTotal = Object.values(result.ratingDistribution).reduce(function (sum, count) {
+        return sum + Number(count || 0);
+    }, 0);
+
+    result.averageRating = distTotal ? (weightedTotal / distTotal) : 0;
+    result.evaluatedCount = targetedProfessors.size;
+
+    return result;
+}
+
+function buildProfessorDataFromSharedData() {
+    const context = buildVpaaDatabaseContext();
+    const currentSemester = context.currentSemester || currentSemesterLabel || "Current Semester";
+    currentSemesterLabel = currentSemester;
+
+    const semesterSet = new Set();
+    if (currentSemester) semesterSet.add(currentSemester);
+
+    (context.semesterList || []).forEach(function (item) {
+        const value = String(item && (item.value || item.id || item.slug || item.label) || "").trim();
+        if (value) semesterSet.add(value);
+    });
+
+    (context.evaluations || []).forEach(function (evaluation) {
+        const semester = String(evaluation && evaluation.semesterId || "").trim();
+        if (semester) semesterSet.add(semester);
+    });
+
+    const semesters = Array.from(semesterSet);
+    if (currentSemester) {
+        semesters.sort(function (a, b) {
+            if (a === currentSemester) return -1;
+            if (b === currentSemester) return 1;
+            return b.localeCompare(a);
+        });
+    }
+
+    const activeProfessorCount = context.professors.filter(function (prof) {
+        return normalizeVpaaToken(prof && prof.status || "active") !== "inactive";
+    }).length;
+
+    const supervisorCount = context.users.filter(function (user) {
+        if (normalizeVpaaToken(user && user.status || "active") === "inactive") return false;
+        const role = normalizeVpaaToken(user && user.role);
+        return role === "dean" || role === "hr" || role === "vpaa";
+    }).length;
+
+    const resultRows = [];
+
+    context.professors.forEach(function (professor, index) {
+        const professorId = normalizeVpaaUserId(professor && professor.id);
+        if (!professorId) return;
+
+        const professorOfferings = (context.offerings || []).filter(function (offering) {
+            return normalizeVpaaUserId(offering && offering.professorUserId) === professorId;
+        });
+
+        semesters.forEach(function (semesterLabel) {
+            const semesterToken = normalizeSemesterLabel(semesterLabel);
+            const semesterOfferings = professorOfferings.filter(function (offering) {
+                const offeringSemester = normalizeSemesterLabel(offering && offering.semesterSlug);
+                if (!offeringSemester) return semesterToken === normalizeSemesterLabel(currentSemester);
+                return offeringSemester === semesterToken;
+            });
+
+            const offeringIdSet = new Set(semesterOfferings.map(function (offering) {
+                return String(offering && offering.id || "").trim();
+            }).filter(Boolean));
+
+            const requiredStudentRaters = (context.enrollments || []).filter(function (enrollment) {
+                const offeringId = String(enrollment && enrollment.courseOfferingId || "").trim();
+                if (!offeringIdSet.has(offeringId)) return false;
+                const status = normalizeVpaaToken(enrollment && enrollment.status || "enrolled");
+                return status !== "inactive" && status !== "dropped";
+            }).length;
+
+            const studentEvals = [];
+            const peerEvals = [];
+            const supervisorEvals = [];
+
+            (context.evaluations || []).forEach(function (evaluation) {
+                const evalType = resolveVpaaEvaluationType(evaluation);
+                if (!evalType) return;
+                if (!isVpaaEvaluationInSemester(evaluation, semesterLabel)) return;
+
+                const targetProfessorId = resolveTargetProfessorIdFromEvaluation(evaluation, evalType, context);
+                if (targetProfessorId !== professorId) return;
+
+                if (evalType === "student") studentEvals.push(evaluation);
+                if (evalType === "professor") peerEvals.push(evaluation);
+                if (evalType === "supervisor") supervisorEvals.push(evaluation);
+            });
+
+            const allEvals = studentEvals.concat(peerEvals, supervisorEvals);
+            const allRatingValues = allEvals.flatMap(getEvaluationNumericRatings);
+            const overall = allRatingValues.length
+                ? allRatingValues.reduce(function (sum, value) { return sum + value; }, 0) / allRatingValues.length
+                : 0;
+
+            const analyticsByType = {
+                student: buildProfessorAnalyticsForType("student", studentEvals, semesterLabel),
+                supervisor: buildProfessorAnalyticsForType("supervisor", supervisorEvals, semesterLabel),
+                professor: buildProfessorAnalyticsForType("professor", peerEvals, semesterLabel)
+            };
+
+            const totalRequired = requiredStudentRaters + Math.max(activeProfessorCount - 1, 0) + supervisorCount;
+            const totalReceived = allEvals.length;
+            const responseRate = totalRequired > 0 ? Math.round((totalReceived / totalRequired) * 100) : 0;
+
+            resultRows.push({
+                id: (professor.id || ("prof-" + (index + 1))) + "|" + semesterLabel,
+                employeeId: String(professor.employeeId || ("FAC-" + (10000 + index))).trim(),
+                name: String(professor.name || ("Professor " + (index + 1))).trim(),
+                campus: String(professor.campus || "").trim(),
+                department: String(professor.department || professor.institute || "General").trim(),
+                rank: String(professor.position || "Instructor").trim(),
+                photoData: String(professor.photoData || "").trim(),
+                semester: semesterLabel,
+                overall: parseFloat(overall.toFixed(1)),
+                responseRate: responseRate,
+                evaluations: totalReceived,
+                students: requiredStudentRaters,
+                subjects: semesterOfferings.map(function (offering) {
+                    const code = String(offering && offering.subjectCode || "").trim();
+                    const name = String(offering && offering.subjectName || "").trim();
+                    if (code && name) return code + " - " + name;
+                    return code || name;
+                }).filter(Boolean),
+                analyticsByType: analyticsByType,
+                trend: [Math.max(0, overall - 0.3), Math.max(0, overall - 0.2), Math.max(0, overall - 0.1), overall, Math.min(5, overall + 0.1)].map(function (value) {
+                    return parseFloat(value.toFixed(1));
+                }),
+                studentComments: studentEvals.flatMap(collectEvaluationComments),
+                peerComments: peerEvals.flatMap(collectEvaluationComments),
+                supervisorComments: supervisorEvals.flatMap(collectEvaluationComments)
+            });
+        });
+    });
+
+    const selectedSemester = currentSemester || (semesters[0] || "");
+
+    return {
+        currentSemester: selectedSemester,
+        semesters: semesters,
+        professorData: resultRows,
+        chartDataByType: {
+            student: buildVpaaChartDataForType("student", selectedSemester, context),
+            professor: buildVpaaChartDataForType("professor", selectedSemester, context),
+            supervisor: buildVpaaChartDataForType("supervisor", selectedSemester, context)
+        }
+    };
+}
+
+function loadDashboardDataFromDb() {
+    const payload = buildProfessorDataFromSharedData();
+    allProfessorData = Array.isArray(payload.professorData) ? payload.professorData : [];
+    currentSemesterLabel = payload.currentSemester || currentSemesterLabel || "";
+    availableSemesterLabels = Array.isArray(payload.semesters) ? payload.semesters : [];
+    vpaaChartDataByType = payload.chartDataByType || {
+        student: createEmptyChartData(),
+        professor: createEmptyChartData(),
+        supervisor: createEmptyChartData()
+    };
+}
+const exampleWordFrequency = [];
+
+const WORD_FREQUENCY_STOP_WORDS = new Set([
+    "the", "and", "for", "that", "this", "with", "from", "have", "has", "had",
+    "are", "was", "were", "will", "would", "should", "could", "can", "may",
+    "you", "your", "yours", "they", "them", "their", "theirs", "our", "ours",
+    "his", "her", "hers", "its", "it's", "who", "whom", "what", "when", "where",
+    "why", "how", "too", "very", "much", "more", "most", "some", "many", "few",
+    "all", "any", "not", "but", "because", "about", "into", "over", "under",
+    "also", "just", "than", "then", "there", "here", "after", "before", "during",
+    "while", "each", "every", "both", "either", "neither", "within", "without",
+    "professor", "teacher", "class", "classes", "subject", "students", "student",
+    "sir", "maam", "mam", "miss", "mrs", "mr"
+]);
 
 
 
@@ -121,21 +516,20 @@ const elements = {
     completionRate: document.getElementById("completionRate"),
     pendingEvaluations: document.getElementById("pendingEvaluations"),
     activeProfessors: document.getElementById("activeProfessors"),
-    topPerformerName: document.getElementById("topPerformerName"),
-    topPerformerMeta: document.getElementById("topPerformerMeta"),
-    mostFeedbackName: document.getElementById("mostFeedbackName"),
-    mostFeedbackMeta: document.getElementById("mostFeedbackMeta"),
-    needsAttentionName: document.getElementById("needsAttentionName"),
-    needsAttentionMeta: document.getElementById("needsAttentionMeta"),
     wordFrequencyPositive: document.getElementById("wordFrequencyPositive"),
     wordFrequencyNegative: document.getElementById("wordFrequencyNegative"),
     searchInput: document.getElementById("searchInput"),
     searchBtn: document.getElementById("searchBtn"),
     semesterFilter: document.getElementById("semesterFilter"),
+    campusFilter: document.getElementById("campusFilter"),
     departmentFilter: document.getElementById("departmentFilter"),
     sortFilter: document.getElementById("sortFilter"),
     resetFilters: document.getElementById("resetFilters"),
-    professorGrid: document.getElementById("professorGrid")
+    professorGrid: document.getElementById("professorGrid"),
+    reportModal: document.getElementById("vpaaReportModal"),
+    reportModalClose: document.getElementById("vpaaReportModalClose"),
+    reportModalBody: document.getElementById("vpaaReportModalBody"),
+    reportModalTitle: document.getElementById("vpaaReportModalTitle")
 };
 
 const dashboardCharts = {
@@ -149,11 +543,13 @@ function init() {
         window.location.href = 'mainpage.html';
         return;
     }
+    loadDashboardDataFromDb();
     setupNavigation();
     populateDepartments();
     populateSemesters();
+    populateCampuses();
+    setupReportModalEvents();
     applyFilters();
-    renderDashboardCharts();
     bindEvents();
     setupProfilePhotoUpload();
     setupProfileActions();
@@ -180,11 +576,16 @@ function setupNavigation() {
 
             navLinks.forEach((nav) => nav.classList.remove("active"));
             link.classList.add("active");
+
+            if (targetId !== "reports-view") {
+                closeReportModal();
+            }
         });
     });
 }
 
 function populateDepartments() {
+    elements.departmentFilter.innerHTML = '<option value="all">All departments</option>';
     const departments = [...new Set(allProfessorData.map((prof) => prof.department))].sort();
     departments.forEach((dept) => {
         const option = document.createElement("option");
@@ -195,53 +596,132 @@ function populateDepartments() {
 }
 
 function populateSemesters() {
-    const semesterOrder = [currentSemesterLabel, previousSemesterLabel, olderSemesterLabel];
-    const semesters = [...new Set(allProfessorData.map((prof) => prof.semester))];
-    const orderedSemesters = semesterOrder.filter((label) => semesters.includes(label));
-    const remainingSemesters = semesters.filter((label) => !semesterOrder.includes(label)).sort();
-    const finalSemesters = [...orderedSemesters, ...remainingSemesters];
+    elements.semesterFilter.innerHTML = "";
+    const semesters = availableSemesterLabels.length
+        ? availableSemesterLabels
+        : [...new Set(allProfessorData.map((prof) => prof.semester))];
     const allOption = document.createElement("option");
     allOption.value = "all";
     allOption.textContent = "All Semesters";
     elements.semesterFilter.appendChild(allOption);
 
-    finalSemesters.forEach((semester) => {
+    semesters.forEach((semester) => {
         const option = document.createElement("option");
         option.value = semester;
         option.textContent = semester;
         elements.semesterFilter.appendChild(option);
     });
 
-    elements.semesterFilter.value = currentSemesterLabel;
+    elements.semesterFilter.value = semesters.includes(currentSemesterLabel)
+        ? currentSemesterLabel
+        : "all";
+}
+
+function formatCampusLabel(campus) {
+    const name = String(campus && (campus.name || campus.id) || "").trim();
+    if (name) return name;
+    const fallbackId = String(campus && campus.id || "").trim();
+    return fallbackId ? fallbackId.toUpperCase() : "";
+}
+
+function populateCampuses() {
+    if (!elements.campusFilter) return;
+
+    elements.campusFilter.innerHTML = "";
+    const allOption = document.createElement("option");
+    allOption.value = "all";
+    allOption.textContent = "All Campuses";
+    elements.campusFilter.appendChild(allOption);
+
+    const campusOptions = new Map();
+    const campuses = (SharedData.getCampuses && SharedData.getCampuses()) || [];
+    campuses.forEach((campus) => {
+        const campusId = String(campus && campus.id || "").trim();
+        if (!campusId || normalizeVpaaToken(campusId) === "all") return;
+        campusOptions.set(campusId, formatCampusLabel(campus));
+    });
+
+    allProfessorData.forEach((prof) => {
+        const campusId = String(prof && prof.campus || "").trim();
+        if (!campusId || normalizeVpaaToken(campusId) === "all" || campusOptions.has(campusId)) return;
+        campusOptions.set(campusId, campusId.toUpperCase());
+    });
+
+    Array.from(campusOptions.entries())
+        .sort((a, b) => a[1].localeCompare(b[1]))
+        .forEach(([campusId, campusLabel]) => {
+            const option = document.createElement("option");
+            option.value = campusId;
+            option.textContent = campusLabel;
+            elements.campusFilter.appendChild(option);
+        });
+
+    elements.campusFilter.value = "all";
 }
 
 function bindEvents() {
-    elements.searchBtn.addEventListener("click", applyFilters);
+    elements.searchBtn.addEventListener("click", () => {
+        hasSubmittedSearch = true;
+        applyFilters();
+    });
+    elements.searchInput.addEventListener("input", () => {
+        hasSubmittedSearch = false;
+        closeReportModal();
+        renderProfessors([], "Enter a professor name or employee ID, then click Search to view reports.");
+    });
     elements.searchInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
             event.preventDefault();
+            hasSubmittedSearch = true;
             applyFilters();
         }
     });
     elements.semesterFilter.addEventListener("change", applyFilters);
+    if (elements.campusFilter) {
+        elements.campusFilter.addEventListener("change", applyFilters);
+    }
     elements.departmentFilter.addEventListener("change", applyFilters);
     elements.sortFilter.addEventListener("change", applyFilters);
     elements.resetFilters.addEventListener("click", resetFilters);
 }
 
 function resetFilters() {
+    hasSubmittedSearch = false;
     elements.searchInput.value = "";
-    elements.semesterFilter.value = currentSemesterLabel;
+    elements.semesterFilter.value = currentSemesterLabel || "all";
+    if (elements.campusFilter) {
+        elements.campusFilter.value = "all";
+    }
     elements.departmentFilter.value = "all";
     elements.sortFilter.value = "rating-high";
     applyFilters();
 }
 
+function refreshDashboardChartsForSemester(semesterLabel) {
+    const label = semesterLabel || currentSemesterLabel || "";
+    const context = buildVpaaDatabaseContext();
+    vpaaChartDataByType = {
+        student: buildVpaaChartDataForType("student", label, context),
+        professor: buildVpaaChartDataForType("professor", label, context),
+        supervisor: buildVpaaChartDataForType("supervisor", label, context)
+    };
+}
+
 function applyFilters() {
-    const term = elements.searchInput.value.trim().toLowerCase();
+    closeReportModal();
+
+    const rawTerm = elements.searchInput.value.trim();
+    const term = rawTerm.toLowerCase();
     const semester = elements.semesterFilter.value;
+    const campus = elements.campusFilter ? elements.campusFilter.value : "all";
     const department = elements.departmentFilter.value;
     const sortMode = elements.sortFilter.value;
+
+    if (semester !== "all" && semester !== currentSemesterLabel) {
+        currentSemesterLabel = semester;
+    }
+    refreshDashboardChartsForSemester(semester === "all" ? currentSemesterLabel : semester);
+    renderDashboardCharts();
 
     const scopeData = allProfessorData.filter(
         (prof) => semester === "all" || prof.semester === semester
@@ -259,9 +739,23 @@ function applyFilters() {
     filtered = sortProfessors(filtered, sortMode);
 
     updateSummary(filtered);
-    updateInsights(filtered);
     updateWordFrequency(filtered);
-    renderProfessors(filtered);
+
+    if (!hasSubmittedSearch || !rawTerm) {
+        renderProfessors([], "Enter a professor name or employee ID, then click Search to view reports.");
+        return;
+    }
+
+    let reportFiltered = scopeData.filter((prof) => {
+        const matchesTerm = prof.name.toLowerCase().includes(term) ||
+            prof.employeeId.toLowerCase().includes(term);
+        const matchesDept = department === "all" || prof.department === department;
+        const matchesCampus = campus === "all" || normalizeVpaaToken(prof.campus) === normalizeVpaaToken(campus);
+        return matchesTerm && matchesDept && matchesCampus;
+    });
+
+    reportFiltered = sortProfessors(reportFiltered, sortMode);
+    renderProfessors(reportFiltered);
 }
 
 function sortProfessors(list, mode) {
@@ -278,90 +772,49 @@ function sortProfessors(list, mode) {
     return sorted;
 }
 
+function getVpaaActiveStudentCount() {
+    const users = (SharedData.getUsers && SharedData.getUsers()) || [];
+    return users.filter((user) => {
+        const role = normalizeVpaaToken(user && user.role);
+        if (role !== "student") return false;
+        const status = normalizeVpaaToken(user && (user.status || "active"));
+        return status !== "inactive";
+    }).length;
+}
+
 function updateSummary(list) {
+    const activeStudentCount = getVpaaActiveStudentCount();
+
     if (list.length === 0) {
-        elements.totalStudents.textContent = "0";
+        elements.totalStudents.textContent = activeStudentCount.toString();
         elements.completionRate.textContent = "0%";
         elements.pendingEvaluations.textContent = "0";
         elements.activeProfessors.textContent = "0";
         return;
     }
 
-    const totalStudents = list.reduce((sum, prof) => sum + prof.students, 0);
+    const expectedStudentEvaluations = list.reduce((sum, prof) => sum + prof.students, 0);
     const totalEvaluations = list.reduce((sum, prof) => sum + prof.evaluations, 0);
-    const completionRate = totalStudents === 0 ? 0 : Math.round((totalEvaluations / totalStudents) * 100);
-    const pendingEvaluations = Math.max(0, totalStudents - totalEvaluations);
+    const completionRate = expectedStudentEvaluations === 0 ? 0 : Math.round((totalEvaluations / expectedStudentEvaluations) * 100);
+    const pendingEvaluations = Math.max(0, expectedStudentEvaluations - totalEvaluations);
 
-    elements.totalStudents.textContent = totalStudents.toString();
+    elements.totalStudents.textContent = activeStudentCount.toString();
     elements.completionRate.textContent = `${completionRate}%`;
     elements.pendingEvaluations.textContent = pendingEvaluations.toString();
     elements.activeProfessors.textContent = list.length.toString();
 }
 
-function updateInsights(list) {
-    let highlights = { ...exampleHighlights };
-
-    if (list.length > 0) {
-        const topPerformer = [...list].sort((a, b) => b.overall - a.overall)[0];
-        const mostFeedback = [...list].sort((a, b) => {
-            const aCount = a.studentComments.length + a.peerComments.length + (a.supervisorComments || []).length;
-            const bCount = b.studentComments.length + b.peerComments.length + (b.supervisorComments || []).length;
-            return bCount - aCount;
-        })[0];
-        const needsAttention = [...list].sort((a, b) => {
-            if (a.overall === b.overall) {
-                return a.responseRate - b.responseRate;
-            }
-            return a.overall - b.overall;
-        })[0];
-
-        const feedbackCount = mostFeedback.studentComments.length
-            + mostFeedback.peerComments.length
-            + (mostFeedback.supervisorComments || []).length;
-
-        highlights = {
-            topPerformer: {
-                name: topPerformer.name,
-                meta: topPerformer.department + " | " + topPerformer.overall.toFixed(1) + " rating"
-            },
-            mostFeedback: {
-                name: mostFeedback.name,
-                meta: feedbackCount + " comments logged"
-            },
-            needsAttention: {
-                name: needsAttention.name,
-                meta: needsAttention.overall.toFixed(1) + " rating | " + needsAttention.responseRate + "% response"
-            }
-        };
-    }
-
-    elements.topPerformerName.textContent = highlights.topPerformer.name;
-    elements.topPerformerMeta.textContent = highlights.topPerformer.meta;
-    elements.mostFeedbackName.textContent = highlights.mostFeedback.name;
-    elements.mostFeedbackMeta.textContent = highlights.mostFeedback.meta;
-    elements.needsAttentionName.textContent = highlights.needsAttention.name;
-    elements.needsAttentionMeta.textContent = highlights.needsAttention.meta;
-}
-
 function updateWordFrequency(list) {
     const comments = collectAllComments(list);
-
-    const positive = countLexicon(comments, wordLexicon.positive);
-    const negative = countLexicon(comments, wordLexicon.negative);
-
-    renderWordFrequencyList(elements.wordFrequencyPositive, positive.length ? positive : exampleWordFrequency.positive);
-    renderWordFrequencyList(elements.wordFrequencyNegative, negative.length ? negative : exampleWordFrequency.negative);
+    const words = computeTopWordFrequency(comments, 10);
+    renderWordFrequencyList(elements.wordFrequencyPositive, words.length ? words : exampleWordFrequency);
+    renderWordFrequencyList(elements.wordFrequencyNegative, []);
 }
 
 function getWordFrequencyForProfessor(prof) {
     const comments = collectAllComments([prof]);
-    const positive = countLexicon(comments, wordLexicon.positive);
-    const negative = countLexicon(comments, wordLexicon.negative);
-
-    return {
-        positive: positive.length ? positive : exampleWordFrequency.positive,
-        negative: negative.length ? negative : exampleWordFrequency.negative
-    };
+    const words = computeTopWordFrequency(comments, 10);
+    return words.length ? words : exampleWordFrequency;
 }
 
 function collectAllComments(list) {
@@ -394,6 +847,101 @@ function countLexicon(comments, lexicon) {
         .slice(0, 3);
 }
 
+function computeTopWordFrequency(comments, limit) {
+    const counts = new Map();
+    const safeLimit = Math.max(1, Number(limit) || 10);
+
+    comments.forEach((comment) => {
+        normalizeCommentTokens(comment).forEach((token) => {
+            counts.set(token, (counts.get(token) || 0) + 1);
+        });
+    });
+
+    return Array.from(counts.entries())
+        .map(([label, count]) => ({ label, count }))
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+        .slice(0, safeLimit);
+}
+
+function normalizeCommentTokens(value) {
+    const text = String(value || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    if (!text) return [];
+
+    return text.split(" ").filter((token) => {
+        if (token.length < 3) return false;
+        if (WORD_FREQUENCY_STOP_WORDS.has(token)) return false;
+        if (/^\d+$/.test(token)) return false;
+        return true;
+    });
+}
+
+function getPopupEvaluationTypeMeta(typeKey) {
+    const token = String(typeKey || "").trim().toLowerCase();
+    if (token === "professor") {
+        return { id: "professor", label: "Professor to Professor" };
+    }
+    if (token === "supervisor") {
+        return { id: "supervisor", label: "Supervisor to Professor" };
+    }
+    return { id: "student", label: "Student to Professor" };
+}
+
+function buildProfessorAnalyticsForType(typeKey, evaluations, semesterLabel) {
+    const meta = buildVpaaQuestionMeta(typeKey, semesterLabel);
+    const categories = Array.isArray(meta.categoryOrder) ? meta.categoryOrder.slice() : [];
+    const categoryTotals = {};
+    categories.forEach((category) => {
+        categoryTotals[category] = { sum: 0, count: 0 };
+    });
+
+    const distribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    const list = Array.isArray(evaluations) ? evaluations : [];
+
+    list.forEach((evaluation) => {
+        const ratings = getEvaluationNumericRatings(evaluation);
+        if (!ratings.length) return;
+
+        const ratingMap = evaluation && typeof evaluation.ratings === "object" && evaluation.ratings ? evaluation.ratings : {};
+        const ratingKeys = Object.keys(ratingMap);
+
+        ratings.forEach((value, index) => {
+            const questionId = String(ratingKeys[index] || "").trim();
+            const mappedCategory = meta.categoryByQuestionId[questionId]
+                || meta.categoryByQuestionId[questionId.toLowerCase()]
+                || "";
+            const fallbackCategory = categories[Math.min(index, categories.length - 1)] || "General Questions";
+            const category = mappedCategory || fallbackCategory;
+
+            if (!categoryTotals[category]) {
+                categoryTotals[category] = { sum: 0, count: 0 };
+                categories.push(category);
+            }
+
+            categoryTotals[category].sum += value;
+            categoryTotals[category].count += 1;
+        });
+
+        const average = ratings.reduce((sum, value) => sum + value, 0) / ratings.length;
+        const rounded = Math.max(1, Math.min(5, Math.round(average)));
+        distribution[rounded] += 1;
+    });
+
+    return {
+        type: getPopupEvaluationTypeMeta(typeKey).id,
+        categoryScores: categories.map((category) => {
+            const bucket = categoryTotals[category] || { sum: 0, count: 0 };
+            const score = bucket.count ? (bucket.sum / bucket.count) : 0;
+            return { category, score: Number(score.toFixed(1)), responses: bucket.count };
+        }),
+        ratingDistribution: distribution,
+        totalEvaluations: list.length
+    };
+}
+
 function renderWordFrequencyList(target, list) {
     if (!target) return;
     target.innerHTML = list
@@ -405,7 +953,12 @@ function renderWordFrequencyList(target, list) {
 }
 
 function renderWordFrequencyListHtml(list) {
-    return list
+    const rows = Array.isArray(list) ? list : [];
+    if (!rows.length) {
+        return '<li class="empty">No word frequency data available yet.</li>';
+    }
+
+    return rows
         .map(
             (item) =>
                 "<li><span class=\"term\">" + capitalize(item.label) + "</span><span class=\"count\">" + item.count + "x</span></li>"
@@ -426,8 +979,6 @@ function renderDashboardCharts() {
         return;
     }
 
-    const chartData = buildDashboardChartData();
-
     renderDashboardChartPair({
         key: "student",
         barId: "vpaa-student-professor-bar-chart",
@@ -437,7 +988,7 @@ function renderDashboardCharts() {
         countId: "vpaa-student-prof-count",
         barColor: "rgba(102, 126, 234, 0.8)",
         barBorder: "rgba(102, 126, 234, 1)"
-    }, chartData);
+    }, vpaaChartDataByType.student || createEmptyChartData());
 
     renderDashboardChartPair({
         key: "professor",
@@ -448,7 +999,7 @@ function renderDashboardCharts() {
         countId: "vpaa-professor-prof-count",
         barColor: "rgba(59, 130, 246, 0.8)",
         barBorder: "rgba(59, 130, 246, 1)"
-    }, chartData);
+    }, vpaaChartDataByType.professor || createEmptyChartData());
 
     renderDashboardChartPair({
         key: "supervisor",
@@ -459,7 +1010,7 @@ function renderDashboardCharts() {
         countId: "vpaa-supervisor-prof-count",
         barColor: "rgba(139, 92, 246, 0.8)",
         barBorder: "rgba(139, 92, 246, 1)"
-    }, chartData);
+    }, vpaaChartDataByType.supervisor || createEmptyChartData());
 }
 
 function renderDashboardChartPair(config, chartData) {
@@ -554,51 +1105,9 @@ function renderDashboardChartPair(config, chartData) {
     const totalEvalEl = document.getElementById(config.totalId);
     const profCountEl = document.getElementById(config.countId);
 
-    if (avgRatingEl) avgRatingEl.textContent = chartData.averageRating.toFixed(1);
-    if (totalEvalEl) totalEvalEl.textContent = chartData.totalEvaluations.toString();
-    if (profCountEl) profCountEl.textContent = chartData.evaluatedCount.toString();
-}
-
-function buildDashboardChartData() {
-    const currentData = allProfessorData.filter((prof) => prof.semester === currentSemesterLabel);
-    if (!currentData.length) {
-        return {
-            categoryScores: [],
-            ratingDistribution: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 },
-            averageRating: 0,
-            totalEvaluations: 0,
-            evaluatedCount: 0
-        };
-    }
-
-    const categories = Object.keys(currentData[0].criteria || {});
-    const categoryScores = categories.map((category) => {
-        const total = currentData.reduce((sum, prof) => sum + (prof.criteria[category] || 0), 0);
-        const score = total / currentData.length;
-        return { category, score: Number(score.toFixed(1)) };
-    });
-
-    const ratingDistribution = currentData.reduce((acc, prof) => {
-        [5, 4, 3, 2, 1].forEach((star) => {
-            acc[star] += prof.distribution[star] || 0;
-        });
-        return acc;
-    }, { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 });
-
-    const totals = Object.entries(ratingDistribution).reduce(
-        (sum, [star, count]) => sum + (Number(star) * count),
-        0
-    );
-    const totalEvaluations = Object.values(ratingDistribution).reduce((sum, count) => sum + count, 0);
-    const averageRating = totalEvaluations ? totals / totalEvaluations : 0;
-
-    return {
-        categoryScores,
-        ratingDistribution,
-        averageRating,
-        totalEvaluations,
-        evaluatedCount: currentData.length
-    };
+    if (avgRatingEl) avgRatingEl.textContent = Number(chartData.averageRating || 0).toFixed(1);
+    if (totalEvalEl) totalEvalEl.textContent = String(chartData.totalEvaluations || 0);
+    if (profCountEl) profCountEl.textContent = String(chartData.evaluatedCount || 0);
 }
 
 function setupProfilePhotoUpload() {
@@ -806,12 +1315,14 @@ function setupPasswordToggles() {
     });
 }
 
-function renderProfessors(list) {
+function renderProfessors(list, emptyMessage) {
     elements.professorGrid.innerHTML = "";
     if (list.length === 0) {
         const emptyState = document.createElement("div");
-        emptyState.className = "professor-card";
-        emptyState.innerHTML = "<p>No professors match the current filters.</p>";
+        emptyState.className = "professor-card professor-card-empty";
+        const message = document.createElement("p");
+        message.textContent = emptyMessage || "No professors match the current filters.";
+        emptyState.appendChild(message);
         elements.professorGrid.appendChild(emptyState);
         return;
     }
@@ -823,146 +1334,300 @@ function renderProfessors(list) {
 
 function createProfessorCard(prof) {
     const card = document.createElement("article");
-    card.className = "professor-card";
+    card.className = "professor-card professor-card-compact";
+    card.setAttribute("role", "button");
+    card.setAttribute("tabindex", "0");
+    card.setAttribute("aria-label", `Open evaluation report for ${prof.name}`);
+    card.innerHTML = buildProfessorIdentityBlock(prof);
 
-    const deptClass = toDeptClass(prof.department);
-    const initials = getInitials(prof.name);
-    const wordFrequency = getWordFrequencyForProfessor(prof);
-    const positiveListHtml = renderWordFrequencyListHtml(wordFrequency.positive);
-    const negativeListHtml = renderWordFrequencyListHtml(wordFrequency.negative);
-    const criteriaRows = Object.entries(prof.criteria)
-        .map(([label, value]) => {
-            const width = Math.min(100, Math.round((value / 5) * 100));
-            return `
-                <div class="vpaa-criteria-row">
-                    <span>${label}</span>
-                    <div class="vpaa-bar">
-                        <div class="vpaa-fill" style="width: ${width}%"></div>
-                    </div>
-                    <span class="vpaa-score">${value.toFixed(1)}</span>
-                </div>
-            `;
-        })
-        .join("");
-
-    const totalDist = Object.values(prof.distribution).reduce((sum, count) => sum + count, 0) || 1;
-    const distRows = [5, 4, 3, 2, 1]
-        .map((score) => {
-            const count = prof.distribution[score] || 0;
-            const width = Math.round((count / totalDist) * 100);
-            return `
-                <div class="vpaa-distribution-row">
-                    <span>${score}</span>
-                    <div class="vpaa-bar">
-                        <div class="vpaa-fill" style="width: ${width}%"></div>
-                    </div>
-                    <span>${count}</span>
-                </div>
-            `;
-        })
-        .join("");
-
-    const studentComments = renderComments(prof.studentComments);
-    const peerComments = renderComments(prof.peerComments);
-    const supervisorComments = renderComments(prof.supervisorComments || []);
-
-    card.innerHTML = `
-        <div class="professor-info">
-            <div class="professor-avatar">${initials}</div>
-            <div class="professor-details">
-                <div class="professor-name-row">
-                    <h3>${prof.name}</h3>
-                    <span class="dept-badge ${deptClass}">${prof.department}</span>
-                </div>
-                <div class="professor-employee">${prof.employeeId} | ${prof.semester}</div>
-                <div class="professor-position">${prof.rank}</div>
-
-            </div>
-        </div>
-        <div class="professor-stats">
-            <div class="stat-item">
-                <i class="fas fa-star"></i>
-                <span><strong>${prof.overall.toFixed(1)}</strong> overall rating</span>
-            </div>
-            <div class="stat-item">
-                <i class="fas fa-chart-line"></i>
-                <span>${prof.responseRate}% response rate</span>
-            </div>
-            <div class="stat-item">
-                <i class="fas fa-file-alt"></i>
-                <span>${prof.evaluations} evaluations ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ ${prof.students} students</span>
-            </div>
-        </div>
-        <div class="vpaa-section">
-            <div class="vpaa-section-title">Category Ratings</div>
-            <div class="vpaa-criteria">${criteriaRows}</div>
-        </div>
-        <div class="vpaa-section scrollable-section">
-            <div class="vpaa-section-title">Rating Distribution</div>
-            <div class="vpaa-distribution">${distRows}</div>
-            <div class="vpaa-section-title" style="margin-top:16px;">Word Frequency Snapshot</div>
-            <div class="word-frequency-grid">
-                <div>
-                    <div class="chip positive"><i class="fas fa-thumbs-up"></i> Positive</div>
-                    <ul class="word-frequency-list">${positiveListHtml}</ul>
-                </div>
-                <div>
-                    <div class="chip negative"><i class="fas fa-thumbs-down"></i> Needs attention</div>
-                    <ul class="word-frequency-list">${negativeListHtml}</ul>
-                </div>
-            </div>
-        </div>
-        <div class="vpaa-section comments-header">
-            <div class="vpaa-section-title">Comments</div>
-            <button class="btn-summary" data-prof-id="${prof.id}" aria-label="Summarise all comments for ${prof.name}">
-                Summarise
-            </button>
-        </div>
-        <div class="vpaa-summary" id="summary-${prof.id}" aria-live="polite"></div>
-        <details class="vpaa-comments">
-            <summary>
-                Student to Professor
-                <span class="vpaa-comment-count">${prof.studentComments.length}</span>
-            </summary>
-            <ul class="vpaa-comment-list">${studentComments}</ul>
-        </details>
-        <details class="vpaa-comments">
-            <summary>
-                Professor to Professor
-                <span class="vpaa-comment-count">${prof.peerComments.length}</span>
-            </summary>
-            <ul class="vpaa-comment-list">${peerComments}</ul>
-        </details>
-        <details class="vpaa-comments">
-            <summary>
-                Supervisor to Professor
-                <span class="vpaa-comment-count">${(prof.supervisorComments || []).length}</span>
-            </summary>
-            <ul class="vpaa-comment-list">${supervisorComments}</ul>
-        </details>
-    `;
-
-    const summaryBtn = card.querySelector(".btn-summary");
-    if (summaryBtn) {
-        summaryBtn.addEventListener("click", () => handleCommentSummary(prof.id));
-    }
+    const openReport = () => openProfessorReportModal(prof);
+    card.addEventListener("click", openReport);
+    card.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openReport();
+        }
+    });
 
     return card;
+}
+
+function buildProfessorIdentityBlock(prof) {
+    const deptClass = toDeptClass(prof.department);
+    const initials = getInitials(prof.name) || "PR";
+    const photoData = sanitizePhotoSource(prof.photoData);
+    const avatarHtml = photoData
+        ? `<img class="professor-avatar-image" src="${escapeAttr(photoData)}" alt="${escapeAttr(prof.name)} photo">`
+        : `<span class="professor-avatar-fallback">${escapeHtml(initials)}</span>`;
+
+    return `
+        <div class="professor-info">
+            <div class="professor-avatar professor-avatar-photo">${avatarHtml}</div>
+            <div class="professor-details">
+                <div class="professor-name-row">
+                    <h3>${escapeHtml(prof.name)}</h3>
+                    <span class="dept-badge ${escapeAttr(deptClass)}">${escapeHtml(prof.department)}</span>
+                </div>
+                <div class="professor-employee">${escapeHtml(prof.employeeId)} | ${escapeHtml(prof.semester)}</div>
+                <div class="professor-position">${escapeHtml(prof.rank)}</div>
+            </div>
+        </div>
+    `;
+}
+
+function buildProfessorReportDetailsHtml(prof) {
+    const wordFrequency = getWordFrequencyForProfessor(prof);
+    const wordFrequencyHtml = renderWordFrequencyListHtml(wordFrequency);
+    const combinedComments = buildCombinedCommentEntries(prof);
+    const combinedCommentsHtml = renderCombinedCommentsHtml(combinedComments);
+
+    return `
+        <div class="vpaa-report-details" data-prof-id="${escapeAttr(prof.id)}" data-popup-type="student">
+            ${buildProfessorIdentityBlock(prof)}
+            <div class="professor-stats">
+                <div class="stat-item">
+                    <i class="fas fa-star"></i>
+                    <span><strong>${prof.overall.toFixed(1)}</strong> overall rating</span>
+                </div>
+                <div class="stat-item">
+                    <i class="fas fa-chart-line"></i>
+                    <span>${prof.responseRate}% response rate</span>
+                </div>
+                <div class="stat-item">
+                    <i class="fas fa-file-alt"></i>
+                    <span>${prof.evaluations} evaluations - ${prof.students} students</span>
+                </div>
+            </div>
+            <div class="vpaa-popup-analytics-filter">
+                <label for="vpaaPopupEvalType">Evaluation Type</label>
+                <select id="vpaaPopupEvalType" class="vpaa-popup-eval-type" data-prof-id="${escapeAttr(prof.id)}">
+                    <option value="student">Student to Professor</option>
+                    <option value="professor">Professor to Professor</option>
+                    <option value="supervisor">Supervisor to Professor</option>
+                </select>
+            </div>
+            <div class="vpaa-section">
+                <div class="vpaa-section-title" data-popup-category-title>Category Ratings</div>
+                <div class="vpaa-criteria" data-popup-category-rows></div>
+            </div>
+            <div class="vpaa-section">
+                <div class="vpaa-section-title" data-popup-distribution-title>Rating Distribution</div>
+                <div class="vpaa-distribution" data-popup-distribution-rows></div>
+                <div class="vpaa-section-title vpaa-word-frequency-title">Word Frequency Snapshot</div>
+                <div class="vpaa-word-frequency-single">
+                    <ul class="word-frequency-list">${wordFrequencyHtml}</ul>
+                </div>
+            </div>
+            <div class="vpaa-section comments-header">
+                <div class="vpaa-section-title">Comments (${combinedComments.length})</div>
+                <button class="btn-summary" data-prof-id="${escapeAttr(prof.id)}" aria-label="Summarise all comments for ${escapeAttr(prof.name)}">
+                    Summarise
+                </button>
+            </div>
+            <div class="vpaa-summary" data-summary-output aria-live="polite"></div>
+            <div class="vpaa-comments-card">
+                <ul class="vpaa-comment-list vpaa-comment-list-combined">${combinedCommentsHtml}</ul>
+            </div>
+        </div>
+    `;
+}
+
+function normalizePopupReportType(value) {
+    const token = String(value || "").trim().toLowerCase();
+    if (token === "professor") return "professor";
+    if (token === "supervisor") return "supervisor";
+    return "student";
+}
+
+function resolveProfessorPopupAnalytics(prof, typeKey) {
+    const normalized = normalizePopupReportType(typeKey);
+    const byType = prof && typeof prof.analyticsByType === "object" && prof.analyticsByType
+        ? prof.analyticsByType
+        : {};
+    if (byType[normalized]) return byType[normalized];
+    return buildProfessorAnalyticsForType(normalized, [], prof && prof.semester);
+}
+
+function renderPopupCategoryRows(categoryScores) {
+    const rows = Array.isArray(categoryScores) ? categoryScores : [];
+    if (!rows.length) {
+        return '<div class="vpaa-empty-metric">No category ratings available.</div>';
+    }
+
+    return rows.map((item) => {
+        const score = Number(item && item.score || 0);
+        const width = Math.min(100, Math.round((score / 5) * 100));
+        return `
+            <div class="vpaa-criteria-row">
+                <span>${escapeHtml(item.category || "General Questions")}</span>
+                <div class="vpaa-bar">
+                    <div class="vpaa-fill" style="width: ${width}%"></div>
+                </div>
+                <span class="vpaa-score">${score.toFixed(1)}</span>
+            </div>
+        `;
+    }).join("");
+}
+
+function renderPopupDistributionRows(distribution) {
+    const dist = distribution && typeof distribution === "object" ? distribution : {};
+    const total = Object.values(dist).reduce((sum, count) => sum + Number(count || 0), 0) || 1;
+    return [5, 4, 3, 2, 1].map((score) => {
+        const count = Number(dist[score] || 0);
+        const width = Math.round((count / total) * 100);
+        return `
+            <div class="vpaa-distribution-row">
+                <span>${score}</span>
+                <div class="vpaa-bar">
+                    <div class="vpaa-fill" style="width: ${width}%"></div>
+                </div>
+                <span>${count}</span>
+            </div>
+        `;
+    }).join("");
+}
+
+function renderPopupAnalyticsForType(prof, typeKey) {
+    if (!prof || !elements.reportModalBody) return;
+    const scope = elements.reportModalBody.querySelector(".vpaa-report-details");
+    if (!scope) return;
+
+    const normalized = normalizePopupReportType(typeKey);
+    const analytics = resolveProfessorPopupAnalytics(prof, normalized);
+    const meta = getPopupEvaluationTypeMeta(normalized);
+
+    const categoryRowsEl = scope.querySelector("[data-popup-category-rows]");
+    const distributionRowsEl = scope.querySelector("[data-popup-distribution-rows]");
+    const categoryTitleEl = scope.querySelector("[data-popup-category-title]");
+    const distributionTitleEl = scope.querySelector("[data-popup-distribution-title]");
+    const selectEl = scope.querySelector(".vpaa-popup-eval-type");
+
+    if (selectEl) {
+        selectEl.value = normalized;
+    }
+    if (categoryTitleEl) {
+        categoryTitleEl.textContent = `Category Ratings (${meta.label})`;
+    }
+    if (distributionTitleEl) {
+        distributionTitleEl.textContent = `Rating Distribution (${meta.label})`;
+    }
+    if (categoryRowsEl) {
+        categoryRowsEl.innerHTML = renderPopupCategoryRows(analytics.categoryScores);
+    }
+    if (distributionRowsEl) {
+        distributionRowsEl.innerHTML = renderPopupDistributionRows(analytics.ratingDistribution);
+    }
+
+    if (elements.reportModalTitle) {
+        elements.reportModalTitle.textContent = `${prof.name} - ${meta.label} Report`;
+    }
+    scope.setAttribute("data-popup-type", normalized);
+}
+
+function setupReportModalEvents() {
+    if (!elements.reportModal || !elements.reportModalBody) return;
+
+    if (elements.reportModalClose) {
+        elements.reportModalClose.addEventListener("click", closeReportModal);
+    }
+
+    elements.reportModal.addEventListener("click", (event) => {
+        if (event.target === elements.reportModal) {
+            closeReportModal();
+        }
+    });
+
+    elements.reportModalBody.addEventListener("click", (event) => {
+        const summaryBtn = event.target.closest(".btn-summary[data-prof-id]");
+        if (!summaryBtn) return;
+        const profId = String(summaryBtn.getAttribute("data-prof-id") || "");
+        const scope = summaryBtn.closest(".vpaa-report-details");
+        const summaryEl = scope ? scope.querySelector("[data-summary-output]") : null;
+        handleCommentSummary(profId, summaryEl);
+    });
+
+    elements.reportModalBody.addEventListener("change", (event) => {
+        const typeSelect = event.target.closest(".vpaa-popup-eval-type");
+        if (!typeSelect) return;
+        const profId = String(typeSelect.getAttribute("data-prof-id") || "");
+        const prof = allProfessorData.find((item) => String(item.id) === profId);
+        if (!prof) return;
+        renderPopupAnalyticsForType(prof, typeSelect.value);
+    });
+
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && isReportModalOpen()) {
+            closeReportModal();
+        }
+    });
+}
+
+function openProfessorReportModal(prof) {
+    if (!prof || !elements.reportModal || !elements.reportModalBody) return;
+
+    elements.reportModalBody.innerHTML = buildProfessorReportDetailsHtml(prof);
+    renderPopupAnalyticsForType(prof, "student");
+    elements.reportModal.classList.add("active");
+    elements.reportModal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("vpaa-modal-open");
+}
+
+function closeReportModal() {
+    if (!elements.reportModal || !elements.reportModalBody) return;
+
+    elements.reportModal.classList.remove("active");
+    elements.reportModal.setAttribute("aria-hidden", "true");
+    elements.reportModalBody.innerHTML = "";
+    document.body.classList.remove("vpaa-modal-open");
+}
+
+function isReportModalOpen() {
+    return !!(elements.reportModal && elements.reportModal.classList.contains("active"));
+}
+
+function buildCombinedCommentEntries(prof) {
+    const rows = [];
+    const pushRows = (source, comments) => {
+        (Array.isArray(comments) ? comments : []).forEach((comment) => {
+            const text = String(comment || "").trim();
+            if (!text) return;
+            rows.push({ source, text });
+        });
+    };
+
+    pushRows("Student to Professor", prof.studentComments);
+    pushRows("Professor to Professor", prof.peerComments);
+    pushRows("Supervisor to Professor", prof.supervisorComments || []);
+
+    return rows;
+}
+
+function renderCombinedCommentsHtml(entries) {
+    const rows = Array.isArray(entries) ? entries : [];
+    if (!rows.length) {
+        return '<li class="empty">No comments submitted.</li>';
+    }
+
+    return rows.map((item) => `
+        <li class="vpaa-comment-item">
+            <span class="vpaa-comment-source">${escapeHtml(item.source)}</span>
+            <span class="vpaa-comment-text">${escapeHtml(item.text)}</span>
+        </li>
+    `).join("");
 }
 
 function renderComments(list) {
     if (!list.length) {
         return '<li class="empty">No comments submitted.</li>';
     }
-    return list.map((comment) => `<li>${comment}</li>`).join("");
+    return list.map((comment) => `<li>${escapeHtml(comment)}</li>`).join("");
 }
 
-function handleCommentSummary(profId) {
-    const prof = allProfessorData.find((p) => p.id === profId);
+function handleCommentSummary(profId, summaryEl) {
+    const prof = allProfessorData.find((p) => String(p.id) === String(profId));
     if (!prof) return;
 
     const summaryText = generateCommentSummary(prof);
-    const summaryEl = document.getElementById(`summary-${profId}`);
 
     if (summaryEl) {
         summaryEl.textContent = summaryText;
@@ -991,13 +1656,38 @@ function generateCommentSummary(prof) {
     return `${counts}. Summary: ${snippets.join(" | ")}`;
 }
 
+function sanitizePhotoSource(value) {
+    const photo = String(value || "").trim();
+    if (!photo) return "";
+    if (/^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+$/i.test(photo)) {
+        return photo;
+    }
+    if (/^https?:\/\//i.test(photo)) {
+        return photo;
+    }
+    return "";
+}
+
+function escapeHtml(value) {
+    return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function escapeAttr(value) {
+    return escapeHtml(value).replace(/`/g, "&#96;");
+}
+
 function toDeptClass(department) {
-    const cleaned = department.replace(/[^a-z0-9]/gi, "");
+    const cleaned = String(department || "General").replace(/[^a-z0-9]/gi, "");
     return `dept-${cleaned}`;
 }
 
 function getInitials(name) {
-    const parts = name.split(" ").filter(Boolean);
+    const parts = String(name || "").split(" ").filter(Boolean);
     return parts.slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 }
 
@@ -1020,4 +1710,5 @@ function checkAuthentication() {
 }
 
 init();
+
 

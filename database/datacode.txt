@@ -41,6 +41,21 @@ CREATE TABLE IF NOT EXISTS `departments` (
         ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `programs` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `department_id` BIGINT UNSIGNED NOT NULL,
+    `code` VARCHAR(30) NOT NULL,
+    `name` VARCHAR(120) NOT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_programs_department_code` (`department_id`, `code`),
+    UNIQUE KEY `uq_programs_department_name` (`department_id`, `name`),
+    CONSTRAINT `fk_programs_department`
+        FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `roles` (
     `id` SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `code` VARCHAR(30) NOT NULL,
@@ -142,11 +157,13 @@ CREATE TABLE IF NOT EXISTS `staff_profiles` (
     `user_id` BIGINT UNSIGNED NOT NULL,
     `employee_id` VARCHAR(50) NOT NULL,
     `employment_type_id` SMALLINT UNSIGNED DEFAULT NULL,
+    `program_id` BIGINT UNSIGNED DEFAULT NULL,
     `position` VARCHAR(150) NOT NULL DEFAULT '',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`user_id`),
     UNIQUE KEY `uq_staff_profiles_employee_id` (`employee_id`),
+    KEY `idx_staff_profiles_program` (`program_id`),
     CONSTRAINT `fk_staff_profiles_user`
         FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
         ON UPDATE CASCADE
@@ -154,21 +171,31 @@ CREATE TABLE IF NOT EXISTS `staff_profiles` (
     CONSTRAINT `fk_staff_profiles_employment_type`
         FOREIGN KEY (`employment_type_id`) REFERENCES `employment_types` (`id`)
         ON UPDATE CASCADE
+        ON DELETE SET NULL,
+    CONSTRAINT `fk_staff_profiles_program`
+        FOREIGN KEY (`program_id`) REFERENCES `programs` (`id`)
+        ON UPDATE CASCADE
         ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `student_profiles` (
     `user_id` BIGINT UNSIGNED NOT NULL,
     `student_number` VARCHAR(50) NOT NULL,
+    `program_id` BIGINT UNSIGNED DEFAULT NULL,
     `year_section` VARCHAR(100) NOT NULL DEFAULT '',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`user_id`),
     UNIQUE KEY `uq_student_profiles_student_number` (`student_number`),
+    KEY `idx_student_profiles_program` (`program_id`),
     CONSTRAINT `fk_student_profiles_user`
         FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
         ON UPDATE CASCADE
-        ON DELETE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_student_profiles_program`
+        FOREIGN KEY (`program_id`) REFERENCES `programs` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `profile_photos` (
@@ -189,6 +216,8 @@ CREATE TABLE IF NOT EXISTS `profile_photos` (
 -- -------------------------------------------------------------
 -- Scheduling and enrollment
 -- -------------------------------------------------------------
+-- Offering Assignment/import identifies professors by staff_profiles.employee_id
+-- at the API/UI layer; course_offerings.professor_id stores the resolved users.id.
 CREATE TABLE IF NOT EXISTS `course_offerings` (
     `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `subject_id` BIGINT UNSIGNED NOT NULL,
@@ -458,18 +487,24 @@ CREATE TABLE IF NOT EXISTS `peer_evaluation_rooms` (
     `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `semester_id` BIGINT UNSIGNED NOT NULL,
     `dean_user_id` BIGINT UNSIGNED DEFAULT NULL,
+    `program_id` BIGINT UNSIGNED DEFAULT NULL,
     `room_name` VARCHAR(150) NOT NULL,
     `coordinator_user_id` BIGINT UNSIGNED DEFAULT NULL,
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uq_peer_evaluation_rooms` (`semester_id`, `dean_user_id`, `room_name`),
+    KEY `idx_peer_evaluation_rooms_program_id` (`program_id`),
     CONSTRAINT `fk_peer_evaluation_rooms_semester`
         FOREIGN KEY (`semester_id`) REFERENCES `semesters` (`id`)
         ON UPDATE CASCADE
         ON DELETE CASCADE,
     CONSTRAINT `fk_peer_evaluation_rooms_dean`
         FOREIGN KEY (`dean_user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+    CONSTRAINT `fk_peer_evaluation_rooms_program`
+        FOREIGN KEY (`program_id`) REFERENCES `programs` (`id`)
         ON UPDATE CASCADE
         ON DELETE SET NULL,
     CONSTRAINT `fk_peer_evaluation_rooms_coordinator`
@@ -489,6 +524,39 @@ CREATE TABLE IF NOT EXISTS `peer_evaluation_room_members` (
         ON DELETE CASCADE,
     CONSTRAINT `fk_peer_evaluation_room_members_professor`
         FOREIGN KEY (`professor_user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `peer_evaluation_assignments` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `semester_id` BIGINT UNSIGNED NOT NULL,
+    `room_id` BIGINT UNSIGNED NOT NULL,
+    `evaluator_user_id` BIGINT UNSIGNED NOT NULL,
+    `evaluatee_user_id` BIGINT UNSIGNED NOT NULL,
+    `status` ENUM('pending', 'submitted') NOT NULL DEFAULT 'pending',
+    `submitted_evaluation_id` VARCHAR(120) DEFAULT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_peer_eval_assignments_pair` (`semester_id`, `evaluator_user_id`, `evaluatee_user_id`),
+    KEY `idx_peer_eval_assignments_room` (`room_id`),
+    KEY `idx_peer_eval_assignments_evaluator_status` (`evaluator_user_id`, `status`),
+    KEY `idx_peer_eval_assignments_evaluatee_status` (`evaluatee_user_id`, `status`),
+    CONSTRAINT `fk_peer_eval_assignments_semester`
+        FOREIGN KEY (`semester_id`) REFERENCES `semesters` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_peer_eval_assignments_room`
+        FOREIGN KEY (`room_id`) REFERENCES `peer_evaluation_rooms` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_peer_eval_assignments_evaluator`
+        FOREIGN KEY (`evaluator_user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_peer_eval_assignments_evaluatee`
+        FOREIGN KEY (`evaluatee_user_id`) REFERENCES `users` (`id`)
         ON UPDATE CASCADE
         ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Architecture Tables</title>
+    <style>
+        :root {
+            --ink: #1a1a1a;
+            --line: #d8dce3;
+            --header: #173a70;
+            --header-ink: #ffffff;
+            --cell: #f2f4f7;
+            --paper: #ffffff;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 28px;
+            font-family: "Segoe UI", Arial, Helvetica, sans-serif;
+            color: var(--ink);
+            background: #eef1f6;
+        }
+
+        .sheet {
+            width: 1280px;
+            margin: 0 auto 24px auto;
+            background: var(--paper);
+            border: 1px solid #c9cfd9;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+            padding: 22px 22px 18px 22px;
+        }
+
+        .title {
+            text-align: center;
+            margin-bottom: 14px;
+            line-height: 1.2;
+        }
+
+        .title .org {
+            font-size: 22px;
+            font-weight: 400;
+            letter-spacing: 0.2px;
+        }
+
+        .title .dept {
+            font-size: 36px;
+            font-weight: 700;
+            color: #1c6cb4;
+            letter-spacing: 1.2px;
+        }
+
+        .subtitle {
+            margin: 0 0 10px 0;
+            font-size: 20px;
+            font-weight: 700;
+            color: #23384f;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            margin-bottom: 8px;
+        }
+
+        th,
+        td {
+            border: 1px solid var(--line);
+            padding: 10px 12px;
+            vertical-align: top;
+            font-size: 22px;
+            line-height: 1.25;
+        }
+
+        th {
+            background: var(--header);
+            color: var(--header-ink);
+            font-weight: 700;
+            text-align: left;
+        }
+
+        td {
+            background: var(--cell);
+        }
+
+        .col-layer {
+            width: 22%;
+        }
+
+        .col-component {
+            width: 28%;
+        }
+
+        .col-tech {
+            width: 50%;
+        }
+
+        .note {
+            margin-top: 8px;
+            font-size: 16px;
+            color: #4a5a6f;
+        }
+
+        @media print {
+            body {
+                background: #fff;
+                padding: 0;
+            }
+
+            .sheet {
+                width: 100%;
+                box-shadow: none;
+                border: none;
+                margin: 0;
+                padding: 14mm;
+                page-break-after: always;
+            }
+
+            .sheet:last-child {
+                page-break-after: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <section class="sheet">
+        <div class="title">
+            <div class="org">The National Professional Institution for Aviation</div>
+            <div class="dept">INSTITUTE OF COMPUTER STUDIES</div>
+        </div>
+
+        <h2 class="subtitle">Current System Architecture (Implemented)</h2>
+        <table aria-label="Current architecture table">
+            <thead>
+                <tr>
+                    <th class="col-layer">Layer</th>
+                    <th class="col-component">Component</th>
+                    <th class="col-tech">Technology / Approach</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Data Protection</td>
+                    <td>Password Storage</td>
+                    <td>Plaintext password storage and direct password comparison in login flow (no password hashing yet).</td>
+                </tr>
+                <tr>
+                    <td>Authentication</td>
+                    <td>Login and Session Entry</td>
+                    <td>PHP API username/password authentication plus role shortcut login and client-side fallback session handling.</td>
+                </tr>
+                <tr>
+                    <td>Access Control</td>
+                    <td>Role-Based Authorization</td>
+                    <td>Role checks at app/API level for dean/professor ownership and action permissions on faculty paper workflows.</td>
+                </tr>
+                <tr>
+                    <td>Reporting</td>
+                    <td>Faculty Acknowledgement Reports</td>
+                    <td>FPDF + FPDI-based CHED-style PDF rendering from template with overlay fields and generated file output.</td>
+                </tr>
+                <tr>
+                    <td>Communication</td>
+                    <td>Frontend-Backend API Calls</td>
+                    <td>JSON-based HTTP fetch requests from panel JavaScript modules to PHP endpoints.</td>
+                </tr>
+                <tr>
+                    <td>Resilience</td>
+                    <td>Backup and Recovery</td>
+                    <td>Backup actions currently UI placeholders only (no actual scheduled backup/restore execution pipeline yet).</td>
+                </tr>
+                <tr>
+                    <td>Network Security</td>
+                    <td>Perimeter Security</td>
+                    <td>No repository-level Cloudflare/WAF/DDoS implementation in application code (deployment-managed).</td>
+                </tr>
+                <tr>
+                    <td>Transport</td>
+                    <td>Data Transmission Security</td>
+                    <td>No application-enforced HTTPS/TLS redirect logic in repo; transport security depends on server configuration.</td>
+                </tr>
+                <tr>
+                    <td>Application</td>
+                    <td>Server-Side Framework</td>
+                    <td>Custom PHP endpoint architecture (no full framework such as Laravel/Symfony in this codebase).</td>
+                </tr>
+                <tr>
+                    <td>Application</td>
+                    <td>Client-Side Interface</td>
+                    <td>HTML5, CSS3, JavaScript with responsive layout behavior via viewport and media-query rules.</td>
+                </tr>
+                <tr>
+                    <td>AI and Analytics</td>
+                    <td>Comment Summarization and Insights</td>
+                    <td>Local rule-based summarization and lexicon frequency counting (no external AI API integration).</td>
+                </tr>
+                <tr>
+                    <td>Data Management</td>
+                    <td>Database System</td>
+                    <td>MySQL via PDO with relational schema usage in state helpers and normalized lookup/profile table logic.</td>
+                </tr>
+            </tbody>
+        </table>
+        <div class="note">Version basis: audited code state as of March 27, 2026.</div>
+    </section>
+
+    <section class="sheet">
+        <div class="title">
+            <div class="org">The National Professional Institution for Aviation</div>
+            <div class="dept">INSTITUTE OF COMPUTER STUDIES</div>
+        </div>
+
+        <h2 class="subtitle">Planned / Not Yet Implemented Architecture</h2>
+        <table aria-label="Planned architecture table">
+            <thead>
+                <tr>
+                    <th class="col-layer">Layer</th>
+                    <th class="col-component">Component</th>
+                    <th class="col-tech">Technology / Approach</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Data Protection</td>
+                    <td>Secure Password Storage</td>
+                    <td>Bcrypt one-way hashing and verification (`password_hash` / `password_verify`) with secure password migration.</td>
+                </tr>
+                <tr>
+                    <td>Authentication</td>
+                    <td>Multi-Factor Authentication</td>
+                    <td>Email-based OTP challenge step with expiry, retry limits, and verification endpoint.</td>
+                </tr>
+                <tr>
+                    <td>Communication</td>
+                    <td>Transactional Email Service</td>
+                    <td>SMTP-backed delivery for OTP and password-reset email workflows.</td>
+                </tr>
+                <tr>
+                    <td>Access Control</td>
+                    <td>RBAC Policy Expansion</td>
+                    <td>Formal permission matrix and role policy hardening, including optional 8th role if required by governance.</td>
+                </tr>
+                <tr>
+                    <td>AI and Analytics</td>
+                    <td>AI Feedback Summarization</td>
+                    <td>OpenAI API integration for generated summaries, trend extraction, and recommendation synthesis.</td>
+                </tr>
+                <tr>
+                    <td>Network Security</td>
+                    <td>Web Application Firewall</td>
+                    <td>Cloudflare edge WAF and DDoS mitigation with managed rulesets and rate-limiting.</td>
+                </tr>
+                <tr>
+                    <td>Transport</td>
+                    <td>TLS Enforcement</td>
+                    <td>Strict HTTPS-only routing, secure headers, and certificate lifecycle governance at server/edge.</td>
+                </tr>
+                <tr>
+                    <td>Resilience</td>
+                    <td>Backup and Restoration Lifecycle</td>
+                    <td>Scheduled encrypted backups, retention policy, and periodic restoration drills with audit logging.</td>
+                </tr>
+                <tr>
+                    <td>Data Management</td>
+                    <td>Schema Consistency and Migrations</td>
+                    <td>Unified production schema path and migration scripts to align legacy/simple setup with normalized structures.</td>
+                </tr>
+            </tbody>
+        </table>
+        <div class="note">Use browser print or full-page screenshot at 100% zoom for PNG export.</div>
+    </section>
+</body>
+</html>

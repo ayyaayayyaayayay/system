@@ -1,6 +1,11 @@
 ﻿// Dean Panel JavaScript - Dashboard Functionality
 
 let deanProfessorCount = 0;
+let deanFacultyPaperState = {
+    actorUserId: '',
+    papers: [],
+    selectedId: '',
+};
 
 // Wait for DOM to be fully loaded
 document.addEventListener('DOMContentLoaded', function () {
@@ -10,9 +15,604 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
     }
 
+    if (!enforceActiveDeanAccount({ inline: false })) {
+        return;
+    }
+
     // Initialize the dashboard
     initializeDashboard();
 });
+
+let supervisorSectionFlow = {
+    steps: [],
+    activeIndex: 0
+};
+
+let deanSummaryState = {
+    byType: {
+        student: null,
+        professor: null,
+        supervisor: null
+    },
+    selectedSemesterId: '',
+    selectedSemesterLabel: '',
+    selectedEvaluationType: 'student'
+};
+let deanSupervisorTargetDirectory = [];
+
+const DEAN_EMPTY_SUMMARY = {
+    criteriaAverages: [],
+    breakdownRows: [],
+    subjects: [],
+    ratingDistribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+    comments: [],
+    commentBuckets: {},
+    detailedRows: [],
+    totals: { required: 0, received: 0, responseRate: 0, averageScore: 0 }
+};
+
+function normalizeUserIdToken(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^u\d+$/i.test(raw)) return 'u' + raw.replace(/^u/i, '');
+    if (/^\d+$/.test(raw)) return 'u' + String(parseInt(raw, 10));
+    return '';
+}
+
+function normalizeRoleToken(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function getLatestSemesterOption() {
+    const list = (SharedData.getSemesterList && SharedData.getSemesterList()) || [];
+    if (!Array.isArray(list) || !list.length) return null;
+    return list[list.length - 1] || null;
+}
+
+function resolveSelectedSemesterId(preferred) {
+    const token = String(preferred || '').trim();
+    if (token) return token;
+
+    const current = String((SharedData.getCurrentSemester && SharedData.getCurrentSemester()) || '').trim();
+    if (current) return current;
+
+    const latest = getLatestSemesterOption();
+    return latest ? String(latest.value || '').trim() : '';
+}
+
+function getSemesterLabelById(semesterId) {
+    const id = String(semesterId || '').trim();
+    if (!id) return 'Selected semester';
+    const list = (SharedData.getSemesterList && SharedData.getSemesterList()) || [];
+    const match = Array.isArray(list) ? list.find(item => String(item && item.value || '') === id) : null;
+    if (match && match.label) return String(match.label);
+    return id;
+}
+
+function getScopedDeanDepartment() {
+    const dean = resolveCurrentDeanUserAnyStatus(getUserSession() || {});
+    return String((dean && (dean.department || dean.institute)) || '').trim().toUpperCase();
+}
+
+function isActiveUser(user) {
+    return normalizeRoleToken(user && user.status || 'active') !== 'inactive';
+}
+
+function getScopedProfessorUsers(includeInactive = false) {
+    const users = (SharedData.getUsers && SharedData.getUsers()) || [];
+    const scopedDepartment = getScopedDeanDepartment();
+    return (Array.isArray(users) ? users : []).filter(user => {
+        if (normalizeRoleToken(user && user.role) !== 'professor') return false;
+        const department = String((user && (user.department || user.institute)) || '').trim().toUpperCase();
+        if (!department || !scopedDepartment) return false;
+        if (department !== scopedDepartment) return false;
+        if (!includeInactive && !isActiveUser(user)) return false;
+        return true;
+    });
+}
+
+function buildDeanUserLookup(users) {
+    const byUserId = {};
+    const byEmployeeId = {};
+    const byName = {};
+
+    (Array.isArray(users) ? users : []).forEach(user => {
+        const userId = normalizeUserIdToken(user && user.id);
+        const employeeId = String(user && user.employeeId || '').trim().toLowerCase();
+        const name = String(user && user.name || '').trim().toLowerCase();
+        if (userId) byUserId[userId] = user;
+        if (employeeId) byEmployeeId[employeeId] = user;
+        if (name) byName[name] = user;
+    });
+
+    return { byUserId, byEmployeeId, byName };
+}
+
+function resolveEvaluationTypeToken(evaluation) {
+    const token = normalizeRoleToken((evaluation && evaluation.evaluatorRole) || (evaluation && evaluation.evaluationType));
+    if (token === 'student') return 'student';
+    if (token === 'peer' || token === 'professor' || token === 'professor-to-professor') return 'professor';
+    if (token === 'supervisor' || token === 'dean' || token === 'supervisor-to-professor') return 'supervisor';
+    return '';
+}
+
+function isEvaluationInSemester(evaluation, semesterId) {
+    const target = String(semesterId || '').trim().toLowerCase();
+    if (!target) return true;
+    const value = String(evaluation && evaluation.semesterId || '').trim().toLowerCase();
+    if (!value) return true;
+    return value === target;
+}
+
+function resolveTargetProfessorFromEvaluation(evaluation, lookup) {
+    const candidates = [
+        evaluation && evaluation.targetProfessorId,
+        evaluation && evaluation.targetId,
+        evaluation && evaluation.colleagueId,
+        evaluation && evaluation.targetUserId
+    ];
+
+    for (let i = 0; i < candidates.length; i += 1) {
+        const candidate = candidates[i];
+        const userId = normalizeUserIdToken(candidate);
+        if (userId && lookup.byUserId[userId]) return lookup.byUserId[userId];
+
+        const employeeId = String(candidate || '').trim().toLowerCase();
+        if (employeeId && lookup.byEmployeeId[employeeId]) return lookup.byEmployeeId[employeeId];
+    }
+
+    return null;
+}
+
+function collectEvaluationComments(evaluation) {
+    const comments = [];
+    const note = String(evaluation && evaluation.comments || '').trim();
+    if (note) comments.push(note);
+
+    const qualitative = evaluation && typeof evaluation.qualitative === 'object' && evaluation.qualitative
+        ? evaluation.qualitative
+        : {};
+    Object.keys(qualitative).forEach(key => {
+        const value = String(qualitative[key] || '').trim();
+        if (value) comments.push(value);
+    });
+    return comments;
+}
+
+function computeAverageRatingFromEvaluations(evaluations) {
+    let sum = 0;
+    let count = 0;
+    (Array.isArray(evaluations) ? evaluations : []).forEach(item => {
+        const ratings = item && typeof item.ratings === 'object' && item.ratings ? item.ratings : {};
+        Object.keys(ratings).forEach(questionId => {
+            const parsed = parseFloat(ratings[questionId]);
+            if (!Number.isFinite(parsed)) return;
+            const value = Math.max(1, Math.min(5, parsed));
+            sum += value;
+            count += 1;
+        });
+    });
+    return count ? (sum / count) : 0;
+}
+
+function formatDisplaySection(sectionName) {
+    const value = String(sectionName || '').trim();
+    if (!value) return '';
+    if (/^\d+\-\d+$/.test(value)) return value.replace('-', '/');
+    return value;
+}
+
+function getActiveSupervisorCount() {
+    const users = (SharedData.getUsers && SharedData.getUsers()) || [];
+    const supervisorRoles = new Set(['dean', 'hr', 'vpaa', 'admin']);
+    return (Array.isArray(users) ? users : []).filter(user =>
+        supervisorRoles.has(normalizeRoleToken(user && user.role)) &&
+        isActiveUser(user)
+    ).length;
+}
+
+function buildDeanQuestionMeta(evaluationType, semesterId) {
+    const questionnaires = (SharedData.getQuestionnaires && SharedData.getQuestionnaires()) || {};
+    const targetSemesterId = resolveSelectedSemesterId(semesterId);
+    const fallbackSemester = getLatestSemesterOption();
+    const bucket = questionnaires[targetSemesterId]
+        || (fallbackSemester && questionnaires[fallbackSemester.value])
+        || {};
+
+    const typeMap = {
+        student: 'student-to-professor',
+        professor: 'professor-to-professor',
+        supervisor: 'supervisor-to-professor'
+    };
+    const typeKey = typeMap[evaluationType] || 'student-to-professor';
+    const sectionBucket = bucket[typeKey] || { sections: [], questions: [] };
+    const sections = Array.isArray(sectionBucket.sections) ? sectionBucket.sections : [];
+    const questions = Array.isArray(sectionBucket.questions) ? sectionBucket.questions : [];
+
+    const categoryByQuestionId = {};
+    const categoryOrder = [];
+    const sectionTitles = {};
+
+    sections.forEach(section => {
+        const sectionId = String(section && section.id || '').trim();
+        const title = String(section && (section.title || section.letter) || '').trim();
+        if (!sectionId || !title) return;
+        sectionTitles[sectionId] = title;
+        if (!categoryOrder.includes(title)) {
+            categoryOrder.push(title);
+        }
+    });
+
+    questions.forEach(question => {
+        const questionId = String(question && question.id || '').trim();
+        if (!questionId) return;
+        const sectionId = String(question && question.sectionId || '').trim();
+        const category = sectionTitles[sectionId] || 'General Questions';
+        categoryByQuestionId[questionId] = category;
+        categoryByQuestionId[questionId.toLowerCase()] = category;
+        if (!categoryOrder.includes(category)) {
+            categoryOrder.push(category);
+        }
+    });
+
+    return { categoryByQuestionId, categoryOrder };
+}
+
+function getDeanEvaluationTypeMeta(type) {
+    const token = normalizeRoleToken(type);
+    if (token === 'peer' || token === 'professor') {
+        return { id: 'professor', label: 'Professor Evaluation' };
+    }
+    if (token === 'supervisor' || token === 'dean') {
+        return { id: 'supervisor', label: 'Supervisor Evaluation' };
+    }
+    return { id: 'student', label: 'Student Evaluation' };
+}
+
+function isSemesterTokenMatch(value, semesterId) {
+    const selected = String(semesterId || '').trim().toLowerCase();
+    if (!selected) return true;
+    const token = String(value || '').trim().toLowerCase();
+    if (!token) return true;
+    return token === selected;
+}
+
+function createCategoryStatBucket() {
+    return {
+        sum: 0,
+        count: 0,
+        responses: 0,
+        excellent: 0,
+        good: 0,
+        fair: 0,
+        poor: 0,
+        veryPoor: 0
+    };
+}
+
+function buildDeanPanelContext() {
+    const session = getUserSession() || {};
+    const deanUser = resolveCurrentDeanUserAnyStatus(session);
+    const users = (SharedData.getUsers && SharedData.getUsers()) || [];
+    const evaluations = (SharedData.getEvaluations && SharedData.getEvaluations()) || [];
+    const semesterList = (SharedData.getSemesterList && SharedData.getSemesterList()) || [];
+    const currentSemester = String((SharedData.getCurrentSemester && SharedData.getCurrentSemester()) || '').trim();
+    const subjectManagement = SharedData.getSubjectManagement
+        ? SharedData.getSubjectManagement()
+        : { offerings: [], enrollments: [] };
+    const scopedDepartment = String((deanUser && (deanUser.department || deanUser.institute)) || '').trim().toUpperCase();
+
+    const scopedProfessors = (Array.isArray(users) ? users : []).filter(user => {
+        if (normalizeRoleToken(user && user.role) !== 'professor') return false;
+        if (!isActiveUser(user)) return false;
+        const department = String((user && (user.department || user.institute)) || '').trim().toUpperCase();
+        return !!department && !!scopedDepartment && department === scopedDepartment;
+    });
+
+    const professorLookup = buildDeanUserLookup(scopedProfessors);
+    const professorById = {};
+    const professorByName = {};
+    const professorByEmployeeId = {};
+    scopedProfessors.forEach(professor => {
+        const idToken = normalizeUserIdToken(professor && professor.id);
+        if (idToken) professorById[idToken] = professor;
+
+        const nameToken = normalizeRoleToken(professor && professor.name);
+        if (nameToken && !professorByName[nameToken]) professorByName[nameToken] = professor;
+
+        const employeeToken = normalizeRoleToken(professor && professor.employeeId);
+        if (employeeToken && !professorByEmployeeId[employeeToken]) professorByEmployeeId[employeeToken] = professor;
+    });
+
+    const offerings = Array.isArray(subjectManagement && subjectManagement.offerings)
+        ? subjectManagement.offerings
+        : [];
+    const scopedOfferings = offerings.filter(offering => {
+        if (!offering || !offering.isActive) return false;
+        const professorId = normalizeUserIdToken(offering.professorUserId);
+        return !!professorId && !!professorById[professorId];
+    });
+    const offeringsById = {};
+    scopedOfferings.forEach(offering => {
+        const offeringId = String(offering && offering.id || '').trim();
+        if (offeringId) offeringsById[offeringId] = offering;
+    });
+
+    const enrollments = Array.isArray(subjectManagement && subjectManagement.enrollments)
+        ? subjectManagement.enrollments
+        : [];
+
+    return {
+        session,
+        deanUser,
+        users,
+        evaluations: Array.isArray(evaluations) ? evaluations : [],
+        semesterList: Array.isArray(semesterList) ? semesterList : [],
+        currentSemester,
+        scopedDepartment,
+        scopedProfessors,
+        professorLookup,
+        professorById,
+        professorByName,
+        professorByEmployeeId,
+        offerings: scopedOfferings,
+        offeringsById,
+        enrollments
+    };
+}
+
+function resolveDeanTargetProfessorId(evaluation, evaluationType, context) {
+    if (evaluationType === 'student') {
+        const offeringId = String(evaluation && evaluation.courseOfferingId || '').trim();
+        if (offeringId && context.offeringsById[offeringId]) {
+            const professorId = normalizeUserIdToken(context.offeringsById[offeringId].professorUserId);
+            if (professorId && context.professorById[professorId]) {
+                return professorId;
+            }
+        }
+    }
+
+    const resolved = resolveTargetProfessorFromEvaluation(evaluation, context.professorLookup);
+    if (resolved) {
+        const token = normalizeUserIdToken(resolved.id);
+        if (token && context.professorById[token]) return token;
+    }
+
+    const fallbackTokens = [
+        evaluation && evaluation.targetProfessor,
+        evaluation && evaluation.professorSubject,
+        evaluation && evaluation.targetName
+    ];
+
+    for (let index = 0; index < fallbackTokens.length; index += 1) {
+        const raw = String(fallbackTokens[index] || '').trim();
+        if (!raw) continue;
+        const head = normalizeRoleToken(raw.split(' - ')[0]);
+        if (head && context.professorByName[head]) {
+            return normalizeUserIdToken(context.professorByName[head].id);
+        }
+    }
+
+    return '';
+}
+
+function getDeanSummaryForType(type) {
+    const key = getDeanEvaluationTypeMeta(type).id;
+    return deanSummaryState.byType[key] || DEAN_EMPTY_SUMMARY;
+}
+
+function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
+    const questionMeta = buildDeanQuestionMeta(evaluationType, semesterId);
+    const categoryStats = {};
+    (questionMeta.categoryOrder || []).forEach(category => {
+        categoryStats[category] = createCategoryStatBucket();
+    });
+
+    const ratingDistribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    const matchedEvaluations = [];
+    const comments = [];
+
+    (context.evaluations || []).forEach(evaluation => {
+        const typeToken = resolveEvaluationTypeToken(evaluation);
+        if (typeToken !== evaluationType) return;
+        if (!isEvaluationInSemester(evaluation, semesterId)) return;
+
+        const targetProfessorId = resolveDeanTargetProfessorId(evaluation, evaluationType, context);
+        if (!targetProfessorId || !context.professorById[targetProfessorId]) return;
+
+        matchedEvaluations.push(evaluation);
+
+        const ratings = evaluation && typeof evaluation.ratings === 'object' && evaluation.ratings
+            ? evaluation.ratings
+            : {};
+        Object.keys(ratings).forEach(questionId => {
+            const parsed = parseFloat(ratings[questionId]);
+            if (!Number.isFinite(parsed)) return;
+            const value = Math.max(1, Math.min(5, parsed));
+            const rounded = Math.max(1, Math.min(5, Math.round(value)));
+            ratingDistribution[rounded] += 1;
+
+            const questionToken = String(questionId || '').trim();
+            const category = questionMeta.categoryByQuestionId[questionToken]
+                || questionMeta.categoryByQuestionId[questionToken.toLowerCase()]
+                || 'General Questions';
+            if (!categoryStats[category]) {
+                categoryStats[category] = createCategoryStatBucket();
+            }
+            categoryStats[category].sum += value;
+            categoryStats[category].count += 1;
+            categoryStats[category].responses += 1;
+            if (rounded === 5) categoryStats[category].excellent += 1;
+            if (rounded === 4) categoryStats[category].good += 1;
+            if (rounded === 3) categoryStats[category].fair += 1;
+            if (rounded === 2) categoryStats[category].poor += 1;
+            if (rounded === 1) categoryStats[category].veryPoor += 1;
+        });
+
+        collectEvaluationComments(evaluation).forEach(text => {
+            comments.push({
+                text,
+                source: getDeanEvaluationTypeMeta(evaluationType).label,
+                date: String(evaluation && (evaluation.submittedAt || evaluation.timestamp) || '').trim()
+            });
+        });
+    });
+
+    const commentBuckets = {};
+    const breakdownRows = [];
+    let requiredTotal = 0;
+    let receivedTotal = 0;
+
+    if (evaluationType === 'student') {
+        const scopedOfferings = (context.offerings || []).filter(offering =>
+            isSemesterTokenMatch(offering && offering.semesterSlug, semesterId)
+        );
+
+        scopedOfferings.forEach(offering => {
+            const offeringId = String(offering && offering.id || '').trim();
+            if (!offeringId) return;
+
+            const required = (context.enrollments || []).filter(enrollment => {
+                if (String(enrollment && enrollment.courseOfferingId || '').trim() !== offeringId) return false;
+                const status = normalizeRoleToken(enrollment && enrollment.status || 'enrolled');
+                return status !== 'dropped' && status !== 'inactive';
+            }).length;
+
+            const offeringEvaluations = matchedEvaluations.filter(evaluation =>
+                String(evaluation && evaluation.courseOfferingId || '').trim() === offeringId
+            );
+            const received = offeringEvaluations.length;
+            const avgRating = computeAverageRatingFromEvaluations(offeringEvaluations);
+            const subject = offering.subjectCode
+                ? `${offering.subjectCode} - ${offering.subjectName}`
+                : String(offering.subjectName || '').trim();
+            const rowKey = `student|offering|${offeringId}`;
+
+            commentBuckets[rowKey] = offeringEvaluations.flatMap(evaluation =>
+                collectEvaluationComments(evaluation).map(text => ({
+                    text,
+                    source: 'Student Evaluation',
+                    date: String(evaluation && (evaluation.submittedAt || evaluation.timestamp) || '').trim()
+                }))
+            );
+
+            breakdownRows.push({
+                rowKey,
+                subject: subject || 'Unknown Subject',
+                section: formatDisplaySection(offering.sectionName),
+                required,
+                received,
+                avgRating
+            });
+        });
+
+        breakdownRows.sort((a, b) => {
+            const left = `${a.subject || ''}|${a.section || ''}`;
+            const right = `${b.subject || ''}|${b.section || ''}`;
+            return left.localeCompare(right);
+        });
+
+        requiredTotal = breakdownRows.reduce((sum, item) => sum + Number(item.required || 0), 0);
+        receivedTotal = breakdownRows.reduce((sum, item) => sum + Number(item.received || 0), 0);
+    } else {
+        const groupMap = {};
+        matchedEvaluations.forEach(evaluation => {
+            const targetProfessorId = resolveDeanTargetProfessorId(evaluation, evaluationType, context);
+            if (!targetProfessorId) return;
+            if (!groupMap[targetProfessorId]) groupMap[targetProfessorId] = [];
+            groupMap[targetProfessorId].push(evaluation);
+        });
+
+        const requiredPerProfessor = evaluationType === 'professor'
+            ? Math.max((context.scopedProfessors || []).length - 1, 0)
+            : getActiveSupervisorCount();
+
+        (context.scopedProfessors || []).forEach(professor => {
+            const userId = normalizeUserIdToken(professor && professor.id);
+            if (!userId) return;
+
+            const evaluationsForProfessor = groupMap[userId] || [];
+            const rowKey = `${evaluationType}|professor|${userId}`;
+            commentBuckets[rowKey] = evaluationsForProfessor.flatMap(evaluation =>
+                collectEvaluationComments(evaluation).map(text => ({
+                    text,
+                    source: getDeanEvaluationTypeMeta(evaluationType).label,
+                    date: String(evaluation && (evaluation.submittedAt || evaluation.timestamp) || '').trim()
+                }))
+            );
+
+            breakdownRows.push({
+                rowKey,
+                employeeId: String(professor.employeeId || professor.id || '').trim() || 'N/A',
+                professorId: String(professor.employeeId || professor.id || '').trim() || 'N/A',
+                professorName: String(professor.name || '').trim() || 'Unknown',
+                institute: String((professor.department || professor.institute) || '').trim().toUpperCase(),
+                employmentType: String(professor.employmentType || '').trim() || 'N/A',
+                position: String(professor.position || '').trim() || 'N/A',
+                status: normalizeRoleToken(professor.status || 'active') === 'inactive' ? 'Inactive' : 'Active',
+                required: requiredPerProfessor,
+                received: evaluationsForProfessor.length,
+                avgRating: computeAverageRatingFromEvaluations(evaluationsForProfessor),
+                avgScore: computeAverageRatingFromEvaluations(evaluationsForProfessor),
+                lastUpdated: evaluationsForProfessor.reduce((latest, item) => {
+                    const value = String(item && (item.submittedAt || item.timestamp) || '').trim();
+                    if (!value) return latest;
+                    if (!latest) return value;
+                    return new Date(value).getTime() > new Date(latest).getTime() ? value : latest;
+                }, '')
+            });
+        });
+
+        breakdownRows.sort((a, b) => String(a.professorName || '').localeCompare(String(b.professorName || '')));
+        requiredTotal = breakdownRows.reduce((sum, item) => sum + Number(item.required || 0), 0);
+        receivedTotal = breakdownRows.reduce((sum, item) => sum + Number(item.received || 0), 0);
+    }
+
+    const categories = (questionMeta.categoryOrder || []).concat(
+        Object.keys(categoryStats).filter(category => !(questionMeta.categoryOrder || []).includes(category))
+    );
+
+    const criteriaAverages = categories.map(category => {
+        const stat = categoryStats[category] || createCategoryStatBucket();
+        return {
+            name: category,
+            average: stat.count ? (stat.sum / stat.count) : 0
+        };
+    }).filter(item => item.name);
+
+    const detailedRows = categories.map(category => {
+        const stat = categoryStats[category] || createCategoryStatBucket();
+        return {
+            category,
+            avgScore: stat.count ? (stat.sum / stat.count) : 0,
+            responses: stat.responses || 0,
+            excellent: stat.excellent || 0,
+            good: stat.good || 0,
+            fair: stat.fair || 0,
+            poor: stat.poor || 0,
+            veryPoor: stat.veryPoor || 0
+        };
+    }).filter(item => item.category);
+
+    const averageScore = computeAverageRatingFromEvaluations(matchedEvaluations);
+    const responseRate = requiredTotal ? Math.round((receivedTotal / requiredTotal) * 100) : 0;
+
+    return {
+        criteriaAverages,
+        breakdownRows,
+        subjects: breakdownRows,
+        ratingDistribution,
+        comments,
+        commentBuckets,
+        detailedRows,
+        totals: {
+            required: requiredTotal,
+            received: receivedTotal,
+            responseRate,
+            averageScore
+        }
+    };
+}
 
 /**
  * Check if user is authenticated and is a dean
@@ -26,10 +626,79 @@ function checkAuthentication() {
 
     try {
         // Check if user is authenticated and is a dean
-        return session.isAuthenticated === true && (session.role === 'dean' || session.role === 'daen');
+        return session.isAuthenticated === true
+            && (session.role === 'dean' || session.role === 'daen')
+            && normalizeDeanToken(session.status || 'active') !== 'inactive';
     } catch (e) {
         return false;
     }
+}
+
+function resolveCurrentDeanUserAnyStatus(sessionInput) {
+    const session = sessionInput || getUserSession() || {};
+    const users = (typeof SharedData !== 'undefined' && SharedData.getUsers) ? SharedData.getUsers() : [];
+    const deans = (Array.isArray(users) ? users : []).filter(user => normalizeDeanToken(user && user.role) === 'dean');
+    if (!deans.length) return null;
+
+    const sessionUserId = normalizeDeanUserIdToken(session && session.userId);
+    if (sessionUserId) {
+        const byId = deans.find(user => normalizeDeanUserIdToken(user && user.id) === sessionUserId);
+        if (byId) return byId;
+    }
+
+    const sessionEmail = normalizeDeanToken(session && session.email);
+    if (sessionEmail) {
+        const byEmail = deans.find(user => normalizeDeanToken(user && user.email) === sessionEmail);
+        if (byEmail) return byEmail;
+    }
+
+    const sessionEmployeeId = normalizeDeanToken(session && session.employeeId);
+    if (sessionEmployeeId) {
+        const byEmployeeId = deans.find(user => normalizeDeanToken(user && user.employeeId) === sessionEmployeeId);
+        if (byEmployeeId) return byEmployeeId;
+    }
+
+    const sessionUsername = normalizeDeanToken(session && session.username);
+    if (sessionUsername) {
+        const byName = deans.find(user => normalizeDeanToken(user && user.name) === sessionUsername);
+        if (byName) return byName;
+        const byEmailName = deans.find(user => normalizeDeanToken(user && user.email) === sessionUsername);
+        if (byEmailName) return byEmailName;
+    }
+
+    const sessionFullName = normalizeDeanToken(session && session.fullName);
+    if (sessionFullName) {
+        const byFullName = deans.find(user => normalizeDeanToken(user && user.name) === sessionFullName);
+        if (byFullName) return byFullName;
+    }
+
+    return null;
+}
+
+function enforceActiveDeanAccount(options = {}) {
+    const cfg = options || {};
+    const matchedDean = resolveCurrentDeanUserAnyStatus(getUserSession() || {});
+    const isInactive = normalizeDeanToken(matchedDean && matchedDean.status) === 'inactive';
+    const hasActiveDean = !!(matchedDean && !isInactive);
+
+    if (hasActiveDean) {
+        return true;
+    }
+
+    const form = cfg.form || document.getElementById('peerEvaluationForm');
+    const message = isInactive
+        ? 'Your account is inactive. You cannot access evaluations. Please contact your administrator.'
+        : 'Your login session is not linked to an active dean account.';
+
+    if (cfg.inline && form && typeof showFormMessage === 'function') {
+        showFormMessage(form, message, 'error');
+    } else {
+        alert(message);
+    }
+
+    clearUserSession();
+    redirectToLogin();
+    return false;
 }
 
 /**
@@ -44,52 +713,148 @@ function redirectToLogin() {
  */
 function initializeDashboard() {
     loadUserInfo();
+    renderDeanAnnouncementPanels();
     setupNavigation();
     setupLogout();
     setupHeaderPanels();
-    setupActionButtons();
     setupTableActions();
-    const hasSemesterFilter = setupSemesterFilter();
-    if (!hasSemesterFilter) {
-        loadFacultySummary();
-    }
+    loadFacultySummary({ evaluationType: 'student' });
     loadProfessorCount();
     setupFacultyResponseView();
     setupPeerManagementView();
-    setupDeanSubjectComments();
+    setupDeanFacultyPaperInbox();
     updateSummaryCards();
     setupPeerEvaluationForm();
+    populatePeerProfessorOptions();
     setupProfileActions();
     setupProfilePhotoUpload();
     setupChangeEmailForm();
     setupChangePasswordForm();
     setupPasswordToggles();
-    applyReportBlackout();
     initializeReports();
+    setupDeanDataSync();
+}
+
+function setupDeanDataSync() {
+    if (!SharedData || typeof SharedData.onDataChange !== 'function' || !SharedData.KEYS) return;
+
+    SharedData.onDataChange(function (key) {
+        if (key === SharedData.KEYS.USERS) {
+            enforceActiveDeanAccount({ inline: false });
+            loadUserInfo();
+            renderDeanAnnouncementPanels();
+            populatePeerProfessorOptions();
+            loadProfessorCount();
+            if (deanSummaryState.selectedEvaluationType) {
+                loadFacultySummary({
+                    semesterId: deanSummaryState.selectedSemesterId,
+                    evaluationType: deanSummaryState.selectedEvaluationType
+                });
+            }
+            return;
+        }
+
+        const refreshKeys = new Set([
+            SharedData.KEYS.EVALUATIONS,
+            SharedData.KEYS.SUBJECT_MANAGEMENT,
+            SharedData.KEYS.CURRENT_SEMESTER,
+            SharedData.KEYS.SEMESTER_LIST,
+            SharedData.KEYS.QUESTIONNAIRES
+        ]);
+
+        if (key === SharedData.KEYS.ANNOUNCEMENTS) {
+            renderDeanAnnouncementPanels();
+            return;
+        }
+
+        if (refreshKeys.has(key)) {
+            populatePeerProfessorOptions();
+            loadProfessorCount();
+            loadFacultySummary({
+                semesterId: deanSummaryState.selectedSemesterId,
+                evaluationType: deanSummaryState.selectedEvaluationType
+            });
+        }
+    });
 }
 
 /**
  * Load and display user information
  */
 function loadUserInfo() {
-    const session = SharedData.getSession();
-    if (session) {
-        try {
-            const username = session.username;
+    const session = SharedData.getSession() || {};
+    const deanUser = resolveCurrentDeanUserAnyStatus(session);
+    if (!deanUser) return;
 
-            // Update user profile name
-            const userProfileSpans = document.querySelectorAll('.user-profile span');
-            if (userProfileSpans.length) {
-                // Format username: capitalize first letter
-                const formattedName = username.charAt(0).toUpperCase() + username.slice(1) + ' Dean';
-                userProfileSpans.forEach(span => {
-                    span.textContent = formattedName;
-                });
-            }
-        } catch (e) {
-            console.error('Error loading user info:', e);
-        }
+    try {
+        const deanName = String(deanUser.name || session.fullName || session.username || 'Dean').trim() || 'Dean';
+        const deanEmployeeId = String(deanUser.employeeId || session.employeeId || 'N/A').trim() || 'N/A';
+        const deanDepartment = String(deanUser.department || deanUser.institute || 'N/A').trim().toUpperCase() || 'N/A';
+        const deanEmail = String(deanUser.email || session.email || '').trim();
+        const deanRank = String(deanUser.position || deanUser.employmentType || 'N/A').trim() || 'N/A';
+        const deanStatus = normalizeRoleToken(deanUser.status || 'active') === 'inactive' ? 'Inactive' : 'Active';
+        const currentSemesterId = resolveSelectedSemesterId(deanSummaryState.selectedSemesterId);
+        const semesterLabel = getSemesterLabelById(currentSemesterId);
+
+        document.querySelectorAll('.user-profile span').forEach(span => {
+            span.textContent = deanName;
+        });
+
+        document.querySelectorAll('.profile-item').forEach(item => {
+            const label = item.querySelector('.profile-label');
+            const value = item.querySelector('.profile-value');
+            if (!label || !value) return;
+            const key = String(label.textContent || '').trim().toLowerCase();
+
+            if (key === 'faculty id') value.textContent = deanEmployeeId;
+            if (key === 'department') value.textContent = deanDepartment;
+            if (key === 'full name') value.textContent = deanName;
+            if (key === 'gmail') value.textContent = deanEmail || 'N/A';
+            if (key === 'rank') value.textContent = deanRank;
+            if (key === 'status') value.textContent = deanStatus;
+            if (key === 'ay/sem') value.textContent = semesterLabel || 'N/A';
+        });
+
+        const profileFacultyId = document.getElementById('profileFacultyId');
+        if (profileFacultyId) profileFacultyId.textContent = deanEmployeeId;
+
+        const profileEmail = document.getElementById('profileEmail');
+        if (profileEmail) profileEmail.textContent = deanEmail || 'N/A';
+
+        const currentEmail = document.getElementById('currentEmail');
+        if (currentEmail) currentEmail.value = deanEmail || '';
+    } catch (e) {
+        console.error('Error loading user info:', e);
     }
+}
+
+function renderDeanAnnouncementPanels() {
+    const listItems = SharedData.getAnnouncementsForCurrentUser
+        ? SharedData.getAnnouncementsForCurrentUser({ limit: 5 })
+        : (SharedData.getAnnouncements ? SharedData.getAnnouncements() : []);
+    const announcements = (Array.isArray(listItems) ? listItems : []).slice(0, 5).map(item => ({
+        title: String(item && item.title || '').trim() || 'Announcement',
+        message: String(item && item.message || '').trim() || 'No details available.',
+    }));
+
+    document.querySelectorAll('.js-announcement-panel .panel-list').forEach(panelList => {
+        if (!announcements.length) {
+            panelList.innerHTML = `
+                <li>
+                    <div class="panel-title">No announcements</div>
+                    <div class="panel-meta">There are currently no posted updates.</div>
+                </li>
+            `;
+            return;
+        }
+
+        panelList.innerHTML = announcements.map(item => `
+            <li>
+                <div class="panel-title">${escapeHTML(item.title)}</div>
+                <div class="panel-meta">${escapeHTML(item.message)}</div>
+            </li>
+        `).join('');
+    });
 }
 
 /**
@@ -193,8 +958,8 @@ function handleNavigation(section) {
         case 'peerEvaluation':
             switchView('peerEvaluation');
             break;
-        case 'reports':
-            switchView('reports');
+        case 'facultyPaperInbox':
+            switchView('facultyPaperInbox');
             break;
         case 'profile':
             switchView('profile');
@@ -217,7 +982,7 @@ function handleNavigation(section) {
 function switchView(viewName) {
     const dashboardView = document.getElementById('dashboardView');
     const peerEvaluationView = document.getElementById('peerEvaluationView');
-    const reportsView = document.getElementById('reportsView');
+    const facultyPaperInboxView = document.getElementById('facultyPaperInboxView');
     const profileView = document.getElementById('profileView');
     const facultyResponseView = document.getElementById('facultyResponseView');
     const peerManagementView = document.getElementById('peerManagementView');
@@ -225,7 +990,7 @@ function switchView(viewName) {
     if (viewName === 'dashboard') {
         if (dashboardView) dashboardView.style.display = 'block';
         if (peerEvaluationView) peerEvaluationView.style.display = 'none';
-        if (reportsView) reportsView.style.display = 'none';
+        if (facultyPaperInboxView) facultyPaperInboxView.style.display = 'none';
         if (profileView) profileView.style.display = 'none';
         if (facultyResponseView) facultyResponseView.style.display = 'none';
         if (peerManagementView) peerManagementView.style.display = 'none';
@@ -233,36 +998,36 @@ function switchView(viewName) {
     } else if (viewName === 'peerEvaluation') {
         if (dashboardView) dashboardView.style.display = 'none';
         if (peerEvaluationView) peerEvaluationView.style.display = 'block';
-        if (reportsView) reportsView.style.display = 'none';
+        if (facultyPaperInboxView) facultyPaperInboxView.style.display = 'none';
         if (profileView) profileView.style.display = 'none';
         if (facultyResponseView) facultyResponseView.style.display = 'none';
         if (peerManagementView) peerManagementView.style.display = 'none';
         window.scrollTo(0, 0);
         closeAllPanels();
         loadDynamicSupervisorQuestionnaire();
-    } else if (viewName === 'reports') {
-        if (dashboardView) dashboardView.style.display = 'none';
-        if (peerEvaluationView) peerEvaluationView.style.display = 'none';
-        if (reportsView) reportsView.style.display = 'block';
-        if (profileView) profileView.style.display = 'none';
-        if (facultyResponseView) facultyResponseView.style.display = 'none';
-        if (peerManagementView) peerManagementView.style.display = 'none';
-        // Scroll to top
-        window.scrollTo(0, 0);
-        closeAllPanels();
     } else if (viewName === 'profile') {
         if (dashboardView) dashboardView.style.display = 'none';
         if (peerEvaluationView) peerEvaluationView.style.display = 'none';
-        if (reportsView) reportsView.style.display = 'none';
+        if (facultyPaperInboxView) facultyPaperInboxView.style.display = 'none';
         if (profileView) profileView.style.display = 'block';
         if (facultyResponseView) facultyResponseView.style.display = 'none';
         if (peerManagementView) peerManagementView.style.display = 'none';
         window.scrollTo(0, 0);
         closeAllPanels();
+    } else if (viewName === 'facultyPaperInbox') {
+        if (dashboardView) dashboardView.style.display = 'none';
+        if (peerEvaluationView) peerEvaluationView.style.display = 'none';
+        if (facultyPaperInboxView) facultyPaperInboxView.style.display = 'block';
+        if (profileView) profileView.style.display = 'none';
+        if (facultyResponseView) facultyResponseView.style.display = 'none';
+        if (peerManagementView) peerManagementView.style.display = 'none';
+        window.scrollTo(0, 0);
+        closeAllPanels();
+        renderDeanFacultyPaperInbox();
     } else if (viewName === 'facultyResponse') {
         if (dashboardView) dashboardView.style.display = 'none';
         if (peerEvaluationView) peerEvaluationView.style.display = 'none';
-        if (reportsView) reportsView.style.display = 'none';
+        if (facultyPaperInboxView) facultyPaperInboxView.style.display = 'none';
         if (profileView) profileView.style.display = 'none';
         if (facultyResponseView) facultyResponseView.style.display = 'block';
         if (peerManagementView) peerManagementView.style.display = 'none';
@@ -271,7 +1036,7 @@ function switchView(viewName) {
     } else if (viewName === 'peerManagement') {
         if (dashboardView) dashboardView.style.display = 'none';
         if (peerEvaluationView) peerEvaluationView.style.display = 'none';
-        if (reportsView) reportsView.style.display = 'none';
+        if (facultyPaperInboxView) facultyPaperInboxView.style.display = 'none';
         if (profileView) profileView.style.display = 'none';
         if (facultyResponseView) facultyResponseView.style.display = 'none';
         if (peerManagementView) peerManagementView.style.display = 'block';
@@ -284,26 +1049,28 @@ function switchView(viewName) {
  * Initialize reports view with charts
  */
 function initializeReports() {
-    // Wait a bit for the view to be visible
-    setTimeout(() => {
-        initializeStudentCharts();
-        initializePeerCharts();
-    }, 100);
+    initializeStudentCharts();
+    initializePeerCharts();
 }
 
 function initializeStudentCharts() {
     const barCtx = document.getElementById('studentBarChart');
     const pieCtx = document.getElementById('studentPieChart');
+    const summary = getDeanSummaryForType('student');
+    const criteria = Array.isArray(summary.criteriaAverages) ? summary.criteriaAverages : [];
+    const distribution = summary.ratingDistribution || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    const labels = criteria.length ? criteria.map(item => item.name) : ['No data'];
+    const values = criteria.length ? criteria.map(item => Number(item.average || 0)) : [0];
 
     if (barCtx) {
         if (window.studentBarChartInstance) window.studentBarChartInstance.destroy();
         window.studentBarChartInstance = new Chart(barCtx, {
             type: 'bar',
             data: {
-                labels: ['Teaching Effectiveness', 'Classroom Management', 'Student Engagement', 'Communication Skills', 'Assessment Methods'],
+                labels,
                 datasets: [{
                     label: 'Average Score',
-                    data: [4.7, 4.5, 4.8, 4.6, 4.4],
+                    data: values,
                     backgroundColor: '#667eea',
                     borderColor: '#764ba2',
                     borderWidth: 1
@@ -327,7 +1094,13 @@ function initializeStudentCharts() {
             data: {
                 labels: ['5 Stars', '4 Stars', '3 Stars', '2 Stars', '1 Star'],
                 datasets: [{
-                    data: [45, 30, 15, 7, 3],
+                    data: [
+                        Number(distribution[5] || 0),
+                        Number(distribution[4] || 0),
+                        Number(distribution[3] || 0),
+                        Number(distribution[2] || 0),
+                        Number(distribution[1] || 0)
+                    ],
                     backgroundColor: ['#10b981', '#34d399', '#fbbf24', '#f59e0b', '#ef4444'],
                     borderWidth: 2,
                     borderColor: '#ffffff'
@@ -345,16 +1118,21 @@ function initializeStudentCharts() {
 function initializePeerCharts() {
     const barCtx = document.getElementById('peerBarChart');
     const pieCtx = document.getElementById('peerPieChart');
+    const summary = getDeanSummaryForType('professor');
+    const criteria = Array.isArray(summary.criteriaAverages) ? summary.criteriaAverages : [];
+    const distribution = summary.ratingDistribution || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    const labels = criteria.length ? criteria.map(item => item.name) : ['No data'];
+    const values = criteria.length ? criteria.map(item => Number(item.average || 0)) : [0];
 
     if (barCtx) {
         if (window.peerBarChartInstance) window.peerBarChartInstance.destroy();
         window.peerBarChartInstance = new Chart(barCtx, {
             type: 'bar',
             data: {
-                labels: ['Collaboration', 'Resource Sharing', 'Feedback Quality', 'Professionalism'],
+                labels,
                 datasets: [{
                     label: 'Peer Avg Score',
-                    data: [4.6, 4.5, 4.7, 4.8],
+                    data: values,
                     backgroundColor: '#34d399',
                     borderColor: '#059669',
                     borderWidth: 1
@@ -378,7 +1156,13 @@ function initializePeerCharts() {
             data: {
                 labels: ['5 Stars', '4 Stars', '3 Stars', '2 Stars', '1 Star'],
                 datasets: [{
-                    data: [38, 34, 18, 7, 3],
+                    data: [
+                        Number(distribution[5] || 0),
+                        Number(distribution[4] || 0),
+                        Number(distribution[3] || 0),
+                        Number(distribution[2] || 0),
+                        Number(distribution[1] || 0)
+                    ],
                     backgroundColor: ['#10b981', '#34d399', '#fbbf24', '#f59e0b', '#ef4444'],
                     borderWidth: 2,
                     borderColor: '#ffffff'
@@ -436,45 +1220,437 @@ function showLogoutMessage() {
     console.log('Logging out...');
 }
 
-/**
- * Setup action buttons
- */
-function setupActionButtons() {
-    const actionButtons = document.querySelectorAll('.btn-action');
+function normalizeDeanUserIdToken(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^u\d+$/i.test(raw)) return 'u' + raw.replace(/^u/i, '');
+    if (/^\d+$/.test(raw)) return 'u' + String(parseInt(raw, 10));
+    return '';
+}
 
-    actionButtons.forEach(button => {
-        button.addEventListener('click', function () {
-            const actionCard = this.closest('.action-card');
-            const actionTitle = actionCard.querySelector('h3').textContent;
-            handleActionButton(actionTitle);
-        });
+function normalizeDeanToken(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function resolveCurrentDeanActorUserId() {
+    const deanUser = resolveCurrentDeanUserAnyStatus(getUserSession() || {});
+    if (!deanUser) return '';
+    if (normalizeDeanToken(deanUser.status) === 'inactive') return '';
+    return normalizeDeanUserIdToken(deanUser.id);
+}
+
+function formatDeanPaperTimestamp(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return 'N/A';
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return raw;
+    return date.toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
     });
 }
 
-/**
- * Handle action button click
- * @param {string} actionTitle - Title of the action
- */
-function handleActionButton(actionTitle) {
-    // Placeholder for future action functionality
-    console.log(`Action clicked: ${actionTitle}`);
+function mapDeanPaperStatus(status) {
+    const token = normalizeDeanToken(status);
+    if (token === 'draft') return 'Draft';
+    if (token === 'archived') return 'Archived';
+    if (token === 'sent') return 'Sent';
+    if (token === 'completed') return 'Completed';
+    return 'Unknown';
+}
 
-    if (actionTitle === 'View Reports') {
-        openDeanReportPdf();
+async function openDeanFacultyPaperPdf(payload, downloadFilename) {
+    let modal = document.getElementById('deanPdfPreviewModal');
+    let frame = document.getElementById('deanPdfPreviewFrame');
+    let blobUrlHolder = openDeanFacultyPaperPdf._blobUrl || '';
+    let filenameHolder = openDeanFacultyPaperPdf._filename || 'faculty_acknowledgement.pdf';
+
+    function closeModal() {
+        if (frame) frame.src = 'about:blank';
+        if (modal) modal.classList.remove('active');
+        if (blobUrlHolder) {
+            URL.revokeObjectURL(blobUrlHolder);
+            blobUrlHolder = '';
+            openDeanFacultyPaperPdf._blobUrl = '';
+        }
+    }
+
+    function ensureModal() {
+        if (modal) return;
+        modal = document.createElement('div');
+        modal.id = 'deanPdfPreviewModal';
+        modal.className = 'pdf-preview-modal';
+        modal.innerHTML = `
+            <div class="pdf-preview-dialog" role="dialog" aria-modal="true" aria-label="Faculty Paper PDF Preview">
+                <div class="pdf-preview-toolbar">
+                    <h3>Faculty Paper Preview</h3>
+                    <div class="pdf-preview-actions">
+                        <button type="button" class="btn-submit pdf-preview-download-btn" id="deanPdfPreviewDownloadBtn">Download</button>
+                        <button type="button" class="btn-cancel pdf-preview-close-btn" id="deanPdfPreviewCloseBtn">Close</button>
+                    </div>
+                </div>
+                <iframe id="deanPdfPreviewFrame" class="pdf-preview-frame" title="Faculty Paper PDF Preview"></iframe>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        frame = document.getElementById('deanPdfPreviewFrame');
+
+        const closeBtn = document.getElementById('deanPdfPreviewCloseBtn');
+        const downloadBtn = document.getElementById('deanPdfPreviewDownloadBtn');
+
+        if (closeBtn) closeBtn.addEventListener('click', closeModal);
+        if (downloadBtn) {
+            downloadBtn.addEventListener('click', function () {
+                if (!blobUrlHolder) return;
+                const anchor = document.createElement('a');
+                anchor.href = blobUrlHolder;
+                anchor.download = filenameHolder || 'faculty_acknowledgement.pdf';
+                document.body.appendChild(anchor);
+                anchor.click();
+                document.body.removeChild(anchor);
+            });
+        }
+
+        modal.addEventListener('click', function (event) {
+            if (event.target === modal) closeModal();
+        });
+
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape' && modal && modal.classList.contains('active')) {
+                closeModal();
+            }
+        });
+    }
+
+    let response;
+    try {
+        response = await fetch('../api/generate_faculty_acknowledgement.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+    } catch (error) {
+        alert('Unable to connect to the PDF generator endpoint. Please try again.');
         return;
-    } else if (actionTitle === 'Generate Summary') {
-        alert('Generate Summary feature will be implemented soon!');
+    }
+
+    if (!response.ok) {
+        let errorMessage = 'Failed to generate faculty acknowledgement paper.';
+        try {
+            const errorData = await response.json();
+            if (errorData && errorData.error) errorMessage = errorData.error;
+        } catch (_error) {
+            // Ignore non-JSON response body.
+        }
+        alert(errorMessage);
+        return;
+    }
+
+    const pdfBlob = await response.blob();
+    ensureModal();
+    if (!frame || !modal) {
+        alert('Unable to open PDF preview modal.');
+        return;
+    }
+
+    if (blobUrlHolder) {
+        URL.revokeObjectURL(blobUrlHolder);
+        blobUrlHolder = '';
+    }
+    filenameHolder = downloadFilename || 'faculty_acknowledgement.pdf';
+    blobUrlHolder = URL.createObjectURL(pdfBlob);
+    openDeanFacultyPaperPdf._blobUrl = blobUrlHolder;
+    openDeanFacultyPaperPdf._filename = filenameHolder;
+    frame.src = `${blobUrlHolder}#toolbar=1&navpanes=0&scrollbar=1`;
+    modal.classList.add('active');
+}
+
+async function openDeanStoredPaperPdf(paper, actorUserId, versionNo) {
+    const paperId = String(paper && paper.id || '').trim();
+    const actorId = normalizeDeanUserIdToken(actorUserId);
+    if (!paperId || !actorId) {
+        throw new Error('Unable to resolve stored paper context.');
+    }
+
+    const params = new URLSearchParams({
+        paper_id: paperId,
+        actor_role: 'dean',
+        actor_user_id: actorId
+    });
+    if (Number.isInteger(versionNo) && versionNo > 0) {
+        params.set('version_no', String(versionNo));
+    }
+
+    let response;
+    try {
+        response = await fetch(`../api/faculty_paper_file.php?${params.toString()}`, {
+            method: 'GET'
+        });
+    } catch (_error) {
+        throw new Error('Unable to connect to stored PDF service.');
+    }
+
+    if (!response.ok) {
+        let message = 'Failed to load stored PDF file.';
+        try {
+            const data = await response.json();
+            if (data && data.error) message = String(data.error);
+        } catch (_error) {
+            // Ignore non-JSON body.
+        }
+        throw new Error(message);
+    }
+
+    const pdfBlob = await response.blob();
+    const filename = String(paper.latest_file_name || `${paperId}.pdf`).trim() || `${paperId}.pdf`;
+
+    const blobUrl = URL.createObjectURL(pdfBlob);
+    let modal = document.getElementById('deanPdfPreviewModal');
+    let frame = document.getElementById('deanPdfPreviewFrame');
+    if (!modal || !frame) {
+        modal = document.createElement('div');
+        modal.id = 'deanPdfPreviewModal';
+        modal.className = 'pdf-preview-modal';
+        modal.innerHTML = `
+            <div class="pdf-preview-dialog" role="dialog" aria-modal="true" aria-label="Faculty Paper PDF Preview">
+                <div class="pdf-preview-toolbar">
+                    <h3>Faculty Paper Preview</h3>
+                    <div class="pdf-preview-actions">
+                        <button type="button" class="btn-submit pdf-preview-download-btn" id="deanPdfPreviewDownloadBtn">Download</button>
+                        <button type="button" class="btn-cancel pdf-preview-close-btn" id="deanPdfPreviewCloseBtn">Close</button>
+                    </div>
+                </div>
+                <iframe id="deanPdfPreviewFrame" class="pdf-preview-frame" title="Faculty Paper PDF Preview"></iframe>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        frame = document.getElementById('deanPdfPreviewFrame');
+
+        const closeBtn = document.getElementById('deanPdfPreviewCloseBtn');
+        const downloadBtn = document.getElementById('deanPdfPreviewDownloadBtn');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', function () {
+                if (frame) frame.src = 'about:blank';
+                if (modal) modal.classList.remove('active');
+                if (openDeanFacultyPaperPdf._blobUrl) {
+                    URL.revokeObjectURL(openDeanFacultyPaperPdf._blobUrl);
+                    openDeanFacultyPaperPdf._blobUrl = '';
+                }
+            });
+        }
+        if (downloadBtn) {
+            downloadBtn.addEventListener('click', function () {
+                if (!openDeanFacultyPaperPdf._blobUrl) return;
+                const anchor = document.createElement('a');
+                anchor.href = openDeanFacultyPaperPdf._blobUrl;
+                anchor.download = openDeanFacultyPaperPdf._filename || 'faculty_acknowledgement.pdf';
+                document.body.appendChild(anchor);
+                anchor.click();
+                document.body.removeChild(anchor);
+            });
+        }
+        modal.addEventListener('click', function (event) {
+            if (event.target !== modal) return;
+            if (frame) frame.src = 'about:blank';
+            modal.classList.remove('active');
+        });
+        document.addEventListener('keydown', function (event) {
+            if (event.key !== 'Escape' || !modal || !modal.classList.contains('active')) return;
+            if (frame) frame.src = 'about:blank';
+            modal.classList.remove('active');
+        });
+    }
+
+    if (openDeanFacultyPaperPdf._blobUrl) {
+        URL.revokeObjectURL(openDeanFacultyPaperPdf._blobUrl);
+    }
+    openDeanFacultyPaperPdf._blobUrl = blobUrl;
+    openDeanFacultyPaperPdf._filename = filename;
+    frame.src = `${blobUrl}#toolbar=1&navpanes=0&scrollbar=1`;
+    modal.classList.add('active');
+}
+
+function renderDeanFacultyPaperDetail(paper) {
+    const card = document.getElementById('deanFacultyPaperDetailCard');
+    const meta = document.getElementById('deanFacultyPaperDetailMeta');
+    const areasInput = document.getElementById('deanSectionCAreas');
+    const activitiesInput = document.getElementById('deanSectionCActivities');
+    const actionPlanInput = document.getElementById('deanSectionCActionPlan');
+    const saveBtn = document.getElementById('deanFacultyPaperSaveBtn');
+    const previewBtn = document.getElementById('deanFacultyPaperPreviewBtn');
+
+    if (!card) return;
+
+    if (!paper) {
+        card.style.display = 'none';
+        return;
+    }
+
+    card.style.display = 'block';
+    if (meta) meta.textContent = `Sent: ${formatDeanPaperTimestamp(paper.sent_at)} | Updated: ${formatDeanPaperTimestamp(paper.updated_at)}`;
+
+    const setText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = String(value || 'N/A');
+    };
+
+    setText('deanFpDetailId', paper.id || 'N/A');
+    setText('deanFpDetailStatus', mapDeanPaperStatus(paper.status));
+    setText('deanFpDetailFacultyName', paper.professor_name || 'N/A');
+    setText('deanFpDetailDepartment', paper.department || 'N/A');
+    setText('deanFpDetailRank', paper.rank || 'N/A');
+    setText('deanFpDetailSemester', paper.semester_label || 'N/A');
+    setText('deanFpDetailSetRating', paper.set_rating || 'N/A');
+    setText('deanFpDetailSafRating', paper.saf_rating || 'N/A');
+
+    if (areasInput) areasInput.value = String(paper.section_c_areas || '');
+    if (activitiesInput) activitiesInput.value = String(paper.section_c_activities || '');
+    if (actionPlanInput) actionPlanInput.value = String(paper.section_c_action_plan || '');
+
+    const editable = normalizeDeanToken(paper.status) === 'sent' || normalizeDeanToken(paper.status) === 'completed';
+    if (areasInput) areasInput.disabled = !editable;
+    if (activitiesInput) activitiesInput.disabled = !editable;
+    if (actionPlanInput) actionPlanInput.disabled = !editable;
+    if (saveBtn) saveBtn.disabled = !editable;
+
+    if (previewBtn) {
+        previewBtn.onclick = async () => {
+            const statusToken = normalizeDeanToken(paper.status);
+            const actorId = deanFacultyPaperState.actorUserId || resolveCurrentDeanActorUserId();
+            const shouldUseStored = (statusToken === 'sent' || statusToken === 'completed')
+                && String(paper.latest_file_path || '').trim() !== ''
+                && !!actorId;
+
+            if (shouldUseStored) {
+                try {
+                    await openDeanStoredPaperPdf(paper, actorId);
+                    return;
+                } catch (error) {
+                    console.warn('[DeanPanel] Falling back to live PDF generation.', error);
+                }
+            }
+
+            await openDeanFacultyPaperPdf({
+                faculty_name: paper.professor_name || 'N/A',
+                department: paper.department || 'N/A',
+                rank: paper.rank || 'N/A',
+                semester_label: paper.semester_label || 'N/A',
+                set_rating: paper.set_rating || 'N/A',
+                saf_rating: paper.saf_rating || 'N/A',
+                section_c_areas: areasInput ? areasInput.value : (paper.section_c_areas || ''),
+                section_c_activities: activitiesInput ? activitiesInput.value : (paper.section_c_activities || ''),
+                section_c_action_plan: actionPlanInput ? actionPlanInput.value : (paper.section_c_action_plan || ''),
+            }, `${paper.id || 'faculty_ack'}.pdf`);
+        };
     }
 }
 
-// Open the dean report PDF in a new browser tab
-function openDeanReportPdf() {
-    const pdfPath = 'files/sample file.pdf';
-    const pdfUrl = encodeURI(pdfPath);
+function renderDeanFacultyPaperInbox() {
+    const tableBody = document.getElementById('deanFacultyPaperTableBody');
+    if (!tableBody) return;
 
-    const newTab = window.open(pdfUrl, '_blank', 'noopener');
-    if (!newTab) {
-        alert('Please allow pop-ups to view the report PDF.');
+    const actorUserId = resolveCurrentDeanActorUserId();
+    deanFacultyPaperState.actorUserId = actorUserId;
+    if (!actorUserId) {
+        tableBody.innerHTML = '<tr><td colspan="6">Unable to resolve dean account for this session.</td></tr>';
+        renderDeanFacultyPaperDetail(null);
+        return;
+    }
+
+    let papers = [];
+    try {
+        papers = SharedData.listFacultyPapers('dean', actorUserId);
+    } catch (error) {
+        tableBody.innerHTML = '<tr><td colspan="6">Failed to load faculty papers.</td></tr>';
+        renderDeanFacultyPaperDetail(null);
+        return;
+    }
+
+    deanFacultyPaperState.papers = Array.isArray(papers) ? papers : [];
+    if (!deanFacultyPaperState.papers.length) {
+        tableBody.innerHTML = '<tr><td colspan="6">No faculty papers assigned.</td></tr>';
+        deanFacultyPaperState.selectedId = '';
+        renderDeanFacultyPaperDetail(null);
+        return;
+    }
+
+    if (!deanFacultyPaperState.papers.some(item => item.id === deanFacultyPaperState.selectedId)) {
+        deanFacultyPaperState.selectedId = deanFacultyPaperState.papers[0].id || '';
+    }
+
+    tableBody.innerHTML = deanFacultyPaperState.papers.map(paper => {
+        const selected = deanFacultyPaperState.selectedId === paper.id;
+        return `
+            <tr class="${selected ? 'faculty-paper-row-active' : ''}">
+                <td>${escapeHTML(String(paper.id || 'N/A'))}</td>
+                <td>${escapeHTML(String(paper.professor_name || 'N/A'))}</td>
+                <td>${escapeHTML(String(paper.semester_label || 'N/A'))}</td>
+                <td>${escapeHTML(mapDeanPaperStatus(paper.status))}</td>
+                <td>${escapeHTML(formatDeanPaperTimestamp(paper.sent_at))}</td>
+                <td><button type="button" class="btn-submit dean-paper-open-btn" data-paper-id="${escapeHTML(String(paper.id || ''))}">Open</button></td>
+            </tr>
+        `;
+    }).join('');
+
+    tableBody.querySelectorAll('.dean-paper-open-btn').forEach(button => {
+        button.addEventListener('click', () => {
+            deanFacultyPaperState.selectedId = button.getAttribute('data-paper-id') || '';
+            const selected = deanFacultyPaperState.papers.find(item => String(item.id || '') === deanFacultyPaperState.selectedId) || null;
+            renderDeanFacultyPaperDetail(selected);
+            renderDeanFacultyPaperInbox();
+        });
+    });
+
+    const selectedPaper = deanFacultyPaperState.papers.find(item => String(item.id || '') === deanFacultyPaperState.selectedId) || null;
+    renderDeanFacultyPaperDetail(selectedPaper);
+}
+
+function setupDeanFacultyPaperInbox() {
+    const form = document.getElementById('deanFacultyPaperSectionCForm');
+    if (form) {
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            const actorUserId = deanFacultyPaperState.actorUserId || resolveCurrentDeanActorUserId();
+            if (!actorUserId) {
+                alert('Unable to resolve dean account.');
+                return;
+            }
+
+            const paperId = deanFacultyPaperState.selectedId;
+            if (!paperId) {
+                alert('Select a faculty paper first.');
+                return;
+            }
+
+            const areas = document.getElementById('deanSectionCAreas');
+            const activities = document.getElementById('deanSectionCActivities');
+            const actionPlan = document.getElementById('deanSectionCActionPlan');
+
+            try {
+                const response = SharedData.saveFacultyPaperSectionC({
+                    actor_role: 'dean',
+                    actor_user_id: actorUserId,
+                    paper_id: paperId,
+                    section_c: {
+                        areas: areas ? areas.value : '',
+                        activities: activities ? activities.value : '',
+                        action_plan: actionPlan ? actionPlan.value : '',
+                    }
+                });
+                if (!response || response.success === false) {
+                    throw new Error((response && response.error) || 'Failed to save Section C.');
+                }
+                renderDeanFacultyPaperInbox();
+                alert('Section C saved successfully.');
+            } catch (error) {
+                alert(error && error.message ? error.message : 'Failed to save Section C.');
+            }
+        });
     }
 }
 
@@ -549,18 +1725,17 @@ function updateSummaryCards() {
 function setupPeerEvaluationForm() {
     const form = document.getElementById('peerEvaluationForm');
     const cancelBtn = document.getElementById('cancelPeerBtn');
+    const peerSearchInput = document.getElementById('peerProfessorSearch');
     if (!form) return;
 
     // Force supervisor mode
     const evaluationTypeInput = document.getElementById('evaluationType');
     const targetLabel = document.getElementById('peerTargetLabel');
-    const placeholder = document.getElementById('peerTargetPlaceholder');
     const endpoint = document.getElementById('peerEvaluationEndpoint');
 
     if (evaluationTypeInput) evaluationTypeInput.value = 'supervisor';
     if (form) form.dataset.evalType = 'supervisor';
     if (targetLabel) targetLabel.textContent = 'Select Employee';
-    if (placeholder) placeholder.textContent = 'Choose an employee to evaluate';
     if (endpoint) endpoint.textContent = 'SQL Ready: connect to /api/dean/supervisor-evaluations/submit (POST)';
 
     form.addEventListener('submit', function (e) {
@@ -568,17 +1743,169 @@ function setupPeerEvaluationForm() {
         handlePeerEvaluation();
     });
 
+    if (peerSearchInput) {
+        peerSearchInput.addEventListener('input', function () {
+            syncSupervisorTargetFromInput();
+        });
+        peerSearchInput.addEventListener('change', function () {
+            syncSupervisorTargetFromInput();
+        });
+        peerSearchInput.addEventListener('blur', function () {
+            syncSupervisorTargetFromInput();
+        });
+    }
+
     if (cancelBtn) {
         cancelBtn.addEventListener('click', function () {
             form.reset();
+            syncSupervisorTargetFromInput();
             switchView('dashboard');
             updateNavigation('dashboard');
         });
     }
+
+    refreshSupervisorTargetLockState();
+}
+
+function populatePeerProfessorOptions() {
+    const hiddenSelectValue = document.getElementById('peerProfessor');
+    const searchInput = document.getElementById('peerProfessorSearch');
+    const datalist = document.getElementById('peerProfessorOptions');
+    const searchMeta = document.getElementById('peerProfessorSearchMeta');
+    if (!hiddenSelectValue || !searchInput || !datalist) return;
+
+    const currentUserId = String(hiddenSelectValue.value || '').trim();
+    const professors = getScopedProfessorUsers(false);
+    deanSupervisorTargetDirectory = professors.map(professor => {
+        const userId = normalizeUserIdToken(professor && professor.id) || String(professor && professor.employeeId || '').trim();
+        if (!userId) return null;
+        const name = String(professor && professor.name || 'Unknown').trim() || 'Unknown';
+        const employeeId = String(professor && professor.employeeId || '').trim();
+        const department = String((professor && (professor.department || professor.institute)) || '').trim().toUpperCase();
+        const programCode = String(professor && professor.programCode || '').trim().toUpperCase();
+        const programLabel = programCode || 'UNASSIGNED';
+        const label = `${name} (${[employeeId || 'N/A', programLabel, department || 'N/A'].join(' | ')})`;
+        return {
+            userId,
+            label
+        };
+    }).filter(Boolean);
+
+    datalist.innerHTML = '';
+    deanSupervisorTargetDirectory.forEach(item => {
+        const option = document.createElement('option');
+        option.value = item.label;
+        datalist.appendChild(option);
+    });
+
+    if (searchMeta) {
+        const label = deanSupervisorTargetDirectory.length === 1 ? 'employee' : 'employees';
+        searchMeta.textContent = deanSupervisorTargetDirectory.length
+            ? `Showing ${deanSupervisorTargetDirectory.length} ${label} in your department scope.`
+            : 'No active professors in your department scope.';
+    }
+
+    const currentMatch = deanSupervisorTargetDirectory.find(item => item.userId === currentUserId);
+    if (currentMatch) {
+        hiddenSelectValue.value = currentMatch.userId;
+        searchInput.value = currentMatch.label;
+    } else {
+        hiddenSelectValue.value = '';
+    }
+    syncSupervisorTargetFromInput();
+}
+
+function syncSupervisorTargetFromInput() {
+    const searchInput = document.getElementById('peerProfessorSearch');
+    const hiddenTarget = document.getElementById('peerProfessor');
+    if (!searchInput || !hiddenTarget) return;
+
+    const raw = String(searchInput.value || '').trim();
+    if (!raw) {
+        hiddenTarget.value = '';
+        searchInput.setCustomValidity('');
+        refreshSupervisorTargetLockState();
+        return;
+    }
+
+    const match = deanSupervisorTargetDirectory.find(item =>
+        String(item.label || '').trim().toLowerCase() === raw.toLowerCase()
+    );
+    if (match) {
+        hiddenTarget.value = match.userId;
+        searchInput.value = match.label;
+        searchInput.setCustomValidity('');
+    } else {
+        hiddenTarget.value = '';
+        searchInput.setCustomValidity('Please choose an employee from the dropdown suggestions.');
+    }
+    refreshSupervisorTargetLockState();
 }
 
 function setupEvaluationToggle(form) {
     // Peer toggle removed; supervisor mode enforced in setupPeerEvaluationForm
+}
+
+function normalizeSupervisorLockValue(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function getSupervisorSemesterId() {
+    const semester = (SharedData.getCurrentSemester && SharedData.getCurrentSemester()) || '';
+    return String(semester || '').trim() || 'current';
+}
+
+function buildSupervisorEvaluationKey(evaluatorId, semesterId, targetId) {
+    return [
+        normalizeSupervisorLockValue(evaluatorId),
+        normalizeSupervisorLockValue(semesterId),
+        normalizeSupervisorLockValue(targetId)
+    ].join('|');
+}
+
+function isSupervisorTargetLocked(targetId) {
+    const session = SharedData.getSession() || {};
+    const evaluatorId = session.username || '';
+    const semesterId = getSupervisorSemesterId();
+    const key = buildSupervisorEvaluationKey(evaluatorId, semesterId, targetId);
+    const evaluations = (SharedData.getEvaluations && SharedData.getEvaluations()) || [];
+
+    return evaluations.some(ev => {
+        const role = String(ev.evaluatorRole || ev.evaluationType || '').toLowerCase();
+        if (role && role !== 'dean' && role !== 'supervisor') return false;
+
+        const evEvaluator = normalizeSupervisorLockValue(ev.evaluatorId || ev.evaluatorUsername);
+        if (!evEvaluator || evEvaluator !== normalizeSupervisorLockValue(evaluatorId)) return false;
+
+        const evSemester = normalizeSupervisorLockValue(ev.semesterId);
+        if (evSemester && evSemester !== normalizeSupervisorLockValue(semesterId)) return false;
+
+        const existingKey = normalizeSupervisorLockValue(ev.evaluationKey);
+        if (existingKey && existingKey === normalizeSupervisorLockValue(key)) return true;
+
+        const evTarget = normalizeSupervisorLockValue(ev.targetProfessorId || ev.targetId || ev.colleagueId);
+        return !!evTarget && evTarget === normalizeSupervisorLockValue(targetId);
+    });
+}
+
+function refreshSupervisorTargetLockState() {
+    const form = document.getElementById('peerEvaluationForm');
+    const select = document.getElementById('peerProfessor');
+    const submitBtn = form ? form.querySelector('.btn-submit') : null;
+    if (!form || !select || !submitBtn) return;
+
+    const targetId = String(select.value || '').trim();
+    if (!targetId) {
+        submitBtn.disabled = false;
+        return;
+    }
+
+    const locked = isSupervisorTargetLocked(targetId);
+    submitBtn.disabled = locked;
+
+    if (locked) {
+        showFormMessage(form, 'You already submitted a supervisor evaluation for this target this semester.', 'error');
+    }
 }
 
 /**
@@ -587,6 +1914,12 @@ function setupEvaluationToggle(form) {
 function handlePeerEvaluation() {
     const form = document.getElementById('peerEvaluationForm');
     if (!form) return;
+
+    syncSupervisorTargetFromInput();
+
+    if (!enforceActiveDeanAccount({ inline: true, form })) {
+        return;
+    }
 
     // ── Evaluation period gate ──
     if (!SharedData.isEvalPeriodOpen('supervisor-professor')) {
@@ -601,7 +1934,26 @@ function handlePeerEvaluation() {
         return;
     }
 
+    const selectedTargetId = String((document.getElementById('peerProfessor') || {}).value || '').trim();
+    if (selectedTargetId && isSupervisorTargetLocked(selectedTargetId)) {
+        showFormMessage(form, 'You already submitted a supervisor evaluation for this target this semester.', 'error');
+        refreshSupervisorTargetLockState();
+        return;
+    }
+
+    enableAllSupervisorStepInputs();
+
     if (!form.checkValidity()) {
+        const firstInvalid = form.querySelector(':invalid');
+        if (firstInvalid) {
+            const targetStep = firstInvalid.closest('.eval-step');
+            if (targetStep) {
+                const targetIndex = parseInt(targetStep.getAttribute('data-step-index'), 10);
+                if (!Number.isNaN(targetIndex)) {
+                    goToSupervisorStep(targetIndex);
+                }
+            }
+        }
         form.reportValidity();
         return;
     }
@@ -626,7 +1978,7 @@ function handlePeerEvaluation() {
     const qualitativeGroup = {};
 
     for (let [key, value] of formData.entries()) {
-        if (key === 'evaluationType' || key === 'peerProfessor' || key === 'peerComments') continue;
+        if (key === 'evaluationType' || key === 'peerProfessor' || key === 'peerProfessorSearch' || key === 'peerComments') continue;
 
         // Find the question definition
         let questionDef = allQuestions.find(q => String(q.id) === key);
@@ -639,29 +1991,45 @@ function handlePeerEvaluation() {
     }
 
     const session = SharedData.getSession() || {};
+    const semesterId = getSupervisorSemesterId();
+    const targetProfessorId = formData.get('peerProfessor') || '';
+    const evaluationKey = buildSupervisorEvaluationKey(session.username || '', semesterId, targetProfessorId);
     const payload = {
         evaluatorId: session.username || '',
         evaluatorName: session.fullName || 'Anonymous Dean',
         evaluatorRole: 'dean',
         evaluationType: 'supervisor',
         targetId: formData.get('peerProfessor'),
+        targetProfessorId: targetProfessorId,
+        semesterId: semesterId,
+        evaluationKey: evaluationKey,
         ratings: ratingsGroup,
         qualitative: qualitativeGroup,
         comments: formData.get('peerComments') || '',
         submittedAt: new Date().toISOString()
     };
 
-    // Save via centralized API
-    SharedData.addEvaluation(payload);
+    try {
+        // Save via centralized API
+        SharedData.addEvaluation(payload);
 
-    // Add to activity log
-    SharedData.addActivityLogEntry({
-        type: 'evaluation_submitted',
-        title: 'Supervisor Evaluation Submitted',
-        user: payload.evaluatorName,
-        role: 'dean',
-        date: new Date().toISOString()
-    });
+        // Add to activity log
+        SharedData.addActivityLogEntry({
+            type: 'evaluation_submitted',
+            title: 'Supervisor Evaluation Submitted',
+            user: payload.evaluatorName,
+            role: 'dean',
+            date: new Date().toISOString()
+        });
+    } catch (error) {
+        const message = String(error && error.message || '');
+        if (message.toLowerCase().includes('inactive')) {
+            enforceActiveDeanAccount({ inline: true, form });
+            return;
+        }
+        showFormMessage(form, message || 'Failed to submit supervisor evaluation. Please try again.', 'error');
+        return;
+    }
 
     console.log('Supervisor evaluation submitted to local database:', payload);
     showFormMessage(
@@ -673,8 +2041,10 @@ function handlePeerEvaluation() {
     // Auto redirect after briefly showing the success state
     setTimeout(() => {
         form.reset();
+        syncSupervisorTargetFromInput();
         const evaluationTypeInput = document.getElementById('evaluationType');
         if (evaluationTypeInput) evaluationTypeInput.value = evaluationType;
+        refreshSupervisorTargetLockState();
         switchView('dashboard');
 
         // Find and update the active nav link for dashboard
@@ -735,6 +2105,19 @@ function loadDynamicSupervisorQuestionnaire() {
     }
 
     let html = '';
+    let stepIndex = 0;
+
+    html += `
+        <div class="eval-form-progress" id="supervisor-form-progress">
+            <div class="eval-form-progress-header">
+                <span class="eval-form-progress-label">Progress</span>
+                <span class="eval-form-progress-meta" id="supervisor-progress-meta">Section 1 of 1</span>
+            </div>
+            <div class="eval-form-progress-track">
+                <div class="eval-form-progress-fill" id="supervisor-progress-fill" style="width: 0%;"></div>
+            </div>
+        </div>
+    `;
 
     supervisorData.sections.forEach(section => {
         const sectionHasContent = supervisorData.questions && supervisorData.questions.some(q => q.sectionId === section.id);
@@ -742,9 +2125,17 @@ function loadDynamicSupervisorQuestionnaire() {
         if (!sectionHasContent) return;
 
         html += `
-            <div class="form-section">
-                <h3 class="section-title purple">${escapeHTML(section.title)}</h3>
-                ${section.description ? `<p style="color: #64748b; margin-bottom: 1rem; font-size: 0.9rem;">${escapeHTML(section.description)}</p>` : ''}
+            <div class="question-section eval-step" data-step-index="${stepIndex}">
+                <div class="section-header">
+                    <div class="section-title-group">
+                        ${section.letter ? `<h2 class="section-letter">${escapeHTML(section.letter)}.</h2>` : ''}
+                        <div class="section-title-content">
+                            <h3 class="section-title">${escapeHTML(section.title)}</h3>
+                            ${section.description ? `<p class="section-description">${escapeHTML(section.description)}</p>` : ''}
+                        </div>
+                    </div>
+                </div>
+                <div class="section-questions">
         `;
 
         const sectionQuestions = supervisorData.questions.filter(q => q.sectionId === section.id);
@@ -753,9 +2144,127 @@ function loadDynamicSupervisorQuestionnaire() {
             html += renderSupervisorQuestionHTML(question, index);
         });
 
-        html += `</div>`;
+        html += `
+                </div>
+            </div>
+        `;
+        stepIndex++;
     });
+    html += `
+        <div class="eval-form-nav" id="supervisor-form-nav">
+            <button type="button" class="btn-eval-nav btn-eval-prev" id="supervisor-prev-btn" disabled>
+                <i class="fas fa-arrow-left"></i>
+                Back
+            </button>
+            <button type="button" class="btn-eval-nav btn-eval-next" id="supervisor-next-btn">
+                Next
+                <i class="fas fa-arrow-right"></i>
+            </button>
+        </div>
+    `;
     container.innerHTML = html;
+    setupSupervisorSectionFlow();
+    refreshSupervisorTargetLockState();
+}
+
+function setupSupervisorSectionFlow() {
+    const steps = Array.from(document.querySelectorAll('#dynamic-supervisor-questions-container .eval-step'));
+    const prevBtn = document.getElementById('supervisor-prev-btn');
+    const nextBtn = document.getElementById('supervisor-next-btn');
+
+    supervisorSectionFlow.steps = steps;
+    supervisorSectionFlow.activeIndex = 0;
+
+    if (!steps.length) {
+        const submitBtn = document.querySelector('#peerEvaluationForm .btn-submit');
+        const progress = document.getElementById('supervisor-form-progress');
+        const nav = document.getElementById('supervisor-form-nav');
+        if (progress) progress.style.display = 'none';
+        if (nav) nav.style.display = 'none';
+        if (submitBtn) submitBtn.style.display = 'inline-flex';
+        return;
+    }
+
+    if (prevBtn) {
+        prevBtn.onclick = () => goToSupervisorStep(supervisorSectionFlow.activeIndex - 1);
+    }
+    if (nextBtn) {
+        nextBtn.onclick = () => {
+            if (!validateSupervisorCurrentStep()) return;
+            goToSupervisorStep(supervisorSectionFlow.activeIndex + 1);
+        };
+    }
+
+    goToSupervisorStep(0);
+}
+
+function goToSupervisorStep(index) {
+    const steps = supervisorSectionFlow.steps || [];
+    if (!steps.length) return;
+
+    const maxIndex = steps.length - 1;
+    supervisorSectionFlow.activeIndex = Math.max(0, Math.min(index, maxIndex));
+
+    steps.forEach((step, idx) => {
+        const isActive = idx === supervisorSectionFlow.activeIndex;
+        step.classList.toggle('is-active', isActive);
+        toggleSupervisorStepInputs(step, isActive);
+    });
+
+    const prevBtn = document.getElementById('supervisor-prev-btn');
+    const nextBtn = document.getElementById('supervisor-next-btn');
+    const progressFill = document.getElementById('supervisor-progress-fill');
+    const progressMeta = document.getElementById('supervisor-progress-meta');
+    const submitBtn = document.querySelector('#peerEvaluationForm .btn-submit');
+
+    const isFirst = supervisorSectionFlow.activeIndex === 0;
+    const isLast = supervisorSectionFlow.activeIndex === maxIndex;
+    const progressPercent = ((supervisorSectionFlow.activeIndex + 1) / steps.length) * 100;
+
+    if (progressFill) progressFill.style.width = `${progressPercent}%`;
+    if (progressMeta) progressMeta.textContent = `Section ${supervisorSectionFlow.activeIndex + 1} of ${steps.length}`;
+    if (prevBtn) prevBtn.disabled = isFirst;
+    if (nextBtn) nextBtn.style.display = isLast ? 'none' : 'inline-flex';
+    if (submitBtn) submitBtn.style.display = isLast ? 'inline-flex' : 'none';
+}
+
+function toggleSupervisorStepInputs(stepElement, enabled) {
+    if (!stepElement) return;
+    const fields = stepElement.querySelectorAll('input, textarea, select');
+    fields.forEach(field => {
+        field.disabled = !enabled;
+    });
+}
+
+function validateSupervisorCurrentStep() {
+    const current = supervisorSectionFlow.steps[supervisorSectionFlow.activeIndex];
+    if (!current) return true;
+    const requiredFields = Array.from(current.querySelectorAll('input[required], textarea[required], select[required]'));
+
+    for (const field of requiredFields) {
+        if (field.type === 'radio') {
+            const radios = current.querySelectorAll(`input[name="${field.name}"]`);
+            const checked = Array.from(radios).some(r => r.checked);
+            if (!checked) {
+                field.reportValidity();
+                return false;
+            }
+            continue;
+        }
+
+        if (!field.checkValidity()) {
+            field.reportValidity();
+            return false;
+        }
+    }
+    return true;
+}
+
+function enableAllSupervisorStepInputs() {
+    const fields = document.querySelectorAll('#dynamic-supervisor-questions-container .eval-step input, #dynamic-supervisor-questions-container .eval-step textarea, #dynamic-supervisor-questions-container .eval-step select');
+    fields.forEach(field => {
+        field.disabled = false;
+    });
 }
 
 function renderSupervisorQuestionHTML(question, index) {
@@ -765,7 +2274,7 @@ function renderSupervisorQuestionHTML(question, index) {
     if (question.type === 'qualitative') {
         return `
             <div class="question-group" style="margin-bottom: 24px;">
-                <label class="question-label" for="q-${qid}">${escapeHTML(question.text)} ${question.required ? '<span style="color:var(--danger)">*</span>' : ''}</label>
+                <label class="question-label" for="q-${qid}">${escapeHTML(question.text)} ${question.required ? '<span style="color:#ef4444">*</span>' : ''}</label>
                 <div class="form-group" style="margin-top: 8px;">
                     <textarea id="q-${qid}" name="${qid}" class="form-textarea" rows="4" placeholder="Type your response here..." ${isRequired}></textarea>
                 </div>
@@ -776,7 +2285,7 @@ function renderSupervisorQuestionHTML(question, index) {
     // Default to rating scale
     return `
         <div class="question-group">
-            <label class="question-label">${escapeHTML(question.text)} ${question.required ? '<span style="color:var(--danger)">*</span>' : ''}</label>
+            <label class="question-label">${escapeHTML(question.text)} ${question.required ? '<span style="color:#ef4444">*</span>' : ''}</label>
             <div class="rating-scale">
                 <input type="radio" name="${qid}" id="q-${qid}-1" value="1" ${isRequired}>
                 <label for="q-${qid}-1" class="rating-option">1</label>
@@ -843,81 +2352,48 @@ function showFormMessage(form, message, type) {
  * Load faculty summary data (SQL-ready placeholder)
  */
 function loadFacultySummary(selection = {}) {
-    const session = getUserSession();
-    const deanId = session ? session.username : '';
-    const ay = selection.ay || '2025-2026';
-    const sem = selection.sem || '2';
-    const evaluationType = selection.evaluationType || 'student';
+    const context = buildDeanPanelContext();
+    const requestedType = getDeanEvaluationTypeMeta(
+        selection.evaluationType
+        || deanSummaryState.selectedEvaluationType
+        || 'student'
+    ).id;
+    const requestedSemesterId = resolveSelectedSemesterId(
+        selection.semesterId
+        || selection.semester
+        || deanSummaryState.selectedSemesterId
+        || context.currentSemester
+    );
 
-    fetchFacultySummaryFromSql({
-        deanId,
-        ay,
-        sem,
-        evaluationType
-    }).then(summary => {
-        renderCriteriaSummary(summary.criteriaAverages);
-        renderBreakdownTable(summary.subjects, evaluationType);
-        renderEvaluationCount(summary.subjects);
-        if (evaluationType === 'student') {
-            updateSubmissionProgress(summary.subjects);
-        }
+    const semesterLabel = getSemesterLabelById(requestedSemesterId);
+    deanSummaryState.selectedSemesterId = requestedSemesterId;
+    deanSummaryState.selectedSemesterLabel = semesterLabel;
+    deanSummaryState.selectedEvaluationType = requestedType;
+
+    try {
+        const studentSummary = fetchFacultySummaryFromSql({ semesterId: requestedSemesterId, evaluationType: 'student' });
+        const professorSummary = fetchFacultySummaryFromSql({ semesterId: requestedSemesterId, evaluationType: 'professor' });
+        const supervisorSummary = fetchFacultySummaryFromSql({ semesterId: requestedSemesterId, evaluationType: 'supervisor' });
+
+        deanSummaryState.byType.student = studentSummary;
+        deanSummaryState.byType.professor = professorSummary;
+        deanSummaryState.byType.supervisor = supervisorSummary;
+
+        const activeSummary = getDeanSummaryForType(requestedType);
+        renderCriteriaSummary(activeSummary.criteriaAverages);
+        renderDetailedSummaryTable(activeSummary.detailedRows, requestedType);
+        renderEvaluationCount(activeSummary.breakdownRows || activeSummary.subjects || [], activeSummary.totals);
         updateSummaryCards();
-    }).catch(() => {
+        initializeReports();
+    } catch (error) {
+        deanSummaryState.byType.student = { ...DEAN_EMPTY_SUMMARY };
+        deanSummaryState.byType.professor = { ...DEAN_EMPTY_SUMMARY };
+        deanSummaryState.byType.supervisor = { ...DEAN_EMPTY_SUMMARY };
+        const emptySummary = getDeanSummaryForType(requestedType);
         renderCriteriaSummary([]);
-        renderBreakdownTable([], evaluationType);
+        renderDetailedSummaryTable([], requestedType);
+        renderEvaluationCount([], emptySummary.totals);
         updateSummaryCards();
-    });
-}
-
-/**
- * Setup semester filter for faculty summary
- * @returns {boolean} - True if filter is present
- */
-function setupSemesterFilter() {
-    const filter = document.getElementById('semesterFilter');
-    const evalFilter = document.getElementById('evaluationTypeFilter');
-    if (!filter) return false;
-
-    const applySelection = () => {
-        const selectedOption = filter.options[filter.selectedIndex];
-        const value = filter.value || '';
-        const [ay, sem] = value.split('|');
-        const label = selectedOption ? selectedOption.textContent.trim() : '';
-        const evalValue = evalFilter ? evalFilter.value : 'student';
-        const evalLabel = evalFilter
-            ? (evalFilter.options[evalFilter.selectedIndex]?.textContent || '').trim()
-            : 'Student Evaluation';
-
-        updateSemesterLabels(label, evalLabel);
-        loadFacultySummary({ ay, sem, evaluationType: evalValue });
-    };
-
-    filter.addEventListener('change', applySelection);
-    if (evalFilter) {
-        evalFilter.addEventListener('change', applySelection);
-    }
-    applySelection();
-    return true;
-}
-
-/**
- * Update semester labels in the UI
- */
-function updateSemesterLabels(label, evaluationLabel) {
-    const display = document.getElementById('selectedSemester');
-    const summary = document.getElementById('summarySemester');
-    const evalDisplay = document.getElementById('selectedEvalType');
-
-    if (display) {
-        display.textContent = label || 'Selected semester';
-    }
-
-    if (summary) {
-        summary.textContent = label || 'Selected semester';
-    }
-
-    if (evalDisplay) {
-        evalDisplay.textContent = evaluationLabel || 'Student Evaluation';
     }
 }
 
@@ -984,15 +2460,16 @@ function buildInitials(name) {
 }
 
 function loadProfessorCount() {
-    const session = getUserSession();
-    const deanId = session ? session.username : '';
+    const session = getUserSession() || {};
+    const deanId = session.username || '';
+    const semesterId = resolveSelectedSemesterId(deanSummaryState.selectedSemesterId);
     const assignedInstitutes = getDeanAssignedInstitutes(session);
 
     return fetchDeanProfessorResultsFromSql({
         deanId,
         assignedInstitutes,
-        ay: '2025-2026',
-        sem: '2'
+        semesterId,
+        evaluationType: 'student'
     }).then(results => {
         deanProfessorCount = Array.isArray(results) ? results.length : 0;
         updateSummaryCards();
@@ -1006,61 +2483,12 @@ function loadProfessorCount() {
  * SQL-ready fetch for faculty summary data
  */
 function fetchFacultySummaryFromSql(query) {
-    // Example SQL-backed API request:
-    // return fetch('/api/dean/evaluations/summary', {
-    //     method: 'POST',
-    //     headers: { 'Content-Type': 'application/json' },
-    //     body: JSON.stringify(query)
-    // }).then(res => res.json());
-
-    // Mock can be scoped by evaluationType when integrating
-    const evalType = query && query.evaluationType ? query.evaluationType : 'student';
-
-    const mockSummary = {
-        criteriaAverages: [
-            { name: 'Teaching Effectiveness', average: 4.7 },
-            { name: 'Classroom Management', average: 4.5 },
-            { name: 'Student Engagement', average: 4.8 },
-            { name: 'Communication Skills', average: 4.6 },
-            { name: 'Assessment Methods', average: 4.4 }
-        ],
-        subjects: evalType === 'professor'
-            ? [
-                { employeeId: 'FAC-20451', avgRating: 4.7, required: 12, received: 9 },
-                { employeeId: 'FAC-21014', avgRating: 4.5, required: 10, received: 7 },
-                { employeeId: 'FAC-19881', avgRating: 4.6, required: 9, received: 8 }
-            ]
-            : [
-                {
-                    subject: 'IT 307 - Web Systems and Technologies 2',
-                    section: 'BSIT 3A',
-                    required: 40,
-                    received: 18,
-                    avgRating: 4.6
-                },
-                {
-                    subject: 'IT 303 - Event-Driven Programming',
-                    section: 'BSIT 3A',
-                    required: 35,
-                    received: 17,
-                    avgRating: 4.8
-                },
-                {
-                    subject: 'IT 305 - Integrative Programming',
-                    section: 'BSIT 3A',
-                    required: 25,
-                    received: 10,
-                    avgRating: 4.5
-                }
-            ]
-    };
-
-    console.log('Ready for SQL integration: /api/dean/evaluations/summary', {
-        ...query,
-        evaluationType: evalType
-    });
-
-    return Promise.resolve(mockSummary);
+    const context = buildDeanPanelContext();
+    const evaluationType = getDeanEvaluationTypeMeta(query && query.evaluationType || 'student').id;
+    const semesterId = resolveSelectedSemesterId(
+        query && (query.semesterId || query.semester) || deanSummaryState.selectedSemesterId || context.currentSemester
+    );
+    return buildDeanEvaluationAggregates(context, evaluationType, semesterId);
 }
 
 /**
@@ -1081,262 +2509,57 @@ function renderCriteriaSummary(criteria) {
 }
 
 /**
- * Render breakdown table per subject/section
- */
-function renderBreakdownTable(subjects, evaluationType = 'student') {
-    const table = document.getElementById('facultyBreakdownTable');
-    if (!table) return;
-
-    const tbody = table.querySelector('tbody');
-    const thead = table.querySelector('thead');
-    if (!tbody || !thead) return;
-
-    // Build dynamic headers based on evaluation type
-    if (evaluationType === 'professor') {
-        thead.innerHTML = `
-            <tr>
-                <th>Employee Number</th>
-                <th>Avg Rating</th>
-                <th>Comments</th>
-            </tr>
-        `;
-    } else {
-        thead.innerHTML = `
-            <tr>
-                <th>Subject</th>
-                <th>Section</th>
-                <th>Evaluations Received</th>
-                <th>Response Rate</th>
-                <th>Avg Rating</th>
-                <th>Comments</th>
-            </tr>
-        `;
-    }
-
-    const colCount = evaluationType === 'professor' ? 3 : 6;
-
-    if (!subjects.length) {
-        tbody.innerHTML = `<tr><td colspan="${colCount}">No evaluation data available.</td></tr>`;
-        return;
-    }
-
-    tbody.innerHTML = subjects.map(item => {
-        const responseRate = item.required ? Math.round((item.received / item.required) * 100) : 0;
-
-        if (evaluationType === 'professor') {
-            return `
-                <tr data-required="${item.required || 0}" data-received="${item.received || 0}" data-avg="${item.avgRating}">
-                    <td>${item.employeeId}</td>
-                    <td>${item.avgRating.toFixed(1)}</td>
-                    <td><button type="button" class="btn-submit faculty-comments-btn js-dean-comments" data-eval-type="professor" data-subject="${item.employeeId}" data-section="">View</button></td>
-                </tr>
-            `;
-        }
-
-        return `
-            <tr data-required="${item.required}" data-received="${item.received}" data-avg="${item.avgRating}">
-                <td>${item.subject}</td>
-                <td>${item.section}</td>
-                <td><span class="count-pill">${item.received}/${item.required}</span></td>
-                <td>${responseRate}%</td>
-                <td>${item.avgRating.toFixed(1)}</td>
-                <td><button type="button" class="btn-submit faculty-comments-btn js-dean-comments" data-eval-type="student" data-subject="${item.subject}" data-section="${item.section}">View</button></td>
-            </tr>
-        `;
-    }).join('');
-}
-
-/**
- * Setup section feedback summary per subject/section
- */
-function setupDeanSubjectComments() {
-    const table = document.getElementById('facultyBreakdownTable');
-    const panel = document.getElementById('deanSubjectCommentsPanel');
-    const title = document.getElementById('deanSubjectCommentsTitle');
-    const meta = document.getElementById('deanSubjectCommentsMeta');
-    const list = document.getElementById('deanSubjectCommentsList');
-    const closeBtn = document.getElementById('deanSubjectCommentsClose');
-
-    if (!table || !panel || !title || !meta || !list || !closeBtn) return;
-
-    closeBtn.addEventListener('click', function () {
-        panel.classList.remove('active');
-    });
-
-    table.addEventListener('click', function (e) {
-        const target = e.target;
-        if (!target || !target.classList || !target.classList.contains('js-dean-comments')) return;
-
-        const subject = target.getAttribute('data-subject');
-        const section = target.getAttribute('data-section');
-        const evalType = target.getAttribute('data-eval-type') || 'student';
-        if (!subject) return;
-
-        title.textContent = evalType === 'professor' ? 'Professor Feedback Summary' : 'Section Feedback Summary';
-        meta.textContent = section ? `${subject} | ${section}` : subject;
-
-        fetchSectionSummaryFromSql({
-            subject,
-            section,
-            ay: '2025-2026',
-            sem: '2',
-            evaluationType: evalType
-        }).then(summaries => {
-            if (!summaries.length) {
-                list.innerHTML = '<li class="faculty-comments-empty">No summaries available.</li>';
-            } else {
-                const firstOnly = summaries.slice(0, 1); // show just one comment
-                list.innerHTML = firstOnly.map(item => {
-                    const cleanText = (item.text || '').replace(/^Summary:\s*/i, '');
-                    return '<li>' +
-                        '<div class="faculty-comment-text">' + cleanText + '</div>' +
-                        '</li>';
-                }).join('');
-            }
-            panel.classList.add('active');
-        }).catch(() => {
-            list.innerHTML = '<li class="faculty-comments-empty">Unable to load summaries.</li>';
-            panel.classList.add('active');
-        });
-    });
-}
-
-/**
- * SQL-ready placeholder for section feedback summaries
- */
-function fetchSectionSummaryFromSql(query) {
-    const evalType = query && query.evaluationType ? query.evaluationType : 'student';
-
-    const studentMock = {
-        'IT 307 - Web Systems and Technologies 2|BSIT 3A': [
-            { text: 'Summary: Strong clarity on core topics and helpful practical examples.' },
-            { text: 'Summary: Students want more hands-on activities for deeper practice.' }
-        ],
-        'IT 303 - Event-Driven Programming|BSIT 3A': [
-            { text: 'Summary: Lab exercises are effective and guidance is appreciated.' }
-        ],
-        'IT 305 - Integrative Programming|BSIT 3A': [
-            { text: 'Summary: Requests for more feedback on coding style and structure.' }
-        ]
-    };
-
-    const professorMock = {
-        'FAC-20451': [
-            { text: 'Summary: Peer feedback highlights strong leadership and support.' },
-            { text: 'Summary: Consider scheduling more peer coaching sessions.' }
-        ],
-        'FAC-21014': [
-            { text: 'Summary: Excellent collaboration within the department.' }
-        ],
-        'FAC-19881': [
-            { text: 'Summary: Recognized for mentoring junior faculty effectively.' }
-        ]
-    };
-
-    console.log('Ready for SQL integration: /api/dean/subjects/summary', {
-        ...query,
-        evaluationType: evalType
-    });
-
-    if (evalType === 'professor') {
-        return Promise.resolve(professorMock[query.subject || ''] || []);
-    }
-
-    const key = `${query.subject || ''}|${query.section || ''}`;
-    return Promise.resolve(studentMock[key] || []);
-}
-
-/**
  * Render evaluations received count
  */
-function renderEvaluationCount(subjects) {
+function renderEvaluationCount(subjects, totals) {
     const countEl = document.getElementById('evaluationCount');
     if (!countEl) return;
-    const totals = computeTotals(subjects);
-    countEl.textContent = `${totals.received}/${totals.required}`;
-}
-
-/**
- * Update submission table progress text based on subject data
- */
-function updateSubmissionProgress(subjects) {
-    const rows = document.querySelectorAll('.submissions-table tbody tr');
-    if (!rows.length || !subjects.length) return;
-
-    rows.forEach(row => {
-        const subjectCell = row.querySelector('td');
-        const progressEl = row.querySelector('.evaluation-progress');
-        if (!subjectCell || !progressEl) return;
-
-        const subjectText = subjectCell.childNodes[0].textContent.trim();
-        const match = subjects.find(item => item.subject === subjectText);
-        if (!match) return;
-
-        progressEl.textContent = `${match.received}/${match.required} evaluations received`;
-    });
+    const summaryTotals = totals || computeTotals(subjects);
+    countEl.textContent = `${summaryTotals.received}/${summaryTotals.required}`;
 }
 
 /**
  * Compute totals for summary cards
  */
 function computeTotals(subjects) {
-    return subjects.reduce((acc, item) => {
-        acc.required += item.required;
-        acc.received += item.received;
+    return (Array.isArray(subjects) ? subjects : []).reduce((acc, item) => {
+        acc.required += Number(item && item.required || 0);
+        acc.received += Number(item && item.received || 0);
         return acc;
     }, { required: 0, received: 0 });
 }
 
 /**
- * Get totals for summary cards (uses mock data if needed)
+ * Get totals for summary cards
  */
 function getFacultySummaryTotals() {
-    const table = document.getElementById('facultyBreakdownTable');
-    if (!table) {
-        return { required: 0, received: 0, responseRate: 0, averageScore: 0 };
+    const activeType = getDeanEvaluationTypeMeta(deanSummaryState.selectedEvaluationType || 'student').id;
+    const summary = getDeanSummaryForType(activeType);
+    return summary && summary.totals ? summary.totals : { required: 0, received: 0, responseRate: 0, averageScore: 0 };
+}
+
+function renderDetailedSummaryTable(rows, evaluationType) {
+    const tbody = document.getElementById('detailedSummaryTableBody');
+    if (!tbody) return;
+
+    const data = Array.isArray(rows) ? rows : [];
+    if (!data.length) {
+        tbody.innerHTML = '<tr><td colspan="8">No data available.</td></tr>';
+        return;
     }
 
-    const rows = Array.from(table.querySelectorAll('tbody tr'));
-    if (!rows.length) {
-        return { required: 0, received: 0, responseRate: 0, averageScore: 0 };
-    }
-
-    let requiredTotal = 0;
-    let receivedTotal = 0;
-    let ratingTotal = 0;
-    let ratingCount = 0;
-
-    rows.forEach(row => {
-        const cells = row.querySelectorAll('td');
-        if (cells.length < 5) return;
-
-        const countEl = row.querySelector('.count-pill');
-        let required = 0;
-        let received = 0;
-        if (countEl) {
-            const parts = countEl.textContent.split('/');
-            received = parseInt(parts[0], 10) || 0;
-            required = parseInt(parts[1], 10) || 0;
-        }
-
-        const avgRating = parseFloat(cells[4].textContent) || 0;
-        requiredTotal += required;
-        receivedTotal += received;
-        if (avgRating) {
-            ratingTotal += avgRating;
-            ratingCount += 1;
-        }
-    });
-
-    const responseRate = requiredTotal ? Math.round((receivedTotal / requiredTotal) * 100) : 0;
-    const averageScore = ratingCount ? ratingTotal / ratingCount : 0;
-
-    return {
-        required: requiredTotal,
-        received: receivedTotal,
-        responseRate,
-        averageScore
-    };
+    tbody.innerHTML = data.map(item => `
+        <tr>
+            <td>${escapeHTML(item.category)}</td>
+            <td><span class="avg-score">${Number(item.avgScore || 0).toFixed(1)}</span></td>
+            <td>${Number(item.responses || 0)}</td>
+            <td><span class="count excellent">${Number(item.excellent || 0)}</span></td>
+            <td><span class="count good">${Number(item.good || 0)}</span></td>
+            <td><span class="count fair">${Number(item.fair || 0)}</span></td>
+            <td><span class="count poor">${Number(item.poor || 0)}</span></td>
+            <td><span class="count very-poor">${Number(item.veryPoor || 0)}</span></td>
+        </tr>
+    `).join('');
 }
 
 /**
@@ -1351,7 +2574,6 @@ function setupProfileActions() {
         button.addEventListener('click', function () {
             const targetId = this.getAttribute('data-target');
             if (!targetId) return;
-            hideAccountActionCards();
             const targetCard = document.getElementById(targetId);
             if (targetCard) {
                 targetCard.style.display = 'block';
@@ -1365,9 +2587,7 @@ function setupProfileActions() {
             const targetId = this.getAttribute('data-target');
             const targetCard = targetId ? document.getElementById(targetId) : null;
             if (targetCard) {
-                const form = targetCard.querySelector('form');
-                if (form) form.reset();
-                targetCard.style.display = 'none';
+                targetCard.style.display = 'block';
             }
         });
     });
@@ -1375,7 +2595,7 @@ function setupProfileActions() {
 
 function hideAccountActionCards() {
     document.querySelectorAll('.account-action-card').forEach(card => {
-        card.style.display = 'none';
+        card.style.display = 'block';
     });
 }
 
@@ -1385,6 +2605,11 @@ function hideAccountActionCards() {
 function setupChangeEmailForm() {
     const form = document.getElementById('changeEmailForm');
     if (!form) return;
+    const newEmail = document.getElementById('newEmail');
+    const confirmEmail = document.getElementById('confirmEmail');
+
+    if (newEmail) newEmail.disabled = true;
+    if (confirmEmail) confirmEmail.disabled = true;
 
     form.addEventListener('submit', function (e) {
         e.preventDefault();
@@ -1396,36 +2621,9 @@ function setupChangeEmailForm() {
  * Placeholder change email handler (SQL-ready)
  */
 function handleChangeEmail() {
-    const currentEmail = document.getElementById('currentEmail').value.trim();
-    const newEmail = document.getElementById('newEmail').value.trim();
-    const confirmEmail = document.getElementById('confirmEmail').value.trim();
-
-    if (!newEmail || !confirmEmail) {
-        alert('Please fill out all email fields.');
-        return;
-    }
-
-    if (newEmail !== confirmEmail) {
-        alert('New email and confirmation do not match.');
-        return;
-    }
-
-    if (currentEmail && newEmail.toLowerCase() === currentEmail.toLowerCase()) {
-        alert('New email must be different from the current email.');
-        return;
-    }
-
-    const payload = {
-        username: getUserSession() ? getUserSession().username : '',
-        currentEmail,
-        newEmail
-    };
-
-    console.log('Ready for SQL integration: /api/dean/change-email', payload);
-    alert('Email update request ready for SQL connection.');
-
     const form = document.getElementById('changeEmailForm');
-    if (form) form.reset();
+    if (!form) return;
+    showFormMessage(form, 'Email update is not available yet in this panel.', 'error');
 }
 
 /**
@@ -1434,6 +2632,13 @@ function handleChangeEmail() {
 function setupChangePasswordForm() {
     const form = document.getElementById('changePasswordForm');
     if (!form) return;
+    const currentPassword = document.getElementById('currentPassword');
+    const newPassword = document.getElementById('newPassword');
+    const confirmPassword = document.getElementById('confirmPassword');
+
+    if (currentPassword) currentPassword.disabled = true;
+    if (newPassword) newPassword.disabled = true;
+    if (confirmPassword) confirmPassword.disabled = true;
 
     form.addEventListener('submit', function (e) {
         e.preventDefault();
@@ -1445,31 +2650,9 @@ function setupChangePasswordForm() {
  * Placeholder change password handler (SQL-ready)
  */
 function handleChangePassword() {
-    const currentPassword = document.getElementById('currentPassword').value.trim();
-    const newPassword = document.getElementById('newPassword').value.trim();
-    const confirmPassword = document.getElementById('confirmPassword').value.trim();
-
-    if (!currentPassword || !newPassword || !confirmPassword) {
-        alert('Please fill out all password fields.');
-        return;
-    }
-
-    if (newPassword !== confirmPassword) {
-        alert('New password and confirmation do not match.');
-        return;
-    }
-
-    const payload = {
-        username: getUserSession() ? getUserSession().username : '',
-        currentPassword,
-        newPassword
-    };
-
-    console.log('Ready for SQL integration: /api/dean/change-password', payload);
-    alert('Password update request ready for SQL connection.');
-
     const form = document.getElementById('changePasswordForm');
-    if (form) form.reset();
+    if (!form) return;
+    showFormMessage(form, 'Password update is not available yet in this panel.', 'error');
 }
 
 /**
@@ -1509,40 +2692,6 @@ function updateNavigation(viewName) {
     });
 }
 
-/**
- * Apply reports blackout placeholder (disabled by default)
- */
-function applyReportBlackout() {
-    const blackoutConfig = {
-        enabled: false,
-        endDate: '2026-02-10'
-    };
-
-    const blackoutEl = document.getElementById('reportsBlackout');
-    const contentEl = document.getElementById('reportsContent');
-    const unlockDateEl = document.getElementById('reportUnlockDate');
-
-    if (!blackoutEl || !contentEl || !unlockDateEl) return;
-    unlockDateEl.textContent = formatDisplayDate(blackoutConfig.endDate);
-
-    if (!blackoutConfig.enabled) {
-        blackoutEl.style.display = 'none';
-        contentEl.style.display = 'block';
-        return;
-    }
-
-    const today = new Date();
-    const endDate = new Date(`${blackoutConfig.endDate}T23:59:59`);
-
-    if (today <= endDate) {
-        blackoutEl.style.display = 'block';
-        contentEl.style.display = 'none';
-    } else {
-        blackoutEl.style.display = 'none';
-        contentEl.style.display = 'block';
-    }
-}
-
 function formatDisplayDate(dateString) {
     const date = new Date(dateString);
     if (Number.isNaN(date.getTime())) return dateString;
@@ -1560,17 +2709,18 @@ function setupDeanEvaluationResults() {
     const instituteFilter = document.getElementById('deanInstituteFilter');
     const table = document.getElementById('deanProfessorResultsTable');
     if (!instituteFilter || !table) return;
-    const session = getUserSession();
-    const deanId = session ? session.username : '';
+    const session = getUserSession() || {};
+    const deanId = session.username || '';
+    const semesterId = resolveSelectedSemesterId(deanSummaryState.selectedSemesterId);
     const assignedInstitutes = getDeanAssignedInstitutes(session);
     fetchDeanProfessorResultsFromSql({
         deanId,
         assignedInstitutes,
-        ay: '2025-2026',
-        sem: '2'
+        semesterId,
+        evaluationType: 'student'
     }).then(results => {
         const institutes = Array.from(new Set(results.map(item => item.institute))).sort();
-        instituteFilter.innerHTML = '<option value="all">All assigned institutes</option>' + institutes.map(institute =>
+        instituteFilter.innerHTML = '<option value="all">Department scope</option>' + institutes.map(institute =>
             '<option value="' + institute + '">' + institute + '</option>'
         ).join('');
         renderDeanProfessorResults(results, instituteFilter.value);
@@ -1588,81 +2738,109 @@ function setupDeanEvaluationResults() {
  * Resolve assigned institute scope for the current dean
  */
 function getDeanAssignedInstitutes(sessionOrUsername) {
-    if (
-        sessionOrUsername &&
-        typeof sessionOrUsername === 'object' &&
-        Array.isArray(sessionOrUsername.assignedInstitutes) &&
-        sessionOrUsername.assignedInstitutes.length
-    ) {
-        return sessionOrUsername.assignedInstitutes;
-    }
+    const deanUser = resolveCurrentDeanUserAnyStatus(
+        typeof sessionOrUsername === 'object' && sessionOrUsername
+            ? sessionOrUsername
+            : getUserSession() || {}
+    );
+    const department = String((deanUser && (deanUser.department || deanUser.institute)) || '').trim().toUpperCase();
+    return department ? [department] : [];
+}
 
-    const username = typeof sessionOrUsername === 'string'
-        ? sessionOrUsername
-        : (sessionOrUsername && sessionOrUsername.username) ? sessionOrUsername.username : '';
-    const normalized = String(username || '').toLowerCase();
+function buildDeanProfessorResultRows(query, typeOverride) {
+    const context = buildDeanPanelContext();
+    const evaluationType = getDeanEvaluationTypeMeta(typeOverride || (query && query.evaluationType) || 'student').id;
+    const semesterId = resolveSelectedSemesterId(
+        query && (query.semesterId || query.semester) || deanSummaryState.selectedSemesterId || context.currentSemester
+    );
+    const assignedInstitutes = Array.isArray(query && query.assignedInstitutes) && query.assignedInstitutes.length
+        ? query.assignedInstitutes.map(item => String(item || '').trim().toUpperCase()).filter(Boolean)
+        : getDeanAssignedInstitutes(getUserSession() || {});
+    const instituteSet = new Set(assignedInstitutes);
+    const scopedProfessors = (context.scopedProfessors || []).filter(professor => {
+        if (!instituteSet.size) return true;
+        const institute = String((professor && (professor.department || professor.institute)) || '').trim().toUpperCase();
+        return instituteSet.has(institute);
+    });
+    const evaluations = Array.isArray(context.evaluations) ? context.evaluations : [];
 
-    const explicitMap = {
-        dean: ['ICS'],
-        daen: ['ENGI'],
-        deanics: ['ICS'],
-        deancs: ['ICS'],
-        deaneng: ['ENGI'],
-        deanie: ['ENGI']
-    };
+    const normalizedType = evaluationType;
+    const filteredByType = evaluations.filter(evaluation =>
+        resolveEvaluationTypeToken(evaluation) === normalizedType &&
+        isEvaluationInSemester(evaluation, semesterId)
+    );
 
-    if (explicitMap[normalized]) {
-        return explicitMap[normalized];
-    }
+    return scopedProfessors.map(professor => {
+        const professorUserId = normalizeUserIdToken(professor && professor.id);
+        const institute = String((professor && (professor.department || professor.institute)) || '').trim().toUpperCase();
+        const professorEvaluations = [];
+        let required = 0;
 
-    if (normalized.includes('ics') || normalized.includes('computer') || normalized.includes('cs')) {
-        return ['ICS'];
-    }
+        if (normalizedType === 'student') {
+            const offeringIds = new Set((context.offerings || []).filter(offering =>
+                normalizeUserIdToken(offering && offering.professorUserId) === professorUserId &&
+                isSemesterTokenMatch(offering && offering.semesterSlug, semesterId)
+            ).map(offering => String(offering && offering.id || '').trim()).filter(Boolean));
 
-    if (normalized.includes('engineering') || normalized.includes('eng') || normalized.includes('ie')) {
-        return ['ENGI'];
-    }
+            required = (context.enrollments || []).filter(enrollment => {
+                const offeringId = String(enrollment && enrollment.courseOfferingId || '').trim();
+                if (!offeringIds.has(offeringId)) return false;
+                const status = normalizeRoleToken(enrollment && enrollment.status || 'enrolled');
+                return status !== 'dropped' && status !== 'inactive';
+            }).length;
 
-    return [];
+            filteredByType.forEach(evaluation => {
+                const offeringId = String(evaluation && evaluation.courseOfferingId || '').trim();
+                if (!offeringIds.has(offeringId)) return;
+                const targetProfessorId = resolveDeanTargetProfessorId(evaluation, 'student', context);
+                if (targetProfessorId && targetProfessorId !== professorUserId) return;
+                professorEvaluations.push(evaluation);
+            });
+        } else {
+            required = normalizedType === 'professor'
+                ? Math.max(scopedProfessors.length - 1, 0)
+                : getActiveSupervisorCount();
 
-    return [];
+            filteredByType.forEach(evaluation => {
+                const targetProfessorId = resolveDeanTargetProfessorId(evaluation, normalizedType, context);
+                if (targetProfessorId === professorUserId) {
+                    professorEvaluations.push(evaluation);
+                }
+            });
+        }
+
+        const avgScore = computeAverageRatingFromEvaluations(professorEvaluations);
+        const lastUpdated = professorEvaluations.reduce((latest, evaluation) => {
+            const current = String(evaluation && (evaluation.submittedAt || evaluation.timestamp) || '').trim();
+            if (!current) return latest;
+            if (!latest) return current;
+            return new Date(current).getTime() > new Date(latest).getTime() ? current : latest;
+        }, '');
+        const statusText = normalizeRoleToken(professor && professor.status || 'active') === 'inactive'
+            ? 'Inactive'
+            : 'Active';
+
+        return {
+            professorUserId,
+            professorId: String(professor && (professor.employeeId || professor.id) || '').trim() || 'N/A',
+            professorName: String(professor && professor.name || '').trim() || 'Unknown',
+            institute,
+            employmentType: String(professor && professor.employmentType || '').trim() || 'N/A',
+            position: String(professor && professor.position || '').trim() || 'N/A',
+            required,
+            received: professorEvaluations.length,
+            avgScore,
+            lastUpdated,
+            status: statusText
+        };
+    });
 }
 
 /**
  * SQL-ready fetch for dean-level professor results
  */
 function fetchDeanProfessorResultsFromSql(query) {
-    // Example SQL-backed API request:
-    // return fetch('/api/dean/professors/evaluations/results', {
-    //     method: 'POST',
-    //     headers: { 'Content-Type': 'application/json' },
-    //     body: JSON.stringify(query)
-    // }).then(res => res.json());
-    // Scope enforcement: each dean can only view assigned institute records.
-    const assignedInstitutes = Array.isArray(query && query.assignedInstitutes)
-        ? query.assignedInstitutes
-        : getDeanAssignedInstitutes(query ? query.deanId : '');
-
-    let scopedResults = [];
-    if (typeof SharedData !== 'undefined' && SharedData.getUsers) {
-        const allUsers = SharedData.getUsers();
-        scopedResults = allUsers
-            .filter(u => u.role === 'professor' && u.department && assignedInstitutes.includes(u.department.toUpperCase()))
-            .map(prof => ({
-                professorId: prof.employeeId || prof.id || 'N/A',
-                professorName: prof.name || 'Unknown',
-                institute: (prof.institute || prof.department || '').toUpperCase(),
-                employmentType: prof.employmentType || 'Regular',
-                position: prof.position || 'Instructor',
-                required: prof.totalStudents || 100,
-                received: prof.evaluatedCount || 0,
-                avgScore: prof.averageRating || 0,
-                lastUpdated: new Date().toISOString().split('T')[0],
-                status: prof.status || 'Active'
-            }));
-    }
-
-    return Promise.resolve(scopedResults);
+    return Promise.resolve(buildDeanProfessorResultRows(query, 'student'));
 }
 /**
  * Render dean view table and metrics
@@ -1684,7 +2862,7 @@ function renderDeanProfessorResults(results, selectedInstitute) {
         if (professorCountEl) professorCountEl.textContent = '0';
         if (averageScoreEl) averageScoreEl.textContent = '0.0/5.0';
         if (responseRateEl) responseRateEl.textContent = '0%';
-        if (scopeBadge) scopeBadge.textContent = 'Scope: ' + (selectedInstitute === 'all' ? 'All assigned institutes' : selectedInstitute);
+        if (scopeBadge) scopeBadge.textContent = 'Scope: ' + (selectedInstitute === 'all' ? 'Department scope' : selectedInstitute);
         return;
     }
     tbody.innerHTML = filtered.map(item => {
@@ -1714,7 +2892,7 @@ function renderDeanProfessorResults(results, selectedInstitute) {
     if (professorCountEl) professorCountEl.textContent = String(filtered.length);
     if (averageScoreEl) averageScoreEl.textContent = averageScore.toFixed(1) + '/5.0';
     if (responseRateEl) responseRateEl.textContent = responseRate + '%';
-    if (scopeBadge) scopeBadge.textContent = 'Scope: ' + (selectedInstitute === 'all' ? 'All assigned institutes' : selectedInstitute);
+    if (scopeBadge) scopeBadge.textContent = 'Scope: ' + (selectedInstitute === 'all' ? 'Department scope' : selectedInstitute);
 }
 
 /**
@@ -1724,6 +2902,7 @@ function setupFacultyResponseView() {
     const searchInput = document.getElementById('facultySearchInput');
     const searchBtn = document.getElementById('facultySearchBtn');
     const resetBtn = document.getElementById('facultyResetBtn');
+    const semesterFilter = document.getElementById('facultyResponseSemesterFilter');
     const studentResultsBtn = document.getElementById('studentResultsBtn');
     const peerResultsBtn = document.getElementById('peerResultsBtn');
     const supervisorResultsBtn = document.getElementById('supervisorResultsBtn');
@@ -1735,13 +2914,58 @@ function setupFacultyResponseView() {
     const commentsList = document.getElementById('facultyCommentsList');
     const commentsClose = document.getElementById('facultyCommentsClose');
 
-    if (!searchInput || !searchBtn || !resetBtn || !resultEl || !table || !commentsPanel || !commentsTitle || !commentsMeta || !commentsList || !commentsClose) return;
+    if (
+        !searchInput || !searchBtn || !resetBtn || !semesterFilter
+        || !resultEl || !table || !commentsPanel || !commentsTitle || !commentsMeta || !commentsList || !commentsClose
+    ) return;
 
-    const session = getUserSession();
-    const deanId = session ? session.username : '';
+    const session = getUserSession() || {};
+    const deanId = session.username || '';
     const assignedInstitutes = getDeanAssignedInstitutes(session);
     let sourceData = [];
     let currentView = 'student';
+    let selectedSemesterId = resolveSelectedSemesterId(deanSummaryState.selectedSemesterId);
+
+    function populateSemesterFilter(preferredSemesterId) {
+        const context = buildDeanPanelContext();
+        const list = Array.isArray(context && context.semesterList) ? context.semesterList : [];
+        const fallbackId = resolveSelectedSemesterId(
+            preferredSemesterId
+            || (context && context.currentSemester)
+            || deanSummaryState.selectedSemesterId
+        );
+        const options = list.length
+            ? list
+            : (fallbackId ? [{ value: fallbackId, label: getSemesterLabelById(fallbackId) }] : []);
+
+        semesterFilter.innerHTML = '';
+        options.forEach(item => {
+            const value = String(item && item.value || '').trim();
+            if (!value) return;
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = String(item && item.label || '').trim() || getSemesterLabelById(value);
+            semesterFilter.appendChild(option);
+        });
+
+        if (!semesterFilter.options.length) {
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = 'No semester available';
+            semesterFilter.appendChild(option);
+        }
+
+        const preferred = String(preferredSemesterId || fallbackId || '').trim();
+        if (preferred && Array.from(semesterFilter.options).some(opt => opt.value === preferred)) {
+            semesterFilter.value = preferred;
+        } else if (semesterFilter.options.length) {
+            semesterFilter.selectedIndex = 0;
+        }
+
+        selectedSemesterId = resolveSelectedSemesterId(semesterFilter.value || fallbackId);
+        deanSummaryState.selectedSemesterId = selectedSemesterId;
+        deanSummaryState.selectedSemesterLabel = getSemesterLabelById(selectedSemesterId);
+    }
 
     function fetchResults(view) {
         const fetcher = view === 'peer'
@@ -1753,8 +2977,7 @@ function setupFacultyResponseView() {
         return fetcher({
             deanId,
             assignedInstitutes,
-            ay: '2025-2026',
-            sem: '2'
+            semesterId: selectedSemesterId
         });
     }
 
@@ -1800,11 +3023,11 @@ function setupFacultyResponseView() {
             const { filtered, keyword } = applyFilter(sourceData);
             renderFacultyResponseTable(filtered);
             attachFacultyCommentButtons(filtered);
-            updateFacultySearchResult(filtered.length, sourceData.length, keyword, currentView);
+            updateFacultySearchResult(filtered.length, sourceData.length, keyword, currentView, selectedSemesterId);
         }).catch(() => {
             renderFacultyResponseTable([]);
             attachFacultyCommentButtons([]);
-            updateFacultySearchResult(0, 0, '', currentView);
+            updateFacultySearchResult(0, 0, '', currentView, selectedSemesterId);
         });
     }
 
@@ -1812,7 +3035,7 @@ function setupFacultyResponseView() {
         const { filtered, keyword } = applyFilter(sourceData);
         renderFacultyResponseTable(filtered);
         attachFacultyCommentButtons(filtered);
-        updateFacultySearchResult(filtered.length, sourceData.length, keyword, currentView);
+        updateFacultySearchResult(filtered.length, sourceData.length, keyword, currentView, selectedSemesterId);
     }
 
     searchBtn.addEventListener('click', runSearch);
@@ -1820,7 +3043,7 @@ function setupFacultyResponseView() {
         searchInput.value = '';
         renderFacultyResponseTable(sourceData);
         attachFacultyCommentButtons(sourceData);
-        updateFacultySearchResult(sourceData.length, sourceData.length, '', currentView);
+        updateFacultySearchResult(sourceData.length, sourceData.length, '', currentView, selectedSemesterId);
     });
 
     searchInput.addEventListener('keydown', function (e) {
@@ -1832,6 +3055,17 @@ function setupFacultyResponseView() {
 
     commentsClose.addEventListener('click', function () {
         commentsPanel.classList.remove('active');
+    });
+
+    semesterFilter.addEventListener('change', function () {
+        selectedSemesterId = resolveSelectedSemesterId(semesterFilter.value || selectedSemesterId);
+        deanSummaryState.selectedSemesterId = selectedSemesterId;
+        deanSummaryState.selectedSemesterLabel = getSemesterLabelById(selectedSemesterId);
+        loadFacultySummary({
+            semesterId: selectedSemesterId,
+            evaluationType: deanSummaryState.selectedEvaluationType || 'student'
+        });
+        setResultsView(currentView);
     });
 
     if (studentResultsBtn) {
@@ -1866,8 +3100,7 @@ function setupFacultyResponseView() {
                 fetchFacultyCommentsFromSql({
                     professorId: professor.professorId,
                     deanId,
-                    ay: '2025-2026',
-                    sem: '2',
+                    semesterId: selectedSemesterId,
                     source: currentView
                 }).then(comments => {
                     if (!comments.length) {
@@ -1889,6 +3122,7 @@ function setupFacultyResponseView() {
         });
     }
 
+    populateSemesterFilter(selectedSemesterId);
     setResultsView(currentView);
 }
 
@@ -1937,14 +3171,50 @@ function renderFacultyResponseTable(items) {
  * SQL-ready placeholder for faculty comments
  */
 function fetchFacultyCommentsFromSql(query) {
-    console.log('Ready for SQL integration: /api/dean/faculty/comments', query);
-    return Promise.resolve([]);
+    const sourceType = query && query.source === 'peer'
+        ? 'professor'
+        : query && query.source === 'supervisor'
+            ? 'supervisor'
+            : 'student';
+    const summary = getDeanSummaryForType(sourceType);
+    const professorToken = normalizeRoleToken(query && query.professorId);
+    const row = (summary.breakdownRows || []).find(item =>
+        normalizeRoleToken(item && item.professorId) === professorToken
+        || normalizeRoleToken(item && item.employeeId) === professorToken
+    );
+    if (row && row.rowKey && summary.commentBuckets && Array.isArray(summary.commentBuckets[row.rowKey])) {
+        return Promise.resolve(summary.commentBuckets[row.rowKey]);
+    }
+
+    const context = buildDeanPanelContext();
+    const semesterId = resolveSelectedSemesterId(query && query.semesterId || deanSummaryState.selectedSemesterId || context.currentSemester);
+    const professorByEmployee = (context.scopedProfessors || []).find(professor =>
+        normalizeRoleToken(professor && professor.employeeId) === professorToken
+        || normalizeRoleToken(professor && professor.id) === professorToken
+    );
+    const targetProfessorId = professorByEmployee ? normalizeUserIdToken(professorByEmployee.id) : '';
+    if (!targetProfessorId) return Promise.resolve([]);
+
+    const comments = [];
+    (context.evaluations || []).forEach(evaluation => {
+        if (resolveEvaluationTypeToken(evaluation) !== sourceType) return;
+        if (!isEvaluationInSemester(evaluation, semesterId)) return;
+        if (resolveDeanTargetProfessorId(evaluation, sourceType, context) !== targetProfessorId) return;
+        collectEvaluationComments(evaluation).forEach(text => {
+            comments.push({
+                text,
+                source: getDeanEvaluationTypeMeta(sourceType).label,
+                date: String(evaluation && (evaluation.submittedAt || evaluation.timestamp) || '').trim()
+            });
+        });
+    });
+    return Promise.resolve(comments);
 }
 
 /**
  * Show current search scope and result count
  */
-function updateFacultySearchResult(count, total, keyword, view) {
+function updateFacultySearchResult(count, total, keyword, view, semesterId) {
     const resultEl = document.getElementById('facultySearchResult');
     if (!resultEl) return;
 
@@ -1953,113 +3223,62 @@ function updateFacultySearchResult(count, total, keyword, view) {
         : view === 'supervisor'
             ? 'Supervisor Evaluation Results'
             : 'Student Evaluation Results';
+    const semesterLabel = getSemesterLabelById(semesterId || deanSummaryState.selectedSemesterId);
 
     if (!keyword) {
-        resultEl.textContent = 'Showing ' + label + ' under assigned institutes. Total: ' + total;
+        resultEl.textContent = 'Showing ' + label + ' under your department scope for ' + semesterLabel + '. Total: ' + total;
         return;
     }
 
-    resultEl.textContent = 'Found ' + count + ' of ' + total + ' faculty record(s) for "' + keyword + '" in ' + label + '.';
+    resultEl.textContent = 'Found ' + count + ' of ' + total + ' faculty record(s) for "' + keyword + '" in ' + label + ' for ' + semesterLabel + '.';
 }
 
 /**
  * SQL-ready placeholder for peer evaluation results
  */
 function fetchDeanPeerEvaluationResultsFromSql(query) {
-    const assignedInstitutes = Array.isArray(query && query.assignedInstitutes)
-        ? query.assignedInstitutes
-        : getDeanAssignedInstitutes(query ? query.deanId : '');
-
-    let scopedResults = [];
-    if (typeof SharedData !== 'undefined' && SharedData.getUsers) {
-        const allUsers = SharedData.getUsers();
-        scopedResults = allUsers
-            .filter(u => u.role === 'professor' && u.department && assignedInstitutes.includes(u.department.toUpperCase()))
-            .map(prof => ({
-                professorId: prof.employeeId || prof.id || 'N/A',
-                professorName: prof.name || 'Unknown',
-                institute: (prof.institute || prof.department || '').toUpperCase(),
-                employmentType: prof.employmentType || 'Regular',
-                position: prof.position || 'Instructor',
-                required: 10,  // Peer evaluations usually have a smaller requirements pool
-                received: prof.evaluatedCount ? Math.floor(prof.evaluatedCount / 10) : 0,
-                avgScore: prof.averageRating || 0,
-                lastUpdated: new Date().toISOString().split('T')[0],
-                status: prof.status || 'Active'
-            }));
-    }
-
-    return Promise.resolve(scopedResults);
+    return Promise.resolve(buildDeanProfessorResultRows(query, 'professor'));
 }
 
 /**
  * SQL-ready placeholder for supervisor evaluation results (single record)
  */
 function fetchDeanSupervisorEvaluationResultsFromSql(query) {
-    const assignedInstitutes = Array.isArray(query && query.assignedInstitutes)
-        ? query.assignedInstitutes
-        : getDeanAssignedInstitutes(query ? query.deanId : '');
-
-    let scopedResults = [];
-    if (typeof SharedData !== 'undefined' && SharedData.getUsers) {
-        const allUsers = SharedData.getUsers();
-        scopedResults = allUsers
-            .filter(u => u.role === 'professor' && assignedInstitutes.includes(u.department))
-            .map(prof => ({
-                professorId: prof.employeeId || prof.id || 'N/A',
-                professorName: prof.name || 'Unknown',
-                institute: prof.department || '',
-                employmentType: prof.employmentType || 'Regular',
-                position: prof.position || 'Instructor',
-                required: 1,  // Supervisor evaluate once
-                received: prof.evaluatedCount ? 1 : 0,
-                avgScore: prof.averageRating || 0,
-                lastUpdated: new Date().toISOString().split('T')[0],
-                status: prof.status || 'Active'
-            }));
-    }
-
-    return Promise.resolve(scopedResults);
+    return Promise.resolve(buildDeanProfessorResultRows(query, 'supervisor'));
 }
 
 /**
  * Setup faculty peer-to-peer room management
- * Rule: professor can only be registered in one room at a time.
+ * Rule: auto-generation is dean-scoped and current-semester only.
  */
 function setupPeerManagementView() {
+    const programSelect = document.getElementById('peerMgmtProgramSelect');
+    const professorCountInput = document.getElementById('peerMgmtProfessorCount');
     const roomNameInput = document.getElementById('peerMgmtRoomName');
-    const directorySearchInput = document.getElementById('peerMgmtDirectorySearch');
-    const pickerContainer = document.getElementById('peerMgmtProfessorPicker');
     const createRoomBtn = document.getElementById('peerMgmtCreateRoomBtn');
     const clearSelectionBtn = document.getElementById('peerMgmtClearSelectionBtn');
     const messageEl = document.getElementById('peerMgmtMessage');
     const roomsTable = document.getElementById('peerMgmtRoomsTable');
-    const activeRoomTitle = document.getElementById('peerMgmtActiveRoomTitle');
-    const addProfessorInput = document.getElementById('peerMgmtAddProfessorInput');
-    const addProfessorList = document.getElementById('peerMgmtAddProfessorList');
+    const roomSelect = document.getElementById('peerMgmtRoomSelect');
+    const roomDisplay = document.getElementById('peerMgmtRoomDisplay');
+    const manualProfessorSelect = document.getElementById('peerMgmtManualProfessorSelect');
     const addProfessorBtn = document.getElementById('peerMgmtAddProfessorBtn');
-    const membersTable = document.getElementById('peerMgmtMembersTable');
-    const coordinatorLabel = document.getElementById('peerMgmtCoordinatorLabel');
+    const viewMembersBtn = document.getElementById('peerMgmtViewMembersBtn');
+    const dismantleRoomBtn = document.getElementById('peerMgmtDismantleRoomBtn');
+    const membersTable = document.getElementById('peerMgmtRoomMembersTable');
 
     if (
-        !roomNameInput || !directorySearchInput ||
-        !pickerContainer || !createRoomBtn || !clearSelectionBtn || !messageEl ||
-        !roomsTable || !activeRoomTitle || !addProfessorInput || !addProfessorList || !addProfessorBtn || !membersTable
+        !programSelect || !professorCountInput || !roomNameInput ||
+        !createRoomBtn || !clearSelectionBtn || !messageEl || !roomsTable ||
+        !roomSelect || !roomDisplay || !manualProfessorSelect || !addProfessorBtn ||
+        !viewMembersBtn || !dismantleRoomBtn || !membersTable
     ) {
         return;
     }
 
-    const session = getUserSession();
-    const deanId = session ? session.username : '';
-    const assignedInstitutes = getDeanAssignedInstitutes(session);
-    const selectedProfessorIds = new Set();
-    const state = {
-        rooms: [],
-        professorDirectory: [],
-        activeRoomId: null,
-        nextRoomId: 1
-    };
-    let availableProfessors = [];
+    const scopedDepartment = getScopedDeanDepartment();
+    let scopedPrograms = [];
+    let roomRowsCache = [];
 
     function setMessage(text, type) {
         messageEl.textContent = text;
@@ -2067,452 +3286,456 @@ function setupPeerManagementView() {
         messageEl.classList.add(type || 'info');
     }
 
-    function getProfessorById(professorId) {
-        return state.professorDirectory.find(item => item.id === professorId) || null;
+    function formatDateTime(value) {
+        const raw = String(value || '').trim();
+        if (!raw) return 'N/A';
+        const dt = new Date(raw);
+        if (Number.isNaN(dt.getTime())) return raw;
+        return dt.toLocaleString();
     }
 
-    function getRoomById(roomId) {
-        return state.rooms.find(room => room.id === roomId) || null;
+    function normalizeRoomId(value) {
+        const parsed = parseInt(String(value || '').trim(), 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
     }
 
-    function findRoomContainingProfessor(professorId) {
-        return state.rooms.find(room => room.memberIds.includes(professorId)) || null;
+    function getSelectedRoomId() {
+        return normalizeRoomId(roomSelect.value || '');
     }
 
-    function renderProfessorPicker() {
-        const keyword = directorySearchInput.value.trim().toLowerCase();
-        const filtered = state.professorDirectory.filter(professor => {
-            if (!keyword) return true;
-            const name = (professor.name || '').toLowerCase();
-            const id = (professor.id || '').toLowerCase();
-            const institute = (professor.institute || '').toLowerCase();
-            return name.includes(keyword) || id.includes(keyword) || institute.includes(keyword);
-        });
-
-        if (!filtered.length) {
-            pickerContainer.innerHTML = '<p class="peer-mgmt-empty">No professors found.</p>';
-            return;
+    function setSelectedRoom(roomId) {
+        const normalizedId = normalizeRoomId(roomId);
+        if (normalizedId <= 0) {
+            roomSelect.value = '';
+            roomDisplay.value = Array.isArray(roomRowsCache) && roomRowsCache.length
+                ? 'Select a room from Existing Rooms actions'
+                : 'No rooms available';
+            return 0;
         }
 
-        pickerContainer.innerHTML = filtered.map(professor => {
-            const assignedRoom = findRoomContainingProfessor(professor.id);
-            const assignedText = assignedRoom ? 'Already in room: ' + assignedRoom.name : 'Available';
-            const checked = selectedProfessorIds.has(professor.id) ? 'checked' : '';
-            const disabled = assignedRoom ? 'disabled' : '';
-
-            return '<label class="peer-mgmt-prof-item">' +
-                '<input type="checkbox" class="peer-mgmt-prof-checkbox" data-professor-id="' + professor.id + '" ' + checked + ' ' + disabled + '>' +
-                '<div class="peer-mgmt-prof-info">' +
-                '<strong>' + professor.name + '</strong>' +
-                '<span>' + professor.id + ' | ' + professor.institute + '</span>' +
-                '<small class="' + (assignedRoom ? 'peer-mgmt-status-busy' : 'peer-mgmt-status-open') + '">' + assignedText + '</small>' +
-                '</div>' +
-                '</label>';
-        }).join('');
-
-        pickerContainer.querySelectorAll('.peer-mgmt-prof-checkbox').forEach(checkbox => {
-            checkbox.addEventListener('change', function () {
-                const professorId = this.getAttribute('data-professor-id');
-                if (!professorId) return;
-                if (this.checked) {
-                    selectedProfessorIds.add(professorId);
-                } else {
-                    selectedProfessorIds.delete(professorId);
-                }
-            });
-        });
+        roomSelect.value = String(normalizedId);
+        const roomEntry = roomRowsCache.find(room => normalizeRoomId(room && room.id) === normalizedId);
+        roomDisplay.value = roomEntry && roomEntry.roomName
+            ? String(roomEntry.roomName)
+            : ('Room #' + String(normalizedId));
+        return normalizedId;
     }
 
-    function renderRoomsTable() {
-        const tbody = roomsTable.querySelector('tbody');
-        if (!tbody) return;
-
-        if (!state.rooms.length) {
-            tbody.innerHTML = '<tr><td colspan="5">No rooms created yet.</td></tr>';
-            return;
-        }
-
-        tbody.innerHTML = state.rooms.map(room => {
-            const count = room.memberIds.length;
-            return '<tr>' +
-                '<td>' + room.name + '</td>' +
-                '<td>' + room.scope + '</td>' +
-                '<td>' + count + ' professor(s)</td>' +
-                '<td>' +
-                '<button type="button" class="btn-submit peer-mgmt-inline-btn js-manage-room-btn" data-room-id="' + room.id + '">Manage</button> ' +
-                '<button type="button" class="btn-cancel peer-mgmt-inline-btn js-delete-room-btn" data-room-id="' + room.id + '">Delete</button>' +
-                '</td>' +
-                '</tr>';
-        }).join('');
-
-        tbody.querySelectorAll('.js-manage-room-btn').forEach(button => {
-            button.addEventListener('click', function () {
-                const roomId = parseInt(this.getAttribute('data-room-id'), 10);
-                if (!roomId) return;
-                state.activeRoomId = roomId;
-                renderManagePanel();
-                renderAddProfessorSelect();
-                setMessage('Managing selected room.', 'info');
-            });
-        });
-
-        tbody.querySelectorAll('.js-delete-room-btn').forEach(button => {
-            button.addEventListener('click', function () {
-                const roomId = parseInt(this.getAttribute('data-room-id'), 10);
-                if (!roomId) return;
-                const room = getRoomById(roomId);
-                if (!room) return;
-
-                const shouldDelete = confirm('Delete room "' + room.name + '"?');
-                if (!shouldDelete) return;
-
-                state.rooms = state.rooms.filter(item => item.id !== roomId);
-                if (state.activeRoomId === roomId) {
-                    state.activeRoomId = null;
-                }
-
-                console.log('Ready for SQL integration: /api/dean/peer-management/rooms/delete', {
-                    deanId,
-                    roomId
-                });
-
-                renderProfessorPicker();
-                renderRoomsTable();
-                renderManagePanel();
-                renderAddProfessorSelect();
-                setMessage('Room deleted.', 'success');
-            });
-        });
-    }
-
-    function renderManagePanel() {
+    function renderMembersTable(payload) {
         const tbody = membersTable.querySelector('tbody');
         if (!tbody) return;
 
-        const activeRoom = getRoomById(state.activeRoomId);
-        if (!activeRoom) {
-            activeRoomTitle.textContent = 'Manage Room Members';
-            if (coordinatorLabel) coordinatorLabel.textContent = 'None assigned';
-            tbody.innerHTML = '<tr><td colspan="4">Select a room to manage members.</td></tr>';
+        const rows = Array.isArray(payload && payload.members) ? payload.members : [];
+        const roomId = normalizeRoomId(payload && payload.room && payload.room.id);
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="4">No members found for this room.</td></tr>';
             return;
         }
 
-        activeRoomTitle.textContent = 'Manage Room Members: ' + activeRoom.name;
-        const coordinator = activeRoom.coordinatorId ? getProfessorById(activeRoom.coordinatorId) : null;
-        if (coordinatorLabel) {
-            coordinatorLabel.textContent = coordinator ? coordinator.name : 'None assigned';
-        }
-        if (!activeRoom.memberIds.length) {
-            tbody.innerHTML = '<tr><td colspan="4">No members in this room.</td></tr>';
-            return;
-        }
-
-        tbody.innerHTML = activeRoom.memberIds.map(memberId => {
-            const professor = getProfessorById(memberId);
-            if (!professor) return '';
-            const isCoordinator = activeRoom.coordinatorId === professor.id;
-            return '<tr>' +
-                '<td>' + professor.id + '</td>' +
-                '<td>' + professor.name + '</td>' +
-                '<td>' + professor.institute + '</td>' +
-                '<td>' +
-                '<button type="button" class="btn-submit peer-mgmt-inline-btn js-set-coordinator-btn" data-professor-id="' + professor.id + '"' + (isCoordinator ? ' disabled' : '') + '>' + (isCoordinator ? 'Coordinator' : 'Set Coordinator') + '</button> ' +
-                '<button type="button" class="btn-cancel peer-mgmt-inline-btn js-remove-member-btn" data-professor-id="' + professor.id + '">Remove</button>' +
-                '</td>' +
-                '</tr>';
-        }).join('');
-
-        tbody.querySelectorAll('.js-set-coordinator-btn').forEach(button => {
-            button.addEventListener('click', function () {
-                const professorId = this.getAttribute('data-professor-id');
-                handleSetCoordinator(professorId);
-            });
-        });
-
-        tbody.querySelectorAll('.js-remove-member-btn').forEach(button => {
-            button.addEventListener('click', function () {
-                const professorId = this.getAttribute('data-professor-id');
-                const room = getRoomById(state.activeRoomId);
-                if (!professorId || !room) return;
-
-                room.memberIds = room.memberIds.filter(id => id !== professorId);
-                if (room.coordinatorId === professorId) {
-                    room.coordinatorId = null;
-                }
-
-                console.log('Ready for SQL integration: /api/dean/peer-management/rooms/update-members', {
-                    deanId,
-                    roomId: room.id,
-                    action: 'remove',
-                    professorId
-                });
-
-                renderProfessorPicker();
-                renderRoomsTable();
-                renderManagePanel();
-                renderAddProfessorSelect();
-                setMessage('Professor removed from room.', 'success');
-            });
-        });
-    }
-
-    function renderAddProfessorSelect() {
-        const activeRoom = getRoomById(state.activeRoomId);
-        if (!activeRoom) {
-            availableProfessors = [];
-            addProfessorList.innerHTML = '';
-            addProfessorInput.value = '';
-            addProfessorInput.placeholder = 'Select a room first';
-            addProfessorInput.disabled = true;
-            addProfessorBtn.disabled = true;
-            return;
-        }
-
-        const available = state.professorDirectory.filter(professor => !findRoomContainingProfessor(professor.id));
-        availableProfessors = available;
-        if (!available.length) {
-            addProfessorList.innerHTML = '';
-            addProfessorInput.value = '';
-            addProfessorInput.placeholder = 'No available professors';
-            addProfessorInput.disabled = true;
-            addProfessorBtn.disabled = true;
-            return;
-        }
-
-        addProfessorList.innerHTML = available.map(professor =>
-            '<option value="' + professor.id + ' - ' + professor.name + '"></option>'
-        ).join('');
-        addProfessorInput.placeholder = 'Search employee ID or full name';
-        addProfessorInput.disabled = false;
-        addProfessorBtn.disabled = false;
-    }
-
-    function handleSetCoordinator(professorId) {
-        const room = getRoomById(state.activeRoomId);
-        if (!room) return;
-        if (!room.memberIds.includes(professorId)) {
-            setMessage('Select a member in this room to assign as coordinator.', 'error');
-            return;
-        }
-
-        const password = prompt('Enter password to assign coordinator:');
-        if (password === null) {
-            setMessage('Coordinator assignment cancelled.', 'info');
-            return;
-        }
-        if (password !== 'dean') {
-            setMessage('Incorrect password. Coordinator not assigned.', 'error');
-            return;
-        }
-
-        room.coordinatorId = professorId;
-
-        console.log('Ready for SQL integration: /api/dean/peer-management/rooms/update-members', {
-            deanId,
-            roomId: room.id,
-            action: 'setCoordinator',
-            coordinatorId: professorId
-        });
-
-        renderManagePanel();
-        setMessage('Coordinator assigned.', 'success');
-    }
-
-    function handleCreateRoom() {
-        const roomName = roomNameInput.value.trim();
-        const selectedIds = Array.from(selectedProfessorIds);
-
-        if (!roomName) {
-            setMessage('Room name is required.', 'error');
-            return;
-        }
-
-        if (selectedIds.length < 2) {
-            setMessage('Select at least 2 professors to create a room.', 'error');
-            return;
-        }
-
-        const occupiedIds = selectedIds.filter(professorId => findRoomContainingProfessor(professorId));
-        if (occupiedIds.length) {
-            const occupiedNames = occupiedIds.map(professorId => {
-                const professor = getProfessorById(professorId);
-                return professor ? professor.name : professorId;
-            });
-            setMessage('Cannot create room. Already assigned: ' + occupiedNames.join(', '), 'error');
-            return;
-        }
-
-        const newRoom = {
-            id: state.nextRoomId,
-            name: roomName,
-            scope: 'All',
-            memberIds: selectedIds.slice(),
-            coordinatorId: null
-        };
-
-        state.nextRoomId += 1;
-        state.rooms.push(newRoom);
-        state.activeRoomId = newRoom.id;
-
-        console.log('Ready for SQL integration: /api/dean/peer-management/rooms/create', {
-            deanId,
-            room: newRoom
-        });
-
-        roomNameInput.value = '';
-        selectedProfessorIds.clear();
-
-        renderProfessorPicker();
-        renderRoomsTable();
-        renderManagePanel();
-        renderAddProfessorSelect();
-        setMessage('Room created successfully.', 'success');
-    }
-
-    function handleAddProfessorToActiveRoom() {
-        const activeRoom = getRoomById(state.activeRoomId);
-        if (!activeRoom) {
-            setMessage('Select a room to manage first.', 'error');
-            return;
-        }
-
-        const rawValue = addProfessorInput.value.trim();
-        if (!rawValue) {
-            setMessage('Enter an employee ID or full name.', 'error');
-            return;
-        }
-
-        const resolved = resolveProfessorFromInput(rawValue, availableProfessors);
-        if (!resolved) {
-            setMessage('No matching professor found. Please select from the list.', 'error');
-            return;
-        }
-
-        const professorId = resolved.id;
-
-        const currentRoom = findRoomContainingProfessor(professorId);
-        if (currentRoom && currentRoom.id !== activeRoom.id) {
-            const professor = getProfessorById(professorId);
-            const name = professor ? professor.name : professorId;
-            setMessage('Cannot add ' + name + '. Already assigned to room "' + currentRoom.name + '".', 'error');
-            return;
-        }
-
-        if (!activeRoom.memberIds.includes(professorId)) {
-            activeRoom.memberIds.push(professorId);
-        }
-
-        console.log('Ready for SQL integration: /api/dean/peer-management/rooms/update-members', {
-            deanId,
-            roomId: activeRoom.id,
-            action: 'add',
-            professorId
-        });
-
-        addProfessorInput.value = '';
-        renderProfessorPicker();
-        renderRoomsTable();
-        renderManagePanel();
-        renderAddProfessorSelect();
-        setMessage('Professor added to room.', 'success');
-    }
-
-    createRoomBtn.addEventListener('click', handleCreateRoom);
-    clearSelectionBtn.addEventListener('click', function () {
-        selectedProfessorIds.clear();
-        renderProfessorPicker();
-        setMessage('Selection cleared.', 'info');
-    });
-    directorySearchInput.addEventListener('input', renderProfessorPicker);
-    addProfessorBtn.addEventListener('click', handleAddProfessorToActiveRoom);
-
-    fetchPeerManagementDirectoryFromSql({
-        deanId,
-        ay: '2025-2026',
-        sem: '2'
-    }).then(payload => {
-        const directory = Array.isArray(payload.professors) ? payload.professors : [];
-        if (assignedInstitutes.length) {
-            const instituteSet = new Set(assignedInstitutes.map(i => String(i).toLowerCase()));
-            state.professorDirectory = directory.filter(item =>
-                instituteSet.has(String(item.institute || '').toLowerCase())
+        tbody.innerHTML = rows.map(member => {
+            const memberName = String(member && member.name || 'Professor');
+            const memberNameEncoded = encodeURIComponent(memberName);
+            return (
+            '<tr>' +
+            '<td>' + escapeHTML(member.name || 'N/A') + '</td>' +
+            '<td>' + escapeHTML(member.email || 'N/A') + '</td>' +
+            '<td>' + escapeHTML(member.employeeId || 'N/A') + '</td>' +
+            '<td>' +
+            '<div class="peer-mgmt-member-actions">' +
+            '<button type="button" class="btn-cancel peer-mgmt-member-remove-btn" data-room-id="' + String(roomId || 0) + '" data-user-id="' + escapeHTML(String(member.userId || '')) + '" data-member-name="' + memberNameEncoded + '">Remove</button>' +
+            '</div>' +
+            '</td>' +
+            '</tr>'
             );
-        } else {
-            state.professorDirectory = directory;
+        }).join('');
+    }
+
+    function renderRoomSelectOptions(preferredRoomId) {
+        const selectedCandidate = normalizeRoomId(preferredRoomId);
+        const hasRooms = Array.isArray(roomRowsCache) && roomRowsCache.length > 0;
+
+        if (!hasRooms) {
+            setSelectedRoom(0);
+            manualProfessorSelect.innerHTML = '<option value="">No eligible professors</option>';
+            addProfessorBtn.disabled = true;
+            viewMembersBtn.disabled = true;
+            dismantleRoomBtn.disabled = true;
+            renderMembersTable({ members: [] });
+            return;
         }
-        const rooms = Array.isArray(payload.rooms) ? payload.rooms : [];
-        state.rooms = rooms.map(room => ({
-            id: room.id,
-            name: room.name,
-            scope: room.scope || 'All',
-            memberIds: Array.isArray(room.memberIds) ? room.memberIds.slice() : [],
-            coordinatorId: room.coordinatorId || null
-        }));
-        state.nextRoomId = state.rooms.reduce((maxId, room) => Math.max(maxId, room.id || 0), 0) + 1;
 
-        renderProfessorPicker();
-        renderRoomsTable();
-        renderManagePanel();
-        renderAddProfessorSelect();
-        setMessage('Peer management ready.', 'info');
-    }).catch(() => {
-        state.professorDirectory = [];
-        state.rooms = [];
-        renderProfessorPicker();
-        renderRoomsTable();
-        renderManagePanel();
-        renderAddProfessorSelect();
-        setMessage('Unable to load peer management data.', 'error');
+        const hasPreferred = selectedCandidate > 0
+            && roomRowsCache.some(room => normalizeRoomId(room && room.id) === selectedCandidate);
+        const currentSelected = getSelectedRoomId();
+        const hasCurrent = currentSelected > 0
+            && roomRowsCache.some(room => normalizeRoomId(room && room.id) === currentSelected);
+        const fallbackRoomId = normalizeRoomId(roomRowsCache[0] && roomRowsCache[0].id);
+        const finalRoomId = hasPreferred
+            ? selectedCandidate
+            : (hasCurrent ? currentSelected : fallbackRoomId);
+
+        setSelectedRoom(finalRoomId);
+
+        addProfessorBtn.disabled = false;
+        viewMembersBtn.disabled = false;
+        dismantleRoomBtn.disabled = false;
+    }
+
+    function renderEligibleProfessors(payload) {
+        const rows = Array.isArray(payload && payload.professors) ? payload.professors : [];
+        if (!rows.length) {
+            manualProfessorSelect.innerHTML = '<option value="">No eligible professors available</option>';
+            return;
+        }
+
+        manualProfessorSelect.innerHTML = '<option value="">Select professor to add</option>' +
+            rows.map(item =>
+                `<option value="${escapeHTML(String(item.userId || ''))}">${escapeHTML(String(item.name || 'Professor'))} (${escapeHTML(String(item.employeeId || 'N/A'))})</option>`
+            ).join('');
+    }
+
+    function renderPrograms() {
+        const allPrograms = (SharedData.getPrograms && SharedData.getPrograms()) || [];
+        scopedPrograms = (Array.isArray(allPrograms) ? allPrograms : [])
+            .filter(program => {
+                const dept = String(program && program.departmentCode || '').trim().toUpperCase();
+                return !!scopedDepartment && dept === scopedDepartment;
+            })
+            .sort((a, b) => String(a && a.programCode || '').localeCompare(String(b && b.programCode || '')));
+
+        if (!scopedPrograms.length) {
+            programSelect.innerHTML = '<option value="">No programs available in your scope</option>';
+            return;
+        }
+
+        programSelect.innerHTML = '<option value="">Select program</option>' +
+            scopedPrograms.map(program =>
+                `<option value="${escapeHTML(String(program.programCode || ''))}">${escapeHTML(String(program.programCode || ''))} - ${escapeHTML(String(program.programName || ''))}</option>`
+            ).join('');
+    }
+
+    function renderRoomsTable(payload) {
+        const tbody = roomsTable.querySelector('tbody');
+        if (!tbody) return;
+
+        const rows = Array.isArray(payload && payload.rooms) ? payload.rooms : [];
+        roomRowsCache = rows.slice();
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="6">No rooms generated for the current semester.</td></tr>';
+            renderRoomSelectOptions(0);
+            return;
+        }
+
+        tbody.innerHTML = rows.map(room =>
+            '<tr>' +
+            '<td>' + escapeHTML(room.roomName || 'N/A') + '</td>' +
+            '<td>' + escapeHTML((room.programCode || 'N/A') + (room.programName ? (' - ' + room.programName) : '')) + '</td>' +
+            '<td>' + String(room.memberCount || 0) + '</td>' +
+            '<td>' + String(room.submittedAssignments || 0) + '/' + String(room.totalAssignments || 0) + ' submitted</td>' +
+            '<td>' + escapeHTML(formatDateTime(room.createdAt)) + '</td>' +
+            '<td>' +
+            '<div class="peer-mgmt-row-actions">' +
+            '<button type="button" class="btn-cancel peer-mgmt-room-view-btn" data-room-id="' + String(Number(room.id) || 0) + '">View</button>' +
+            '<button type="button" class="btn-cancel peer-mgmt-room-dismantle-btn" data-room-id="' + String(Number(room.id) || 0) + '">Dismantle</button>' +
+            '</div>' +
+            '</td>' +
+            '</tr>'
+        ).join('');
+
+        renderRoomSelectOptions(getSelectedRoomId());
+    }
+
+    function loadEligibleProfessors(roomId, options = {}) {
+        const selectedRoomId = normalizeRoomId(roomId);
+        if (selectedRoomId <= 0) {
+            manualProfessorSelect.innerHTML = '<option value="">Select a room first</option>';
+            return;
+        }
+        try {
+            const response = SharedData.listDeanPeerRoomEligibleProfessorsCurrent({ roomId: selectedRoomId }, selectedRoomId);
+            renderEligibleProfessors(response || {});
+            if (!options || !options.silent) {
+                setMessage('Eligible professors loaded for selected room.', 'info');
+            }
+        } catch (error) {
+            manualProfessorSelect.innerHTML = '<option value="">Unable to load eligible professors</option>';
+            if (!options || !options.silent) {
+                setMessage(String(error && error.message || 'Unable to load eligible professors.'), 'error');
+            }
+        }
+    }
+
+    function loadRoomMembers(roomId, options = {}) {
+        const selectedRoomId = normalizeRoomId(roomId);
+        if (selectedRoomId <= 0) {
+            renderMembersTable({ members: [] });
+            return;
+        }
+        try {
+            const response = SharedData.listDeanPeerRoomMembersCurrent({ roomId: selectedRoomId }, selectedRoomId);
+            renderMembersTable(response || {});
+            if (!options || !options.silent) {
+                const roomName = String(response && response.room && response.room.roomName || '').trim();
+                if (roomName) {
+                    setMessage('Loaded members for room: ' + roomName + '.', 'info');
+                } else {
+                    setMessage('Loaded room members.', 'info');
+                }
+            }
+        } catch (error) {
+            renderMembersTable({ members: [] });
+            if (!options || !options.silent) {
+                setMessage(String(error && error.message || 'Unable to load room members.'), 'error');
+            }
+        }
+    }
+
+    function dismantleRoom(roomId) {
+        const selectedRoomId = normalizeRoomId(roomId);
+        if (selectedRoomId <= 0) {
+            setMessage('Select a room first.', 'error');
+            return;
+        }
+
+        const roomEntry = roomRowsCache.find(room => normalizeRoomId(room && room.id) === selectedRoomId);
+        const roomLabel = roomEntry && roomEntry.roomName ? roomEntry.roomName : ('Room #' + selectedRoomId);
+        const approved = window.confirm('Dismantle "' + roomLabel + '"? This removes room members and assignments for this room.');
+        if (!approved) {
+            return;
+        }
+
+        dismantleRoomBtn.disabled = true;
+        try {
+            const response = SharedData.dismantleDeanPeerRoom({ roomId: selectedRoomId });
+            const info = response && response.dismantledRoom ? response.dismantledRoom : {};
+            setMessage(
+                'Room dismantled: ' + String(info.roomName || roomLabel) + ' (' +
+                String(info.memberCount || 0) + ' members, ' +
+                String(info.assignmentCount || 0) + ' assignments).',
+                'success'
+            );
+            renderMembersTable({ members: [] });
+            loadRooms({ silent: true });
+        } catch (error) {
+            setMessage(String(error && error.message || 'Failed to dismantle room.'), 'error');
+        } finally {
+            dismantleRoomBtn.disabled = false;
+        }
+    }
+
+    function removeRoomMember(roomId, professorUserId, memberName) {
+        const selectedRoomId = normalizeRoomId(roomId);
+        const professorToken = String(professorUserId || '').trim();
+        if (selectedRoomId <= 0 || !professorToken) {
+            setMessage('Unable to remove room member due to invalid selection.', 'error');
+            return;
+        }
+
+        const name = String(memberName || 'this professor').trim();
+        const approved = window.confirm('Remove "' + name + '" from this room? Their room assignments in this room will also be removed.');
+        if (!approved) {
+            return;
+        }
+
+        try {
+            const response = SharedData.removeDeanPeerRoomMember({
+                roomId: selectedRoomId,
+                professorUserId: professorToken
+            });
+            const removedMember = response && response.removedMember ? response.removedMember : null;
+            setMessage(
+                'Removed ' + String(removedMember && removedMember.name || name)
+                + '. Deleted assignments: ' + String(response && response.deletedAssignmentCount || 0) + '.',
+                'success'
+            );
+            loadRooms({ silent: true, preferredRoomId: selectedRoomId });
+            loadRoomMembers(selectedRoomId, { silent: true });
+        } catch (error) {
+            setMessage(String(error && error.message || 'Failed to remove professor from room.'), 'error');
+        }
+    }
+
+    function loadRooms(options = {}) {
+        const silent = !!(options && options.silent);
+        const preferredRoomId = normalizeRoomId(options && options.preferredRoomId);
+        try {
+            const response = SharedData.listDeanPeerRoomsCurrent({});
+            renderRoomsTable(response || {});
+            const selectedRoomId = preferredRoomId > 0 ? preferredRoomId : getSelectedRoomId();
+            if (selectedRoomId > 0) {
+                loadEligibleProfessors(selectedRoomId, { silent: true });
+            } else {
+                manualProfessorSelect.innerHTML = '<option value="">Select a room first</option>';
+            }
+            if (!silent) {
+                const semesterLabel = String(response && response.currentSemester || '').trim();
+                if (semesterLabel) {
+                    setMessage('Loaded current semester rooms: ' + semesterLabel + '.', 'info');
+                } else {
+                    setMessage('No current semester is configured yet.', 'error');
+                }
+            }
+        } catch (error) {
+            renderRoomsTable({ rooms: [] });
+            if (!silent) {
+                setMessage(String(error && error.message || 'Unable to load peer rooms.'), 'error');
+            }
+        }
+    }
+
+    function clearInputs() {
+        roomNameInput.value = '';
+        if (scopedPrograms.length > 0) {
+            programSelect.value = '';
+        }
+        professorCountInput.value = '5';
+    }
+
+    createRoomBtn.addEventListener('click', function () {
+        const programCode = String(programSelect.value || '').trim().toUpperCase();
+        const professorCount = parseInt(String(professorCountInput.value || '').trim(), 10);
+        const roomName = String(roomNameInput.value || '').trim();
+
+        if (!programCode) {
+            setMessage('Program selection is required.', 'error');
+            return;
+        }
+        if (!Number.isFinite(professorCount) || professorCount < 2) {
+            setMessage('Professor count must be at least 2.', 'error');
+            return;
+        }
+
+        createRoomBtn.disabled = true;
+        try {
+            const response = SharedData.autoGeneratePeerRoom({
+                programCode,
+                professorCount,
+                roomName
+            });
+            const summary = response && response.summary ? response.summary : null;
+            const generatedRooms = Array.isArray(response && response.rooms) ? response.rooms : [];
+            const generatedRoom = response && response.room
+                ? response.room
+                : (generatedRooms.length ? generatedRooms[0] : null);
+
+            if (summary) {
+                setMessage(
+                    'Generated ' + String(summary.roomCount || 0) + ' room(s) for '
+                    + String(summary.totalEligibleUsed || 0) + ' professors ('
+                    + String(summary.totalAssignments || 0) + ' assignments).',
+                    'success'
+                );
+            } else if (generatedRoom) {
+                setMessage(
+                    'Room generated: ' + (generatedRoom.roomName || 'N/A')
+                    + ' (' + String(generatedRoom.memberCount || 0) + ' professors, '
+                    + String(generatedRoom.assignmentCount || 0) + ' assignments).',
+                    'success'
+                );
+            } else {
+                setMessage('Room generated successfully.', 'success');
+            }
+            clearInputs();
+            loadRooms({ silent: true, preferredRoomId: Number(generatedRoom && generatedRoom.id) || 0 });
+        } catch (error) {
+            setMessage(String(error && error.message || 'Failed to generate room.'), 'error');
+        } finally {
+            createRoomBtn.disabled = false;
+        }
     });
-}
 
-function resolveProfessorFromInput(rawValue, available) {
-    if (!rawValue || !available.length) return null;
-    const value = rawValue.trim().toLowerCase();
+    clearSelectionBtn.addEventListener('click', function () {
+        clearInputs();
+        setMessage('', 'info');
+    });
 
-    let match = available.find(professor => professor.id.toLowerCase() === value);
-    if (match) return match;
+    addProfessorBtn.addEventListener('click', function () {
+        const selectedRoomId = getSelectedRoomId();
+        const professorUserId = String(manualProfessorSelect.value || '').trim();
+        if (selectedRoomId <= 0) {
+            setMessage('Select a room first.', 'error');
+            return;
+        }
+        if (!professorUserId) {
+            setMessage('Select a professor to add.', 'error');
+            return;
+        }
 
-    match = available.find(professor => (professor.name || '').toLowerCase() === value);
-    if (match) return match;
+        addProfessorBtn.disabled = true;
+        try {
+            const response = SharedData.addDeanPeerRoomMembers({
+                roomId: selectedRoomId,
+                professorUserIds: [professorUserId]
+            });
+            const addedMembers = Array.isArray(response && response.addedMembers) ? response.addedMembers : [];
+            setMessage(
+                'Added ' + String(addedMembers.length) + ' professor(s). New assignments: ' + String(response && response.assignmentAddedCount || 0) + '.',
+                'success'
+            );
+            loadRooms({ silent: true, preferredRoomId: selectedRoomId });
+            loadRoomMembers(selectedRoomId, { silent: true });
+        } catch (error) {
+            setMessage(String(error && error.message || 'Failed to add professor to room.'), 'error');
+        } finally {
+            addProfessorBtn.disabled = false;
+        }
+    });
 
-    match = available.find(professor =>
-        value.includes(professor.id.toLowerCase()) ||
-        value.includes((professor.name || '').toLowerCase())
-    );
+    viewMembersBtn.addEventListener('click', function () {
+        const selectedRoomId = getSelectedRoomId();
+        if (selectedRoomId <= 0) {
+            setMessage('Select a room first.', 'error');
+            return;
+        }
+        loadRoomMembers(selectedRoomId);
+    });
 
-    return match || null;
-}
+    dismantleRoomBtn.addEventListener('click', function () {
+        const selectedRoomId = getSelectedRoomId();
+        dismantleRoom(selectedRoomId);
+    });
 
-/**
- * SQL-ready placeholder data for peer room management
- */
-function fetchPeerManagementDirectoryFromSql(query) {
-    // Example SQL-backed API requests:
-    // POST /api/dean/peer-management/professors/list
-    // POST /api/dean/peer-management/rooms/list
-    // Both should include dean scope fields (ay/sem, deanId).
-    // Server must enforce: one professor can belong to one room only.
-    const payload = {
-        professors: [
-            { id: 'FAC-20451', name: 'Efrhain Louis Pajota', institute: 'Institute of Computer Studies' },
-            { id: 'FAC-21014', name: 'Maria Santos', institute: 'Institute of Computer Studies' },
-            { id: 'FAC-21440', name: 'Leo Ramos', institute: 'Institute of Computer Studies' },
-            { id: 'FAC-21888', name: 'Catherine Dela Cruz', institute: 'Institute of Computer Studies' },
-            { id: 'FAC-21990', name: 'Ivan Tan', institute: 'Institute of Computer Studies' },
-            { id: 'FAC-18934', name: 'John Mendoza', institute: 'Institute of Engineering' },
-            { id: 'FAC-19881', name: 'Ana Garcia', institute: 'Institute of Engineering' },
-            { id: 'FAC-17710', name: 'Riza Delos Reyes', institute: 'Institute of Engineering' },
-            { id: 'FAC-30022', name: 'Paul Reyes', institute: 'Institute of Business and Accountancy' },
-            { id: 'FAC-30108', name: 'Lena Cruz', institute: 'Institute of Liberal Arts' }
-        ],
-        rooms: [
-            // Start with no existing rooms; user-created only
-        ]
-    };
+    roomsTable.addEventListener('click', function (event) {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        const viewBtn = target.closest('.peer-mgmt-room-view-btn');
+        if (viewBtn) {
+            const roomId = normalizeRoomId(viewBtn.getAttribute('data-room-id'));
+            if (roomId > 0) {
+                setSelectedRoom(roomId);
+                loadEligibleProfessors(roomId, { silent: true });
+                loadRoomMembers(roomId);
+            }
+            return;
+        }
 
-    console.log('Ready for SQL integration: /api/dean/peer-management/professors/list, /api/dean/peer-management/rooms/list', query);
-    return Promise.resolve(payload);
+        const dismantleBtn = target.closest('.peer-mgmt-room-dismantle-btn');
+        if (dismantleBtn) {
+            const roomId = normalizeRoomId(dismantleBtn.getAttribute('data-room-id'));
+            dismantleRoom(roomId);
+        }
+    });
+
+    membersTable.addEventListener('click', function (event) {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        const removeBtn = target.closest('.peer-mgmt-member-remove-btn');
+        if (!removeBtn) return;
+
+        const roomId = normalizeRoomId(removeBtn.getAttribute('data-room-id'));
+        const professorUserId = String(removeBtn.getAttribute('data-user-id') || '').trim();
+        const memberName = decodeURIComponent(String(removeBtn.getAttribute('data-member-name') || '').trim());
+
+        removeBtn.disabled = true;
+        try {
+            removeRoomMember(roomId, professorUserId, memberName);
+        } finally {
+            removeBtn.disabled = false;
+        }
+    });
+
+    renderPrograms();
+    loadRooms();
 }
 
 /**
@@ -2548,10 +3771,7 @@ if (typeof module !== 'undefined' && module.exports) {
         handleLogout,
         clearUserSession,
         getUserSession,
-        handleActionButton,
         handleViewDetails,
         updateSummaryCards
     };
 }
-
-

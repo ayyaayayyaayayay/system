@@ -12,6 +12,81 @@ document.addEventListener('DOMContentLoaded', function () {
     initializeDashboard();
 });
 
+// Users loaded from PHP API (or SharedData fallback)
+let adminUsers = [];
+let hrNotificationHandlersBound = false;
+let hrAnnouncementComposerReady = false;
+let hrUsersRefreshPromise = null;
+let hrUsersLastRefreshAt = 0;
+let hrEvaluationOverviewChartInstance = null;
+let hrSemestralPerformanceChartInstance = null;
+const HR_USERS_REFRESH_INTERVAL_MS = 30000;
+
+/**
+ * Fetch users from PHP API, with SharedData fallback
+ */
+function fetchUsersFromApi(campus = 'all', search = '') {
+    const params = new URLSearchParams();
+    if (campus) params.set('campus', campus);
+    if (search) params.set('search', search);
+
+    return fetch(`../api/users.php?${params.toString()}`, { cache: 'no-store' })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(payload => {
+            adminUsers = Array.isArray(payload && payload.users) ? payload.users : [];
+            return adminUsers;
+        })
+        .catch(error => {
+            console.warn('[HRPanel] Falling back to SharedData users:', error);
+            adminUsers = SharedData.getUsers();
+
+            let filtered = [...adminUsers];
+            if (campus && campus !== 'all') {
+                filtered = filtered.filter(u => u.campus === campus);
+            }
+            if (search) {
+                const query = search.toLowerCase();
+                filtered = filtered.filter(u =>
+                    (u.name && u.name.toLowerCase().includes(query)) ||
+                    (u.email && u.email.toLowerCase().includes(query)) ||
+                    (u.department && u.department.toLowerCase().includes(query))
+                );
+            }
+
+            adminUsers = filtered;
+            return adminUsers;
+        });
+}
+
+function refreshHrUsersInBackground(force = false) {
+    const now = Date.now();
+    if (!force && now - hrUsersLastRefreshAt < HR_USERS_REFRESH_INTERVAL_MS) {
+        return Promise.resolve(adminUsers);
+    }
+    if (hrUsersRefreshPromise) {
+        return hrUsersRefreshPromise;
+    }
+
+    hrUsersRefreshPromise = fetchUsersFromApi('all', '')
+        .then(() => {
+            hrUsersLastRefreshAt = Date.now();
+            loadProfessorsData();
+            renderProfessors();
+            return adminUsers;
+        })
+        .catch(() => adminUsers)
+        .finally(() => {
+            hrUsersRefreshPromise = null;
+        });
+
+    return hrUsersRefreshPromise;
+}
+
 /**
  * Check if user is authenticated and is an admin
  * @returns {boolean} - True if user is authenticated as admin
@@ -52,6 +127,8 @@ function initializeDashboard() {
     setupNavigation();
     setupLogout();
     setupNotifications();
+    renderHrSystemNotifications();
+    setupHrAnnouncementComposer();
     setupProfilePhotoUpload();
     setupProfileActions();
     setupSemesterSettings();
@@ -61,6 +138,7 @@ function initializeDashboard() {
     renderProfessorDepartmentOptions();
     renderProfessorDepartmentTabs();
     setupQuestionnaire();
+    setupHrSharedDataBindings();
 
     // Cross-tab sync: auto-refresh questionnaire when another panel saves changes
     // (only fires for OTHER tabs, not this one — avoids redundant re-renders)
@@ -81,9 +159,14 @@ function initializeDashboard() {
                 if (startEl && periods[type]) startEl.value = periods[type].start || '';
                 if (endEl && periods[type]) endEl.value = periods[type].end || '';
             });
+            renderHrSystemNotifications();
+        }
+        if (e.key === SharedData.KEYS.ANNOUNCEMENTS) {
+            renderHrSystemNotifications();
         }
     });
     updateOverviewCards();
+    renderHrDashboardTopCharts();
     loadReports();
     setupChangePasswordForm();
     setupPasswordToggles();
@@ -188,7 +271,7 @@ function loadUserInfo() {
  * Setup navigation links
  */
 function setupNavigation() {
-    const navLinks = document.querySelectorAll('.nav-link:not(.logout)');
+    const navLinks = document.querySelectorAll('.sidebar-nav .nav-link[data-view]');
 
     navLinks.forEach(link => {
         link.addEventListener('click', function (e) {
@@ -200,9 +283,8 @@ function setupNavigation() {
             // Add active class to clicked link
             this.classList.add('active');
 
-            // Handle navigation (for future implementation)
-            const linkText = this.querySelector('span').textContent.trim();
-            handleNavigation(linkText);
+            const viewId = this.getAttribute('data-view') || 'dashboard';
+            handleNavigation(viewId);
         });
     });
 }
@@ -219,11 +301,40 @@ function hideAllViews() {
     });
 }
 
+function isContentViewVisible(viewId) {
+    const view = document.getElementById(viewId);
+    return !!(view && view.style.display !== 'none');
+}
+
 /**
  * Handle navigation to different sections
  * @param {string} section - Section name
  */
 function handleNavigation(section) {
+    const raw = String(section || '').trim();
+    const lower = raw.toLowerCase();
+    const viewId = (
+        lower === 'dashboard' ? 'dashboard' :
+            (lower === 'users' || lower === 'user management') ? 'users' :
+                (lower === 'activity-log' || lower === 'activity log') ? 'activity-log' :
+                    (lower === 'settings' || lower === 'evaluation settings' || lower === 'system settings') ? 'settings' :
+                        (lower === 'reports' || lower === 'reports & analytics') ? 'reports' :
+                            (lower === 'questionnaire') ? 'questionnaire' :
+                                (lower === 'profile') ? 'profile' :
+                                    (lower === 'change-password' || lower === 'change password') ? 'change-password' :
+                                        'dashboard'
+    );
+    const pageTitleMap = {
+        'dashboard': 'Dashboard',
+        'users': 'User Management',
+        'activity-log': 'Activity Log',
+        'settings': 'Evaluation Settings',
+        'reports': 'Reports',
+        'questionnaire': 'Questionnaire',
+        'profile': 'Profile',
+        'change-password': 'Change Password',
+    };
+
     // Hide all views first to ensure only one is visible
     hideAllViews();
 
@@ -234,56 +345,57 @@ function handleNavigation(section) {
     const pageTitle = document.getElementById('mainPageTitle');
 
     if (pageTitle) {
-        pageTitle.textContent = section;
+        pageTitle.textContent = pageTitleMap[viewId] || 'Dashboard';
     }
 
-    switch (section) {
-        case 'Dashboard':
+    switch (viewId) {
+        case 'dashboard':
             if (dashboardView) {
                 dashboardView.style.display = 'block';
+                updateOverviewCards();
+                renderProfessorRanking();
+                renderHrDashboardTopCharts();
                 loadReports();
             }
             break;
-        case 'User Management':
+        case 'users':
             if (userManagementView) {
                 userManagementView.style.display = 'block';
                 loadUserManagement();
             }
             break;
-        case 'Activity Log':
+        case 'activity-log':
             const activityLogView = document.getElementById('activity-log-view');
             if (activityLogView) {
                 activityLogView.style.display = 'block';
                 loadHrActivityLog();
             }
             break;
-        case 'Evaluation Settings':
-        case 'System Settings':
+        case 'settings':
             if (settingsView) {
                 settingsView.style.display = 'block';
             }
             break;
-        case 'Reports & Analytics':
-        case 'Reports':
+        case 'reports':
             if (reportsView) {
                 reportsView.style.display = 'block';
                 loadReports();
             }
             break;
-        case 'Profile':
+        case 'profile':
             const profileView = document.getElementById('profile-view');
             if (profileView) {
                 profileView.style.display = 'block';
             }
             break;
-        case 'Questionnaire':
+        case 'questionnaire':
             const questionnaireView = document.getElementById('questionnaire-view');
             if (questionnaireView) {
                 questionnaireView.style.display = 'block';
                 loadQuestionnaire();
             }
             break;
-        case 'Change Password':
+        case 'change-password':
             const changePasswordView = document.getElementById('change-password-view');
             if (changePasswordView) {
                 changePasswordView.style.display = 'block';
@@ -302,57 +414,86 @@ function handleNavigation(section) {
 }
 
 /**
- * Load HR activity log (mock data with filters)
+ * Load HR activity log from database-backed SharedData
  */
 function loadHrActivityLog() {
     const tbody = document.getElementById('hr-activity-log-body');
     if (!tbody) return;
 
-    const activityRows = [
-        { ip_address: '223.31.69.69', timestamp: '2026-02-06 08:32', description: 'Authentication by cached UID', action: 'Login', role: 'admin', user_id: 'admin', log_id: 'LOG-0001', type: 'login' },
-        { ip_address: '223.31.69.70', timestamp: '2026-02-06 08:10', description: 'Update AdoptOpenJDK JRE', action: 'System Update', role: 'system', user_id: 'system', log_id: 'LOG-0002', type: 'system' },
-        { ip_address: '223.31.69.69', timestamp: '2026-02-06 07:58', description: 'HR staff logged in', action: 'Login', role: 'hr', user_id: 'hr_staff', log_id: 'LOG-0003', type: 'login' },
-        { ip_address: '223.31.69.60', timestamp: '2026-02-06 07:22', description: 'Students completed evaluations', action: 'Evaluation Completed', role: 'student', user_id: 'student_2024_102', log_id: 'LOG-0004', type: 'evaluation' },
-        { ip_address: '223.31.69.69', timestamp: '2026-02-06 06:55', description: 'Created user prof_garcia', action: 'User Account Created', role: 'admin', user_id: 'admin_ops', log_id: 'LOG-0005', type: 'user' }
-    ];
-
+    const fromInput = document.getElementById('hr-activity-from');
+    const toInput = document.getElementById('hr-activity-to');
     const searchBtn = document.getElementById('hr-activity-search-btn');
     const typeSelect = document.getElementById('hr-activity-type');
     const searchInput = document.getElementById('hr-activity-search');
 
+    const escapeHtml = value => String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    const normalizeType = value => String(value || '').trim().toLowerCase();
+    const parseTimestamp = value => {
+        const raw = String(value || '').trim();
+        if (!raw) return null;
+        const parsed = new Date(raw);
+        if (!Number.isNaN(parsed.getTime())) return parsed;
+        const altParsed = new Date(raw.replace(' ', 'T'));
+        return Number.isNaN(altParsed.getTime()) ? null : altParsed;
+    };
+    const formatTimestamp = value => {
+        const parsed = parseTimestamp(value);
+        return parsed ? parsed.toLocaleString() : String(value || '-');
+    };
+    const renderPrompt = message => {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" style="text-align:center; padding:18px;">${escapeHtml(message)}</td>
+            </tr>
+        `;
+    };
+
     const renderRows = (rows) => {
+        if (!rows.length) {
+            renderPrompt('No activity records found.');
+            return;
+        }
         tbody.innerHTML = rows.map(row => `
             <tr>
-                <td>${row.ip_address}</td>
-                <td>${row.timestamp}</td>
-                <td>${row.description}</td>
-                <td>${row.action}</td>
-                <td>${row.role}</td>
-                <td>${row.user_id}</td>
-                <td>${row.log_id}</td>
+                <td>${escapeHtml(row.ip_address || '-')}</td>
+                <td>${escapeHtml(formatTimestamp(row.timestamp))}</td>
+                <td>${escapeHtml(row.description || '-')}</td>
+                <td>${escapeHtml(row.action || '-')}</td>
+                <td>${escapeHtml(row.role || '-')}</td>
+                <td>${escapeHtml(row.user_id || '-')}</td>
+                <td>${escapeHtml(row.log_id || row.id || '-')}</td>
             </tr>
         `).join('');
     };
 
-    renderRows(activityRows);
-
-    if (searchBtn && typeSelect && searchInput) {
-        const handleSearch = () => {
-            const typeValue = typeSelect.value;
-            const term = searchInput.value.trim().toLowerCase();
-            const filtered = activityRows.filter(row => {
-                const typeMatch = typeValue === 'all' || row.type === typeValue;
-                const text = `${row.ip_address} ${row.timestamp} ${row.description} ${row.action} ${row.role} ${row.user_id} ${row.log_id}`.toLowerCase();
-                const searchMatch = term ? text.includes(term) : true;
-                return typeMatch && searchMatch;
-            });
-            renderRows(filtered);
+    const runSearch = () => {
+        const filters = {
+            type: normalizeType(typeSelect ? typeSelect.value : 'all'),
+            term: String(searchInput ? searchInput.value : '').trim(),
+            from: String(fromInput ? fromInput.value : '').trim(),
+            to: String(toInput ? toInput.value : '').trim(),
+            limit: 200,
         };
 
-        searchBtn.onclick = handleSearch;
-        typeSelect.onchange = handleSearch;
-        searchInput.oninput = handleSearch;
+        try {
+            const rows = SharedData.searchActivityLog ? SharedData.searchActivityLog(filters) : [];
+            renderRows(Array.isArray(rows) ? rows : []);
+        } catch (error) {
+            console.error('[HRPanel] Failed to search activity log.', error);
+            renderPrompt('Failed to load activity records.');
+        }
+    };
+
+    if (searchBtn) {
+        searchBtn.onclick = runSearch;
     }
+
+    renderPrompt('Click Search to load activity records.');
 }
 
 /**
@@ -383,35 +524,410 @@ function setupNotifications() {
         return;
     }
 
-    const notifications = [
-        { title: 'Evaluation Started', meta: 'Student to Professor - Just now' },
-        { title: 'Evaluation Window Open', meta: 'Peer Evaluation - Today' },
-        { title: 'New Review Period', meta: 'Supervisor Evaluation - Today' }
-    ];
+    const announcements = (SharedData.getAnnouncements && SharedData.getAnnouncements()) || [];
+    const formatMeta = (item) => {
+        const message = String(item && item.message || '').trim();
+        const timestamp = String(item && item.timestamp || '').trim();
+        const parsed = timestamp ? new Date(timestamp) : null;
+        const dateLabel = parsed && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleString() : timestamp;
+        if (message && dateLabel) return `${message} • ${dateLabel}`;
+        if (message) return message;
+        if (dateLabel) return dateLabel;
+        return 'No details';
+    };
 
     if (badge) {
-        badge.textContent = notifications.length;
+        const unreadCount = SharedData.getUnreadAnnouncementCount
+            ? Number(SharedData.getUnreadAnnouncementCount()) || 0
+            : announcements.length;
+        badge.textContent = unreadCount;
     }
 
-    list.innerHTML = notifications.map(item => `
-        <div class="notification-item">
-            <div class="notification-item-title">${item.title}</div>
-            <div class="notification-item-meta">${item.meta}</div>
+    if (announcements.length === 0) {
+        list.innerHTML = `
+            <div class="notification-item">
+                <div class="notification-item-title">No notifications</div>
+                <div class="notification-item-meta">Announcements will appear here.</div>
+            </div>
+        `;
+    } else {
+        list.innerHTML = announcements.map(item => `
+            <div class="notification-item">
+                <div class="notification-item-title">${item.title || 'Announcement'}</div>
+                <div class="notification-item-meta">${formatMeta(item)}</div>
+            </div>
+        `).join('');
+    }
+
+    if (!hrNotificationHandlersBound) {
+        icon.addEventListener('click', function (e) {
+            e.stopPropagation();
+            dropdown.classList.toggle('show');
+            dropdown.setAttribute('aria-hidden', dropdown.classList.contains('show') ? 'false' : 'true');
+        });
+
+        document.addEventListener('click', function (e) {
+            if (!dropdown.classList.contains('show')) return;
+            if (wrapper && wrapper.contains(e.target)) return;
+            dropdown.classList.remove('show');
+            dropdown.setAttribute('aria-hidden', 'true');
+        });
+
+        hrNotificationHandlersBound = true;
+    }
+}
+
+function normalizeHrAnnouncementComposerToken(value) {
+    return String(value == null ? '' : value).trim().toLowerCase();
+}
+
+function populateHrAnnouncementComposerCampusOptions() {
+    const campusSelect = document.getElementById('hr-announcement-target-campus');
+    if (!campusSelect) return;
+
+    const campuses = (SharedData.getCampuses ? SharedData.getCampuses() : []) || [];
+    const previous = normalizeHrAnnouncementComposerToken(campusSelect.value);
+    const realCampuses = (Array.isArray(campuses) ? campuses : []).filter(campus => {
+        const id = normalizeHrAnnouncementComposerToken(campus && campus.id);
+        return id && id !== 'all';
+    });
+
+    campusSelect.innerHTML = '<option value="">All Campuses</option>';
+    realCampuses.forEach(campus => {
+        const id = String(campus && campus.id || '').trim();
+        if (!id) return;
+        const name = String(campus && (campus.name || campus.id) || id).trim() || id;
+        const option = document.createElement('option');
+        option.value = id;
+        option.textContent = name;
+        campusSelect.appendChild(option);
+    });
+
+    if (previous && realCampuses.some(campus => normalizeHrAnnouncementComposerToken(campus && campus.id) === previous)) {
+        campusSelect.value = previous;
+    } else {
+        campusSelect.value = '';
+    }
+}
+
+function populateHrAnnouncementComposerProgramOptions() {
+    const campusSelect = document.getElementById('hr-announcement-target-campus');
+    const programSelect = document.getElementById('hr-announcement-target-program');
+    if (!programSelect) return;
+
+    const selectedCampus = normalizeHrAnnouncementComposerToken(campusSelect ? campusSelect.value : '');
+    const previousRaw = String(programSelect.value || '').trim();
+    const previous = normalizeHrAnnouncementComposerToken(previousRaw);
+    const programs = (SharedData.getPrograms ? SharedData.getPrograms() : []) || [];
+
+    const filteredPrograms = (Array.isArray(programs) ? programs : [])
+        .filter(program => {
+            if (!program) return false;
+            if (!selectedCampus) return true;
+            return normalizeHrAnnouncementComposerToken(program.campusSlug) === selectedCampus;
+        })
+        .sort((a, b) => String(a && a.programCode || '').localeCompare(String(b && b.programCode || '')));
+
+    programSelect.innerHTML = '<option value="">All Programs</option>';
+    filteredPrograms.forEach(program => {
+        const code = String(program && program.programCode || '').trim();
+        if (!code) return;
+        const name = String(program && program.programName || '').trim();
+        const option = document.createElement('option');
+        option.value = code;
+        option.textContent = code + (name ? ' - ' + name : '');
+        programSelect.appendChild(option);
+    });
+
+    const matchedPrevious = previous
+        ? filteredPrograms.find(program => normalizeHrAnnouncementComposerToken(program && program.programCode) === previous)
+        : null;
+    if (matchedPrevious) {
+        programSelect.value = String(matchedPrevious.programCode || '').trim();
+    } else {
+        programSelect.value = '';
+    }
+}
+
+function syncHrAnnouncementStudentCompletionVisibility() {
+    const roleSelect = document.getElementById('hr-announcement-target-role');
+    const completionWrap = document.getElementById('hr-announcement-student-completion-wrap');
+    const completionSelect = document.getElementById('hr-announcement-student-completion');
+    const isStudentTarget = normalizeHrAnnouncementComposerToken(roleSelect ? roleSelect.value : '') === 'student';
+    if (completionWrap) completionWrap.style.display = isStudentTarget ? 'block' : 'none';
+    if (completionSelect && !isStudentTarget) {
+        completionSelect.value = 'all';
+    }
+}
+
+function resetHrAnnouncementComposerForm() {
+    const form = document.getElementById('hr-announcement-compose-form');
+    const feedback = document.getElementById('hr-announcement-compose-feedback');
+    if (form) form.reset();
+    if (feedback) feedback.textContent = '';
+    populateHrAnnouncementComposerCampusOptions();
+    populateHrAnnouncementComposerProgramOptions();
+    syncHrAnnouncementStudentCompletionVisibility();
+}
+
+function closeHrAnnouncementComposerModal() {
+    const modal = document.getElementById('hr-announcement-compose-modal');
+    if (!modal) return;
+    modal.style.display = 'none';
+    resetHrAnnouncementComposerForm();
+}
+
+function openHrAnnouncementComposerModal() {
+    const modal = document.getElementById('hr-announcement-compose-modal');
+    if (!modal) return;
+    populateHrAnnouncementComposerCampusOptions();
+    populateHrAnnouncementComposerProgramOptions();
+    syncHrAnnouncementStudentCompletionVisibility();
+    modal.style.display = 'flex';
+
+    const titleInput = document.getElementById('hr-announcement-compose-title');
+    if (titleInput) titleInput.focus();
+}
+
+function handleHrAnnouncementComposeSubmit(event) {
+    if (event) event.preventDefault();
+
+    const titleInput = document.getElementById('hr-announcement-compose-title');
+    const messageInput = document.getElementById('hr-announcement-compose-message');
+    const roleSelect = document.getElementById('hr-announcement-target-role');
+    const campusSelect = document.getElementById('hr-announcement-target-campus');
+    const programSelect = document.getElementById('hr-announcement-target-program');
+    const completionSelect = document.getElementById('hr-announcement-student-completion');
+    const feedback = document.getElementById('hr-announcement-compose-feedback');
+
+    const title = String(titleInput ? titleInput.value : '').trim();
+    const message = String(messageInput ? messageInput.value : '').trim();
+    const role = normalizeHrAnnouncementComposerToken(roleSelect ? roleSelect.value : '');
+    const campus = normalizeHrAnnouncementComposerToken(campusSelect ? campusSelect.value : '');
+    const programCode = normalizeHrAnnouncementComposerToken(programSelect ? programSelect.value : '');
+    const studentCompletion = role === 'student'
+        ? normalizeHrAnnouncementComposerToken(completionSelect ? completionSelect.value : 'all')
+        : 'all';
+
+    if (!title || !message || !role) {
+        if (feedback) {
+            feedback.textContent = 'Please fill in title, message, and target role.';
+        }
+        return;
+    }
+
+    const session = getUserSession() || SharedData.getSession() || {};
+    const createdAt = new Date().toISOString();
+    const audience = {
+        role: role,
+        campus: campus,
+        programCode: programCode,
+        studentCompletion: studentCompletion === 'completed' || studentCompletion === 'not_completed'
+            ? studentCompletion
+            : 'all',
+    };
+
+    try {
+        SharedData.addAnnouncement({
+            title: title,
+            message: message,
+            audience: audience,
+            createdAt: createdAt,
+            timestamp: createdAt,
+            createdByRole: normalizeHrAnnouncementComposerToken(session.role || 'hr') || 'hr',
+            createdByUserId: String(session.userId || '').trim(),
+            read: false,
+        });
+
+        if (SharedData.addActivityLogEntry) {
+            const targetDetails = [
+                role,
+                campus ? `campus:${campus}` : '',
+                programCode ? `program:${programCode}` : '',
+                role === 'student' ? `completion:${audience.studentCompletion}` : ''
+            ].filter(Boolean).join(', ');
+
+            SharedData.addActivityLogEntry({
+                action: 'Announcement Published',
+                description: `Published announcement "${title}" for ${targetDetails}.`,
+                type: 'announcement',
+                userId: String(session.userId || '').trim(),
+                username: String(session.username || '').trim(),
+                role: String(session.role || 'hr').trim(),
+            });
+        }
+
+        closeHrAnnouncementComposerModal();
+        setupNotifications();
+        renderHrSystemNotifications();
+        alert('Announcement published successfully.');
+    } catch (error) {
+        console.error('[HRPanel] Failed to publish announcement.', error);
+        if (feedback) {
+            feedback.textContent = 'Failed to publish announcement. Please try again.';
+        } else {
+            alert('Failed to publish announcement.');
+        }
+    }
+}
+
+function setupHrAnnouncementComposer() {
+    if (hrAnnouncementComposerReady) return;
+
+    const openBtn = document.getElementById('hr-open-announcement-compose-btn');
+    const modal = document.getElementById('hr-announcement-compose-modal');
+    if (!openBtn || !modal) return;
+
+    const closeBtn = document.getElementById('hr-close-announcement-compose-modal');
+    const cancelBtn = document.getElementById('hr-cancel-announcement-compose-btn');
+    const form = document.getElementById('hr-announcement-compose-form');
+    const roleSelect = document.getElementById('hr-announcement-target-role');
+    const campusSelect = document.getElementById('hr-announcement-target-campus');
+
+    openBtn.addEventListener('click', openHrAnnouncementComposerModal);
+    if (closeBtn) closeBtn.addEventListener('click', closeHrAnnouncementComposerModal);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeHrAnnouncementComposerModal);
+    if (form) form.addEventListener('submit', handleHrAnnouncementComposeSubmit);
+    if (roleSelect) roleSelect.addEventListener('change', syncHrAnnouncementStudentCompletionVisibility);
+    if (campusSelect) campusSelect.addEventListener('change', populateHrAnnouncementComposerProgramOptions);
+
+    modal.addEventListener('click', function (event) {
+        if (event.target === modal) {
+            closeHrAnnouncementComposerModal();
+        }
+    });
+
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && modal.style.display === 'flex') {
+            closeHrAnnouncementComposerModal();
+        }
+    });
+
+    hrAnnouncementComposerReady = true;
+    resetHrAnnouncementComposerForm();
+}
+
+function renderHrSystemNotifications() {
+    const container = document.getElementById('hr-system-notifications');
+    if (!container) return;
+
+    const alerts = [];
+    const periodLabels = {
+        'student-professor': 'Student to Professor',
+        'professor-professor': 'Professor to Professor',
+        'supervisor-professor': 'Supervisor to Professor',
+    };
+    const dayMs = 24 * 60 * 60 * 1000;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const escapeHtml = value => String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    const parseDate = value => {
+        const raw = String(value || '').trim();
+        if (!raw) return null;
+        const parsed = new Date(raw + 'T00:00:00');
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+    const formatDate = value => {
+        const parsed = parseDate(value);
+        return parsed
+            ? parsed.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+            : 'Date not set';
+    };
+
+    const periods = (SharedData.getEvalPeriods && SharedData.getEvalPeriods()) || {};
+    Object.keys(periodLabels).forEach(typeKey => {
+        const period = periods[typeKey] || {};
+        const startDate = parseDate(period.start);
+        const endDate = parseDate(period.end);
+        if (!startDate || !endDate) return;
+
+        const daysToStart = Math.ceil((startDate.getTime() - today.getTime()) / dayMs);
+        const daysToEnd = Math.ceil((endDate.getTime() - today.getTime()) / dayMs);
+        const label = periodLabels[typeKey];
+
+        if (daysToStart > 0) {
+            alerts.push({
+                message: `${label} evaluation opens in ${daysToStart} day${daysToStart === 1 ? '' : 's'}`,
+                date: formatDate(period.start),
+                sortKey: daysToStart,
+            });
+            return;
+        }
+
+        if (daysToEnd >= 0) {
+            alerts.push({
+                message: `${label} evaluation ends in ${daysToEnd} day${daysToEnd === 1 ? '' : 's'}`,
+                date: formatDate(period.end),
+                sortKey: daysToEnd,
+            });
+            return;
+        }
+
+        const daysSinceEnd = Math.abs(daysToEnd);
+        if (daysSinceEnd <= 7) {
+            alerts.push({
+                message: `${label} evaluation ended ${daysSinceEnd} day${daysSinceEnd === 1 ? '' : 's'} ago`,
+                date: formatDate(period.end),
+                sortKey: 1000 + daysSinceEnd,
+            });
+        }
+    });
+
+    const announcements = (SharedData.getAnnouncementsForCurrentUser && SharedData.getAnnouncementsForCurrentUser()) ||
+        (SharedData.getAnnouncements && SharedData.getAnnouncements()) || [];
+    const latestAnnouncements = announcements
+        .slice()
+        .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+        .slice(0, 2);
+
+    latestAnnouncements.forEach(item => {
+        const title = String(item && item.title ? item.title : 'Announcement').trim();
+        const timestamp = String(item && item.timestamp ? item.timestamp : '').trim();
+        const parsed = timestamp ? new Date(timestamp) : null;
+        const dateLabel = parsed && !Number.isNaN(parsed.getTime())
+            ? parsed.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+            : 'Recent update';
+        alerts.push({
+            message: title,
+            date: dateLabel,
+            sortKey: 2000,
+        });
+    });
+
+    const sortedAlerts = alerts.sort((a, b) => a.sortKey - b.sortKey).slice(0, 3);
+
+    if (!sortedAlerts.length) {
+        container.innerHTML = `
+            <div class="notification-alert">
+                <div class="alert-icon">
+                    <i class="fas fa-check"></i>
+                </div>
+                <div class="alert-content">
+                    <div class="alert-message">No active system notifications.</div>
+                    <div class="alert-date">${today.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</div>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = sortedAlerts.map(alert => `
+        <div class="notification-alert">
+            <div class="alert-icon">
+                <i class="fas fa-exclamation-triangle"></i>
+            </div>
+            <div class="alert-content">
+                <div class="alert-message">${escapeHtml(alert.message)}</div>
+                <div class="alert-date">${escapeHtml(alert.date)}</div>
+            </div>
         </div>
     `).join('');
-
-    icon.addEventListener('click', function (e) {
-        e.stopPropagation();
-        dropdown.classList.toggle('show');
-        dropdown.setAttribute('aria-hidden', dropdown.classList.contains('show') ? 'false' : 'true');
-    });
-
-    document.addEventListener('click', function (e) {
-        if (!dropdown.classList.contains('show')) return;
-        if (wrapper && wrapper.contains(e.target)) return;
-        dropdown.classList.remove('show');
-        dropdown.setAttribute('aria-hidden', 'true');
-    });
 }
 
 /**
@@ -776,17 +1292,18 @@ function handleSettingAction(settingTitle) {
  * Update overview cards with dynamic data
  */
 function updateOverviewCards() {
-    const profs = professorsData || [];
-    const totalStudents = profs.reduce((sum, professor) => sum + (Number(professor.totalStudents) || 0), 0);
-
-    const completedEvaluations = profs.reduce((sum, professor) => sum + (Number(professor.evaluatedCount || professor.evaluationsCount) || 0), 0);
-
-    const pendingEvaluations = Math.max(totalStudents - completedEvaluations, 0);
+    const context = buildHrEvaluationContext();
+    const semesterId = context.currentSemester || 'all';
+    const registration = buildHrStudentRegistrationStats(context, semesterId);
+    const population = buildHrStudentPopulationCompletionStats(context, semesterId);
+    const totalStudents = population.totalStudents;
+    const completedEvaluations = registration.completed;
+    const pendingEvaluations = registration.pending;
+    const completedStudents = population.completedStudents;
     const completionRate = totalStudents > 0
-        ? `${((completedEvaluations / totalStudents) * 100).toFixed(1)}%`
+        ? `${((completedStudents / totalStudents) * 100).toFixed(1)}%`
         : '0%';
-
-    const activeProfessors = profs.filter(professor => professor.isActive !== false).length;
+    const activeProfessors = context.professorUsers.filter(professor => normalizeHrToken(professor.status) !== 'inactive').length;
 
     const studentsCard = document.querySelector('.overview-card.users .card-number');
     const completionCard = document.querySelector('.overview-card.evaluations .card-number');
@@ -866,7 +1383,7 @@ function saveProfessorsToSharedData() {
     const allUsers = SharedData.getUsers();
     // Remove all existing professor users
     const nonProfessors = allUsers.filter(function (u) {
-        return u.role !== 'professor';
+        return normalizeHrToken(u && u.role) !== 'professor';
     });
     // Add current professorsData with role marker
     const professorsWithRole = professorsData.map(function (p) {
@@ -880,13 +1397,8 @@ let rankingDepartmentFilter = 'all';
 let rankingEmploymentFilter = 'all';
 let currentAnalyticsSemester = 'all';
 let currentAnalyticsEvaluationType = 'student';
-
-const SEMESTER_OPTIONS = [
-    { id: 'all', label: 'All Semesters' },
-    { id: 'sem1', label: '1st Semester' },
-    { id: 'sem2', label: '2nd Semester' },
-    { id: 'summer', label: 'Summer Term' }
-];
+let currentAnalyticsProfessorId = null;
+let hrSharedDataBindingsRegistered = false;
 
 const EVALUATION_TYPE_OPTIONS = [
     {
@@ -919,12 +1431,31 @@ const EVALUATION_TYPE_OPTIONS = [
 ];
 
 function getSemesterLabel(id) {
-    const option = SEMESTER_OPTIONS.find(item => item.id === id);
+    const option = getSemesterOptions().find(item => item.id === id);
     return option ? option.label : 'Semester';
 }
 
 function getSemesterOptions() {
-    return SEMESTER_OPTIONS;
+    const options = [{ id: 'all', label: 'All Semesters' }];
+    const seen = new Set(['all']);
+    const semesterList = SharedData.getSemesterList ? SharedData.getSemesterList() : [];
+
+    semesterList.forEach(item => {
+        const value = String(item && item.value || '').trim();
+        if (!value || seen.has(value)) return;
+        seen.add(value);
+        options.push({
+            id: value,
+            label: String(item && item.label || value),
+        });
+    });
+
+    const current = String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : '').trim();
+    if (current && !seen.has(current)) {
+        options.push({ id: current, label: current });
+    }
+
+    return options;
 }
 
 function getEvaluationTypeOptions() {
@@ -933,6 +1464,1062 @@ function getEvaluationTypeOptions() {
 
 function getEvaluationTypeMeta(id) {
     return EVALUATION_TYPE_OPTIONS.find(item => item.id === id) || EVALUATION_TYPE_OPTIONS[0];
+}
+
+function normalizeHrToken(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function normalizeHrUserIdToken(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^u\d+$/i.test(raw)) {
+        return 'u' + raw.replace(/^u/i, '');
+    }
+    if (/^\d+$/.test(raw)) {
+        return 'u' + String(parseInt(raw, 10));
+    }
+    return normalizeHrToken(raw);
+}
+
+function getHrEvaluationTypeKey(evaluation) {
+    const role = normalizeHrToken(evaluation && (evaluation.evaluatorRole || evaluation.evaluationType));
+    if (role === 'student' || role === 'student-to-professor') return 'student';
+    if (role === 'professor' || role === 'peer' || role === 'professor-to-professor') return 'peer';
+    if (role === 'dean' || role === 'hr' || role === 'supervisor' || role === 'supervisor-to-professor') return 'supervisor';
+    return '';
+}
+
+function getHrQuestionnaireTypeCode(typeKey) {
+    if (typeKey === 'student') return 'student-to-professor';
+    if (typeKey === 'peer') return 'professor-to-professor';
+    return 'supervisor-to-professor';
+}
+
+function isHrEvaluationInSemester(evaluation, semesterId) {
+    const normalizedSemester = String(semesterId || '').trim();
+    if (!normalizedSemester || normalizedSemester === 'all') return true;
+    const evaluationSemester = String(evaluation && evaluation.semesterId || '').trim();
+    if (!evaluationSemester) return true;
+    return evaluationSemester === normalizedSemester;
+}
+
+function buildHrEvaluationContext() {
+    const users = SharedData.getUsers ? SharedData.getUsers() : [];
+    const evaluations = SharedData.getEvaluations ? SharedData.getEvaluations() : [];
+    const studentEvaluationDrafts = SharedData.getStudentEvaluationDrafts ? SharedData.getStudentEvaluationDrafts() : [];
+    const subjectManagement = SharedData.getSubjectManagement ? SharedData.getSubjectManagement() : { offerings: [], enrollments: [] };
+    const questionnaires = SharedData.getQuestionnaires ? SharedData.getQuestionnaires() : {};
+    const semesterList = SharedData.getSemesterList ? SharedData.getSemesterList() : [];
+    const currentSemester = String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : '').trim();
+
+    const professorUsers = users.filter(user => normalizeHrToken(user && user.role) === 'professor');
+    const supervisorUsers = users.filter(user => {
+        const role = normalizeHrToken(user && user.role);
+        return role === 'dean' || role === 'hr' || role === 'supervisor';
+    });
+
+    const professorIdSet = new Set();
+    const professorNameMap = {};
+    const professorEmployeeIdMap = {};
+
+    professorUsers.forEach(user => {
+        const normalizedId = normalizeHrUserIdToken(user && user.id);
+        if (!normalizedId) return;
+        professorIdSet.add(normalizedId);
+
+        const nameToken = normalizeHrToken(user && user.name);
+        if (nameToken && !professorNameMap[nameToken]) {
+            professorNameMap[nameToken] = normalizedId;
+        }
+
+        const employeeToken = normalizeHrToken(user && user.employeeId);
+        if (employeeToken && !professorEmployeeIdMap[employeeToken]) {
+            professorEmployeeIdMap[employeeToken] = normalizedId;
+        }
+    });
+
+    const offerings = Array.isArray(subjectManagement.offerings) ? subjectManagement.offerings : [];
+    const enrollments = Array.isArray(subjectManagement.enrollments) ? subjectManagement.enrollments : [];
+    const offeringsById = {};
+    offerings.forEach(offering => {
+        const offeringId = String(offering && offering.id || '').trim();
+        if (offeringId) offeringsById[offeringId] = offering;
+    });
+
+    return {
+        users,
+        evaluations: Array.isArray(evaluations) ? evaluations : [],
+        studentEvaluationDrafts: Array.isArray(studentEvaluationDrafts) ? studentEvaluationDrafts : [],
+        questionnaires: questionnaires || {},
+        semesterList: Array.isArray(semesterList) ? semesterList : [],
+        currentSemester,
+        offerings,
+        enrollments,
+        offeringsById,
+        professorUsers,
+        supervisorUsers,
+        professorIdSet,
+        professorNameMap,
+        professorEmployeeIdMap,
+    };
+}
+
+function resolveHrProfessorIdToken(rawValue, context) {
+    const normalizedId = normalizeHrUserIdToken(rawValue);
+    if (normalizedId && context.professorIdSet.has(normalizedId)) {
+        return normalizedId;
+    }
+
+    const token = normalizeHrToken(rawValue);
+    if (!token) return '';
+    if (context.professorEmployeeIdMap[token]) return context.professorEmployeeIdMap[token];
+    if (context.professorNameMap[token]) return context.professorNameMap[token];
+
+    if (token.includes(' - ')) {
+        const head = normalizeHrToken(token.split(' - ')[0]);
+        if (head && context.professorNameMap[head]) return context.professorNameMap[head];
+    }
+
+    return '';
+}
+
+function resolveHrEvaluationTargetProfessorId(evaluation, typeKey, context) {
+    if (typeKey === 'student') {
+        const offeringId = String(evaluation && evaluation.courseOfferingId || '').trim();
+        const offering = context.offeringsById[offeringId];
+        if (offering && offering.professorUserId) {
+            const professorByOffering = resolveHrProfessorIdToken(offering.professorUserId, context);
+            if (professorByOffering) return professorByOffering;
+        }
+    }
+
+    const candidates = [
+        evaluation && evaluation.targetProfessorId,
+        evaluation && evaluation.targetId,
+        evaluation && evaluation.colleagueId,
+        evaluation && evaluation.professorId,
+        evaluation && evaluation.professorUserId,
+        evaluation && evaluation.targetProfessor,
+        evaluation && evaluation.professorSubject,
+    ];
+
+    for (let index = 0; index < candidates.length; index += 1) {
+        const candidate = candidates[index];
+        const resolved = resolveHrProfessorIdToken(candidate, context);
+        if (resolved) return resolved;
+    }
+
+    return '';
+}
+
+function buildHrQuestionSectionLookup(typeKey, context, semesterId) {
+    const questionnaireType = getHrQuestionnaireTypeCode(typeKey);
+    const questionnaires = context.questionnaires || {};
+    const preferredSemester = String(semesterId || '').trim();
+    const fallbackSemester = String(context.currentSemester || '').trim();
+
+    let bucket = null;
+    const candidateSemesters = [];
+    if (preferredSemester) candidateSemesters.push(preferredSemester);
+    if (fallbackSemester && fallbackSemester !== preferredSemester) candidateSemesters.push(fallbackSemester);
+    Object.keys(questionnaires).forEach(semester => {
+        if (!candidateSemesters.includes(semester)) candidateSemesters.push(semester);
+    });
+
+    for (let index = 0; index < candidateSemesters.length; index += 1) {
+        const semester = candidateSemesters[index];
+        if (questionnaires[semester] && questionnaires[semester][questionnaireType]) {
+            bucket = questionnaires[semester][questionnaireType];
+            break;
+        }
+    }
+
+    const sections = Array.isArray(bucket && bucket.sections) ? bucket.sections.slice() : [];
+    const questions = Array.isArray(bucket && bucket.questions) ? bucket.questions.slice() : [];
+    sections.sort((a, b) => (Number(a && a.order) || 0) - (Number(b && b.order) || 0));
+    questions.sort((a, b) => (Number(a && a.order) || 0) - (Number(b && b.order) || 0));
+
+    const categoryOrder = [];
+    const sectionTitleById = {};
+    sections.forEach(section => {
+        const title = String(section && (section.title || section.letter) || '').trim() || 'Untitled Section';
+        if (!categoryOrder.includes(title)) categoryOrder.push(title);
+        const sectionIdToken = normalizeHrToken(section && section.id);
+        if (sectionIdToken) sectionTitleById[sectionIdToken] = title;
+    });
+
+    const questionToCategory = {};
+    questions.forEach(question => {
+        const questionToken = normalizeHrToken(question && question.id);
+        if (!questionToken) return;
+        const sectionToken = normalizeHrToken(question && question.sectionId);
+        const category = sectionTitleById[sectionToken] || 'Unassigned';
+        questionToCategory[questionToken] = category;
+        if (!categoryOrder.includes(category)) categoryOrder.push(category);
+    });
+
+    return {
+        categoryOrder,
+        questionToCategory,
+        fallbackCategory: 'Unassigned',
+    };
+}
+
+function collectHrQualitativeResponses(evaluation) {
+    const responses = [];
+    const baseDateRaw = evaluation && (evaluation.submittedAt || evaluation.timestamp || '');
+    const parsedDate = baseDateRaw ? new Date(baseDateRaw) : null;
+    const dateLabel = parsedDate && !Number.isNaN(parsedDate.getTime())
+        ? parsedDate.toLocaleDateString()
+        : new Date().toLocaleDateString();
+    const evaluatorName = String(
+        evaluation && (evaluation.evaluatorName || evaluation.studentName || evaluation.evaluatorUsername) || 'Anonymous'
+    ).trim() || 'Anonymous';
+    const evaluatorIdentity = String(
+        evaluation && (evaluation.studentNumber || evaluation.studentUserId || evaluation.studentId || evaluation.evaluatorId || evaluation.evaluatorUsername) || 'N/A'
+    ).trim() || 'N/A';
+    const semesterId = String(evaluation && evaluation.semesterId || '').trim();
+    const prefix = String(
+        evaluation && (evaluation.evaluationKey || evaluation.id || evaluation.submittedAt || Date.now())
+    ).trim();
+
+    const qualitative = evaluation && typeof evaluation.qualitative === 'object' && evaluation.qualitative
+        ? evaluation.qualitative
+        : {};
+    Object.values(qualitative).forEach((value, index) => {
+        const text = String(value || '').trim();
+        if (!text) return;
+        responses.push({
+            id: `${prefix}-qual-${index}`,
+            text,
+            date: dateLabel,
+            studentName: evaluatorName,
+            studentNumber: evaluatorIdentity,
+            semesterId,
+        });
+    });
+
+    const comment = String(evaluation && evaluation.comments || '').trim();
+    if (comment) {
+        responses.push({
+            id: `${prefix}-comment`,
+            text: comment,
+            date: dateLabel,
+            studentName: evaluatorName,
+            studentNumber: evaluatorIdentity,
+            semesterId,
+        });
+    }
+
+    return responses;
+}
+
+function aggregateHrEvaluationData(options) {
+    const settings = options || {};
+    const context = settings.context || buildHrEvaluationContext();
+    const typeKey = settings.typeKey || 'student';
+    const semesterId = settings.semesterId || 'all';
+    const targetProfessorId = settings.targetProfessorId ? normalizeHrUserIdToken(settings.targetProfessorId) : '';
+    const includeCategoryScores = !!settings.includeCategoryScores;
+
+    const sectionLookup = includeCategoryScores
+        ? buildHrQuestionSectionLookup(typeKey, context, semesterId)
+        : { categoryOrder: [], questionToCategory: {}, fallbackCategory: 'Unassigned' };
+
+    const categoryStats = {};
+    sectionLookup.categoryOrder.forEach(category => {
+        categoryStats[category] = { sum: 0, count: 0 };
+    });
+
+    const ratingDistribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    let totalRatingValue = 0;
+    let totalRatingCount = 0;
+    let totalEvaluations = 0;
+    const uniqueTargetProfessorIds = new Set();
+    const uniqueTargetTokens = new Set();
+    const uniqueRaterTokens = new Set();
+    let qualitativeResponses = [];
+
+    (context.evaluations || []).forEach(evaluation => {
+        const evaluationType = getHrEvaluationTypeKey(evaluation);
+        if (evaluationType !== typeKey) return;
+        if (!isHrEvaluationInSemester(evaluation, semesterId)) return;
+
+        const targetId = resolveHrEvaluationTargetProfessorId(evaluation, typeKey, context);
+        if (targetProfessorId && targetId !== targetProfessorId) return;
+        if (targetId) uniqueTargetProfessorIds.add(targetId);
+        const fallbackTargetToken = normalizeHrToken(
+            evaluation && (evaluation.targetProfessorId || evaluation.targetId || evaluation.colleagueId || evaluation.targetProfessor || evaluation.professorSubject)
+        );
+        if (fallbackTargetToken) uniqueTargetTokens.add(fallbackTargetToken);
+
+        const raterToken = normalizeHrToken(
+            evaluation && (evaluation.studentUserId || evaluation.studentId || evaluation.evaluatorId || evaluation.evaluatorUsername || evaluation.evaluatorName)
+        );
+        if (raterToken) uniqueRaterTokens.add(raterToken);
+
+        totalEvaluations += 1;
+
+        const ratings = (evaluation && typeof evaluation.ratings === 'object' && evaluation.ratings) ? evaluation.ratings : {};
+        const evaluationValues = [];
+        Object.keys(ratings).forEach(questionId => {
+            const parsed = parseFloat(ratings[questionId]);
+            if (!Number.isFinite(parsed)) return;
+
+            const numericRating = clampNumber(parsed, 1, 5);
+            evaluationValues.push(numericRating);
+            totalRatingValue += numericRating;
+            totalRatingCount += 1;
+
+            if (includeCategoryScores) {
+                const questionToken = normalizeHrToken(questionId);
+                const category = sectionLookup.questionToCategory[questionToken] || sectionLookup.fallbackCategory;
+                if (!categoryStats[category]) {
+                    categoryStats[category] = { sum: 0, count: 0 };
+                }
+                categoryStats[category].sum += numericRating;
+                categoryStats[category].count += 1;
+            }
+        });
+
+        if (evaluationValues.length > 0) {
+            const average = evaluationValues.reduce((sum, value) => sum + value, 0) / evaluationValues.length;
+            const ratingBucket = clampNumber(Math.round(average), 1, 5);
+            ratingDistribution[ratingBucket] = (ratingDistribution[ratingBucket] || 0) + 1;
+        }
+
+        qualitativeResponses = qualitativeResponses.concat(collectHrQualitativeResponses(evaluation));
+    });
+
+    const orderedCategories = sectionLookup.categoryOrder.concat(
+        Object.keys(categoryStats).filter(category => !sectionLookup.categoryOrder.includes(category))
+    );
+    let categoryScores = orderedCategories.map(category => {
+        const stat = categoryStats[category] || { sum: 0, count: 0 };
+        return {
+            category,
+            score: stat.count > 0 ? parseFloat((stat.sum / stat.count).toFixed(1)) : 0,
+        };
+    });
+    if (includeCategoryScores && categoryScores.length === 0) {
+        categoryScores = [{ category: sectionLookup.fallbackCategory, score: 0 }];
+    }
+
+    return {
+        averageRating: totalRatingCount > 0 ? parseFloat((totalRatingValue / totalRatingCount).toFixed(1)) : 0,
+        totalEvaluations,
+        ratingDistribution,
+        categoryScores,
+        uniqueTargetCount: Math.max(uniqueTargetProfessorIds.size, uniqueTargetTokens.size),
+        uniqueRaterCount: uniqueRaterTokens.size,
+        qualitativeResponses,
+    };
+}
+
+function buildHrStudentRegistrationStats(context, semesterId) {
+    const normalizedSemester = String(semesterId || '').trim();
+    const activeOfferingIds = new Set(
+        (context.offerings || [])
+            .filter(offering => {
+                if (!offering || !offering.isActive) return false;
+                if (!normalizedSemester || normalizedSemester === 'all') return true;
+                const offeringSemester = String(offering.semesterSlug || '').trim();
+                return !offeringSemester || offeringSemester === normalizedSemester;
+            })
+            .map(offering => String(offering.id))
+    );
+
+    const expectedPairs = new Set();
+    (context.enrollments || []).forEach(enrollment => {
+        if (!enrollment) return;
+        if (normalizeHrToken(enrollment.status) !== 'enrolled') return;
+        const offeringId = String(enrollment.courseOfferingId || '').trim();
+        const studentToken = normalizeHrToken(enrollment.studentUserId || enrollment.studentId || enrollment.studentNumber || enrollment.studentName);
+        if (!offeringId || !studentToken || !activeOfferingIds.has(offeringId)) return;
+        expectedPairs.add(`${studentToken}|${normalizeHrToken(offeringId)}`);
+    });
+
+    const completedPairs = new Set();
+    (context.evaluations || []).forEach(evaluation => {
+        if (getHrEvaluationTypeKey(evaluation) !== 'student') return;
+        if (!isHrEvaluationInSemester(evaluation, normalizedSemester || 'all')) return;
+
+        const offeringId = String(evaluation.courseOfferingId || '').trim();
+        if (!offeringId || !activeOfferingIds.has(offeringId)) return;
+
+        const studentToken = normalizeHrToken(
+            evaluation.studentUserId || evaluation.studentId || evaluation.evaluatorId || evaluation.evaluatorUsername
+        );
+        if (!studentToken) return;
+
+        const pairKey = `${studentToken}|${normalizeHrToken(offeringId)}`;
+        if (expectedPairs.has(pairKey)) completedPairs.add(pairKey);
+    });
+
+    const total = expectedPairs.size;
+    const completed = completedPairs.size;
+    const pending = Math.max(total - completed, 0);
+
+    return { total, completed, pending };
+}
+
+function buildHrActiveStudentCountForSemester(context, semesterId) {
+    const normalizedSemester = String(semesterId || '').trim();
+    const activeStudentIds = new Set(
+        (context.users || [])
+            .filter(user =>
+                normalizeHrToken(user && user.role) === 'student' &&
+                normalizeHrToken(user && user.status) !== 'inactive'
+            )
+            .map(user => normalizeHrUserIdToken(user && user.id))
+            .filter(Boolean)
+    );
+
+    const validOfferingIds = new Set(
+        (context.offerings || [])
+            .filter(offering => {
+                if (!offering || !offering.isActive) return false;
+                if (!normalizedSemester || normalizedSemester === 'all') return true;
+                const offeringSemester = String(offering.semesterSlug || '').trim();
+                return !offeringSemester || offeringSemester === normalizedSemester;
+            })
+            .map(offering => String(offering.id))
+    );
+
+    const studentsInSemester = new Set();
+    (context.enrollments || []).forEach(enrollment => {
+        if (!enrollment) return;
+        if (normalizeHrToken(enrollment.status) !== 'enrolled') return;
+        const offeringId = String(enrollment.courseOfferingId || '').trim();
+        if (!offeringId || !validOfferingIds.has(offeringId)) return;
+
+        const studentUserId = normalizeHrUserIdToken(
+            enrollment.studentUserId || enrollment.studentId || enrollment.studentNumber
+        );
+        if (!studentUserId || !activeStudentIds.has(studentUserId)) return;
+        studentsInSemester.add(studentUserId);
+    });
+
+    return studentsInSemester.size;
+}
+
+function buildHrStudentPopulationCompletionStats(context, semesterId) {
+    const normalizedSemester = String(semesterId || '').trim();
+    const validOfferingIds = new Set(
+        (context.offerings || [])
+            .filter(offering => {
+                if (!offering || !offering.isActive) return false;
+                if (!normalizedSemester || normalizedSemester === 'all') return true;
+                const offeringSemester = String(offering.semesterSlug || '').trim();
+                return !offeringSemester || offeringSemester === normalizedSemester;
+            })
+            .map(offering => String(offering.id))
+    );
+
+    const enrolledStudents = new Set();
+    (context.enrollments || []).forEach(enrollment => {
+        if (!enrollment) return;
+        if (normalizeHrToken(enrollment.status) !== 'enrolled') return;
+        const offeringId = String(enrollment.courseOfferingId || '').trim();
+        if (!offeringId || !validOfferingIds.has(offeringId)) return;
+
+        const studentToken = normalizeHrToken(
+            enrollment.studentUserId || enrollment.studentId || enrollment.studentNumber || enrollment.studentName
+        );
+        if (!studentToken) return;
+        enrolledStudents.add(studentToken);
+    });
+
+    const completedStudents = new Set();
+    (context.evaluations || []).forEach(evaluation => {
+        if (getHrEvaluationTypeKey(evaluation) !== 'student') return;
+        if (!isHrEvaluationInSemester(evaluation, normalizedSemester || 'all')) return;
+
+        const offeringId = String(evaluation.courseOfferingId || '').trim();
+        if (!offeringId || !validOfferingIds.has(offeringId)) return;
+
+        const studentToken = normalizeHrToken(
+            evaluation.studentUserId || evaluation.studentId || evaluation.evaluatorId || evaluation.evaluatorUsername
+        );
+        if (!studentToken || !enrolledStudents.has(studentToken)) return;
+        completedStudents.add(studentToken);
+    });
+
+    const totalStudents = enrolledStudents.size;
+    const completed = completedStudents.size;
+    const notCompleted = Math.max(totalStudents - completed, 0);
+
+    return {
+        totalStudents,
+        completedStudents: completed,
+        notCompletedStudents: notCompleted,
+    };
+}
+
+function buildHrExpectedStudentEvaluationPairs(context, semesterId) {
+    const normalizedSemester = String(semesterId || '').trim();
+    const activeOfferingIds = new Set(
+        (context.offerings || [])
+            .filter(offering => {
+                if (!offering || !offering.isActive) return false;
+                if (!normalizedSemester || normalizedSemester === 'all') return true;
+                const offeringSemester = String(offering.semesterSlug || '').trim();
+                return !offeringSemester || offeringSemester === normalizedSemester;
+            })
+            .map(offering => String(offering.id))
+    );
+
+    const expectedPairs = new Set();
+    (context.enrollments || []).forEach(enrollment => {
+        if (!enrollment) return;
+        if (normalizeHrToken(enrollment.status) !== 'enrolled') return;
+
+        const offeringId = String(enrollment.courseOfferingId || '').trim();
+        if (!offeringId || !activeOfferingIds.has(offeringId)) return;
+
+        const studentToken = normalizeHrToken(
+            enrollment.studentUserId || enrollment.studentId || enrollment.studentNumber || enrollment.studentName
+        );
+        if (!studentToken) return;
+
+        expectedPairs.add(`${studentToken}|${normalizeHrToken(offeringId)}`);
+    });
+
+    return {
+        expectedPairs,
+        activeOfferingIds,
+    };
+}
+
+function buildHrStudentsCompletedAssignedForSemester(context, semesterId) {
+    const expected = buildHrExpectedStudentEvaluationPairs(context, semesterId);
+    const expectedCountByStudent = new Map();
+    const completedCountByStudent = new Map();
+    const completedPairs = new Set();
+
+    expected.expectedPairs.forEach(pairKey => {
+        const separatorIndex = pairKey.indexOf('|');
+        const studentToken = separatorIndex >= 0 ? pairKey.slice(0, separatorIndex) : '';
+        if (!studentToken) return;
+        expectedCountByStudent.set(studentToken, (expectedCountByStudent.get(studentToken) || 0) + 1);
+    });
+
+    (context.evaluations || []).forEach(evaluation => {
+        if (getHrEvaluationTypeKey(evaluation) !== 'student') return;
+        if (!isHrEvaluationInSemester(evaluation, semesterId || 'all')) return;
+
+        const offeringId = String(evaluation.courseOfferingId || '').trim();
+        if (!offeringId || !expected.activeOfferingIds.has(offeringId)) return;
+
+        const studentToken = normalizeHrToken(
+            evaluation.studentUserId || evaluation.studentId || evaluation.evaluatorId || evaluation.evaluatorUsername
+        );
+        if (!studentToken) return;
+
+        const pairKey = `${studentToken}|${normalizeHrToken(offeringId)}`;
+        if (!expected.expectedPairs.has(pairKey) || completedPairs.has(pairKey)) return;
+        completedPairs.add(pairKey);
+        completedCountByStudent.set(studentToken, (completedCountByStudent.get(studentToken) || 0) + 1);
+    });
+
+    let completedAssignedStudents = 0;
+    expectedCountByStudent.forEach((expectedCount, studentToken) => {
+        const completedCount = completedCountByStudent.get(studentToken) || 0;
+        if (expectedCount > 0 && completedCount >= expectedCount) {
+            completedAssignedStudents += 1;
+        }
+    });
+
+    return completedAssignedStudents;
+}
+
+function buildHrDashboardEvaluationOverview(context) {
+    const semesterId = context.currentSemester || 'all';
+    const expected = buildHrExpectedStudentEvaluationPairs(context, semesterId);
+
+    const completedPairs = new Set();
+    (context.evaluations || []).forEach(evaluation => {
+        if (getHrEvaluationTypeKey(evaluation) !== 'student') return;
+        if (!isHrEvaluationInSemester(evaluation, semesterId)) return;
+
+        const offeringId = String(evaluation.courseOfferingId || '').trim();
+        if (!offeringId || !expected.activeOfferingIds.has(offeringId)) return;
+
+        const studentToken = normalizeHrToken(
+            evaluation.studentUserId || evaluation.studentId || evaluation.evaluatorId || evaluation.evaluatorUsername
+        );
+        if (!studentToken) return;
+
+        const pairKey = `${studentToken}|${normalizeHrToken(offeringId)}`;
+        if (expected.expectedPairs.has(pairKey)) {
+            completedPairs.add(pairKey);
+        }
+    });
+
+    const pendingPairs = new Set();
+    (context.studentEvaluationDrafts || []).forEach(draft => {
+        if (!draft) return;
+        if (!isHrEvaluationInSemester({ semesterId: draft.semesterId || '' }, semesterId)) return;
+
+        const offeringId = String(draft.courseOfferingId || '').trim();
+        if (!offeringId || !expected.activeOfferingIds.has(offeringId)) return;
+
+        const studentToken = normalizeHrToken(draft.studentUserId || draft.studentId);
+        if (!studentToken) return;
+
+        const pairKey = `${studentToken}|${normalizeHrToken(offeringId)}`;
+        if (!expected.expectedPairs.has(pairKey) || completedPairs.has(pairKey)) return;
+        pendingPairs.add(pairKey);
+    });
+
+    const totalExpected = expected.expectedPairs.size;
+    const completed = completedPairs.size;
+    const pending = pendingPairs.size;
+    const notStarted = Math.max(totalExpected - completed - pending, 0);
+
+    return {
+        labels: ['Completed', 'Pending', 'Not Started'],
+        values: [completed, pending, notStarted],
+        totalExpected,
+        semesterId,
+    };
+}
+
+function getHrLatestSemestersForTrend(context, limit = 4) {
+    const desired = Number(limit) > 0 ? Number(limit) : 4;
+    const orderedSemesters = [];
+    const seen = new Set();
+    (context.semesterList || []).forEach(item => {
+        const value = String(item && item.value || '').trim();
+        if (!value || seen.has(value)) return;
+        seen.add(value);
+        orderedSemesters.push({
+            id: value,
+            label: String(item && item.label || value),
+        });
+    });
+
+    const currentSemester = String(context.currentSemester || '').trim();
+    if (currentSemester && !seen.has(currentSemester)) {
+        orderedSemesters.unshift({
+            id: currentSemester,
+            label: currentSemester,
+        });
+    }
+
+    if (orderedSemesters.length > 0) {
+        return orderedSemesters.slice(0, desired).reverse();
+    }
+
+    const latestBySemester = new Map();
+    (context.evaluations || []).forEach(evaluation => {
+        const semesterId = String(evaluation && evaluation.semesterId || '').trim();
+        if (!semesterId) return;
+
+        const rawTs = evaluation && (evaluation.submittedAt || evaluation.timestamp || '');
+        const ts = Date.parse(rawTs);
+        const score = Number.isFinite(ts) ? ts : 0;
+        const previous = latestBySemester.get(semesterId);
+        if (previous === undefined || score > previous) {
+            latestBySemester.set(semesterId, score);
+        }
+    });
+
+    return Array.from(latestBySemester.entries())
+        .sort((a, b) => {
+            if (b[1] !== a[1]) return b[1] - a[1];
+            return String(b[0]).localeCompare(String(a[0]));
+        })
+        .slice(0, desired)
+        .reverse()
+        .map(entry => ({ id: entry[0], label: entry[0] }));
+}
+
+function buildHrSemestralPerformanceData(context) {
+    const semesters = getHrLatestSemestersForTrend(context, 4);
+    if (!semesters.length) {
+        return {
+            labels: ['No Semester Data'],
+            values: [0],
+        };
+    }
+
+    const values = semesters.map(semester => {
+        const semesterId = String(semester.id || '').trim();
+        return buildHrStudentsCompletedAssignedForSemester(context, semesterId);
+    });
+
+    return {
+        labels: semesters.map(semester => String(semester.label || semester.id || '').trim() || String(semester.id || '')),
+        values,
+    };
+}
+
+function renderHrEvaluationOverviewChart(data) {
+    if (typeof Chart === 'undefined') return;
+    const chartCanvas = document.getElementById('hr-evaluation-overview-chart');
+    if (!chartCanvas) return;
+
+    if (hrEvaluationOverviewChartInstance) {
+        hrEvaluationOverviewChartInstance.destroy();
+        hrEvaluationOverviewChartInstance = null;
+    }
+
+    hrEvaluationOverviewChartInstance = new Chart(chartCanvas, {
+        type: 'doughnut',
+        data: {
+            labels: data.labels,
+            datasets: [{
+                data: data.values,
+                backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'bottom'
+                }
+            }
+        }
+    });
+}
+
+function renderHrSemestralPerformanceChart(data) {
+    if (typeof Chart === 'undefined') return;
+    const chartCanvas = document.getElementById('hr-semestral-performance-chart');
+    if (!chartCanvas) return;
+
+    if (hrSemestralPerformanceChartInstance) {
+        hrSemestralPerformanceChartInstance.destroy();
+        hrSemestralPerformanceChartInstance = null;
+    }
+
+    hrSemestralPerformanceChartInstance = new Chart(chartCanvas, {
+        type: 'bar',
+        data: {
+            labels: data.labels,
+            datasets: [{
+                label: 'Students Completed Assigned Evaluations',
+                data: data.values,
+                backgroundColor: ['#667eea', '#7c8df0', '#5f78dd', '#4d66cf'],
+                borderRadius: 8,
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: {
+                    display: false
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        precision: 0
+                    }
+                },
+                x: {
+                    ticks: {
+                        maxRotation: 0,
+                        minRotation: 0,
+                        callback: function (value) {
+                            const label = String(this.getLabelForValue(value) || '');
+                            const semesterYearMatch = label.match(/^(.*)\s(\d{4}-\d{4})$/);
+                            if (semesterYearMatch) {
+                                return [semesterYearMatch[1], semesterYearMatch[2]];
+                            }
+                            return label;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function renderHrDashboardTopCharts() {
+    const context = buildHrEvaluationContext();
+    const overview = buildHrDashboardEvaluationOverview(context);
+    const semestral = buildHrSemestralPerformanceData(context);
+    renderHrEvaluationOverviewChart(overview);
+    renderHrSemestralPerformanceChart(semestral);
+}
+
+function buildHrStudentsEvaluatedCountMap(context, semesterId) {
+    const countsByProfessor = {};
+    const expectedPairsByProfessor = new Map();
+    const completedPairsByProfessor = new Map();
+    const fallbackPairsByProfessor = new Map();
+
+    const ensureSet = (map, key) => {
+        if (!map.has(key)) map.set(key, new Set());
+        return map.get(key);
+    };
+
+    (context.enrollments || []).forEach(enrollment => {
+        if (!enrollment) return;
+        if (normalizeHrToken(enrollment.status) !== 'enrolled') return;
+
+        const offeringId = String(enrollment.courseOfferingId || '').trim();
+        const offering = context.offeringsById[offeringId];
+        if (!offering || !offering.isActive) return;
+        if (!isHrEvaluationInSemester({ semesterId: offering.semesterSlug || '' }, semesterId)) return;
+
+        const professorId = resolveHrProfessorIdToken(offering.professorUserId, context);
+        if (!professorId) return;
+
+        const studentToken = normalizeHrToken(enrollment.studentUserId || enrollment.studentId || enrollment.studentNumber || enrollment.studentName);
+        const offeringToken = normalizeHrToken(offeringId);
+        if (!studentToken || !offeringToken) return;
+
+        ensureSet(expectedPairsByProfessor, professorId).add(`${studentToken}|${offeringToken}`);
+    });
+
+    (context.evaluations || []).forEach(evaluation => {
+        if (getHrEvaluationTypeKey(evaluation) !== 'student') return;
+        if (!isHrEvaluationInSemester(evaluation, semesterId)) return;
+
+        const professorId = resolveHrEvaluationTargetProfessorId(evaluation, 'student', context);
+        if (!professorId) return;
+
+        const studentToken = normalizeHrToken(
+            evaluation.studentUserId || evaluation.studentId || evaluation.evaluatorId || evaluation.evaluatorUsername
+        );
+        if (!studentToken) return;
+
+        const offeringToken = normalizeHrToken(evaluation.courseOfferingId);
+        const expectedPairs = expectedPairsByProfessor.get(professorId);
+
+        if (expectedPairs && expectedPairs.size > 0 && offeringToken) {
+            const pairKey = `${studentToken}|${offeringToken}`;
+            if (expectedPairs.has(pairKey)) {
+                ensureSet(completedPairsByProfessor, professorId).add(pairKey);
+            }
+            return;
+        }
+
+        ensureSet(fallbackPairsByProfessor, professorId).add(`${studentToken}|${offeringToken || 'direct'}`);
+    });
+
+    context.professorUsers.forEach(user => {
+        const professorId = normalizeHrUserIdToken(user && user.id);
+        if (!professorId) return;
+
+        const expectedCount = (expectedPairsByProfessor.get(professorId) || new Set()).size;
+        const completedCount = (completedPairsByProfessor.get(professorId) || new Set()).size;
+        const fallbackCount = (fallbackPairsByProfessor.get(professorId) || new Set()).size;
+
+        countsByProfessor[professorId] = expectedCount > 0 ? completedCount : fallbackCount;
+    });
+
+    return countsByProfessor;
+}
+
+function getHrReportDataByType(typeKey, context, semesterId) {
+    const aggregate = aggregateHrEvaluationData({
+        context,
+        typeKey,
+        semesterId,
+        includeCategoryScores: true,
+    });
+    return {
+        categoryScores: aggregate.categoryScores,
+        ratingDistribution: aggregate.ratingDistribution,
+        averageRating: aggregate.averageRating,
+        totalEvaluations: aggregate.totalEvaluations,
+        evaluatedCount: aggregate.uniqueTargetCount,
+    };
+}
+
+function getHrProfessorStudentTotals(context, professorId, semesterId) {
+    const expectedPairs = new Set();
+
+    (context.enrollments || []).forEach(enrollment => {
+        if (!enrollment) return;
+        if (normalizeHrToken(enrollment.status) !== 'enrolled') return;
+
+        const offering = context.offeringsById[String(enrollment.courseOfferingId || '').trim()];
+        if (!offering || !offering.isActive) return;
+        if (!isHrEvaluationInSemester({ semesterId: offering.semesterSlug || '' }, semesterId)) return;
+
+        const offeringProfessorId = resolveHrProfessorIdToken(offering.professorUserId, context);
+        if (offeringProfessorId !== professorId) return;
+
+        const studentToken = normalizeHrToken(enrollment.studentUserId || enrollment.studentId || enrollment.studentNumber || enrollment.studentName);
+        const offeringToken = normalizeHrToken(enrollment.courseOfferingId);
+        if (!studentToken || !offeringToken) return;
+        expectedPairs.add(`${studentToken}|${offeringToken}`);
+    });
+
+    const completedPairs = new Set();
+    (context.evaluations || []).forEach(evaluation => {
+        if (getHrEvaluationTypeKey(evaluation) !== 'student') return;
+        if (!isHrEvaluationInSemester(evaluation, semesterId)) return;
+
+        const targetId = resolveHrEvaluationTargetProfessorId(evaluation, 'student', context);
+        if (targetId !== professorId) return;
+
+        const studentToken = normalizeHrToken(
+            evaluation.studentUserId || evaluation.studentId || evaluation.evaluatorId || evaluation.evaluatorUsername
+        );
+        const offeringToken = normalizeHrToken(evaluation.courseOfferingId);
+        if (!studentToken) return;
+
+        if (expectedPairs.size > 0 && offeringToken) {
+            const pairKey = `${studentToken}|${offeringToken}`;
+            if (expectedPairs.has(pairKey)) {
+                completedPairs.add(pairKey);
+            }
+            return;
+        }
+
+        completedPairs.add(`${studentToken}|${offeringToken || 'direct'}`);
+    });
+
+    return {
+        totalRaters: expectedPairs.size,
+        evaluatedPairs: completedPairs.size,
+    };
+}
+
+function getHrProfessorEvaluationSnapshot(professorId, semesterId, evaluationType, contextInput) {
+    const context = contextInput || buildHrEvaluationContext();
+    const normalizedProfessorId = normalizeHrUserIdToken(professorId);
+    const normalizedSemester = String(semesterId || 'all').trim() || 'all';
+    const normalizedType = getEvaluationTypeMeta(evaluationType).id;
+    const aggregate = aggregateHrEvaluationData({
+        context,
+        typeKey: normalizedType,
+        semesterId: normalizedSemester,
+        targetProfessorId: normalizedProfessorId,
+        includeCategoryScores: false,
+    });
+    const meta = getEvaluationTypeMeta(normalizedType);
+
+    if (normalizedType === 'student') {
+        const studentTotals = getHrProfessorStudentTotals(context, normalizedProfessorId, normalizedSemester);
+        const fallbackRaters = aggregate.uniqueRaterCount;
+        const totalRaters = studentTotals.totalRaters > 0 ? studentTotals.totalRaters : fallbackRaters;
+        const evaluatedCount = studentTotals.totalRaters > 0 ? studentTotals.evaluatedPairs : aggregate.uniqueRaterCount;
+        return {
+            totalRaters,
+            evaluatedCount,
+            notEvaluatedCount: Math.max(totalRaters - evaluatedCount, 0),
+            averageRating: aggregate.averageRating,
+            qualitativeResponses: aggregate.qualitativeResponses,
+            meta,
+        };
+    }
+
+    const activeProfessors = context.professorUsers.filter(user => normalizeHrToken(user.status) !== 'inactive');
+    const activeSupervisors = context.supervisorUsers.filter(user => normalizeHrToken(user.status) !== 'inactive');
+    const professorPool = Math.max(activeProfessors.length - 1, 0);
+    const supervisorPool = activeSupervisors.length;
+    let totalRaters = normalizedType === 'peer' ? professorPool : supervisorPool;
+    if (totalRaters < aggregate.uniqueRaterCount) {
+        totalRaters = aggregate.uniqueRaterCount;
+    }
+
+    const evaluatedCount = aggregate.uniqueRaterCount;
+    return {
+        totalRaters,
+        evaluatedCount,
+        notEvaluatedCount: Math.max(totalRaters - evaluatedCount, 0),
+        averageRating: aggregate.averageRating,
+        qualitativeResponses: aggregate.qualitativeResponses,
+        meta,
+    };
+}
+
+function setupHrSharedDataBindings() {
+    if (hrSharedDataBindingsRegistered || !SharedData.onDataChange || !SharedData.KEYS) return;
+    hrSharedDataBindingsRegistered = true;
+
+    SharedData.onDataChange(function (key) {
+        const keys = SharedData.KEYS;
+
+        if (key === keys.QUESTIONNAIRES || key === keys.CURRENT_SEMESTER || key === keys.SEMESTER_LIST) {
+            loadQuestionsData();
+            setupSemesterPicker();
+            updateFormHeader(currentQuestionnaireType);
+            renderQuestions();
+            applyQuestionnaireEditMode(isQuestionnaireEditable());
+        }
+
+        if (key === keys.EVAL_PERIODS) {
+            const periods = SharedData.getEvalPeriods();
+            ['student-professor', 'professor-professor', 'supervisor-professor'].forEach(type => {
+                const startEl = document.getElementById(type + '-start');
+                const endEl = document.getElementById(type + '-end');
+                if (startEl && periods[type]) startEl.value = periods[type].start || '';
+                if (endEl && periods[type]) endEl.value = periods[type].end || '';
+            });
+            renderHrSystemNotifications();
+        }
+
+        if (key === keys.USERS) {
+            loadProfessorsData();
+            renderProfessorDepartmentOptions();
+            renderProfessorDepartmentTabs();
+            if (isContentViewVisible('user-management-view')) {
+                renderProfessors();
+            }
+            if (isContentViewVisible('dashboard-view')) {
+                updateOverviewCards();
+                renderProfessorRanking();
+                renderHrDashboardTopCharts();
+                loadReports();
+            }
+            if (isContentViewVisible('reports-view')) {
+                loadReports();
+            }
+        }
+
+        if (
+            key === keys.EVALUATIONS ||
+            key === keys.SUBJECT_MANAGEMENT ||
+            key === keys.STUDENT_EVAL_DRAFTS ||
+            key === keys.CURRENT_SEMESTER ||
+            key === keys.SEMESTER_LIST ||
+            key === keys.QUESTIONNAIRES
+        ) {
+            if (isContentViewVisible('dashboard-view')) {
+                updateOverviewCards();
+                renderProfessorRanking();
+                renderHrDashboardTopCharts();
+                loadReports();
+            }
+            if (isContentViewVisible('reports-view')) {
+                loadReports();
+            }
+            if (isContentViewVisible('user-management-view')) {
+                renderProfessors();
+            }
+            if (currentAnalyticsProfessorId) {
+                const modal = document.getElementById('professor-analytics-modal');
+                if (modal && modal.style.display === 'flex') {
+                    viewProfessorAnalytics(currentAnalyticsProfessorId);
+                }
+            }
+        }
+
+        if (key === keys.ACTIVITY_LOG) {
+            loadHrActivityLog();
+        }
+
+        if (key === keys.ANNOUNCEMENTS) {
+            setupNotifications();
+            renderHrSystemNotifications();
+        }
+    });
 }
 
 function clampNumber(value, min, max) {
@@ -1074,36 +2661,40 @@ function getProfessorAnalyticsSnapshot(professor, semesterId) {
  * Load professors data from localStorage or generate new
  */
 function loadProfessorsData() {
-    // Load professors from centralized sharedUsersData
-    const savedProfessors = getProfessorsFromSharedData();
-    if (savedProfessors.length > 0) {
-        professorsData = savedProfessors;
-        let didUpdate = false;
-        // Migrate old data to include analytics fields
-        professorsData = professorsData.map(professor => {
-            if (!professor.employeeId) {
-                professor.employeeId = generateEmployeeId();
-                didUpdate = true;
-            }
-            if (!professor.employmentType) {
-                professor.employmentType = 'Regular';
-                didUpdate = true;
-            }
-            if (ensureProfessorSemesterData(professor)) {
-                didUpdate = true;
-            }
-            return professor;
-        });
+    // Always load from the canonical shared user snapshot.
+    // Using filtered adminUsers can drop professors when later persisted.
+    const sourceUsers = SharedData.getUsers();
 
-        // Limit professors to 2-3 per department
-        limitProfessorsPerDepartment();
-        if (didUpdate) {
-            saveProfessorsToSharedData();
+    professorsData = sourceUsers.filter(function (u) {
+        return String(u.role || '').toLowerCase() === 'professor';
+    });
+
+    professorsData = professorsData.map(professor => {
+        const updated = { ...professor };
+        if (!updated.employeeId) {
+            updated.employeeId = deriveEmployeeIdFallback(updated.id);
         }
-    } else {
-        // No professors in SharedData — show empty state, don't auto-generate fake data
-        professorsData = [];
-    }
+        if (!updated.employmentType) {
+            updated.employmentType = 'Regular';
+        }
+        if (!updated.department && updated.institute) {
+            updated.department = updated.institute;
+        }
+        if (updated.department) {
+            const normalizedDepartment = String(updated.department).toUpperCase();
+            updated.department = normalizedDepartment;
+        }
+        if (typeof updated.isActive !== 'boolean') {
+            const normalizedStatus = String(updated.status || '').toLowerCase();
+            updated.isActive = normalizedStatus === 'inactive' ? false : true;
+        }
+        if (!updated.status) {
+            updated.status = updated.isActive ? 'active' : 'inactive';
+        }
+        ensureProfessorSemesterData(updated);
+
+        return updated;
+    });
 }
 
 /**
@@ -1232,11 +2823,18 @@ function renderProfessorRanking() {
         filtered = filtered.filter(p => formatEmploymentType(p.employmentType).toLowerCase() === employmentFilter);
     }
 
+    const context = buildHrEvaluationContext();
     const ranked = filtered
         .map(prof => {
-            const averageRating = parseFloat(prof.averageRating) || 0;
+            const snapshot = getHrProfessorEvaluationSnapshot(prof.id, 'all', 'student', context);
+            const averageRating = parseFloat(snapshot.averageRating) || 0;
             const ratingPercent = Math.min(Math.max((averageRating / 5) * 100, 0), 100);
-            return { ...prof, ratingPercent };
+            return {
+                ...prof,
+                averageRating,
+                evaluatedCount: snapshot.evaluatedCount || 0,
+                ratingPercent,
+            };
         })
         .sort((a, b) => b.ratingPercent - a.ratingPercent || (b.evaluatedCount || 0) - (a.evaluatedCount || 0));
 
@@ -1377,7 +2975,12 @@ function setupProfessorManagement() {
  * Load user management view
  */
 function loadUserManagement() {
+    // Render immediately from current SharedData cache.
+    loadProfessorsData();
     renderProfessors();
+
+    // Refresh from API in the background and re-render when new data arrives.
+    setTimeout(() => refreshHrUsersInBackground(false), 0);
 }
 
 /**
@@ -1426,46 +3029,64 @@ function renderProfessors() {
         return;
     }
 
-    professorsList.innerHTML = filteredProfessors.map(professor => `
-        <div class="professor-card ${professor.isActive === false ? 'inactive' : ''}" data-id="${professor.id}">
-            <div class="professor-info">
-                <div class="professor-avatar">
-                    <i class="fas fa-user-tie"></i>
-                </div>
-                <div class="professor-details">
-                    <div class="professor-name-row">
-                        <h3>${professor.name}</h3>
-                        <span class="dept-badge dept-${professor.department}">${professor.department}</span>
-                    </div>
-                    <p class="professor-email">${professor.email}</p>
-                    <p class="professor-employee">Employee ID: ${professor.employeeId || 'N/A'}</p>
-                    <p class="professor-position">${professor.position}</p>
-                    <p class="professor-employment">${formatEmploymentType(professor.employmentType)}</p>
-                    <div class="professor-stats">
-                        <div class="stat-item">
-                            <i class="fas fa-user-check"></i>
-                            <span>${professor.evaluatedCount || professor.evaluationsCount || 0} Students Evaluated</span>
-                        </div>
-                        <div class="stat-item">
-                            <i class="fas fa-toggle-${professor.isActive ? 'on' : 'off'}"></i>
-                            <span>${professor.isActive ? 'Active' : 'Inactive'}</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="professor-actions">
-                <button class="action-btn view" data-action="view" data-professor-id="${professor.id}" title="View Details">
-                    <i class="fas fa-eye"></i>
-                </button>
-                <button class="action-btn analytics" data-action="analytics" data-professor-id="${professor.id}" title="Analytics">
-                    <i class="fas fa-chart-line"></i>
-                </button>
-                <button class="action-btn edit" data-action="edit" data-professor-id="${professor.id}" title="Edit">
-                    <i class="fas fa-edit"></i>
-                </button>
-            </div>
+    professorsList.innerHTML = `
+        <div class="professor-table-wrap">
+            <table class="professor-table">
+                <thead>
+                    <tr>
+                        <th>Professor Details</th>
+                        <th>Email</th>
+                        <th>Employee ID</th>
+                        <th>Department</th>
+                        <th>Position</th>
+                        <th>Employment</th>
+                        <th>Students Evaluated</th>
+                        <th>Status</th>
+                        <th class="actions-col">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${filteredProfessors.map(professor => {
+                        const studentsEvaluated = Number(professor.evaluatedCount || professor.evaluationsCount) || 0;
+                        return `
+                        <tr class="${professor.isActive === false ? 'inactive' : ''}" data-id="${professor.id}">
+                            <td>
+                                <div class="professor-table-name">
+                                    <i class="fas fa-user-tie"></i>
+                                    <span>${professor.name || 'N/A'}</span>
+                                </div>
+                            </td>
+                            <td>${professor.email || 'N/A'}</td>
+                            <td>${professor.employeeId || 'N/A'}</td>
+                            <td><span class="dept-badge dept-${professor.department}">${professor.department || 'N/A'}</span></td>
+                            <td>${professor.position || 'Professor'}</td>
+                            <td>${formatEmploymentType(professor.employmentType)}</td>
+                            <td>${studentsEvaluated}</td>
+                            <td>
+                                <span class="status-pill ${professor.isActive ? 'active' : 'inactive'}">
+                                    ${professor.isActive ? 'Active' : 'Inactive'}
+                                </span>
+                            </td>
+                            <td>
+                                <div class="professor-actions">
+                                    <button class="action-btn view" data-action="view" data-professor-id="${professor.id}" title="View Details">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                    <button class="action-btn analytics" data-action="analytics" data-professor-id="${professor.id}" title="Analytics">
+                                        <i class="fas fa-chart-line"></i>
+                                    </button>
+                                    <button class="action-btn edit" data-action="edit" data-professor-id="${professor.id}" title="Edit">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                    }).join('')}
+                </tbody>
+            </table>
         </div>
-    `).join('');
+    `;
 
     // Add event listeners to action buttons
     const actionButtons = professorsList.querySelectorAll('.action-btn');
@@ -1634,12 +3255,58 @@ function deleteProfessor(professorId) {
     }
 }
 
+function normalizeHrProgramCode(value) {
+    return String(value || '').trim().toUpperCase();
+}
+
+function resolveHrProfessorProgramLabel(professor) {
+    if (!professor) return 'Not assigned';
+
+    const programCode = normalizeHrProgramCode(
+        professor.programCode || professor.program || ''
+    );
+    if (!programCode) {
+        return 'Not assigned';
+    }
+
+    const directProgramName = String(professor.programName || '').trim();
+    if (directProgramName) {
+        return `${programCode} - ${directProgramName}`;
+    }
+
+    const campusToken = normalizeHrToken(professor.campus || '');
+    const departmentToken = normalizeHrToken(professor.department || professor.institute || '');
+    const programs = SharedData.getPrograms ? SharedData.getPrograms() : [];
+    const programList = Array.isArray(programs) ? programs : [];
+
+    let matched = null;
+    if (campusToken && departmentToken) {
+        matched = programList.find(program =>
+            normalizeHrToken(program && program.campusSlug) === campusToken &&
+            normalizeHrToken(program && program.departmentCode) === departmentToken &&
+            normalizeHrProgramCode(program && program.programCode) === programCode
+        ) || null;
+    }
+
+    if (!matched) {
+        matched = programList.find(program =>
+            normalizeHrProgramCode(program && program.programCode) === programCode
+        ) || null;
+    }
+
+    const matchedName = String(matched && matched.programName || '').trim();
+    return matchedName ? `${programCode} - ${matchedName}` : programCode;
+}
+
 /**
  * View professor details
  */
 function viewProfessorDetails(professorId) {
     const professor = professorsData.find(t => String(t.id) === String(professorId));
     if (!professor) return;
+    const programLabel = resolveHrProfessorProgramLabel(professor);
+    const snapshot = getHrProfessorEvaluationSnapshot(professor.id, 'all', 'student');
+    const studentsEvaluated = snapshot.evaluatedCount || 0;
 
     const modal = document.getElementById('professor-details-modal');
     const content = document.getElementById('professor-details-content');
@@ -1678,16 +3345,20 @@ function viewProfessorDetails(professorId) {
                         <span>${professor.department}</span>
                     </div>
                     <div class="info-row">
+                        <label><i class="fas fa-graduation-cap"></i> Program:</label>
+                        <span>${programLabel}</span>
+                    </div>
+                    <div class="info-row">
                         <label><i class="fas fa-toggle-${professor.isActive ? 'on' : 'off'}"></i> Status:</label>
                         <span>${professor.isActive ? 'Active' : 'Inactive'}</span>
                     </div>
                     <div class="info-row highlight">
                         <label><i class="fas fa-user-check"></i> Students Evaluated:</label>
-                        <span class="evaluation-count">${professor.evaluatedCount || professor.evaluationsCount || 0}</span>
+                        <span class="evaluation-count">${studentsEvaluated}</span>
                     </div>
                 </div>
                 <div class="detail-actions">
-                    <button class="btn-edit-detail" onclick="closeProfessorDetailsModal(); editProfessor(${professor.id});">
+                    <button class="btn-edit-detail" onclick="closeProfessorDetailsModal(); editProfessor(${JSON.stringify(String(professor.id))});">
                         <i class="fas fa-edit"></i> Edit Profile
                     </button>
                 </div>
@@ -1722,47 +3393,24 @@ function buildEvaluationTypeOptionsHtml(selectedType) {
 }
 
 function getEvaluationSnapshotForType(professor, semesterId, evaluationType) {
-    const baseSnapshot = getProfessorAnalyticsSnapshot(professor, semesterId);
-    const meta = getEvaluationTypeMeta(evaluationType);
-
-    if (evaluationType === 'student') {
+    if (!professor) {
+        const meta = getEvaluationTypeMeta(evaluationType);
         return {
-            totalRaters: baseSnapshot.totalStudents || 0,
-            evaluatedCount: baseSnapshot.evaluatedCount || 0,
-            notEvaluatedCount: baseSnapshot.notEvaluatedCount || Math.max((baseSnapshot.totalStudents || 0) - (baseSnapshot.evaluatedCount || 0), 0),
-            averageRating: parseFloat(baseSnapshot.averageRating) || 0,
-            qualitativeResponses: baseSnapshot.qualitativeResponses || [],
+            totalRaters: 0,
+            evaluatedCount: 0,
+            notEvaluatedCount: 0,
+            averageRating: 0,
+            qualitativeResponses: [],
             meta
         };
     }
 
-    const professorCount = professorsData ? professorsData.length : 0;
-    const totalRaters = evaluationType === 'peer'
-        ? Math.max(professorCount - 1, 0)
-        : professorCount > 0 ? 1 : 0;
-
-    const completionRatio = baseSnapshot.totalStudents > 0
-        ? baseSnapshot.evaluatedCount / baseSnapshot.totalStudents
-        : 0;
-
-    const ratio = evaluationType === 'peer'
-        ? clampNumber(completionRatio * 0.9 + 0.05, 0.3, 0.95)
-        : clampNumber(completionRatio * 0.75 + 0.05, 0.2, 0.9);
-
-    const evaluatedCount = totalRaters > 0 ? Math.round(totalRaters * ratio) : 0;
-    const notEvaluatedCount = Math.max(totalRaters - evaluatedCount, 0);
-
-    const ratingOffset = evaluationType === 'peer' ? 0.1 : 0.2;
-    const averageRating = clampNumber((parseFloat(baseSnapshot.averageRating) || 0) + ratingOffset, 1, 5);
-
-    return {
-        totalRaters,
-        evaluatedCount,
-        notEvaluatedCount,
-        averageRating,
-        qualitativeResponses: [],
-        meta
-    };
+    return getHrProfessorEvaluationSnapshot(
+        professor.id,
+        semesterId || 'all',
+        evaluationType || 'student',
+        buildHrEvaluationContext()
+    );
 }
 
 /**
@@ -1799,8 +3447,10 @@ function viewProfessorAnalytics(professorId) {
             return;
         }
 
+        currentAnalyticsProfessorId = String(professor.id);
         const selectedSemester = currentAnalyticsSemester || 'all';
-        const normalizedSemester = professor.semesterData && professor.semesterData[selectedSemester]
+        const semesterOptions = getSemesterOptions();
+        const normalizedSemester = semesterOptions.some(option => option.id === selectedSemester)
             ? selectedSemester
             : 'all';
 
@@ -2020,6 +3670,7 @@ function closeProfessorAnalyticsModal() {
     if (modal) {
         modal.style.display = 'none';
     }
+    currentAnalyticsProfessorId = null;
 }
 
 /**
@@ -2055,6 +3706,12 @@ function generateEmployeeId() {
     return `EMP-${Math.floor(1000 + Math.random() * 9000)}`;
 }
 
+function deriveEmployeeIdFallback(userId) {
+    const digits = String(userId || '').replace(/\D/g, '');
+    const base = digits ? digits.slice(-4) : String(Date.now()).slice(-4);
+    return `EMP-${base.padStart(4, '0')}`;
+}
+
 function formatEmploymentType(type) {
     if (!type) return 'Regular';
     const normalized = String(type).toLowerCase();
@@ -2081,79 +3738,43 @@ function loadReports() {
  * Generate evaluation data
  */
 function generateEvaluationData() {
-    // Calculate overall statistics from professors data
-    let totalStudents = 0;
-    let completedEvaluations = 0;
+    const context = buildHrEvaluationContext();
+    const semesterId = context.currentSemester || 'all';
+    const registration = buildHrStudentRegistrationStats(context, semesterId);
+    const population = buildHrStudentPopulationCompletionStats(context, semesterId);
+    const completionRate = population.totalStudents > 0
+        ? Math.round((population.completedStudents / population.totalStudents) * 100)
+        : 0;
 
-    professorsData.forEach(professor => {
-        totalStudents += professor.totalStudents || 0;
-        completedEvaluations += professor.evaluatedCount || 0;
-    });
-
-    const pendingEvaluations = totalStudents - completedEvaluations;
-    const completionRate = totalStudents > 0 ? Math.round((completedEvaluations / totalStudents) * 100) : 0;
-
-    // Generate data for each evaluation type
     return {
         overall: {
-            total: totalStudents,
-            completed: completedEvaluations,
-            pending: pendingEvaluations,
-            completionRate: completionRate
+            total: registration.total,
+            completed: registration.completed,
+            pending: registration.pending,
+            completionRate
         },
-        studentToProfessor: generateEvaluationTypeData('Student to Professor'),
-        professorToProfessor: generateEvaluationTypeData('Professor to Professor'),
-        supervisorToProfessor: generateEvaluationTypeData('Supervisor to Professor')
+        studentToProfessor: generateEvaluationTypeData('student', context, semesterId),
+        professorToProfessor: generateEvaluationTypeData('peer', context, semesterId),
+        supervisorToProfessor: generateEvaluationTypeData('supervisor', context, semesterId)
     };
 }
 
 /**
  * Generate data for a specific evaluation type
  */
-function generateEvaluationTypeData(type) {
-    const categories = [
-        'Teaching Effectiveness',
-        'Classroom Management',
-        'Student Engagement',
-        'Communication Skills',
-        'Assessment Methods'
-    ];
+function generateEvaluationTypeData(type, contextInput, semesterIdInput) {
+    const typeToken = normalizeHrToken(type);
+    let typeKey = 'student';
+    if (typeToken === 'peer' || typeToken.includes('professor')) {
+        typeKey = 'peer';
+    }
+    if (typeToken === 'supervisor' || typeToken.includes('supervisor')) {
+        typeKey = 'supervisor';
+    }
 
-    // Generate average scores for each category (3.5-5.0 range)
-    const categoryScores = categories.map(cat => ({
-        category: cat,
-        score: parseFloat((Math.random() * 1.5 + 3.5).toFixed(1))
-    }));
-
-    // Generate rating distribution (1-5 stars)
-    const totalRatings = Math.floor(Math.random() * 200) + 100; // 100-300 ratings
-    const ratingDistribution = {
-        5: Math.floor(totalRatings * (0.4 + Math.random() * 0.2)), // 40-60%
-        4: Math.floor(totalRatings * (0.2 + Math.random() * 0.15)), // 20-35%
-        3: Math.floor(totalRatings * (0.1 + Math.random() * 0.1)), // 10-20%
-        2: Math.floor(totalRatings * (0.02 + Math.random() * 0.03)), // 2-5%
-        1: Math.floor(totalRatings * (0.005 + Math.random() * 0.015)) // 0.5-2%
-    };
-
-    // Calculate average rating
-    const totalWeighted = ratingDistribution[5] * 5 + ratingDistribution[4] * 4 +
-        ratingDistribution[3] * 3 + ratingDistribution[2] * 2 + ratingDistribution[1] * 1;
-    const totalCount = ratingDistribution[5] + ratingDistribution[4] + ratingDistribution[3] +
-        ratingDistribution[2] + ratingDistribution[1];
-    const averageRating = totalCount > 0 ? parseFloat((totalWeighted / totalCount).toFixed(1)) : 0;
-
-    // Get number of professors/professors evaluated
-    const evaluatedCount = type === 'Student to Professor' ? professorsData.length :
-        type === 'Professor to Professor' ? Math.floor(professorsData.length * 0.8) :
-            Math.floor(professorsData.length * 0.6);
-
-    return {
-        categoryScores: categoryScores,
-        ratingDistribution: ratingDistribution,
-        averageRating: averageRating,
-        totalEvaluations: totalCount,
-        evaluatedCount: evaluatedCount
-    };
+    const context = contextInput || buildHrEvaluationContext();
+    const semesterId = semesterIdInput || context.currentSemester || 'all';
+    return getHrReportDataByType(typeKey, context, semesterId);
 }
 
 /**
@@ -2727,9 +4348,92 @@ function setupEvalPeriods() {
 
 function setupSemesterSettings() {
     const semesterSelect = document.getElementById('current-semester');
-    if (!semesterSelect) return;
+    const yearStartSelect = document.getElementById('new-term-year-start');
+    const yearEndSelect = document.getElementById('new-term-year-end');
+    const semesterTypeSelect = document.getElementById('new-term-semester-type');
+    const termPreviewInput = document.getElementById('new-term-preview');
+    if (!semesterSelect || !yearStartSelect || !yearEndSelect || !semesterTypeSelect || !termPreviewInput) return;
 
-    // ── Populate dropdown from SharedData semester list ──
+    const semesterPattern = /^(1st|2nd|3rd)\s+Semester\s+(\d{4})-(\d{4})$/i;
+    const slugifyTerm = (label) => label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const parseSemesterLabel = (label) => {
+        const match = String(label || '').trim().match(semesterPattern);
+        if (!match) return null;
+        return {
+            semesterType: match[1] + ' Semester',
+            startYear: String(match[2]),
+            endYear: String(match[3])
+        };
+    };
+
+    const getYearChoices = () => {
+        const years = new Set();
+        const nowYear = new Date().getFullYear();
+        for (let year = nowYear - 3; year <= nowYear + 8; year += 1) {
+            years.add(year);
+        }
+        (SharedData.getSemesterList() || []).forEach(item => {
+            const parsed = parseSemesterLabel(item && item.label);
+            if (parsed) {
+                years.add(Number(parsed.startYear));
+                years.add(Number(parsed.endYear));
+            }
+        });
+        return Array.from(years).sort((a, b) => a - b);
+    };
+
+    const fillYearDropdowns = (preferredStart, preferredEnd) => {
+        const years = getYearChoices();
+        yearStartSelect.innerHTML = '<option value="">Start Year</option>';
+        yearEndSelect.innerHTML = '<option value="">End Year</option>';
+
+        years.forEach(year => {
+            const startOption = document.createElement('option');
+            startOption.value = String(year);
+            startOption.textContent = String(year);
+            yearStartSelect.appendChild(startOption);
+
+            const endOption = document.createElement('option');
+            endOption.value = String(year);
+            endOption.textContent = String(year);
+            yearEndSelect.appendChild(endOption);
+        });
+
+        const nowYear = new Date().getFullYear();
+        const fallbackStart = String(nowYear);
+        const fallbackEnd = String(nowYear + 1);
+        const startValue = preferredStart || fallbackStart;
+        const endValue = preferredEnd || fallbackEnd;
+
+        if ([...yearStartSelect.options].some(option => option.value === startValue)) {
+            yearStartSelect.value = startValue;
+        }
+        if ([...yearEndSelect.options].some(option => option.value === endValue)) {
+            yearEndSelect.value = endValue;
+        }
+    };
+
+    const buildPreviewLabel = () => {
+        const startYear = yearStartSelect.value;
+        const endYear = yearEndSelect.value;
+        const semesterType = semesterTypeSelect.value;
+        if (!startYear || !endYear || !semesterType) return '';
+        return `${semesterType} ${startYear}-${endYear}`;
+    };
+
+    const refreshPreview = () => {
+        termPreviewInput.value = buildPreviewLabel();
+    };
+
+    const syncBuilderFromLabel = (label) => {
+        const parsed = parseSemesterLabel(label);
+        fillYearDropdowns(parsed && parsed.startYear, parsed && parsed.endYear);
+        if (parsed && parsed.semesterType) {
+            semesterTypeSelect.value = parsed.semesterType;
+        }
+        refreshPreview();
+    };
+
     const populateDropdown = () => {
         const list = SharedData.getSemesterList();
         const saved = SharedData.getCurrentSemester();
@@ -2738,58 +4442,75 @@ function setupSemesterSettings() {
         if (list.length === 0) {
             const placeholder = document.createElement('option');
             placeholder.value = '';
-            placeholder.textContent = '— No semesters added yet —';
+            placeholder.textContent = 'No semesters added yet';
             placeholder.disabled = true;
             placeholder.selected = true;
             semesterSelect.appendChild(placeholder);
+            syncBuilderFromLabel('');
             return;
         }
 
         list.forEach(sem => {
-            const opt = document.createElement('option');
-            opt.value = sem.value;
-            opt.textContent = sem.label;
-            if (sem.value === saved) opt.selected = true;
-            semesterSelect.appendChild(opt);
+            const option = document.createElement('option');
+            option.value = sem.value;
+            option.textContent = sem.label;
+            if (sem.value === saved) option.selected = true;
+            semesterSelect.appendChild(option);
         });
 
-        // If no saved match, select first option
         if (saved && !semesterSelect.value) {
             semesterSelect.selectedIndex = 0;
         }
+
+        const selectedOption = semesterSelect.options[semesterSelect.selectedIndex];
+        syncBuilderFromLabel(selectedOption ? selectedOption.textContent : '');
     };
 
+    fillYearDropdowns();
     populateDropdown();
+    [yearStartSelect, yearEndSelect, semesterTypeSelect].forEach(element => {
+        element.addEventListener('change', refreshPreview);
+    });
+    semesterSelect.addEventListener('change', () => {
+        const selectedOption = semesterSelect.options[semesterSelect.selectedIndex];
+        syncBuilderFromLabel(selectedOption ? selectedOption.textContent : '');
+    });
 
-    // ── Add Term button ──
     const addTermBtn = document.getElementById('btn-add-term');
-    const newTermInput = document.getElementById('new-term-input');
-    if (addTermBtn && newTermInput) {
+    if (addTermBtn) {
         addTermBtn.addEventListener('click', () => {
-            const label = newTermInput.value.trim();
-            if (!label) {
-                alert('Please enter a semester name (e.g. "1st Semester 2027-2028").');
+            const startYear = Number(yearStartSelect.value);
+            const endYear = Number(yearEndSelect.value);
+            const semesterType = semesterTypeSelect.value;
+
+            if (!startYear || !endYear || !semesterType) {
+                alert('Please select start year, end year, and semester.');
                 return;
             }
-            // Create a slug-style value from the label
-            const value = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-            // Check for duplicates
-            const existing = SharedData.getSemesterList().find(s => s.value === value);
+            if (endYear !== startYear + 1) {
+                alert('Academic year must be consecutive (example: 2026-2027).');
+                return;
+            }
+
+            const label = `${semesterType} ${startYear}-${endYear}`;
+            const value = slugifyTerm(label);
+            const existing = SharedData.getSemesterList().find(s =>
+                s.value === value || String(s.label || '').toLowerCase() === label.toLowerCase()
+            );
             if (existing) {
                 alert('This semester already exists.');
-                semesterSelect.value = value;
-                newTermInput.value = '';
+                semesterSelect.value = existing.value;
+                syncBuilderFromLabel(existing.label);
                 return;
             }
-            // Add to SharedData and refresh dropdown
+
             SharedData.addSemester(value, label);
             populateDropdown();
             semesterSelect.value = value;
-            newTermInput.value = '';
+            syncBuilderFromLabel(label);
         });
     }
 
-    // ── Save Current Semester button ──
     const saveBtn = document.getElementById('save-current-semester-btn');
     if (saveBtn) {
         saveBtn.addEventListener('click', () => {
@@ -2805,7 +4526,6 @@ function setupSemesterSettings() {
         });
     }
 }
-
 function refreshSemesterPicker() {
     const semesterSelect = document.getElementById('semester-select');
     if (!semesterSelect) return;
@@ -3072,13 +4792,8 @@ function renderQuestions() {
             <div class="question-section" data-section-id="${section.id}">
                 <div class="section-header">
                     <div class="section-title-group">
-                        <div class="section-letter-badge" aria-label="Section ${section.letter}">
-                            <span class="section-letter-label">Section</span>
-                            <span class="section-letter-value">${section.letter}</span>
-                        </div>
                         <div class="section-title-content">
-                            <p class="section-title-label">Section Title</p>
-                            <h2 class="section-title">${section.title}</h2>
+                            <h2 class="section-title"><span class="section-letter-inline">${section.letter}.</span> ${section.title}</h2>
                             <p class="section-description">${section.description}</p>
                         </div>
                     </div>
@@ -3688,3 +5403,4 @@ if (typeof module !== 'undefined' && module.exports) {
         loadUserManagement
     };
 }
+

@@ -378,7 +378,7 @@ body {
 /* Summary Cards */
 .summary-cards {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 24px;
     margin-bottom: 32px;
 }
@@ -869,6 +869,92 @@ body {
     margin-bottom: 24px;
 }
 
+.evaluation-form .eval-step {
+    display: none;
+}
+
+.evaluation-form .eval-step.is-active {
+    display: block;
+}
+
+.eval-form-progress {
+    margin-bottom: 20px;
+}
+
+.eval-form-progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.eval-form-progress-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #6b7280;
+}
+
+.eval-form-progress-meta {
+    font-size: 12px;
+    font-weight: 600;
+    color: #374151;
+}
+
+.eval-form-progress-track {
+    width: 100%;
+    height: 8px;
+    border-radius: 999px;
+    background: #e5e7eb;
+    overflow: hidden;
+}
+
+.eval-form-progress-fill {
+    width: 0%;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--primary-gradient);
+    transition: width 0.3s ease;
+}
+
+.eval-form-nav {
+    margin-top: 8px;
+    margin-bottom: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.btn-eval-nav {
+    min-width: 116px;
+    border-radius: 10px;
+    border: 1px solid #d1d5db;
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    background: #ffffff;
+    color: #374151;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-eval-nav:hover:not(:disabled) {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.btn-eval-nav:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.btn-eval-next {
+    margin-left: auto;
+}
+
 .form-group {
     margin-bottom: 20px;
 }
@@ -879,6 +965,12 @@ body {
     font-weight: 600;
     color: #374151;
     margin-bottom: 8px;
+}
+
+.field-note {
+    font-size: 12px;
+    color: #6b7280;
+    margin-top: 6px;
 }
 
 .form-select {
@@ -942,6 +1034,63 @@ body {
 
 .evaluation-form .section-title.purple {
     color: var(--primary-color);
+}
+
+.evaluation-form .question-section {
+    background: #f8f9fa;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+}
+
+.evaluation-form .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 24px;
+    padding-bottom: 20px;
+    border-bottom: 2px solid #d1d5db;
+}
+
+.evaluation-form .section-title-group {
+    display: flex;
+    gap: 16px;
+    flex: 1;
+    align-items: flex-start;
+}
+
+.evaluation-form .section-letter {
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--primary-color);
+    margin: 0;
+    min-width: 40px;
+}
+
+.evaluation-form .section-title-content {
+    flex: 1;
+}
+
+.evaluation-form .section-title {
+    font-size: 19px;
+    font-weight: 700;
+    color: #1f2937;
+    margin: 0 0 8px 0;
+}
+
+.evaluation-form .section-description {
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 1.6;
+    margin: 0;
+    white-space: pre-line;
+}
+
+.evaluation-form .section-questions {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
 }
 
 .question-group {
@@ -1176,6 +1325,19 @@ body {
         width: 260px;
         right: -10px;
     }
+
+    .eval-form-progress-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .eval-form-nav {
+        flex-direction: column;
+    }
+
+    .btn-eval-nav {
+        width: 100%;
+    }
 }
 
 /* Content View Toggle */
@@ -1351,6 +1513,16 @@ body {
 
 .count.fair {
     color: #f59e0b;
+    font-weight: 600;
+}
+
+.count.poor {
+    color: #f97316;
+    font-weight: 600;
+}
+
+.count.very-poor {
+    color: #ef4444;
     font-weight: 600;
 }
 
@@ -1625,6 +1797,24 @@ body {
     color: #6b7280;
 }
 
+.faculty-response-table-container {
+    max-height: 460px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+}
+
+.faculty-response-table-container .summary-table {
+    min-width: 980px;
+}
+
+.faculty-response-table-container .summary-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #f9fafb;
+}
+
 /* Peer Management View */
 .peer-mgmt-section {
     display: flex;
@@ -1634,8 +1824,9 @@ body {
 
 .peer-mgmt-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
     gap: 20px;
+    align-items: start;
 }
 
 .peer-mgmt-card {
@@ -1643,6 +1834,7 @@ body {
     border-radius: 14px;
     background: var(--bg-secondary);
     padding: 20px;
+    min-width: 0;
 }
 
 .peer-mgmt-card h2 {
@@ -1673,6 +1865,85 @@ body {
     font-size: 12px;
     color: #6b7280;
     margin-bottom: 16px;
+}
+
+.peer-mgmt-ops-card {
+    margin-top: 16px;
+    border-top: 1px solid var(--border-color);
+    padding-top: 16px;
+}
+
+.peer-mgmt-ops-card h2 {
+    font-size: 18px;
+    color: #1f2937;
+    margin-bottom: 6px;
+}
+
+.peer-mgmt-room-display[readonly] {
+    background: #f3f4f6;
+    color: #111827;
+    font-weight: 600;
+    cursor: default;
+}
+
+.peer-mgmt-ops-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.peer-mgmt-members-table-container {
+    margin-top: 12px;
+}
+
+.peer-mgmt-rooms-table-container {
+    max-height: 360px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+}
+
+#peerMgmtRoomsTable thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #f9fafb;
+}
+
+#peerMgmtRoomsTable {
+    min-width: 900px;
+}
+
+#peerMgmtRoomMembersTable {
+    min-width: 620px;
+}
+
+#peerMgmtRoomsTable th:last-child,
+#peerMgmtRoomsTable td:last-child {
+    width: 210px;
+}
+
+.peer-mgmt-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.peer-mgmt-row-actions .btn-cancel {
+    min-width: 92px;
+    padding: 8px 12px;
+    font-size: 12px;
+}
+
+.peer-mgmt-member-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.peer-mgmt-member-actions .btn-cancel {
+    min-width: 86px;
+    padding: 6px 10px;
+    font-size: 12px;
 }
 
 .peer-mgmt-picker {
@@ -1772,11 +2043,114 @@ body {
     .peer-mgmt-grid {
         grid-template-columns: 1fr;
     }
+
+    #peerMgmtRoomsTable {
+        min-width: 760px;
+    }
 }
 
 @media (max-width: 768px) {
     .peer-mgmt-add-row {
         grid-template-columns: 1fr;
+    }
+
+    .peer-mgmt-ops-actions {
+        justify-content: stretch;
+    }
+
+    .peer-mgmt-ops-actions .btn-submit,
+    .peer-mgmt-ops-actions .btn-cancel {
+        flex: 1 1 100%;
+    }
+}
+
+.faculty-paper-section {
+    margin-bottom: 18px;
+}
+
+.dean-paper-open-btn {
+    padding: 6px 10px;
+    font-size: 11px;
+}
+
+.faculty-paper-row-active {
+    background: #eef2ff;
+}
+
+.faculty-paper-detail-card {
+    margin-top: 0;
+}
+
+.pdf-preview-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.6);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    z-index: 1400;
+}
+
+.pdf-preview-modal.active {
+    display: flex;
+}
+
+.pdf-preview-dialog {
+    width: min(1100px, 96vw);
+    height: min(90vh, 900px);
+    background: #ffffff;
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 24px 60px rgba(2, 6, 23, 0.45);
+    display: flex;
+    flex-direction: column;
+}
+
+.pdf-preview-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #f8fafc;
+}
+
+.pdf-preview-toolbar h3 {
+    margin: 0;
+    font-size: 16px;
+    color: #111827;
+}
+
+.pdf-preview-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pdf-preview-download-btn,
+.pdf-preview-close-btn {
+    padding: 8px 14px;
+    font-size: 12px;
+}
+
+.pdf-preview-frame {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #ffffff;
+    flex: 1;
+}
+
+@media (max-width: 768px) {
+    .pdf-preview-dialog {
+        width: 100%;
+        height: 92vh;
+        border-radius: 10px;
+    }
+    .pdf-preview-toolbar h3 {
+        font-size: 14px;
     }
 }
 

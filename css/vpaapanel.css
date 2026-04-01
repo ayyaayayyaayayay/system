@@ -45,10 +45,6 @@
     gap: 16px;
 }
 
-.top-header .notification-icon {
-    background: #f9fafb;
-}
-
 .top-header .user-profile {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
@@ -118,17 +114,6 @@
     font-size: 13px;
     gap: 8px;
     white-space: nowrap;
-}
-
-.vpaa-summary .stat-item {
-    align-items: flex-start;
-}
-
-.vpaa-summary .stat-item span {
-    display: block;
-    font-size: 11px;
-    color: #6b7280;
-    margin-top: 2px;
 }
 
 .vpaa-section {
@@ -220,14 +205,15 @@
     color: #374151;
     font-size: 12px;
     line-height: 1.5;
-    display: flex;
-    gap: 18px;
-    padding-top: 16px;
-    flex-wrap: wrap;
+    display: none;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: #f8fafc;
+    padding: 12px 14px;
 }
 
 .vpaa-summary.visible {
-    display: flex;
+    display: block;
 }
 
 .vpaa-comments {
@@ -282,6 +268,46 @@
     font-style: italic;
 }
 
+.vpaa-word-frequency-single {
+    margin-top: 4px;
+}
+
+.vpaa-comments-card {
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-secondary);
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 10px 12px;
+}
+
+.vpaa-comment-list-combined {
+    margin-top: 0;
+}
+
+.vpaa-comment-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.vpaa-comment-source {
+    display: inline-flex;
+    align-self: flex-start;
+    background: rgba(102, 126, 234, 0.12);
+    color: var(--primary-color);
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+}
+
+.vpaa-comment-text {
+    color: #374151;
+    line-height: 1.5;
+}
+
 .dept-badge.dept-Engineering {
     background: rgba(59, 130, 246, 0.15);
     color: var(--info-color);
@@ -319,9 +345,26 @@ body.vpaa-panel .sidebar {
     min-width: 280px;
 }
 
+body.vpaa-panel .main-wrapper {
+    min-width: 0;
+}
+
 body.vpaa-panel .main-content {
     margin-left: 280px;
+    width: calc(100% - 280px);
+    max-width: calc(100% - 280px);
+    min-width: 0;
     padding: 36px;
+    overflow-x: hidden;
+}
+
+body.vpaa-panel .content-view {
+    max-width: 100%;
+}
+
+body.vpaa-panel .admin-section {
+    max-width: 100%;
+    overflow: hidden;
 }
 
 body.vpaa-panel .logo-text {
@@ -528,12 +571,29 @@ body.vpaa-panel .word-frequency-card {
     padding: 20px 22px;
 }
 
+body.vpaa-panel .professors-list-container {
+    max-height: 520px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scroll-behavior: smooth;
+    padding-right: 6px;
+}
+
 body.vpaa-panel .professors-list {
-    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 18px;
+    align-items: stretch;
 }
 
 body.vpaa-panel .professor-name-row h3 {
     font-size: 18px;
+    line-height: 1.3;
+    min-height: calc(1.3em * 2);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 
 body.vpaa-panel .professor-email {
@@ -546,30 +606,177 @@ body.vpaa-panel .professor-employment {
     font-size: 13px;
 }
 
+body.vpaa-panel .professor-employee {
+    line-height: 1.45;
+    min-height: calc(1.45em * 2);
+}
+
 body.vpaa-panel .professor-stats .stat-item {
     font-size: 14px;
 }
 
 body.vpaa-panel .professor-card {
-    max-height: 720px;
-    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+body.vpaa-panel .professor-card.professor-card-compact {
+    max-height: none;
+    overflow: visible;
+    min-height: 150px;
+    height: 100%;
+    justify-content: flex-start;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+body.vpaa-panel .professor-card.professor-card-compact:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+}
+
+body.vpaa-panel .professor-card.professor-card-compact:focus-visible {
+    outline: 3px solid rgba(59, 130, 246, 0.35);
+    outline-offset: 2px;
+}
+
+body.vpaa-panel .professor-card-empty {
+    justify-content: center;
+    align-items: center;
+    min-height: 150px;
+}
+
+body.vpaa-panel .professor-card.professor-card-compact .professor-info {
+    margin-bottom: 0;
+}
+
+body.vpaa-panel .professor-avatar.professor-avatar-photo {
+    width: 64px;
+    height: 58px;
+    padding: 0;
+    overflow: hidden;
+    border-radius: 12px;
+}
+
+body.vpaa-panel .professor-avatar-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+body.vpaa-panel .professor-avatar-fallback {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+
+body.vpaa-panel .vpaa-word-frequency-title {
+    margin-top: 16px;
+}
+
+body.vpaa-panel .vpaa-popup-analytics-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+body.vpaa-panel .vpaa-popup-analytics-filter label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #374151;
+    letter-spacing: 0.2px;
+}
+
+body.vpaa-panel .vpaa-popup-eval-type {
+    width: 100%;
+    padding: 11px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    background: #f9fafb;
+    color: #1f2937;
+    font-size: 14px;
+}
+
+body.vpaa-panel .vpaa-empty-metric {
+    font-size: 13px;
+    color: #6b7280;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: #f9fafb;
+    border: 1px dashed var(--border-color);
+}
+
+body.vpaa-panel .vpaa-report-details {
     display: flex;
     flex-direction: column;
     gap: 14px;
 }
 
-body.vpaa-panel .professor-card .scrollable-section {
-    overflow: visible;
-    padding-right: 2px;
-    margin-bottom: 6px;
+.vpaa-report-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.48);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 220;
+    padding: 20px;
 }
 
-body.vpaa-panel .professor-card .word-frequency-grid {
+.vpaa-report-modal.active {
+    display: flex;
+}
+
+.vpaa-report-modal-dialog {
+    width: min(920px, 100%);
+    max-height: 88vh;
+    background: var(--bg-secondary);
+    border-radius: 16px;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 24px 48px rgba(15, 23, 42, 0.24);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.vpaa-report-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
 }
 
-body.vpaa-panel .professor-card .vpaa-comments {
-    margin-bottom: 10px;
+.vpaa-report-modal-header h3 {
+    margin: 0;
+    font-size: 17px;
+    color: #1f2937;
+}
+
+.vpaa-report-modal-close {
+    border: none;
+    background: transparent;
+    color: #6b7280;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+.vpaa-report-modal-body {
+    overflow-y: auto;
+    padding: 20px;
+}
+
+body.vpaa-modal-open {
+    overflow: hidden;
 }
 
 body.vpaa-panel .profile-grid.profile-grid-wide {
@@ -613,6 +820,8 @@ body.vpaa-panel .form-input {
 
     body.vpaa-panel .main-content {
         margin-left: 250px;
+        width: calc(100% - 250px);
+        max-width: calc(100% - 250px);
         padding: 30px;
     }
 }
@@ -642,6 +851,8 @@ body.vpaa-panel .form-input {
 
     body.vpaa-panel .main-content {
         margin-left: 0;
+        width: 100%;
+        max-width: 100%;
         padding: 24px;
     }
 
@@ -673,6 +884,14 @@ body.vpaa-panel .form-input {
         flex-direction: column;
         align-items: stretch;
     }
+
+    .vpaa-report-modal {
+        padding: 12px;
+    }
+
+    .vpaa-report-modal-dialog {
+        max-height: 92vh;
+    }
 }
 
 @media (max-width: 640px) {
@@ -688,6 +907,14 @@ body.vpaa-panel .form-input {
         grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     }
 
+    body.vpaa-panel .professors-list {
+        grid-template-columns: 1fr;
+    }
+
+    body.vpaa-panel .professors-list-container {
+        max-height: 380px;
+    }
+
     body.vpaa-panel .stats-summary {
         flex-direction: column;
         align-items: stretch;
@@ -700,6 +927,18 @@ body.vpaa-panel .form-input {
     body.vpaa-panel .btn-summary {
         width: 100%;
         justify-content: center;
+    }
+
+    .vpaa-report-modal {
+        padding: 8px;
+    }
+
+    .vpaa-report-modal-header {
+        padding: 14px 16px;
+    }
+
+    .vpaa-report-modal-body {
+        padding: 16px;
     }
 }
 

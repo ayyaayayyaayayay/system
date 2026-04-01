@@ -10,34 +10,19 @@ document.addEventListener("DOMContentLoaded", function () {
     setupNavigation();
     setupLogout();
     initializeStatusMonitoring();
+    setupDataSubscriptions();
     setupProfilePhotoUpload();
     setupProfileForms();
     setupProfileActionToggle();
     setupPasswordVisibility();
 });
 
-/**
- * Build student evaluation data from centralized SharedData
- */
-function getStudentEvaluationData() {
-    const users = SharedData.getUsers();
-    const students = users.filter(function(u) {
-        return u.role === 'student';
-    });
-    return students.map(function(s) {
-        return {
-            studentNumber: s.studentNumber || '',
-            fullName: s.name || '',
-            program: (s.department || '').toUpperCase(),
-            yearSection: s.yearSection || '',
-            done: false
-        };
-    });
-}
-
 let allStudents = [];
 let filteredStudents = [];
 let osaProfile = null;
+let currentSearchKeyword = "";
+let latestAnalyticsSnapshot = null;
+let selectedAnalyticsDepartment = "";
 
 function checkAuthentication() {
     return SharedData.isAuthenticated() && SharedData.getRole() === "osa";
@@ -51,17 +36,16 @@ function loadUserInfo() {
     const session = SharedData.getSession();
     if (!session) return;
 
-    const profileName = document.getElementById("profileName");
-    const profileNameDuplicate = document.getElementById("profileNameDuplicate");
     const displayName =
         (osaProfile && osaProfile.fullName) ||
         (session.username ? `${capitalizeFirstLetter(session.username)} OSA` : "OSA User");
-    if (profileName) {
-        profileName.textContent = displayName;
-    }
-    if (profileNameDuplicate) {
-        profileNameDuplicate.textContent = displayName;
-    }
+
+    ["profileName", "profileNameDuplicate", "profileNameStatus"].forEach(function (id) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = displayName;
+        }
+    });
 }
 
 function setupLogout() {
@@ -75,10 +59,27 @@ function setupLogout() {
     });
 }
 
-async function initializeStatusMonitoring() {
+function initializeStatusMonitoring() {
     setupSearch();
     setupStatusActions();
-    await loadStudentEvaluationStatus();
+    setupAnalyticsInteractions();
+    refreshStatusAndAnalytics();
+}
+
+function setupDataSubscriptions() {
+    if (!SharedData.onDataChange) return;
+
+    SharedData.onDataChange(function (key) {
+        if (
+            key === SharedData.KEYS.EVALUATIONS ||
+            key === SharedData.KEYS.SUBJECT_MANAGEMENT ||
+            key === SharedData.KEYS.CURRENT_SEMESTER ||
+            key === SharedData.KEYS.USERS ||
+            key === SharedData.KEYS.OSA_STUDENT_CLEARANCES
+        ) {
+            refreshStatusAndAnalytics();
+        }
+    });
 }
 
 function setupNavigation() {
@@ -103,117 +104,437 @@ function setupNavigation() {
     });
 }
 
-function setupStatusActions() {
-    const tbody = document.getElementById("statusTableBody");
-    if (!tbody) return;
-
-    tbody.addEventListener("click", function (event) {
-        const button = event.target.closest(".status-action-btn");
-        if (!button) return;
-
-        const studentNumber = button.dataset.studentNumber;
-        if (!studentNumber) return;
-
-        const student = allStudents.find((item) => item.studentNumber === studentNumber);
-        if (!student) return;
-
-        student.done = true;
-        student.cleared = true;
-
-        renderStatusTable(filteredStudents);
-        updateSummaryCards(filteredStudents);
-    });
+function normalizeTextToken(value) {
+    return String(value || "").trim().toLowerCase();
 }
 
-async function loadStudentEvaluationStatus() {
-    const session = getUserSession();
-    const query = {
-        requestedBy: session ? session.username : "",
-        ay: "2025-2026",
-        sem: "2"
-    };
-
-    try {
-        const records = await fetchStudentsFromSql(query);
-        allStudents = normalizeStudentRecords(records);
-    } catch (error) {
-        allStudents = getStudentEvaluationData();
-        console.error("Failed to load SQL student records, using SharedData.", error);
-    }
-
-    filteredStudents = [...allStudents];
-    renderStatusTable(filteredStudents);
-    updateSummaryCards(filteredStudents);
+function normalizeUserId(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const prefixed = raw.match(/^u(\d+)$/i);
+    if (prefixed) return `u${prefixed[1]}`;
+    const numeric = raw.match(/^\d+$/);
+    if (numeric) return `u${String(parseInt(raw, 10))}`;
+    return raw.toLowerCase();
 }
 
-function setupSearch() {
-    const searchInput = document.getElementById("studentSearch");
-    if (!searchInput) return;
+function escapeHtml(value) {
+    return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
 
-    searchInput.addEventListener("input", function () {
-        const keyword = searchInput.value.trim().toLowerCase();
-        filteredStudents = allStudents.filter((student) => {
-            return (
-                student.fullName.toLowerCase().includes(keyword) ||
-                student.studentNumber.toLowerCase().includes(keyword)
-            );
+function getActiveSemesterId() {
+    return String((SharedData.getCurrentSemester && SharedData.getCurrentSemester()) || "").trim();
+}
+
+function isStudentEvaluationRecord(record) {
+    const role = normalizeTextToken(record && (record.evaluatorRole || record.evaluationType));
+    return role === "" || role === "student";
+}
+
+function isSubmittedStatus(record) {
+    const status = normalizeTextToken(record && record.status);
+    return status === "" || status === "submitted";
+}
+
+function isEvaluationInSemester(record, semesterId) {
+    const semester = String(semesterId || "").trim();
+    if (!semester) return true;
+    const evalSemester = String(record && record.semesterId || "").trim();
+    return !evalSemester || evalSemester === semester;
+}
+
+function buildStudentDirectory() {
+    const users = SharedData.getUsers ? SharedData.getUsers() : [];
+    const directoryByUserId = new Map();
+    const userIdByStudentNumber = new Map();
+
+    users.forEach(function (user) {
+        if (!user || normalizeTextToken(user.role) !== "student") return;
+        if (normalizeTextToken(user.status) === "inactive") return;
+
+        const userId = normalizeUserId(user.id);
+        if (!userId) return;
+
+        const studentNumber = String(user.studentNumber || "").trim();
+        directoryByUserId.set(userId, {
+            studentUserId: userId,
+            studentNumber: studentNumber,
+            fullName: String(user.name || "").trim() || "Unknown Student",
+            department: String(user.department || user.institute || "UNASSIGNED").trim().toUpperCase() || "UNASSIGNED",
+            program: String(user.programCode || user.programName || "UNASSIGNED").trim().toUpperCase() || "UNASSIGNED",
+            yearSection: String(user.yearSection || "").trim() || "N/A",
         });
 
-        renderStatusTable(filteredStudents);
-        updateSummaryCards(filteredStudents);
+        if (studentNumber) {
+            userIdByStudentNumber.set(normalizeTextToken(studentNumber), userId);
+        }
     });
+
+    return { directoryByUserId, userIdByStudentNumber };
 }
 
-function fetchStudentsFromSql(query) {
-    // SQL integration placeholder:
-    // return fetch("/api/osa/student-evaluation-status", {
-    //     method: "POST",
-    //     headers: { "Content-Type": "application/json" },
-    //     body: JSON.stringify(query)
-    // }).then((response) => response.json());
-    //
-    // Expected SQL/API response fields:
-    // Student Number, Full Name, Program, Year/Section, Status
-    // Example row:
-    // {
-    //   studentNumber: "2022-04519",
-    //   fullName: "John Michael Santos",
-    //   program: "BSIT",
-    //   yearSection: "3A",
-    //   status: "Done"
-    // }
+function getEvaluationPeriodState() {
+    const dates = SharedData.getEvalPeriodDates
+        ? SharedData.getEvalPeriodDates("student-professor")
+        : { start: "", end: "" };
+    const endRaw = String(dates && dates.end || "").trim();
+    const now = new Date();
 
-    return Promise.resolve(getStudentEvaluationData());
-}
-
-function normalizeStudentRecords(records) {
-    if (!Array.isArray(records)) return [];
-
-    return records.map((record) => {
-        const normalizedStatus = String(record.status || "").trim().toLowerCase();
-        const clearedFromStatus = normalizedStatus === "cleared";
-        const doneFromStatus =
-            normalizedStatus === "done" ||
-            normalizedStatus === "completed" ||
-            normalizedStatus === "true" ||
-            normalizedStatus === "1" ||
-            clearedFromStatus;
-
+    if (!endRaw) {
         return {
-            studentNumber: String(record.studentNumber || "").trim(),
-            fullName: String(record.fullName || "").trim(),
-            program: String(record.program || "").trim(),
-            yearSection: String(record.yearSection || "").trim(),
-            done: typeof record.done === "boolean" ? record.done : doneFromStatus,
-            cleared: clearedFromStatus
+            isClosed: false,
+            hasEndDate: false,
+            note: "Mark Cleared is unavailable because the Student-to-Professor period end date is not configured.",
         };
-    });
+    }
+
+    const endDate = new Date(`${endRaw}T23:59:59`);
+    const isClosed = !Number.isNaN(endDate.getTime()) && now > endDate;
+
+    return {
+        isClosed: isClosed,
+        hasEndDate: true,
+        note: isClosed
+            ? `Evaluation period ended on ${endRaw}. Mark Cleared is enabled for non-completed students with valid reasons.`
+            : `Mark Cleared becomes available after the evaluation period ends on ${endRaw}.`,
+    };
 }
 
-function renderStatusTable(students) {
+function buildStatusRows() {
+    const semesterId = getActiveSemesterId();
+    const periodState = getEvaluationPeriodState();
+    const directory = buildStudentDirectory();
+    const directoryByUserId = directory.directoryByUserId;
+    const userIdByStudentNumber = directory.userIdByStudentNumber;
+
+    const subjectManagement = SharedData.getSubjectManagement
+        ? SharedData.getSubjectManagement()
+        : { offerings: [], enrollments: [] };
+    const offerings = Array.isArray(subjectManagement.offerings) ? subjectManagement.offerings : [];
+    const enrollments = Array.isArray(subjectManagement.enrollments) ? subjectManagement.enrollments : [];
+    const evaluations = SharedData.getEvaluations ? SharedData.getEvaluations() : [];
+
+    const activeOfferingsById = new Map(
+        offerings
+            .filter(function (offering) {
+                if (!offering || !offering.isActive) return false;
+                const offeringSemester = String(offering.semesterSlug || "").trim();
+                if (!semesterId) return true;
+                return !offeringSemester || offeringSemester === semesterId;
+            })
+            .map(function (offering) {
+                return [String(offering.id || "").trim(), offering];
+            })
+    );
+
+    const expectedByStudent = new Map();
+    const studentMetaById = new Map();
+
+    enrollments.forEach(function (enrollment) {
+        if (!enrollment || normalizeTextToken(enrollment.status) !== "enrolled") return;
+
+        const offeringId = String(enrollment.courseOfferingId || "").trim();
+        if (!offeringId || !activeOfferingsById.has(offeringId)) return;
+
+        let studentUserId = normalizeUserId(enrollment.studentUserId || enrollment.studentId);
+        const studentNumber = String(enrollment.studentNumber || "").trim();
+        if (!studentUserId && studentNumber) {
+            studentUserId = userIdByStudentNumber.get(normalizeTextToken(studentNumber)) || "";
+        }
+        if (!studentUserId) return;
+
+        if (!expectedByStudent.has(studentUserId)) {
+            expectedByStudent.set(studentUserId, new Set());
+        }
+        expectedByStudent.get(studentUserId).add(offeringId);
+
+        const baseMeta = directoryByUserId.get(studentUserId);
+        studentMetaById.set(studentUserId, {
+            studentUserId,
+            studentNumber: studentNumber || (baseMeta && baseMeta.studentNumber) || "",
+            fullName: String(enrollment.studentName || "").trim() || (baseMeta && baseMeta.fullName) || "Unknown Student",
+            department: (baseMeta && baseMeta.department) || "UNASSIGNED",
+            program: (baseMeta && baseMeta.program) || "UNASSIGNED",
+            yearSection: (baseMeta && baseMeta.yearSection) || "N/A",
+        });
+    });
+
+    const completedByStudent = new Map();
+    evaluations.forEach(function (evaluation) {
+        if (!isStudentEvaluationRecord(evaluation)) return;
+        if (!isSubmittedStatus(evaluation)) return;
+        if (!isEvaluationInSemester(evaluation, semesterId)) return;
+
+        const offeringId = String(evaluation.courseOfferingId || "").trim();
+        if (!offeringId) return;
+
+        let studentUserId = normalizeUserId(
+            evaluation.studentUserId ||
+            evaluation.studentId ||
+            evaluation.evaluatorId ||
+            evaluation.userId
+        );
+
+        const evalStudentNumber = String(evaluation.studentNumber || "").trim();
+        if (!studentUserId && evalStudentNumber) {
+            studentUserId = userIdByStudentNumber.get(normalizeTextToken(evalStudentNumber)) || "";
+        }
+        if (!studentUserId) return;
+        if (!expectedByStudent.has(studentUserId)) return;
+        if (!expectedByStudent.get(studentUserId).has(offeringId)) return;
+
+        if (!completedByStudent.has(studentUserId)) {
+            completedByStudent.set(studentUserId, new Set());
+        }
+        completedByStudent.get(studentUserId).add(offeringId);
+    });
+
+    const clearanceRows = SharedData.getOsaStudentClearances ? SharedData.getOsaStudentClearances() : [];
+    const clearanceByUserAndSemester = new Map();
+    const clearanceByNumberAndSemester = new Map();
+    clearanceRows.forEach(function (row) {
+        if (!row || normalizeTextToken(row.status || "cleared") !== "cleared") return;
+        const sem = String(row.semesterId || "").trim();
+        if (!sem || (semesterId && sem !== semesterId)) return;
+
+        const userId = normalizeUserId(row.studentUserId);
+        const studentNumber = normalizeTextToken(row.studentNumber);
+        if (userId) clearanceByUserAndSemester.set(`${userId}|${sem}`, row);
+        if (studentNumber) clearanceByNumberAndSemester.set(`${studentNumber}|${sem}`, row);
+    });
+
+    const rows = [];
+    expectedByStudent.forEach(function (expectedSet, studentUserId) {
+        const meta = studentMetaById.get(studentUserId) || directoryByUserId.get(studentUserId) || {
+            studentUserId,
+            studentNumber: "",
+            fullName: "Unknown Student",
+            department: "UNASSIGNED",
+            program: "UNASSIGNED",
+            yearSection: "N/A",
+        };
+        const expectedCount = expectedSet.size;
+        const completedCount = (completedByStudent.get(studentUserId) || new Set()).size;
+        const evaluated = expectedCount > 0 && completedCount >= expectedCount;
+
+        let clearance = null;
+        if (!evaluated) {
+            clearance = clearanceByUserAndSemester.get(`${studentUserId}|${semesterId}`)
+                || clearanceByNumberAndSemester.get(`${normalizeTextToken(meta.studentNumber)}|${semesterId}`)
+                || null;
+        }
+
+        const cleared = Boolean(clearance);
+        rows.push({
+            studentUserId,
+            studentNumber: meta.studentNumber || "",
+            fullName: meta.fullName || "Unknown Student",
+            department: meta.department || "UNASSIGNED",
+            program: meta.program || "UNASSIGNED",
+            yearSection: meta.yearSection || "N/A",
+            expectedCount,
+            completedCount,
+            evaluated,
+            cleared,
+            clearanceReason: cleared ? String(clearance.reason || "").trim() : "",
+            clearanceNotedAt: cleared ? String(clearance.notedAt || "").trim() : "",
+            canMarkCleared: !evaluated && periodState.isClosed,
+        });
+    });
+
+    rows.sort(function (a, b) {
+        return String(a.fullName || "").localeCompare(String(b.fullName || ""));
+    });
+
+    return {
+        rows,
+        periodState,
+        summary: buildSummaryFromRows(rows),
+        departmentBreakdown: buildDepartmentBreakdown(rows),
+        programBreakdown: buildProgramBreakdown(rows),
+    };
+}
+
+function buildSummaryFromRows(rows) {
+    const assigned = rows.length;
+    const evaluated = rows.filter(function (row) { return row.evaluated; }).length;
+    const notEvaluated = Math.max(assigned - evaluated, 0);
+    const completionRate = assigned > 0 ? Math.round((evaluated / assigned) * 100) : 0;
+    return { assigned, evaluated, notEvaluated, completionRate };
+}
+
+function buildDepartmentBreakdown(rows) {
+    const map = new Map();
+    rows.forEach(function (row) {
+        const key = row.department || "UNASSIGNED";
+        if (!map.has(key)) {
+            map.set(key, { department: key, assigned: 0, evaluated: 0, notEvaluated: 0, completionRate: 0 });
+        }
+        const item = map.get(key);
+        item.assigned += 1;
+        if (row.evaluated) item.evaluated += 1;
+    });
+
+    const list = Array.from(map.values()).map(function (item) {
+        item.notEvaluated = Math.max(item.assigned - item.evaluated, 0);
+        item.completionRate = item.assigned > 0 ? Math.round((item.evaluated / item.assigned) * 100) : 0;
+        return item;
+    });
+
+    list.sort(function (a, b) {
+        return b.completionRate - a.completionRate || a.department.localeCompare(b.department);
+    });
+    return list;
+}
+
+function buildProgramBreakdown(rows) {
+    const map = new Map();
+    rows.forEach(function (row) {
+        const program = row.program || "UNASSIGNED";
+        const department = row.department || "UNASSIGNED";
+        const key = `${department}|${program}`;
+        if (!map.has(key)) {
+            map.set(key, { program, department, assigned: 0, evaluated: 0, notEvaluated: 0, completionRate: 0 });
+        }
+        const item = map.get(key);
+        item.assigned += 1;
+        if (row.evaluated) item.evaluated += 1;
+    });
+
+    const list = Array.from(map.values()).map(function (item) {
+        item.notEvaluated = Math.max(item.assigned - item.evaluated, 0);
+        item.completionRate = item.assigned > 0 ? Math.round((item.evaluated / item.assigned) * 100) : 0;
+        return item;
+    });
+
+    list.sort(function (a, b) {
+        return b.completionRate - a.completionRate
+            || a.department.localeCompare(b.department)
+            || a.program.localeCompare(b.program);
+    });
+    return list;
+}
+
+function refreshStatusAndAnalytics() {
+    const snapshot = buildStatusRows();
+    allStudents = snapshot.rows;
+    filteredStudents = applySearchFilter(allStudents, currentSearchKeyword);
+
+    renderStatusPeriodNote(snapshot.periodState);
+    renderStatusTable(filteredStudents, snapshot.periodState);
+    renderDashboardAnalytics(snapshot);
+}
+
+function renderStatusPeriodNote(periodState) {
+    const noteEl = document.getElementById("statusPeriodNote");
+    if (!noteEl) return;
+    noteEl.textContent = periodState && periodState.note ? periodState.note : "";
+}
+
+function renderDashboardAnalytics(snapshot) {
+    latestAnalyticsSnapshot = snapshot;
+    const summary = snapshot.summary || { assigned: 0, evaluated: 0, notEvaluated: 0, completionRate: 0 };
+    setText("assignedCount", summary.assigned);
+    setText("evaluatedCountAnalytics", summary.evaluated);
+    setText("notEvaluatedCountAnalytics", summary.notEvaluated);
+    setText("completionRateCount", `${summary.completionRate}%`);
+
+    const deptBody = document.getElementById("departmentAnalyticsBody");
+    const progBody = document.getElementById("departmentProgramsBody");
+    const progTitle = document.getElementById("departmentProgramsTitle");
+    const progEmpty = document.getElementById("departmentProgramsEmpty");
+    const emptyEl = document.getElementById("analyticsEmptyState");
+    if (!deptBody || !progBody || !progTitle || !progEmpty || !emptyEl) return;
+
+    if (!snapshot.rows.length) {
+        deptBody.innerHTML = "";
+        progBody.innerHTML = "";
+        selectedAnalyticsDepartment = "";
+        progTitle.textContent = "Programs by Department";
+        progEmpty.textContent = "Select a department above to view its programs.";
+        progEmpty.style.display = "block";
+        emptyEl.style.display = "block";
+        return;
+    }
+
+    emptyEl.style.display = "none";
+    const hasSelectedDepartment = snapshot.departmentBreakdown.some(function (item) {
+        return item.department === selectedAnalyticsDepartment;
+    });
+    if (!hasSelectedDepartment) {
+        selectedAnalyticsDepartment = "";
+    }
+
+    deptBody.innerHTML = snapshot.departmentBreakdown.map(function (item) {
+        const isActive = item.department === selectedAnalyticsDepartment;
+        return `
+            <tr class="analytics-dept-row${isActive ? " active" : ""}" data-department="${escapeHtml(item.department)}" tabindex="0" role="button" aria-label="Show programs for ${escapeHtml(item.department)}">
+                <td>${escapeHtml(item.department)}</td>
+                <td>${item.assigned}</td>
+                <td>${item.evaluated}</td>
+                <td>${item.notEvaluated}</td>
+                <td>${item.completionRate}%</td>
+            </tr>
+        `;
+    }).join("");
+
+    if (!selectedAnalyticsDepartment) {
+        progBody.innerHTML = "";
+        progTitle.textContent = "Programs by Department";
+        progEmpty.textContent = "Select a department above to view its programs.";
+        progEmpty.style.display = "block";
+        return;
+    }
+
+    const filteredPrograms = snapshot.programBreakdown.filter(function (item) {
+        return item.department === selectedAnalyticsDepartment;
+    });
+    progTitle.textContent = `Programs under ${selectedAnalyticsDepartment}`;
+
+    if (!filteredPrograms.length) {
+        progBody.innerHTML = "";
+        progEmpty.textContent = "No program data available for this department.";
+        progEmpty.style.display = "block";
+        return;
+    }
+
+    progEmpty.style.display = "none";
+    progBody.innerHTML = filteredPrograms.map(function (item) {
+        return `
+            <tr>
+                <td>${escapeHtml(item.program)}</td>
+                <td>${item.assigned}</td>
+                <td>${item.evaluated}</td>
+                <td>${item.notEvaluated}</td>
+                <td>${item.completionRate}%</td>
+            </tr>
+        `;
+    }).join("");
+}
+
+function formatNotedAt(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return raw;
+    return parsed.toLocaleString();
+}
+
+function renderStatusTable(students, periodState) {
     const tbody = document.getElementById("statusTableBody");
+    const actionHeader = document.getElementById("statusActionHeader");
     const emptyState = document.getElementById("emptyState");
     if (!tbody || !emptyState) return;
+
+    const showActionColumn = Boolean(periodState && periodState.isClosed);
+    if (actionHeader) {
+        actionHeader.style.display = showActionColumn ? "" : "none";
+    }
 
     if (!students.length) {
         tbody.innerHTML = "";
@@ -222,45 +543,163 @@ function renderStatusTable(students) {
     }
 
     emptyState.style.display = "none";
-    tbody.innerHTML = students
-        .map((student) => {
-            const isCleared = student.cleared === true;
-            const statusClass = student.done ? "done" : "not-done";
-            const statusText = student.done ? (isCleared ? "Cleared" : "Done") : "Not Done";
-            const icon = student.done ? "fa-circle-check" : "fa-circle-xmark";
-            const actionButton = student.done
-                ? ""
-                : `<button type="button" class="status-action-btn" data-student-number="${student.studentNumber}">Mark Cleared</button>`;
+    tbody.innerHTML = students.map(function (student) {
+        const statusClass = student.evaluated ? "done" : (student.cleared ? "cleared" : "not-done");
+        const statusText = student.evaluated ? "Done" : (student.cleared ? "Cleared" : "Not Done");
+        const icon = student.evaluated ? "fa-circle-check" : (student.cleared ? "fa-file-circle-check" : "fa-circle-xmark");
+        const progressText = `${student.completedCount}/${student.expectedCount}`;
 
-            return `
-                <tr>
-                    <td>${student.studentNumber}</td>
-                    <td>${student.fullName}</td>
-                    <td>${student.program}</td>
-                    <td>${student.yearSection}</td>
-                    <td>
-                        <div class="status-cell">
-                            <span class="status-pill ${statusClass}">
-                                <i class="fas ${icon}"></i>
-                                ${statusText}
-                            </span>
-                            ${actionButton}
-                        </div>
-                    </td>
-                </tr>
-            `;
-        })
-        .join("");
+        const reasonBlock = student.cleared && student.clearanceReason
+            ? `<div class="status-reason">Reason: ${escapeHtml(student.clearanceReason)}${student.clearanceNotedAt ? ` (${escapeHtml(formatNotedAt(student.clearanceNotedAt))})` : ""}</div>`
+            : "";
+
+        let actionCell = "";
+        if (showActionColumn) {
+            let actionHtml = "";
+            if (student.evaluated) {
+                actionHtml = `<span class="status-progress">Completed</span>`;
+            } else if (student.canMarkCleared) {
+                const actionLabel = student.cleared ? "Update Reason" : "Mark Cleared";
+                actionHtml = `<button type="button" class="status-action-btn" data-student-user-id="${escapeHtml(student.studentUserId)}" data-student-number="${escapeHtml(student.studentNumber)}">${actionLabel}</button>`;
+            } else {
+                const note = periodState && periodState.hasEndDate
+                    ? "Available after evaluation period ends"
+                    : "Unavailable: no period end date";
+                actionHtml = `<span class="status-progress">${escapeHtml(note)}</span>`;
+            }
+            actionCell = `<td>${actionHtml}</td>`;
+        }
+
+        return `
+            <tr>
+                <td>${escapeHtml(student.studentNumber)}</td>
+                <td>${escapeHtml(student.fullName)}</td>
+                <td>${escapeHtml(student.department)}</td>
+                <td>${escapeHtml(student.program)}</td>
+                <td>${escapeHtml(student.yearSection)}</td>
+                <td><span class="status-progress">${escapeHtml(progressText)}</span></td>
+                <td>
+                    <div class="status-cell">
+                        <span class="status-pill ${statusClass}">
+                            <i class="fas ${icon}"></i>
+                            ${statusText}
+                        </span>
+                        ${reasonBlock}
+                    </div>
+                </td>
+                ${actionCell}
+            </tr>
+        `;
+    }).join("");
 }
 
-function updateSummaryCards(students) {
-    const total = students.length;
-    const done = students.filter((student) => student.done).length;
-    const notDone = total - done;
+function setupAnalyticsInteractions() {
+    const deptBody = document.getElementById("departmentAnalyticsBody");
+    if (!deptBody) return;
 
-    setText("totalCount", total);
-    setText("doneCount", done);
-    setText("notDoneCount", notDone);
+    function selectDepartmentFromEvent(event) {
+        const row = event.target.closest("tr[data-department]");
+        if (!row) return;
+        const department = String(row.dataset.department || "").trim();
+        if (!department || department === selectedAnalyticsDepartment) return;
+
+        selectedAnalyticsDepartment = department;
+        if (latestAnalyticsSnapshot) {
+            renderDashboardAnalytics(latestAnalyticsSnapshot);
+        }
+    }
+
+    deptBody.addEventListener("click", selectDepartmentFromEvent);
+    deptBody.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        selectDepartmentFromEvent(event);
+    });
+}
+
+function setupSearch() {
+    const searchInput = document.getElementById("studentSearch");
+    if (!searchInput) return;
+
+    searchInput.addEventListener("input", function () {
+        currentSearchKeyword = searchInput.value.trim().toLowerCase();
+        filteredStudents = applySearchFilter(allStudents, currentSearchKeyword);
+        renderStatusTable(filteredStudents, getEvaluationPeriodState());
+    });
+}
+
+function applySearchFilter(rows, keyword) {
+    const token = String(keyword || "").trim().toLowerCase();
+    if (!token) return [...rows];
+    return rows.filter(function (student) {
+        return (
+            String(student.fullName || "").toLowerCase().includes(token) ||
+            String(student.studentNumber || "").toLowerCase().includes(token)
+        );
+    });
+}
+
+function setupStatusActions() {
+    const tbody = document.getElementById("statusTableBody");
+    if (!tbody) return;
+
+    tbody.addEventListener("click", function (event) {
+        const button = event.target.closest(".status-action-btn");
+        if (!button) return;
+
+        const periodState = getEvaluationPeriodState();
+        if (!periodState.isClosed) {
+            alert("Mark Cleared is only available after the Student-to-Professor evaluation period ends.");
+            return;
+        }
+
+        const studentUserId = String(button.dataset.studentUserId || "").trim();
+        const studentNumber = String(button.dataset.studentNumber || "").trim();
+        if (!studentUserId && !studentNumber) return;
+
+        const reasonInput = prompt("Enter the student's reason for not completing the evaluation:");
+        if (reasonInput === null) return;
+        const reason = String(reasonInput || "").trim();
+        if (!reason) {
+            alert("Reason is required.");
+            return;
+        }
+
+        const semesterId = getActiveSemesterId();
+        if (!semesterId) {
+            alert("Current semester is not configured.");
+            return;
+        }
+
+        const session = getUserSession();
+        const notedBy = (session && (session.fullName || session.username)) || "OSA";
+
+        try {
+            if (!SharedData.upsertOsaStudentClearance) {
+                throw new Error("Clearance persistence is unavailable.");
+            }
+
+            const response = SharedData.upsertOsaStudentClearance({
+                studentUserId: studentUserId,
+                studentNumber: studentNumber,
+                semesterId: semesterId,
+                reason: reason,
+                notedAt: new Date().toISOString(),
+                notedBy: notedBy,
+                status: "cleared",
+            });
+
+            if (!response || response.success !== true) {
+                throw new Error((response && response.error) || "Failed to save clearance.");
+            }
+
+            refreshStatusAndAnalytics();
+            alert("Student marked as cleared with reason.");
+        } catch (error) {
+            console.error("[OSA] Failed to save clearance:", error);
+            alert(error && error.message ? error.message : "Failed to mark student as cleared.");
+        }
+    });
 }
 
 function setText(id, value) {

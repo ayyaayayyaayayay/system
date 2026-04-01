@@ -96,7 +96,7 @@
                             </div>
                             <div class="profile-item">
                                 <span class="profile-label">Program</span>
-                                <span class="profile-value">BS Aviation</span>
+                                <span class="profile-value" id="profileProgramMini">BS Aviation</span>
                             </div>
                         </div>
                     </div>
@@ -145,10 +145,6 @@
                             <h2>My Evaluations</h2>
                             <p>Pending and completed Professor evaluations.</p>
                         </div>
-                        <button class="btn-submit-new">
-                            <i class="fas fa-plus"></i>
-                            Submit New Evaluation
-                        </button>
                     </div>
 
                     <div class="evaluations-list">
@@ -205,32 +201,6 @@
                             <button class="btn-start">Start Evaluation</button>
                         </div>
 
-                        <!-- Completed Evaluations -->
-                        <div class="evaluation-item">
-                            <div class="evaluation-info">
-                                <div class="teacher-name">Ryan Billera</div>
-                                <span class="status-badge completed">Completed</span>
-                                <div class="course-info">
-                                    <span class="course-code">IT 304</span>
-                                    <span class="course-name">- Information Assurance and Security 1</span>
-                                </div>
-                                <div class="due-date">Due: 2025-11-18</div>
-                            </div>
-                            <span class="submitted-text">Submitted</span>
-                        </div>
-
-                        <div class="evaluation-item">
-                            <div class="evaluation-info">
-                                <div class="teacher-name">Sarah Johnson</div>
-                                <span class="status-badge completed">Completed</span>
-                                <div class="course-info">
-                                    <span class="course-code">PHY 201</span>
-                                    <span class="course-name">- Physics for Engineers</span>
-                                </div>
-                                <div class="due-date">Due: 2025-11-15</div>
-                            </div>
-                            <span class="submitted-text">Submitted</span>
-                        </div>
                     </div>
                 </section>
             </div>
@@ -245,24 +215,15 @@
                         <p id="dynamic-form-description">Please rate your Professor honestly and constructively. Your
                             feedback helps improve the quality
                             of education.</p>
+                        <div class="evaluation-target-indicator" id="evaluation-target-indicator">
+                            <span class="target-label">Selected for evaluation:</span>
+                            <span class="target-value" id="evaluation-target-text">No professor selected yet</span>
+                        </div>
+                        <p class="evaluation-draft-status" id="evaluation-draft-status">Draft not saved yet.</p>
                     </div>
 
                     <form id="evaluationForm" class="evaluation-form">
-                        <!-- Select Professor and Subject -->
-                        <div class="form-section">
-                            <h3 class="section-title">Select Professor and Subject</h3>
-                            <div class="form-group">
-                                <select id="professorSubject" name="professorSubject" class="form-select" required>
-                                    <option value="">Choose a Professor to evaluate</option>
-                                    <option value="arvin-lauron-sf5">Arvin Lauron - SF 5 (Student Formation 5)</option>
-                                    <option value="maria-santos-math101">Maria Santos - MATH 101 (College Algebra)
-                                    </option>
-                                    <option value="juan-delacruz-eng201">Juan Dela Cruz - ENG 201 (Technical Writing)
-                                    </option>
-                                    <option value="ana-garcia-cs301">Ana Garcia - CS 301 (Data Structures)</option>
-                                </select>
-                            </div>
-                        </div>
+                        <input type="hidden" id="evaluation-target-value" name="evaluationTarget">
 
                         <!-- Dynamic Questions Container -->
                         <div id="dynamic-questions-container">
@@ -281,6 +242,7 @@
 
                         <!-- Form Actions -->
                         <div class="form-actions">
+                            <button type="button" class="btn-draft" id="saveDraftBtn">Save Draft</button>
                             <button type="submit" class="btn-submit">Submit Evaluation</button>
                             <button type="button" class="btn-cancel" id="cancelBtn">Cancel</button>
                         </div>
@@ -347,15 +309,35 @@
                         </div>
                         <div class="profile-item">
                             <span class="profile-label">Program</span>
-                            <span class="profile-value">BS Aviation</span>
+                            <span class="profile-value" id="profileStudentProgram">BS Aviation</span>
+                        </div>
+                        <div class="profile-item">
+                            <span class="profile-label">Email</span>
+                            <span class="profile-value" id="profileStudentEmail">N/A</span>
+                        </div>
+                        <div class="profile-item">
+                            <span class="profile-label">Campus</span>
+                            <span class="profile-value" id="profileStudentCampus">N/A</span>
+                        </div>
+                        <div class="profile-item">
+                            <span class="profile-label">Department</span>
+                            <span class="profile-value" id="profileStudentDepartment">N/A</span>
+                        </div>
+                        <div class="profile-item">
+                            <span class="profile-label">Year Section</span>
+                            <span class="profile-value" id="profileStudentYearSection">N/A</span>
                         </div>
                         <div class="profile-item">
                             <span class="profile-label">Year Level</span>
-                            <span class="profile-value">3rd Year</span>
+                            <span class="profile-value" id="profileStudentYearLevel">N/A</span>
+                        </div>
+                        <div class="profile-item">
+                            <span class="profile-label">Status</span>
+                            <span class="profile-value" id="profileStudentStatus">N/A</span>
                         </div>
                         <div class="profile-item">
                             <span class="profile-label">Academic Year</span>
-                            <span class="profile-value">2025-2026</span>
+                            <span class="profile-value" id="profileAcademicYear">2025-2026</span>
                         </div>
                     </div>
                 </div>

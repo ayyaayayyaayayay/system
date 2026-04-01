@@ -139,7 +139,7 @@ body {
 
 .summary-cards {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 20px;
     margin-bottom: 24px;
 }
@@ -180,6 +180,11 @@ body {
     color: var(--danger-color);
 }
 
+.summary-card.rate .card-icon {
+    background: rgba(245, 158, 11, 0.18);
+    color: #b45309;
+}
+
 .card-content h3 {
     font-size: 13px;
     color: #6b7280;
@@ -201,6 +206,10 @@ body {
 
 .summary-card.not-done .card-number {
     color: var(--danger-color);
+}
+
+.summary-card.rate .card-number {
+    color: #b45309;
 }
 
 .status-section {
@@ -288,6 +297,16 @@ body {
     background: var(--danger-color);
 }
 
+.legend-dot.cleared {
+    background: #0f766e;
+}
+
+.status-period-note {
+    margin-bottom: 12px;
+    font-size: 12px;
+    color: #6b7280;
+}
+
 .api-info-box {
     background: #eff6ff;
     border: 1px solid var(--info-color);
@@ -359,6 +378,11 @@ body {
     color: #b91c1c;
 }
 
+.status-pill.cleared {
+    background: rgba(15, 118, 110, 0.16);
+    color: #0f766e;
+}
+
 .status-cell {
     display: flex;
     align-items: center;
@@ -381,6 +405,59 @@ body {
 .status-action-btn:hover {
     background: #e0e7ff;
     border-color: #a5b4fc;
+}
+
+.status-action-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.status-progress {
+    font-size: 12px;
+    font-weight: 700;
+    color: #374151;
+}
+
+.status-reason {
+    margin-top: 4px;
+    font-size: 11px;
+    color: #475569;
+}
+
+.analytics-section .api-info-box {
+    margin-bottom: 18px;
+}
+
+.analytics-table-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #334155;
+    margin: 8px 0 10px;
+}
+
+.analytics-table-container {
+    margin-bottom: 12px;
+}
+
+.analytics-dept-row {
+    cursor: pointer;
+}
+
+.analytics-dept-row:hover {
+    background: #eef2ff;
+}
+
+.analytics-dept-row.active {
+    background: #e0e7ff;
+}
+
+.analytics-dept-row:focus-visible {
+    outline: 2px solid #6366f1;
+    outline-offset: -2px;
+}
+
+.analytics-inline-empty {
+    padding-top: 8px;
 }
 
 .empty-state {

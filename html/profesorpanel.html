@@ -37,6 +37,10 @@
                     <i class="fas fa-chart-bar"></i>
                     <span>Reports</span>
                 </a>
+                <a href="#" class="nav-link" data-view="facultyPaper">
+                    <i class="fas fa-file-signature"></i>
+                    <span>Faculty Paper</span>
+                </a>
                 <a href="#" class="nav-link" data-view="profile">
                     <i class="fas fa-id-card"></i>
                     <span>Profile</span>
@@ -66,7 +70,7 @@
                         </button>
                         <button class="user-profile js-profile-btn" aria-label="View profile">
                             <i class="fas fa-user-circle"></i>
-                            <span>Efrhain Louis Pajota</span>
+                            <span>Professor</span>
                         </button>
 
                         <div class="dropdown-panel js-announcement-panel">
@@ -99,19 +103,19 @@
                             <div class="profile-grid">
                                 <div class="profile-item">
                                     <span class="profile-label">Faculty ID</span>
-                                    <span class="profile-value" id="profileFacultyId">FAC-20451</span>
+                                    <span class="profile-value" id="profileFacultyId" data-prof-field="facultyId">N/A</span>
                                 </div>
                                 <div class="profile-item">
                                     <span class="profile-label">Department</span>
-                                    <span class="profile-value">ICS</span>
+                                    <span class="profile-value" data-prof-field="department">N/A</span>
                                 </div>
                                 <div class="profile-item">
                                     <span class="profile-label">Rank</span>
-                                    <span class="profile-value">Assistant Professor</span>
+                                    <span class="profile-value" data-prof-field="position">N/A</span>
                                 </div>
                                 <div class="profile-item">
                                     <span class="profile-label">AY/SEM</span>
-                                    <span class="profile-value">AY 2025-2026, 2nd Semester</span>
+                                    <span class="profile-value" data-prof-field="semesterLabel">Selected semester</span>
                                 </div>
                             </div>
                         </div>
@@ -126,7 +130,7 @@
                         </div>
                         <div class="card-content">
                             <h3>Evaluations Received</h3>
-                            <p class="card-number">45/100</p>
+                            <p class="card-number">0/0</p>
                         </div>
                     </div>
 
@@ -136,7 +140,7 @@
                         </div>
                         <div class="card-content">
                             <h3>Average Score</h3>
-                            <p class="card-number score-text">4.7/5.0</p>
+                            <p class="card-number score-text">0.0/5.0</p>
                         </div>
                     </div>
 
@@ -146,9 +150,30 @@
                         </div>
                         <div class="card-content">
                             <h3>Response Rate</h3>
-                            <p class="card-number">45%</p>
+                            <p class="card-number">0%</p>
                         </div>
                     </div>
+                </div>
+
+                <div class="dashboard-widget-grid">
+                    <section class="dashboard-widget-card">
+                        <div class="dashboard-widget-header">
+                            <h3><i class="fas fa-hourglass-half"></i> Evaluation Deadline Countdown</h3>
+                        </div>
+                        <div id="deadline-countdown-list" class="dashboard-widget-list">
+                            <p class="dashboard-widget-empty">No evaluation periods configured yet.</p>
+                        </div>
+                    </section>
+
+                    <section class="dashboard-widget-card">
+                        <div class="dashboard-widget-header">
+                            <h3><i class="fas fa-list-check"></i> My Pending Tasks</h3>
+                            <span id="pending-tasks-count" class="dashboard-widget-badge">0</span>
+                        </div>
+                        <div id="pending-tasks-list" class="dashboard-widget-list">
+                            <p class="dashboard-widget-empty">No pending tasks.</p>
+                        </div>
+                    </section>
                 </div>
 
                 <!-- Action Cards -->
@@ -165,40 +190,235 @@
                     </div>
                 </div>
 
-                <!-- Faculty Summary Section -->
-                <section class="faculty-summary-section">
-                    <div class="section-header">
-                        <div class="section-title">
-                            <h2>Faculty Dashboard: Response Rate & Counts</h2>
-                            <p>Evaluations received per subject/section. Counts are per subject evaluation.</p>
-                        </div>
-                    </div>
+            </div>
 
-                    <div class="summary-grid">
-                        <div class="summary-block">
-                            <h3>Average Rating per Criteria</h3>
-                            <ul class="criteria-list" id="criteriaList">
-                                <li><span>Teaching Effectiveness</span><strong>4.7</strong></li>
-                                <li><span>Classroom Management</span><strong>4.5</strong></li>
-                                <li><span>Student Engagement</span><strong>4.8</strong></li>
-                                <li><span>Communication Skills</span><strong>4.6</strong></li>
-                                <li><span>Assessment Methods</span><strong>4.4</strong></li>
+            <!-- Peer Evaluation View -->
+            <div id="peerEvaluationView" class="content-view" style="display: none;">
+                <header class="top-header">
+                    <h1 class="page-title">Peer-to-Peer Evaluation</h1>
+                    <div class="user-info">
+                        <button class="user-action-btn js-notification-btn" aria-label="View announcements">
+                            <i class="fas fa-bell"></i>
+                            <span class="notification-dot" aria-hidden="true"></span>
+                        </button>
+                        <button class="user-profile js-profile-btn" aria-label="View profile">
+                            <i class="fas fa-user-circle"></i>
+                            <span>Professor</span>
+                        </button>
+
+                        <div class="dropdown-panel js-announcement-panel">
+                            <div class="panel-header">
+                                <h3>Faculty Announcements</h3>
+                                <span class="panel-subtitle">Latest updates for professors</span>
+                            </div>
+                            <ul class="panel-list">
+                                <li>
+                                    <div class="panel-title">Peer Evaluation Window</div>
+                                    <div class="panel-meta">Submit peer evaluations before Feb 10, 2026.</div>
+                                </li>
                             </ul>
                         </div>
-                        <div class="summary-block">
-                            <h3>Evaluations Received</h3>
-                            <div class="evaluation-count" id="evaluationCount">45/100</div>
-                            <p class="summary-note">Required = enrolled students. Received = submissions.</p>
-                            <p class="summary-note">Stats are filtered by <span id="summarySemester">AY 2025-2026, 2nd
-                                    Semester</span>.</p>
+
+                        <div class="dropdown-panel js-profile-panel">
+                            <div class="panel-header">
+                                <h3>Professor Profile</h3>
+                                <span class="panel-subtitle">Faculty information</span>
+                            </div>
+                            <div class="profile-grid">
+                                <div class="profile-item">
+                                    <span class="profile-label">Faculty ID</span>
+                                    <span class="profile-value" data-prof-field="facultyId">N/A</span>
+                                </div>
+                                <div class="profile-item">
+                                    <span class="profile-label">Department</span>
+                                    <span class="profile-value" data-prof-field="department">N/A</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
+                </header>
 
+                <div class="form-card wide">
+                    <div class="form-header" id="dynamic-form-header">
+                        <h2 id="dynamic-form-title">Professor Peer Evaluation Form</h2>
+                        <p id="dynamic-form-description">Evaluate a colleague based on workplace conduct, collaboration,
+                            and professionalism.</p>
+                    </div>
 
-                </section>
+                    <form id="peerEvaluationForm" class="evaluation-form">
+                        <div class="form-section">
+                            <h3 class="section-title">Select Colleague</h3>
+                            <div class="form-group">
+                                <select id="peerProfessor" name="peerProfessor" class="form-select" required>
+                                    <option value="">Choose a professor to evaluate</option>
+                                </select>
+                            </div>
+                        </div>
 
-                <!-- Evaluation Analytics (Merged from Reports) -->
-                <section class="analytics-section">
+                        <div id="dynamic-peer-questions-container">
+                            <div class="empty-state" style="text-align: center; padding: 3rem 1rem;">
+                                <i class="fas fa-spinner fa-spin"
+                                    style="font-size: 3rem; color: #cbd5e1; margin-bottom: 1rem;"></i>
+                                <p>Loading peer evaluation form...</p>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn-submit">Submit Evaluation</button>
+                            <button type="button" class="btn-cancel" id="cancelPeerBtn">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Reports View -->
+            <div id="reportsView" class="content-view" style="display: none;">
+                <header class="top-header">
+                    <h1 class="page-title">Evaluation Reports</h1>
+                    <div class="user-info">
+                        <button class="user-action-btn js-notification-btn" aria-label="View announcements">
+                            <i class="fas fa-bell"></i>
+                            <span class="notification-dot" aria-hidden="true"></span>
+                        </button>
+                        <button class="user-profile js-profile-btn" aria-label="View profile">
+                            <i class="fas fa-user-circle"></i>
+                            <span>Professor</span>
+                        </button>
+
+                        <div class="dropdown-panel js-announcement-panel">
+                            <div class="panel-header">
+                                <h3>Faculty Announcements</h3>
+                                <span class="panel-subtitle">Latest updates for professors</span>
+                            </div>
+                            <ul class="panel-list">
+                                <li>
+                                    <div class="panel-title">Evaluation Window</div>
+                                    <div class="panel-meta">Faculty reports will unlock after Feb 10, 2026.</div>
+                                </li>
+                                <li>
+                                    <div class="panel-title">Report Access</div>
+                                    <div class="panel-meta">Reports are viewable after the evaluation period ends.</div>
+                                </li>
+                            </ul>
+                        </div>
+
+                        <div class="dropdown-panel js-profile-panel">
+                            <div class="panel-header">
+                                <h3>Professor Profile</h3>
+                                <span class="panel-subtitle">Faculty information</span>
+                            </div>
+                            <div class="profile-grid">
+                                <div class="profile-item">
+                                    <span class="profile-label">Faculty ID</span>
+                                    <span class="profile-value" data-prof-field="facultyId">N/A</span>
+                                </div>
+                                <div class="profile-item">
+                                    <span class="profile-label">Department</span>
+                                    <span class="profile-value" data-prof-field="department">N/A</span>
+                                </div>
+                                <div class="profile-item">
+                                    <span class="profile-label">AY/SEM</span>
+                                    <span class="profile-value" data-prof-field="semesterLabel">Selected semester</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </header>
+
+                <div class="reports-blackout" id="reportsBlackout" style="display: none;">
+                    <h2>Reports not available yet</h2>
+                    <p>Reports will be available after the evaluation period ends on <span id="reportUnlockDate">Feb 10,
+                            2026</span>.</p>
+                </div>
+
+                <div class="reports-content" id="reportsContent">
+                    <section class="detail-report-section">
+                        <div class="section-header">
+                            <div class="section-title">
+                                <h2>Faculty Response Rate & Counts</h2>
+                                <p>Evaluations received per subject/section. Counts are per subject evaluation.</p>
+                                <p class="semester-display">Showing: <span id="selectedEvalType">Student
+                                        Evaluation</span> — <span id="selectedSemester">Selected semester</span></p>
+                            </div>
+                            <div class="filters-row">
+                                <div class="eval-type-filter">
+                                    <label for="evaluationTypeFilter">Evaluation</label>
+                                    <select id="evaluationTypeFilter">
+                                        <option value="student" selected>Student Evaluation</option>
+                                        <option value="professor">Professor Evaluation</option>
+                                        <option value="supervisor">Supervisor Evaluation</option>
+                                    </select>
+                                </div>
+                                <div class="semester-filter">
+                                    <label for="semesterFilter">Semester</label>
+                                    <select id="semesterFilter"></select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="table-container">
+                            <table class="faculty-breakdown-table" id="facultyBreakdownTable">
+                                <thead>
+                                    <tr>
+                                        <th>Subject</th>
+                                        <th>Section</th>
+                                        <th>Evaluations Received</th>
+                                        <th>Response Rate</th>
+                                        <th>Avg Rating</th>
+                                        <th>Comments</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td colspan="6">No evaluation data available.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="faculty-comments-panel" id="profSubjectCommentsPanel" aria-live="polite">
+                            <div class="faculty-comments-header">
+                                <div>
+                                    <h3 id="profSubjectCommentsTitle">Anonymous Feedback</h3>
+                                    <p class="faculty-comments-meta" id="profSubjectCommentsMeta">Select a subject and
+                                        section to view anonymized comments.</p>
+                                </div>
+                                <button type="button" class="btn-cancel faculty-comments-close"
+                                    id="profSubjectCommentsClose">Close</button>
+                            </div>
+                            <ul class="faculty-comments-list" id="profSubjectCommentsList">
+                                <li class="faculty-comments-empty">No summaries loaded yet.</li>
+                            </ul>
+                        </div>
+                    </section>
+
+                    <!-- Faculty Summary Section -->
+                    <section class="faculty-summary-section">
+                        <div class="section-header">
+                            <div class="section-title">
+                                <h2>Faculty Dashboard: Response Rate & Counts</h2>
+                                <p>Evaluations received per subject/section. Counts are per subject evaluation.</p>
+                            </div>
+                        </div>
+
+                        <div class="summary-grid">
+                            <div class="summary-block">
+                                <h3>Average Rating per Criteria</h3>
+                                <ul class="criteria-list" id="criteriaList">
+                                    <li><span>No data available</span><strong>-</strong></li>
+                                </ul>
+                            </div>
+                            <div class="summary-block">
+                                <h3>Evaluations Received</h3>
+                                <div class="evaluation-count" id="evaluationCount">0/0</div>
+                                <p class="summary-note">Required = enrolled students. Received = submissions.</p>
+                                <p class="summary-note">Stats are filtered by <span id="summarySemester">Selected semester</span>.</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Evaluation Analytics -->
+                    <section class="analytics-section">
                     <div class="section-header">
                         <div class="section-title">
                             <h2>Evaluation Analytics</h2>
@@ -294,48 +514,13 @@
                                         <th>Excellent (5)</th>
                                         <th>Good (4)</th>
                                         <th>Fair (3)</th>
+                                        <th>Poor (2)</th>
+                                        <th>Very Poor (1)</th>
                                     </tr>
                                 </thead>
-                                <tbody>
+                                <tbody id="detailedSummaryTableBody">
                                     <tr>
-                                        <td>Teaching Effectiveness</td>
-                                        <td><span class="avg-score">4.7</span></td>
-                                        <td>45</td>
-                                        <td><span class="count excellent">32</span></td>
-                                        <td><span class="count good">10</span></td>
-                                        <td><span class="count fair">3</span></td>
-                                    </tr>
-                                    <tr>
-                                        <td>Classroom Management</td>
-                                        <td><span class="avg-score">4.5</span></td>
-                                        <td>45</td>
-                                        <td><span class="count excellent">28</span></td>
-                                        <td><span class="count good">13</span></td>
-                                        <td><span class="count fair">4</span></td>
-                                    </tr>
-                                    <tr>
-                                        <td>Student Engagement</td>
-                                        <td><span class="avg-score">4.8</span></td>
-                                        <td>45</td>
-                                        <td><span class="count excellent">35</span></td>
-                                        <td><span class="count good">8</span></td>
-                                        <td><span class="count fair">2</span></td>
-                                    </tr>
-                                    <tr>
-                                        <td>Communication Skills</td>
-                                        <td><span class="avg-score">4.6</span></td>
-                                        <td>45</td>
-                                        <td><span class="count excellent">30</span></td>
-                                        <td><span class="count good">12</span></td>
-                                        <td><span class="count fair">3</span></td>
-                                    </tr>
-                                    <tr>
-                                        <td>Assessment Methods</td>
-                                        <td><span class="avg-score">4.4</span></td>
-                                        <td>45</td>
-                                        <td><span class="count excellent">26</span></td>
-                                        <td><span class="count good">15</span></td>
-                                        <td><span class="count fair">4</span></td>
+                                        <td colspan="8">No data available.</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -351,28 +536,25 @@
                             </div>
                         </div>
 
-                        <div class="comments-list">
+                        <div class="comments-list" id="studentCommentsSummaryList">
                             <div class="comment-card">
                                 <div class="comment-icon">
                                     <i class="fas fa-quote-left"></i>
                                 </div>
-                                <p class="comment-text">"Students generally appreciate the clarity of explanations and
-                                    the
-                                    approachable nature of the instructor. Many highlighted the effectiveness of office
-                                    hours and the organized teaching style. However, there are suggestions for
-                                    incorporating
-                                    more real-world examples in lectures to enhance practical understanding."</p>
-                                <p class="comment-author">- Automated Student Feedback Summary</p>
+                                <p class="comment-text">No data available.</p>
+                                <p class="comment-author">- System</p>
                             </div>
                         </div>
                     </section>
                 </section>
+
+                </div>
             </div>
 
-            <!-- Peer Evaluation View -->
-            <div id="peerEvaluationView" class="content-view" style="display: none;">
+            <!-- Faculty Paper View -->
+            <div id="facultyPaperView" class="content-view" style="display: none;">
                 <header class="top-header">
-                    <h1 class="page-title">Peer-to-Peer Evaluation</h1>
+                    <h1 class="page-title">Faculty Paper Workflow</h1>
                     <div class="user-info">
                         <button class="user-action-btn js-notification-btn" aria-label="View announcements">
                             <i class="fas fa-bell"></i>
@@ -380,7 +562,7 @@
                         </button>
                         <button class="user-profile js-profile-btn" aria-label="View profile">
                             <i class="fas fa-user-circle"></i>
-                            <span>Efrhain Louis Pajota</span>
+                            <span>Professor</span>
                         </button>
 
                         <div class="dropdown-panel js-announcement-panel">
@@ -390,8 +572,8 @@
                             </div>
                             <ul class="panel-list">
                                 <li>
-                                    <div class="panel-title">Peer Evaluation Window</div>
-                                    <div class="panel-meta">Submit peer evaluations before Feb 10, 2026.</div>
+                                    <div class="panel-title">Faculty Paper Routing</div>
+                                    <div class="panel-meta">Draft papers can be sent to your assigned dean for Section C completion.</div>
                                 </li>
                             </ul>
                         </div>
@@ -404,223 +586,93 @@
                             <div class="profile-grid">
                                 <div class="profile-item">
                                     <span class="profile-label">Faculty ID</span>
-                                    <span class="profile-value">FAC-20451</span>
+                                    <span class="profile-value" data-prof-field="facultyId">N/A</span>
                                 </div>
                                 <div class="profile-item">
                                     <span class="profile-label">Department</span>
-                                    <span class="profile-value">ICS</span>
+                                    <span class="profile-value" data-prof-field="department">N/A</span>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </header>
 
-                <div class="form-card wide">
-                    <div class="form-header" id="dynamic-form-header">
-                        <h2 id="dynamic-form-title">Professor Peer Evaluation Form</h2>
-                        <p id="dynamic-form-description">Evaluate a colleague based on workplace conduct, collaboration,
-                            and professionalism.</p>
-                    </div>
-
-                    <form id="peerEvaluationForm" class="evaluation-form">
-                        <div class="form-section">
-                            <h3 class="section-title">Select Colleague</h3>
-                            <div class="form-group">
-                                <select id="peerProfessor" name="peerProfessor" class="form-select" required>
-                                    <option value="">Choose a professor to evaluate</option>
-                                    <option value="prof-maria-santos">Maria Santos - ICS</option>
-                                    <option value="prof-juan-delacruz">Juan Dela Cruz - ICS</option>
-                                    <option value="prof-ana-garcia">Ana Garcia - ICS</option>
-                                </select>
-                            </div>
+                <section class="detail-report-section faculty-paper-section">
+                    <div class="section-header">
+                        <div class="section-title">
+                            <h2>My Faculty Acknowledgement Papers</h2>
+                            <p>Section A and Section B are read-only snapshots. Section C can be edited by both professor and dean.</p>
                         </div>
-
-                        <div id="dynamic-peer-questions-container">
-                            <div class="empty-state" style="text-align: center; padding: 3rem 1rem;">
-                                <i class="fas fa-spinner fa-spin"
-                                    style="font-size: 3rem; color: #cbd5e1; margin-bottom: 1rem;"></i>
-                                <p>Loading peer evaluation form...</p>
-                            </div>
-                        </div>
-
-                        <div class="api-info-box">
-                            <i class="fas fa-database"></i>
-                            <span>SQL Ready: connect to /api/professor/peer-evaluations/submit (POST)</span>
-                        </div>
-
-                        <div class="form-actions">
-                            <button type="submit" class="btn-submit">Submit Evaluation</button>
-                            <button type="button" class="btn-cancel" id="cancelPeerBtn">Cancel</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-
-            <!-- Reports View -->
-            <div id="reportsView" class="content-view" style="display: none;">
-                <header class="top-header">
-                    <h1 class="page-title">Evaluation Reports</h1>
-                    <div class="user-info">
-                        <button class="user-action-btn js-notification-btn" aria-label="View announcements">
-                            <i class="fas fa-bell"></i>
-                            <span class="notification-dot" aria-hidden="true"></span>
-                        </button>
-                        <button class="user-profile js-profile-btn" aria-label="View profile">
-                            <i class="fas fa-user-circle"></i>
-                            <span>Efrhain Louis Pajota</span>
-                        </button>
-
-                        <div class="dropdown-panel js-announcement-panel">
-                            <div class="panel-header">
-                                <h3>Faculty Announcements</h3>
-                                <span class="panel-subtitle">Latest updates for professors</span>
-                            </div>
-                            <ul class="panel-list">
-                                <li>
-                                    <div class="panel-title">Evaluation Window</div>
-                                    <div class="panel-meta">Faculty reports will unlock after Feb 10, 2026.</div>
-                                </li>
-                                <li>
-                                    <div class="panel-title">Report Access</div>
-                                    <div class="panel-meta">Reports are viewable after the evaluation period ends.</div>
-                                </li>
-                            </ul>
-                        </div>
-
-                        <div class="dropdown-panel js-profile-panel">
-                            <div class="panel-header">
-                                <h3>Professor Profile</h3>
-                                <span class="panel-subtitle">Faculty information</span>
-                            </div>
-                            <div class="profile-grid">
-                                <div class="profile-item">
-                                    <span class="profile-label">Faculty ID</span>
-                                    <span class="profile-value">FAC-20451</span>
-                                </div>
-                                <div class="profile-item">
-                                    <span class="profile-label">Department</span>
-                                    <span class="profile-value">ICS</span>
-                                </div>
-                                <div class="profile-item">
-                                    <span class="profile-label">AY/SEM</span>
-                                    <span class="profile-value">AY 2025-2026, 2nd Semester</span>
-                                </div>
-                            </div>
+                        <div class="faculty-paper-header-actions">
+                            <button type="button" class="btn-submit" id="facultyPaperCreateDraftBtn">Create/Refresh Draft</button>
                         </div>
                     </div>
-                </header>
 
-                <div class="reports-blackout" id="reportsBlackout" style="display: none;">
-                    <h2>Reports not available yet</h2>
-                    <p>Reports will be available after the evaluation period ends on <span id="reportUnlockDate">Feb 10,
-                            2026</span>.</p>
-                </div>
+                    <div class="faculty-paper-tabs">
+                        <button type="button" class="btn-submit faculty-paper-tab active" id="facultyPaperTabActive">Active</button>
+                        <button type="button" class="btn-cancel faculty-paper-tab" id="facultyPaperTabArchive">Archive</button>
+                    </div>
 
-                <div class="reports-content" id="reportsContent">
-                    <section class="detail-report-section">
-                        <div class="section-header">
-                            <div class="section-title">
-                                <h2>Faculty Response Rate & Counts</h2>
-                                <p>Evaluations received per subject/section. Counts are per subject evaluation.</p>
-                                <p class="semester-display">Showing: <span id="selectedEvalType">Student
-                                        Evaluation</span> — <span id="selectedSemester">AY 2025-2026, 2nd
-                                        Semester</span></p>
-                            </div>
-                            <div class="filters-row">
-                                <div class="eval-type-filter">
-                                    <label for="evaluationTypeFilter">Evaluation</label>
-                                    <select id="evaluationTypeFilter">
-                                        <option value="student" selected>Student Evaluation</option>
-                                        <option value="professor">Professor Evaluation</option>
-                                        <option value="supervisor">Supervisor Evaluation</option>
-                                    </select>
-                                </div>
-                                <div class="semester-filter">
-                                    <label for="semesterFilter">Semester</label>
-                                    <select id="semesterFilter">
-                                        <option value="2025-2026|2" selected>AY 2025-2026, 2nd Semester</option>
-                                        <option value="2025-2026|1">AY 2025-2026, 1st Semester</option>
-                                        <option value="2024-2025|2">AY 2024-2025, 2nd Semester</option>
-                                        <option value="2024-2025|1">AY 2024-2025, 1st Semester</option>
-                                    </select>
-                                </div>
-                            </div>
+                    <div class="table-container">
+                        <table class="summary-table" id="facultyPaperTable">
+                            <thead>
+                                <tr>
+                                    <th>Paper ID</th>
+                                    <th>Semester</th>
+                                    <th>Status</th>
+                                    <th>Recipient Dean</th>
+                                    <th>Updated</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="facultyPaperTableBody">
+                                <tr>
+                                    <td colspan="6">No faculty papers available.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <div class="form-card faculty-paper-detail-card" id="facultyPaperDetailCard" style="display: none;">
+                    <div class="form-header">
+                        <h2>Paper Detail</h2>
+                        <p id="facultyPaperDetailMeta">Select a paper from the table.</p>
+                    </div>
+
+                    <div class="profile-grid profile-grid-wide">
+                        <div class="profile-item"><span class="profile-label">Paper ID</span><span class="profile-value" id="fpDetailId">N/A</span></div>
+                        <div class="profile-item"><span class="profile-label">Status</span><span class="profile-value" id="fpDetailStatus">N/A</span></div>
+                        <div class="profile-item"><span class="profile-label">Faculty Name</span><span class="profile-value" id="fpDetailFacultyName">N/A</span></div>
+                        <div class="profile-item"><span class="profile-label">Department</span><span class="profile-value" id="fpDetailDepartment">N/A</span></div>
+                        <div class="profile-item"><span class="profile-label">Rank</span><span class="profile-value" id="fpDetailRank">N/A</span></div>
+                        <div class="profile-item"><span class="profile-label">Semester</span><span class="profile-value" id="fpDetailSemester">N/A</span></div>
+                        <div class="profile-item"><span class="profile-label">SET Rating (%)</span><span class="profile-value" id="fpDetailSetRating">N/A</span></div>
+                        <div class="profile-item"><span class="profile-label">SAF Rating (%)</span><span class="profile-value" id="fpDetailSafRating">N/A</span></div>
+                    </div>
+
+                    <div class="form-section">
+                        <h3 class="section-title">Section C (Editable by Professor and Dean)</h3>
+                        <div class="form-group">
+                            <label for="fpSectionCAreasInput">Areas for Improvement</label>
+                            <textarea id="fpSectionCAreasInput" class="form-input" rows="3" placeholder="Input areas for improvement"></textarea>
                         </div>
-
-                        <div class="table-container">
-                            <table class="faculty-breakdown-table" id="facultyBreakdownTable">
-                                <thead>
-                                    <tr>
-                                        <th>Subject</th>
-                                        <th>Section</th>
-                                        <th>Evaluations Received</th>
-                                        <th>Response Rate</th>
-                                        <th>Avg Rating</th>
-                                        <th>Comments</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr data-required="40" data-received="18" data-avg="4.6">
-                                        <td>IT 307 - Web Systems and Technologies 2</td>
-                                        <td>BSIT 3A</td>
-                                        <td><span class="count-pill">18/40</span></td>
-                                        <td>45%</td>
-                                        <td>4.6</td>
-                                        <td><button type="button"
-                                                class="btn-submit faculty-comments-btn js-prof-comments"
-                                                data-subject="IT 307 - Web Systems and Technologies 2"
-                                                data-section="BSIT 3A">View</button></td>
-                                    </tr>
-                                    <tr data-required="35" data-received="17" data-avg="4.8">
-                                        <td>IT 303 - Event-Driven Programming</td>
-                                        <td>BSIT 3A</td>
-                                        <td><span class="count-pill">17/35</span></td>
-                                        <td>49%</td>
-                                        <td>4.8</td>
-                                        <td><button type="button"
-                                                class="btn-submit faculty-comments-btn js-prof-comments"
-                                                data-subject="IT 303 - Event-Driven Programming"
-                                                data-section="BSIT 3A">View</button></td>
-                                    </tr>
-                                    <tr data-required="25" data-received="10" data-avg="4.5">
-                                        <td>IT 305 - Integrative Programming</td>
-                                        <td>BSIT 3A</td>
-                                        <td><span class="count-pill">10/25</span></td>
-                                        <td>40%</td>
-                                        <td>4.5</td>
-                                        <td><button type="button"
-                                                class="btn-submit faculty-comments-btn js-prof-comments"
-                                                data-subject="IT 305 - Integrative Programming"
-                                                data-section="BSIT 3A">View</button></td>
-                                    </tr>
-                                </tbody>
-                            </table>
+                        <div class="form-group">
+                            <label for="fpSectionCActivitiesInput">Proposed Learning and Development Activities</label>
+                            <textarea id="fpSectionCActivitiesInput" class="form-input" rows="3" placeholder="Input proposed activities"></textarea>
                         </div>
-
-                        <div class="faculty-comments-panel" id="profSubjectCommentsPanel" aria-live="polite">
-                            <div class="faculty-comments-header">
-                                <div>
-                                    <h3 id="profSubjectCommentsTitle">Anonymous Feedback</h3>
-                                    <p class="faculty-comments-meta" id="profSubjectCommentsMeta">Select a subject and
-                                        section to view anonymized comments.</p>
-                                </div>
-                                <button type="button" class="btn-cancel faculty-comments-close"
-                                    id="profSubjectCommentsClose">Close</button>
-                            </div>
-                            <ul class="faculty-comments-list" id="profSubjectCommentsList">
-                                <li class="faculty-comments-empty">No summaries loaded yet.</li>
-                            </ul>
-                            <div class="api-info-box compact">
-                                <i class="fas fa-database"></i>
-                                <span>SQL Ready: connect to /api/professor/subjects/summary (POST)</span>
-                            </div>
+                        <div class="form-group">
+                            <label for="fpSectionCActionPlanInput">Action Plan</label>
+                            <textarea id="fpSectionCActionPlanInput" class="form-input" rows="3" placeholder="Input action plan"></textarea>
                         </div>
+                    </div>
 
-                        <div class="api-info-box compact">
-                            <i class="fas fa-database"></i>
-                            <span>SQL Ready: connect to /api/professor/evaluations/summary (POST)</span>
-                        </div>
-                    </section>
+                    <div class="form-actions">
+                        <button type="button" class="btn-submit" id="fpDetailPreviewBtn">Preview PDF</button>
+                        <button type="button" class="btn-submit" id="fpDetailSaveSectionCBtn">Save Section C</button>
+                        <button type="button" class="btn-submit" id="fpDetailSendBtn">Send to Dean</button>
+                        <button type="button" class="btn-cancel" id="fpDetailArchiveBtn">Archive</button>
+                    </div>
                 </div>
             </div>
 
@@ -635,7 +687,7 @@
                         </button>
                         <button class="user-profile js-profile-btn" aria-label="View profile">
                             <i class="fas fa-user-circle"></i>
-                            <span>Efrhain Louis Pajota</span>
+                            <span>Professor</span>
                         </button>
 
                         <div class="dropdown-panel js-announcement-panel">
@@ -664,11 +716,11 @@
                             <div class="profile-grid">
                                 <div class="profile-item">
                                     <span class="profile-label">Faculty ID</span>
-                                    <span class="profile-value">FAC-20451</span>
+                                    <span class="profile-value" data-prof-field="facultyId">N/A</span>
                                 </div>
                                 <div class="profile-item">
                                     <span class="profile-label">Department</span>
-                                    <span class="profile-value">ICS</span>
+                                    <span class="profile-value" data-prof-field="department">N/A</span>
                                 </div>
                             </div>
                         </div>
@@ -694,27 +746,27 @@
                     <div class="profile-grid profile-grid-wide">
                         <div class="profile-item">
                             <span class="profile-label">Faculty ID</span>
-                            <span class="profile-value">FAC-20451</span>
+                            <span class="profile-value" data-prof-field="facultyId">N/A</span>
                         </div>
                         <div class="profile-item">
                             <span class="profile-label">Full Name</span>
-                            <span class="profile-value">Efrhain Louis Pajota</span>
+                            <span class="profile-value" data-prof-field="fullName">N/A</span>
                         </div>
                         <div class="profile-item">
                             <span class="profile-label">Department</span>
-                            <span class="profile-value">ICS</span>
+                            <span class="profile-value" data-prof-field="department">N/A</span>
                         </div>
                         <div class="profile-item">
                             <span class="profile-label">Rank</span>
-                            <span class="profile-value">Assistant Professor</span>
+                            <span class="profile-value" data-prof-field="position">N/A</span>
                         </div>
                         <div class="profile-item">
                             <span class="profile-label">Gmail</span>
-                            <span class="profile-value" id="profileEmail">professor@gmail.com</span>
+                            <span class="profile-value" id="profileEmail" data-prof-field="email">N/A</span>
                         </div>
                         <div class="profile-item">
                             <span class="profile-label">AY/SEM</span>
-                            <span class="profile-value">AY 2025-2026, 2nd Semester</span>
+                            <span class="profile-value" data-prof-field="semesterLabel">Selected semester</span>
                         </div>
                     </div>
                 </div>
@@ -743,7 +795,7 @@
                             <div class="form-group">
                                 <label for="currentEmail">Current Gmail</label>
                                 <input type="email" id="currentEmail" name="currentEmail" class="form-input"
-                                    value="professor@gmail.com" readonly>
+                                    value="" readonly>
                             </div>
                             <div class="form-group">
                                 <label for="newEmail">New Gmail</label>
@@ -757,11 +809,6 @@
                             </div>
                         </div>
 
-                        <div class="api-info-box">
-                            <i class="fas fa-database"></i>
-                            <span>SQL Ready: connect to /api/professor/change-email (POST)</span>
-                        </div>
-
                         <div class="form-actions">
                             <button type="submit" class="btn-submit">Update Gmail</button>
                             <button type="button" class="btn-cancel js-close-account-form"
@@ -773,7 +820,7 @@
                 <div class="form-card account-action-card" id="passwordUpdateCard" style="display: none;">
                     <div class="form-header">
                         <h2>Update Account Password</h2>
-                        <p>Placeholder form ready for SQL connection.</p>
+                        <p>Update your account password.</p>
                     </div>
 
                     <form id="changePasswordForm" class="evaluation-form">
@@ -814,11 +861,6 @@
                             </div>
                         </div>
 
-                        <div class="api-info-box">
-                            <i class="fas fa-database"></i>
-                            <span>SQL Ready: connect to /api/professor/change-password (POST)</span>
-                        </div>
-
                         <div class="form-actions">
                             <button type="submit" class="btn-submit">Update Password</button>
                             <button type="button" class="btn-cancel js-close-account-form"
@@ -835,3 +877,4 @@
 </body>
 
 </html>
+

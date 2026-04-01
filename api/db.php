@@ -53,6 +53,63 @@ function sendJson($data, $statusCode = 200) {
     exit();
 }
 
+function isStoredPasswordHash($value) {
+    $text = trim((string) $value);
+    if ($text === '') {
+        return false;
+    }
+
+    $info = password_get_info($text);
+    return isset($info['algo']) && (int) $info['algo'] !== 0;
+}
+
+function normalizePasswordForStorage($value) {
+    $password = (string) $value;
+    if ($password === '') {
+        return '';
+    }
+
+    if (isStoredPasswordHash($password)) {
+        return $password;
+    }
+
+    $hash = password_hash($password, PASSWORD_BCRYPT);
+    if ($hash === false) {
+        throw new RuntimeException('Failed to hash password.');
+    }
+
+    return $hash;
+}
+
+function verifyPasswordForLogin($inputPassword, $storedPassword) {
+    $input = (string) $inputPassword;
+    $stored = (string) $storedPassword;
+
+    if ($stored === '') {
+        return [
+            'matched' => ($input === ''),
+            'needs_migration' => false,
+            'needs_rehash' => false,
+        ];
+    }
+
+    if (isStoredPasswordHash($stored)) {
+        $matched = password_verify($input, $stored);
+        return [
+            'matched' => $matched,
+            'needs_migration' => false,
+            'needs_rehash' => $matched && password_needs_rehash($stored, PASSWORD_BCRYPT),
+        ];
+    }
+
+    $matched = hash_equals($stored, $input);
+    return [
+        'matched' => $matched,
+        'needs_migration' => $matched,
+        'needs_rehash' => false,
+    ];
+}
+
 function getJsonBody() {
     $raw = file_get_contents('php://input');
     if ($raw === false || trim($raw) === '') {

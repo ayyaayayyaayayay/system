@@ -27,6 +27,10 @@
                     <i class="fas fa-home"></i>
                     <span>Dashboard</span>
                 </a>
+                <a href="#" class="nav-link" data-view="studentStatusView">
+                    <i class="fas fa-list-check"></i>
+                    <span>Student Evaluation Status</span>
+                </a>
                 <a href="#" class="nav-link" data-view="profileView">
                     <i class="fas fa-id-card"></i>
                     <span>Profile</span>
@@ -56,25 +60,95 @@
                     <div class="summary-card total">
                         <div class="card-icon"><i class="fas fa-users"></i></div>
                         <div class="card-content">
-                            <h3>Total Students</h3>
-                            <p class="card-number" id="totalCount">0</p>
+                            <h3>Assigned Students</h3>
+                            <p class="card-number" id="assignedCount">0</p>
                         </div>
                     </div>
                     <div class="summary-card done">
                         <div class="card-icon"><i class="fas fa-circle-check"></i></div>
                         <div class="card-content">
-                            <h3>Done</h3>
-                            <p class="card-number" id="doneCount">0</p>
+                            <h3>Evaluated</h3>
+                            <p class="card-number" id="evaluatedCountAnalytics">0</p>
                         </div>
                     </div>
                     <div class="summary-card not-done">
                         <div class="card-icon"><i class="fas fa-circle-xmark"></i></div>
                         <div class="card-content">
-                            <h3>Not Done</h3>
-                            <p class="card-number" id="notDoneCount">0</p>
+                            <h3>Not Evaluated</h3>
+                            <p class="card-number" id="notEvaluatedCountAnalytics">0</p>
+                        </div>
+                    </div>
+                    <div class="summary-card rate">
+                        <div class="card-icon"><i class="fas fa-percent"></i></div>
+                        <div class="card-content">
+                            <h3>Completion Rate</h3>
+                            <p class="card-number" id="completionRateCount">0%</p>
                         </div>
                     </div>
                 </section>
+
+                <section class="status-section analytics-section">
+                    <div class="section-header">
+                        <div class="section-title">
+                            <h2>Descriptive Analytics</h2>
+                            <p>Evaluated versus not evaluated students by department and program.</p>
+                        </div>
+                    </div>
+
+                    <div class="api-info-box">
+                        <i class="fas fa-chart-pie"></i>
+                        <span>Computed from assigned enrollments and submitted student evaluations for the active semester.</span>
+                    </div>
+
+                    <h3 class="analytics-table-title">By Department</h3>
+                    <div class="table-container analytics-table-container">
+                        <table class="status-table analytics-table">
+                            <thead>
+                                <tr>
+                                    <th>Department</th>
+                                    <th>Assigned</th>
+                                    <th>Evaluated</th>
+                                    <th>Not Evaluated</th>
+                                    <th>Completion %</th>
+                                </tr>
+                            </thead>
+                            <tbody id="departmentAnalyticsBody"></tbody>
+                        </table>
+                    </div>
+
+                    <h3 class="analytics-table-title" id="departmentProgramsTitle">Programs by Department</h3>
+                    <div class="table-container analytics-table-container">
+                        <table class="status-table analytics-table">
+                            <thead>
+                                <tr>
+                                    <th>Program</th>
+                                    <th>Assigned</th>
+                                    <th>Evaluated</th>
+                                    <th>Not Evaluated</th>
+                                    <th>Completion %</th>
+                                </tr>
+                            </thead>
+                            <tbody id="departmentProgramsBody"></tbody>
+                        </table>
+                    </div>
+                    <p class="empty-state analytics-inline-empty" id="departmentProgramsEmpty">
+                        Select a department above to view its programs.
+                    </p>
+
+                    <p class="empty-state" id="analyticsEmptyState" style="display: none;">
+                        No assigned students found for analytics.
+                    </p>
+                </section>
+            </div>
+
+            <div id="studentStatusView" class="content-view">
+                <header class="top-header">
+                    <h1 class="page-title">Student Evaluation Status</h1>
+                    <div class="user-profile">
+                        <i class="fas fa-user-circle"></i>
+                        <span id="profileNameStatus">OSA User</span>
+                    </div>
+                </header>
 
                 <section class="status-section">
                     <div class="section-header">
@@ -89,10 +163,16 @@
                         </div>
                     </div>
 
+                    <p class="status-period-note" id="statusPeriodNote"></p>
+
                     <div class="status-legend">
                         <span class="legend-item">
                             <span class="legend-dot done"></span>
                             Done
+                        </span>
+                        <span class="legend-item">
+                            <span class="legend-dot cleared"></span>
+                            Cleared
                         </span>
                         <span class="legend-item">
                             <span class="legend-dot not-done"></span>
@@ -102,8 +182,7 @@
 
                     <div class="api-info-box">
                         <i class="fas fa-database"></i>
-                        <span>SQL Ready: connect to <strong>/api/osa/student-evaluation-status</strong>. Expected
-                            fields: Student Number, Full Name, Program, Year/Section, Status.</span>
+                        <span>Automatic completion is based on submitted evaluations; post-period non-completion can be marked as cleared with reason.</span>
                     </div>
 
                     <div class="table-container">
@@ -112,9 +191,12 @@
                                 <tr>
                                     <th>Student Number</th>
                                     <th>Full Name</th>
+                                    <th>Department</th>
                                     <th>Program</th>
                                     <th>Year/Section</th>
+                                    <th>Progress</th>
                                     <th>Status</th>
+                                    <th id="statusActionHeader">Action</th>
                                 </tr>
                             </thead>
                             <tbody id="statusTableBody"></tbody>

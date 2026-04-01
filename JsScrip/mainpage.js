@@ -87,114 +87,55 @@ function handleLogin() {
     .then((response) => response.json())
     .then((data) => {
       if (data.success) {
-        storeUserSession(data.username, data.role);
+        storeUserSession(data);
         redirectToDashboard(data.role);
       } else {
-        // Fallback to looking in local SharedData when PHP login fails
-        const detectedRole = detectUserRoleFallback(
-          sanitizedUsername,
-          sanitizedPassword,
-        );
-        if (detectedRole) {
-          storeUserSession(sanitizedUsername, detectedRole);
-          redirectToDashboard(detectedRole);
-        } else {
-          showError(data.error || "Invalid username or password");
-          loginBtn.querySelector("span").textContent = originalText;
-          loginBtn.disabled = false;
-        }
-      }
-    })
-    .catch(() => {
-      // Fallback to client-side login if PHP server is not available
-      console.warn("PHP API unavailable, using client-side fallback login");
-      const detectedRole = detectUserRoleFallback(
-        sanitizedUsername,
-        sanitizedPassword,
-      );
-      if (detectedRole) {
-        storeUserSession(sanitizedUsername, detectedRole);
-        redirectToDashboard(detectedRole);
-      } else {
-        showError("Invalid username or password");
+        showError(data.error || "Invalid username or password");
         loginBtn.querySelector("span").textContent = originalText;
         loginBtn.disabled = false;
       }
+    })
+    .catch(() => {
+      showError("Login service is unavailable. Please try again.");
+      loginBtn.querySelector("span").textContent = originalText;
+      loginBtn.disabled = false;
     });
 }
 
 function detectUserRoleFallback(username, password) {
-  const normalizedUsername = username.toLowerCase();
-  const passwordMatch = password; // maintain case for password
-
-  // ── Shortcut logins (matches login.php behavior) ──────────────
-  // Typing a role name as username logs in directly to that role
-  const shortcutRoles = ["admin", "hr", "osa", "vpaa", "dean", "professor", "student"];
-
-  // Also accept "daen" as alias for "dean"
-  let roleAlias = normalizedUsername;
-  if (roleAlias === "daen") {
-    roleAlias = "dean";
-  }
-
-  if (shortcutRoles.includes(roleAlias)) {
-    return roleAlias;
-  }
-
-  // ── Demo credentials ──────────────────────────────────────────
-  if (normalizedUsername === "1" && password === "1") {
-    return "student";
-  }
-
-  // ── Match against users in SharedData (localStorage) ──────────
-  const users = SharedData.getUsers();
-
-  const match = users.find((u) => {
-    const isStudent = u.role === "student";
-    const idField = isStudent ? u.studentNumber : u.employeeId;
-    
-    // Check if the ID field exists and matches the provided username
-    if (!idField) return false;
-    
-    const idMatch = idField.toLowerCase() === normalizedUsername;
-    const passMatch = u.password === passwordMatch;
-    
-    return idMatch && passMatch;
-  });
-
-  if (match) {
-    return match.role;
-  }
-
-  // Also try matching by name or email (like login.php does)
-  const nameOrEmailMatch = users.find((u) => {
-    const nameMatch = (u.name || "").toLowerCase() === normalizedUsername;
-    const emailMatch = (u.email || "").toLowerCase() === normalizedUsername;
-    if (!nameMatch && !emailMatch) return false;
-    return u.password === passwordMatch || (u.password === "" && passwordMatch === "");
-  });
-
-  if (nameOrEmailMatch) {
-    return nameOrEmailMatch.role;
-  }
-
+  // Intentionally disabled: login is API-only.
   return null;
 }
 
 /**
  * Store user session in localStorage
- * @param {string} username - Username
- * @param {string} role - User role
+ * @param {Object} authData - Login response payload
  */
-function storeUserSession(username, role) {
-    SharedData.setSession(username, role);
+function storeUserSession(authData) {
+    const username = String(authData && authData.username || '').trim();
+    const role = String(authData && authData.role || '').trim();
+    const fullName = String(authData && authData.fullName || username).trim();
+    const userId = String(authData && authData.userId || '').trim();
+    const email = String(authData && authData.email || '').trim();
+    const studentNumber = String(authData && authData.studentNumber || '').trim();
+    const employeeId = String(authData && authData.employeeId || '').trim();
+    const status = String(authData && authData.status || 'active').trim().toLowerCase();
+
+    SharedData.setSession(username, role, {
+        fullName: fullName,
+        userId: userId,
+        email: email,
+        studentNumber: studentNumber,
+        employeeId: employeeId,
+        status: status === 'inactive' ? 'inactive' : 'active'
+    });
 
     // Log the login activity
     SharedData.addActivityLogEntry({
         action: 'Login',
-        description: username + ' logged in as ' + role,
+        description: fullName + ' logged in as ' + role,
         role: role,
-        user_id: username,
+        user_id: userId || username,
         type: 'login'
     });
 }
@@ -380,3 +321,5 @@ if (typeof module !== "undefined" && module.exports) {
     redirectToDashboard,
   };
 }
+
+

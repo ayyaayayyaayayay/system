@@ -26,27 +26,27 @@
                 </div>
 
                 <nav class="sidebar-nav">
-                    <a href="#" class="nav-link active">
+                    <a href="#" class="nav-link active" data-view="dashboard">
                         <i class="fas fa-home"></i>
                         <span>Dashboard</span>
                     </a>
-                    <a href="#" class="nav-link">
+                    <a href="#" class="nav-link" data-view="users">
                         <i class="fas fa-users"></i>
                         <span>User Management</span>
                     </a>
-                    <a href="#" class="nav-link">
+                    <a href="#" class="nav-link" data-view="activity-log">
                         <i class="fas fa-clipboard-list"></i>
                         <span>Activity Log</span>
                     </a>
-                    <a href="#" class="nav-link">
+                    <a href="#" class="nav-link" data-view="settings">
                         <i class="fas fa-sliders-h"></i>
                         <span>Evaluation Settings</span>
                     </a>
-                    <a href="#" class="nav-link">
+                    <a href="#" class="nav-link" data-view="questionnaire">
                         <i class="fas fa-clipboard-list"></i>
                         <span>Questionnaire</span>
                     </a>
-                    <a href="#" class="nav-link">
+                    <a href="#" class="nav-link" data-view="profile">
                         <i class="fas fa-id-card"></i>
                         <span>Profile</span>
                     </a>
@@ -186,18 +186,49 @@
                                         <h2>System Notifications</h2>
                                         <p>Recent system events and alerts.</p>
                                     </div>
+                                    <div class="hr-system-notification-actions">
+                                        <button type="button" class="btn-add-user hr-announcement-btn"
+                                            id="hr-open-announcement-compose-btn">
+                                            <i class="fas fa-bullhorn"></i>
+                                            Create Announcement
+                                        </button>
+                                    </div>
                                 </div>
 
-                                <div class="notification-alert">
-                                    <div class="alert-icon">
-                                        <i class="fas fa-exclamation-triangle"></i>
-                                    </div>
-                                    <div class="alert-content">
-                                        <div class="alert-message">Evaluation period ends in 7 days</div>
-                                        <div class="alert-date">2025-11-13</div>
+                                <div id="hr-system-notifications" class="notification-alert-list" aria-live="polite">
+                                    <div class="notification-alert">
+                                        <div class="alert-icon">
+                                            <i class="fas fa-spinner fa-spin"></i>
+                                        </div>
+                                        <div class="alert-content">
+                                            <div class="alert-message">Loading system notifications...</div>
+                                            <div class="alert-date">Please wait</div>
+                                        </div>
                                     </div>
                                 </div>
                             </section>
+                        </div>
+                    </div>
+
+                    <!-- Dashboard Top Analytics -->
+                    <div class="evaluation-type-section">
+                        <div class="section-card">
+                            <h2 class="section-card-title">
+                                <i class="fas fa-chart-area"></i>
+                                Dashboard Trends
+                            </h2>
+                            <div class="charts-grid">
+                                <div class="chart-container">
+                                    <h3 class="chart-title">Evaluation Overview</h3>
+                                    <p class="chart-subtitle">Completed, pending drafts, and not started for current semester</p>
+                                    <canvas id="hr-evaluation-overview-chart"></canvas>
+                                </div>
+                                <div class="chart-container">
+                                    <h3 class="chart-title">Semestral Performance</h3>
+                                    <p class="chart-subtitle">Student submissions across latest 4 semesters</p>
+                                    <canvas id="hr-semestral-performance-chart"></canvas>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -418,8 +449,15 @@
                                         <select id="current-semester">
                                             <!-- Populated dynamically from SharedData -->
                                         </select>
-                                        <input type="text" id="new-term-input" placeholder="e.g. 1st Semester 2027-2028"
-                                            style="padding: 8px 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; min-width: 220px;">
+                                        <select id="new-term-year-start" aria-label="Academic year start"></select>
+                                        <select id="new-term-year-end" aria-label="Academic year end"></select>
+                                        <select id="new-term-semester-type" aria-label="Semester type">
+                                            <option value="1st Semester">1st Semester</option>
+                                            <option value="2nd Semester">2nd Semester</option>
+                                            <option value="3rd Semester">3rd Semester</option>
+                                        </select>
+                                        <input type="text" id="new-term-preview" placeholder="Latest semester preview"
+                                            readonly>
                                         <button class="btn-add-term" type="button" id="btn-add-term">Add
                                             Term</button>
                                     </div>
@@ -849,6 +887,62 @@
                     </div>
                 </div>
             </main>
+        </div>
+    </div>
+
+    <!-- HR Announcement Compose Modal -->
+    <div id="hr-announcement-compose-modal" class="modal">
+        <div class="modal-content hr-announcement-compose-modal-content">
+            <div class="modal-header">
+                <h2>Create Professor/Dean/Student Announcement</h2>
+                <button class="modal-close" id="hr-close-announcement-compose-modal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="hr-announcement-compose-form">
+                <div class="form-group">
+                    <label for="hr-announcement-compose-title">Title</label>
+                    <input type="text" id="hr-announcement-compose-title" maxlength="200" required>
+                </div>
+                <div class="form-group">
+                    <label for="hr-announcement-compose-message">Message</label>
+                    <textarea id="hr-announcement-compose-message" rows="5" maxlength="3000" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="hr-announcement-target-role">Target Role</label>
+                    <select id="hr-announcement-target-role" required>
+                        <option value="student">Student</option>
+                        <option value="dean">Dean</option>
+                        <option value="professor">Professor</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="hr-announcement-target-campus">Campus (Optional)</label>
+                    <select id="hr-announcement-target-campus">
+                        <option value="">All Campuses</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="hr-announcement-target-program">Program (Optional)</label>
+                    <select id="hr-announcement-target-program">
+                        <option value="">All Programs</option>
+                    </select>
+                </div>
+                <div class="form-group" id="hr-announcement-student-completion-wrap" style="display:none;">
+                    <label for="hr-announcement-student-completion">Student Completion Filter</label>
+                    <select id="hr-announcement-student-completion">
+                        <option value="all">All Students</option>
+                        <option value="completed">Completed</option>
+                        <option value="not_completed">Not Completed</option>
+                    </select>
+                </div>
+                <p class="form-hint">If campus/program are blank, the announcement targets all users of the selected role.</p>
+                <p class="hr-announcement-compose-feedback" id="hr-announcement-compose-feedback" aria-live="polite"></p>
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" id="hr-cancel-announcement-compose-btn">Cancel</button>
+                    <button type="submit" class="btn-submit">Publish Announcement</button>
+                </div>
+            </form>
         </div>
     </div>
 

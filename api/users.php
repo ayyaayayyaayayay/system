@@ -11,6 +11,32 @@ require_once __DIR__ . '/db.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
 
+function convertSectionTokenToNumberApi($token) {
+    $value = strtoupper(trim((string) $token));
+    if ($value === '') return '';
+    if (preg_match('/^\d+$/', $value)) return (string) ((int) $value);
+    if (preg_match('/^[A-Z]$/', $value)) return (string) (ord($value) - ord('A') + 1);
+    return '';
+}
+
+function normalizeYearSectionApi($value) {
+    $raw = trim((string) $value);
+    if ($raw === '') return '';
+    if (preg_match('/^(\d+)\s*-\s*(\d+)$/', $raw, $m)) {
+        return ((int) $m[1]) . '-' . ((int) $m[2]);
+    }
+    if (preg_match('/^(\d+)\s*-\s*([A-Za-z0-9])$/', $raw, $m)) {
+        $section = convertSectionTokenToNumberApi($m[2]);
+        return $section === '' ? '' : ((int) $m[1]) . '-' . $section;
+    }
+    if (preg_match('/(\d+)\s*(?:st|nd|rd|th)?\s*year/i', $raw, $yearMatch) &&
+        preg_match('/section\s*([A-Za-z0-9]+)/i', $raw, $sectionMatch)) {
+        $section = convertSectionTokenToNumberApi($sectionMatch[1]);
+        return $section === '' ? '' : ((int) $yearMatch[1]) . '-' . $section;
+    }
+    return '';
+}
+
 switch ($method) {
 
     // ── GET: List users ──────────────────────────────────────────────
@@ -67,6 +93,8 @@ switch ($method) {
     // ── POST: Create user ────────────────────────────────────────────
     case 'POST':
         $body = getJsonBody();
+        $role = strtolower((string) ($body['role'] ?? ''));
+        $normalizedYearSection = normalizeYearSectionApi($body['yearSection'] ?? '');
 
         $required = ['name', 'email', 'role', 'campus'];
         foreach ($required as $field) {
@@ -75,23 +103,33 @@ switch ($method) {
             }
         }
 
+        if ($role === 'student') {
+            if (trim((string) ($body['studentNumber'] ?? '')) === '') {
+                sendJson(['success' => false, 'error' => "Field 'studentNumber' is required for students"], 400);
+            }
+            if ($normalizedYearSection === '') {
+                sendJson(['success' => false, 'error' => "Field 'yearSection' must be Y-S format (e.g., 3-1)"], 400);
+            }
+        }
+
         $stmt = $pdo->prepare("
             INSERT INTO users (name, email, password, role, campus, department, employee_id, employment_type, position, year_section, student_number, status)
             VALUES (:name, :email, :password, :role, :campus, :department, :employee_id, :employment_type, :position, :year_section, :student_number, :status)
         ");
+        $passwordValue = normalizePasswordForStorage($body['password'] ?? '');
 
         $stmt->execute([
             ':name' => strip_tags($body['name']),
             ':email' => strip_tags($body['email']),
-            ':password' => $body['password'] ?? '',
+            ':password' => $passwordValue,
             ':role' => $body['role'],
             ':campus' => $body['campus'],
             ':department' => $body['department'] ?? '',
             ':employee_id' => $body['employeeId'] ?? '',
             ':employment_type' => $body['employmentType'] ?? '',
             ':position' => $body['position'] ?? '',
-            ':year_section' => $body['yearSection'] ?? '',
-            ':student_number' => $body['studentNumber'] ?? '',
+            ':year_section' => $role === 'student' ? $normalizedYearSection : '',
+            ':student_number' => $role === 'student' ? ($body['studentNumber'] ?? '') : '',
             ':status' => $body['status'] ?? 'active',
         ]);
 
@@ -111,6 +149,17 @@ switch ($method) {
         }
 
         $body = getJsonBody();
+        $role = strtolower((string) ($body['role'] ?? ''));
+        $normalizedYearSection = normalizeYearSectionApi($body['yearSection'] ?? '');
+
+        if ($role === 'student') {
+            if (trim((string) ($body['studentNumber'] ?? '')) === '') {
+                sendJson(['success' => false, 'error' => "Field 'studentNumber' is required for students"], 400);
+            }
+            if ($normalizedYearSection === '') {
+                sendJson(['success' => false, 'error' => "Field 'yearSection' must be Y-S format (e.g., 3-1)"], 400);
+            }
+        }
 
         $stmt = $pdo->prepare("
             UPDATE users SET
@@ -128,20 +177,21 @@ switch ($method) {
                 status = :status
             WHERE id = :id
         ");
+        $passwordValue = normalizePasswordForStorage($body['password'] ?? '');
 
         $stmt->execute([
             ':id' => $numericId,
             ':name' => strip_tags($body['name'] ?? ''),
             ':email' => strip_tags($body['email'] ?? ''),
-            ':password' => $body['password'] ?? '',
+            ':password' => $passwordValue,
             ':role' => $body['role'] ?? '',
             ':campus' => $body['campus'] ?? '',
             ':department' => $body['department'] ?? '',
             ':employee_id' => $body['employeeId'] ?? '',
             ':employment_type' => $body['employmentType'] ?? '',
             ':position' => $body['position'] ?? '',
-            ':year_section' => $body['yearSection'] ?? '',
-            ':student_number' => $body['studentNumber'] ?? '',
+            ':year_section' => $role === 'student' ? $normalizedYearSection : '',
+            ':student_number' => $role === 'student' ? ($body['studentNumber'] ?? '') : '',
             ':status' => $body['status'] ?? 'active',
         ]);
 

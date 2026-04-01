@@ -56,10 +56,6 @@
                     <header class="top-header">
                         <h1 class="page-title">VPAA Evaluation Overview</h1>
                         <div class="header-right">
-                            <div class="notification-icon">
-                                <i class="fas fa-bell"></i>
-                                <span class="notification-badge">3</span>
-                            </div>
                             <div class="user-profile">
                                 <i class="fas fa-user-circle"></i>
                                 <span>VPAA Office</span>
@@ -235,49 +231,17 @@
                     <section class="admin-section">
                         <div class="section-header">
                             <div class="section-title">
-                                <h2>Key Highlights</h2>
-                                <p>Automatic insights based on current evaluation summaries.</p>
-                            </div>
-                        </div>
-                        <div class="stats-summary vpaa-summary">
-                            <div class="stat-item">
-                                <i class="fas fa-trophy"></i>
-                                <div>
-                                    <strong id="topPerformerName">--</strong>
-                                    <span id="topPerformerMeta">--</span>
-                                </div>
-                            </div>
-                            <div class="stat-item">
-                                <i class="fas fa-comment-dots"></i>
-                                <div>
-                                    <strong id="mostFeedbackName">--</strong>
-                                    <span id="mostFeedbackMeta">--</span>
-                                </div>
-                            </div>
-                            <div class="stat-item">
-                                <i class="fas fa-triangle-exclamation"></i>
-                                <div>
-                                    <strong id="needsAttentionName">--</strong>
-                                    <span id="needsAttentionMeta">--</span>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-
-                    <section class="admin-section">
-                        <div class="section-header">
-                            <div class="section-title">
                                 <h2>Evaluation Filters</h2>
-                                <p>Filter professor evaluation reports by department, rating, and keyword.</p>
+                                <p>Search by professor name or employee ID first, then filter reports by campus, semester, and department.</p>
                             </div>
                         </div>
 
                         <div class="analytics-filters vpaa-filters">
                             <div class="analytics-filter vpaa-search-group">
-                                <label for="searchInput">Search professor / subject</label>
+                                <label for="searchInput">Search professor name / employee ID</label>
                                 <div class="vpaa-search-row">
-                                    <input type="text" id="searchInput" placeholder="Search by name, ID, or subject"
-                                        aria-label="Professor or subject search">
+                                    <input type="text" id="searchInput" placeholder="Search by professor name or employee ID"
+                                        aria-label="Professor name or employee ID search">
                                     <button class="btn-add-professor vpaa-search" type="button" id="searchBtn">
                                         <i class="fas fa-search"></i>
                                         Search
@@ -287,6 +251,12 @@
                             <div class="analytics-filter">
                                 <label for="semesterFilter">Semester</label>
                                 <select id="semesterFilter"></select>
+                            </div>
+                            <div class="analytics-filter">
+                                <label for="campusFilter">Campus</label>
+                                <select id="campusFilter">
+                                    <option value="all">All Campuses</option>
+                                </select>
                             </div>
                             <div class="analytics-filter">
                                 <label for="departmentFilter">Department</label>
@@ -491,6 +461,19 @@
                     </div>
                 </div>
             </main>
+        </div>
+    </div>
+
+    <div class="vpaa-report-modal" id="vpaaReportModal" aria-hidden="true">
+        <div class="vpaa-report-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="vpaaReportModalTitle">
+            <div class="vpaa-report-modal-header">
+                <h3 id="vpaaReportModalTitle">Professor Evaluation Report</h3>
+                <button type="button" class="vpaa-report-modal-close" id="vpaaReportModalClose"
+                    aria-label="Close report details">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="vpaa-report-modal-body" id="vpaaReportModalBody"></div>
         </div>
     </div>
 
