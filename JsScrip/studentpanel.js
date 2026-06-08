@@ -27,7 +27,12 @@ let evaluationDraftState = {
     lastSavedAt: '',
     lastDraftKey: ''
 };
+let evaluationBehaviorCapture = {
+    captureKey: '',
+    startedAt: ''
+};
 let studentHeaderPanelsBound = false;
+let studentProofModalBound = false;
 
 /**
  * Check if user is authenticated
@@ -38,7 +43,7 @@ let studentHeaderPanelsBound = false;
  * @returns {boolean} - True if user is authenticated
  */
 function checkAuthentication() {
-    const session = SharedData.getSession();
+    const session = SharedData.requireSession('student');
     if (!session) {
         return false;
     }
@@ -113,6 +118,8 @@ function initializeDashboard() {
     setupChangePasswordForm();
     setupPasswordToggles();
     setupHistoryView();
+    setupStudentProofModal();
+    refreshStudentProofRequirement();
 
     SharedData.onDataChange(function (key) {
         if (key === SharedData.KEYS.USERS) {
@@ -125,12 +132,15 @@ function initializeDashboard() {
         if (
             key === SharedData.KEYS.SUBJECT_MANAGEMENT ||
             key === SharedData.KEYS.EVALUATIONS ||
-            key === SharedData.KEYS.CURRENT_SEMESTER
+            key === SharedData.KEYS.CURRENT_SEMESTER ||
+            key === SharedData.KEYS.EVAL_PERIODS ||
+            key === SharedData.KEYS.STUDENT_EVAL_PROOF_REQUESTS
         ) {
             renderAssignedEvaluationList();
             refreshEvaluationStatuses();
             updateSummaryCards();
             renderStudentAnnouncements();
+            refreshStudentProofRequirement();
         }
 
         if (key === SharedData.KEYS.ANNOUNCEMENTS) {
@@ -620,6 +630,357 @@ function renderAssignedEvaluationList() {
     `).join('');
 }
 
+function normalizeProofUserId(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const prefixed = raw.match(/^u(\d+)$/i);
+    if (prefixed) return `u${prefixed[1]}`;
+    const numeric = raw.match(/^\d+$/);
+    if (numeric) return `u${String(parseInt(raw, 10))}`;
+    return raw.toLowerCase();
+}
+
+function getStudentEvaluationPeriodStateForProof() {
+    const dates = SharedData.getEvalPeriodDates
+        ? SharedData.getEvalPeriodDates('student-professor')
+        : { start: '', end: '' };
+    const endRaw = String(dates && dates.end || '').trim();
+    if (!endRaw) {
+        return { hasEndDate: false, isClosed: false, endDate: '' };
+    }
+    const endDate = new Date(`${endRaw}T23:59:59`);
+    const isClosed = !Number.isNaN(endDate.getTime()) && (new Date()) > endDate;
+    return { hasEndDate: true, isClosed, endDate: endRaw };
+}
+
+function buildCurrentStudentCompletionSnapshotForProof() {
+    const session = getUserSession() || {};
+    const currentStudent = resolveCurrentStudentUser(session);
+    if (!currentStudent || !currentStudent.id) {
+        return { ready: false, hasIncomplete: false, totalAssigned: 0, completedCount: 0 };
+    }
+
+    const subjectManagement = SharedData.getSubjectManagement ? SharedData.getSubjectManagement() : null;
+    const offerings = (subjectManagement && Array.isArray(subjectManagement.offerings)) ? subjectManagement.offerings : [];
+    const enrollments = (subjectManagement && Array.isArray(subjectManagement.enrollments)) ? subjectManagement.enrollments : [];
+    const semesterId = getActiveSemesterId();
+    const studentIdentity = buildCurrentStudentIdentity(session);
+    const activeOfferingById = new Map(
+        offerings
+            .filter(function (item) {
+                return item && item.isActive && String(item.semesterSlug || '') === String(semesterId);
+            })
+            .map(function (item) {
+                return [String(item.id), item];
+            })
+    );
+
+    const assignedEnrollments = enrollments.filter(function (item) {
+        return item
+            && String(item.studentUserId || '') === String(currentStudent.id)
+            && String(item.status || '').toLowerCase() === 'enrolled'
+            && activeOfferingById.has(String(item.courseOfferingId || ''));
+    });
+
+    let completedCount = 0;
+    assignedEnrollments.forEach(function (enrollment) {
+        const offeringId = String(enrollment.courseOfferingId || '').trim();
+        const offering = activeOfferingById.get(offeringId);
+        if (!offering) return;
+        const professorName = String(offering.professorName || '').trim();
+        const subjectCode = String(offering.subjectCode || '').trim();
+        if (!professorName) return;
+        const submitted = isSubmittedEvaluation(
+            studentIdentity.primaryStudentId,
+            studentIdentity.primarySemesterId,
+            professorName,
+            studentIdentity,
+            offeringId,
+            subjectCode
+        );
+        if (submitted) {
+            completedCount += 1;
+        }
+    });
+
+    const totalAssigned = assignedEnrollments.length;
+    const hasIncomplete = totalAssigned > 0 && completedCount < totalAssigned;
+
+    return {
+        ready: true,
+        hasIncomplete,
+        totalAssigned,
+        completedCount,
+        semesterId: studentIdentity.primarySemesterId,
+        studentUserId: normalizeProofUserId(currentStudent.id),
+        studentNumber: String(currentStudent.studentNumber || '').trim(),
+        studentName: String(currentStudent.name || '').trim() || String(session.fullName || session.username || 'Student').trim(),
+        studentEmail: String(currentStudent.email || session.email || '').trim(),
+        studentUsername: String(session.username || '').trim(),
+    };
+}
+
+function findLatestStudentProofRecordForCurrentStudent(snapshot) {
+    const rows = SharedData.getStudentEvaluationProofRequests
+        ? SharedData.getStudentEvaluationProofRequests()
+        : [];
+    if (!Array.isArray(rows) || !rows.length || !snapshot || !snapshot.ready) {
+        return null;
+    }
+
+    const semesterToken = normalizeValue(snapshot.semesterId);
+    const studentUserToken = normalizeValue(snapshot.studentUserId);
+    const studentNumberToken = normalizeValue(snapshot.studentNumber);
+
+    const filtered = rows.filter(function (row) {
+        if (!row) return false;
+        const rowSemester = normalizeValue(row.semesterId);
+        if (semesterToken && rowSemester !== semesterToken) return false;
+
+        const rowUser = normalizeValue(normalizeProofUserId(row.studentUserId));
+        const rowNumber = normalizeValue(row.studentNumber);
+        const userMatch = studentUserToken && rowUser && studentUserToken === rowUser;
+        const numberMatch = studentNumberToken && rowNumber && studentNumberToken === rowNumber;
+        return userMatch || numberMatch;
+    });
+
+    if (!filtered.length) return null;
+    filtered.sort(function (a, b) {
+        const aTime = Date.parse(String(a && (a.submittedAt || a.reviewedAt) || '')) || 0;
+        const bTime = Date.parse(String(b && (b.submittedAt || b.reviewedAt) || '')) || 0;
+        return bTime - aTime;
+    });
+    return filtered[0];
+}
+
+function isValidStudentDriveProofLink(value) {
+    const urlText = String(value || '').trim();
+    if (!urlText) return false;
+    try {
+        const parsed = new URL(urlText);
+        const host = String(parsed.hostname || '').toLowerCase().replace(/^www\./, '');
+        return (parsed.protocol === 'https:' || parsed.protocol === 'http:')
+            && (host === 'drive.google.com' || host === 'docs.google.com');
+    } catch (_error) {
+        return false;
+    }
+}
+
+function setStudentProofStatusMessage(type, message) {
+    const statusEl = document.getElementById('studentProofStatusMessage');
+    if (!statusEl) return;
+    const text = String(message || '').trim();
+    statusEl.className = 'proof-status-message';
+    statusEl.textContent = '';
+    if (!text) return;
+    statusEl.classList.add(type === 'error' ? 'error' : (type === 'success' ? 'success' : 'info'));
+    statusEl.textContent = text;
+}
+
+function closeStudentProofModal() {
+    const modal = document.getElementById('studentProofModal');
+    if (!modal) return;
+    modal.classList.remove('active');
+    modal.setAttribute('aria-hidden', 'true');
+}
+
+function openStudentProofModal(options) {
+    const cfg = options || {};
+    const modal = document.getElementById('studentProofModal');
+    const lead = document.getElementById('studentProofModalLead');
+    const form = document.getElementById('studentProofForm');
+    const pendingBox = document.getElementById('studentProofPendingBox');
+    const reasonEl = document.getElementById('studentProofReason');
+    const linkEl = document.getElementById('studentProofDriveLink');
+    const submitBtn = document.getElementById('studentProofSubmitBtn');
+    const titleEl = document.getElementById('studentProofModalTitle');
+    if (!modal || !lead || !form || !pendingBox || !reasonEl || !linkEl || !submitBtn || !titleEl) return;
+
+    const completion = cfg.completionSnapshot || { completedCount: 0, totalAssigned: 0 };
+    const periodState = cfg.periodState || { endDate: '' };
+    const proofRecord = cfg.record || null;
+    const mode = cfg.mode === 'pending' ? 'pending' : 'submit';
+
+    titleEl.textContent = mode === 'pending'
+        ? 'Proof Under OSA Review'
+        : 'Evaluation Proof Requirement';
+    lead.textContent = `You completed ${completion.completedCount}/${completion.totalAssigned} evaluations. `
+        + `The Student-to-Professor evaluation period ended on ${periodState.endDate || 'N/A'}. `
+        + `Please provide your reason and Google Drive proof for OSA review.`;
+
+    if (mode === 'pending') {
+        form.style.display = 'none';
+        pendingBox.style.display = 'block';
+        const submittedText = proofRecord && proofRecord.submittedAt
+            ? ` Submitted on ${new Date(proofRecord.submittedAt).toLocaleString()}.`
+            : '';
+        pendingBox.textContent = `Your submitted proof is under OSA review.${submittedText}`;
+        setStudentProofStatusMessage('info', '');
+    } else {
+        form.style.display = '';
+        pendingBox.style.display = 'none';
+        reasonEl.value = proofRecord && proofRecord.status === 'rejected'
+            ? String(proofRecord.reason || '')
+            : '';
+        linkEl.value = proofRecord && proofRecord.status === 'rejected'
+            ? String(proofRecord.proofDriveLink || '')
+            : '';
+        reasonEl.disabled = false;
+        linkEl.disabled = false;
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit Proof';
+
+        if (proofRecord && String(proofRecord.status || '').toLowerCase() === 'rejected') {
+            const reviewNote = String(proofRecord.reviewNote || '').trim();
+            const rejectedMessage = reviewNote
+                ? `Your previous proof was rejected by OSA: ${reviewNote}`
+                : 'Your previous proof was rejected by OSA. Please submit an updated reason and proof link.';
+            setStudentProofStatusMessage('error', rejectedMessage);
+        } else {
+            setStudentProofStatusMessage('info', 'Submit your explanation and a valid Google Drive proof link.');
+        }
+    }
+
+    modal.classList.add('active');
+    modal.setAttribute('aria-hidden', 'false');
+}
+
+function handleStudentProofFormSubmit(event) {
+    event.preventDefault();
+
+    const reasonEl = document.getElementById('studentProofReason');
+    const linkEl = document.getElementById('studentProofDriveLink');
+    const submitBtn = document.getElementById('studentProofSubmitBtn');
+    if (!reasonEl || !linkEl || !submitBtn) return;
+
+    const reason = String(reasonEl.value || '').trim();
+    const proofDriveLink = String(linkEl.value || '').trim();
+    if (!reason) {
+        setStudentProofStatusMessage('error', 'Reason is required.');
+        reasonEl.focus();
+        return;
+    }
+    if (!proofDriveLink) {
+        setStudentProofStatusMessage('error', 'Google Drive proof link is required.');
+        linkEl.focus();
+        return;
+    }
+    if (!isValidStudentDriveProofLink(proofDriveLink)) {
+        setStudentProofStatusMessage('error', 'Please provide a valid Google Drive link.');
+        linkEl.focus();
+        return;
+    }
+
+    const periodState = getStudentEvaluationPeriodStateForProof();
+    const completion = buildCurrentStudentCompletionSnapshotForProof();
+    if (!periodState.isClosed || !completion.hasIncomplete) {
+        closeStudentProofModal();
+        return;
+    }
+
+    try {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Submitting...';
+
+        if (!SharedData.submitStudentEvaluationProof) {
+            throw new Error('Proof submission service is unavailable.');
+        }
+
+        const response = SharedData.submitStudentEvaluationProof({
+            studentUserId: completion.studentUserId,
+            studentNumber: completion.studentNumber,
+            studentName: completion.studentName,
+            studentEmail: completion.studentEmail,
+            studentUsername: completion.studentUsername,
+            semesterId: completion.semesterId,
+            reason: reason,
+            proofDriveLink: proofDriveLink,
+        });
+
+        if (!response || response.success !== true) {
+            throw new Error((response && response.error) || 'Failed to submit proof request.');
+        }
+
+        const savedRecord = response.record || {
+            status: 'pending',
+            reason: reason,
+            proofDriveLink: proofDriveLink,
+            submittedAt: new Date().toISOString(),
+        };
+
+        setStudentProofStatusMessage('success', 'Proof submitted. Waiting for OSA review.');
+        openStudentProofModal({
+            mode: 'pending',
+            completionSnapshot: completion,
+            periodState: periodState,
+            record: savedRecord,
+        });
+    } catch (error) {
+        setStudentProofStatusMessage('error', error && error.message ? error.message : 'Failed to submit proof request.');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit Proof';
+    }
+}
+
+function setupStudentProofModal() {
+    if (studentProofModalBound) return;
+    const modal = document.getElementById('studentProofModal');
+    const closeBtn = document.getElementById('studentProofModalClose');
+    const laterBtn = document.getElementById('studentProofLaterBtn');
+    const form = document.getElementById('studentProofForm');
+    if (!modal || !closeBtn || !laterBtn || !form) return;
+
+    closeBtn.addEventListener('click', closeStudentProofModal);
+    laterBtn.addEventListener('click', closeStudentProofModal);
+    form.addEventListener('submit', handleStudentProofFormSubmit);
+    modal.addEventListener('click', function (event) {
+        if (event.target === modal) {
+            closeStudentProofModal();
+        }
+    });
+
+    studentProofModalBound = true;
+}
+
+function refreshStudentProofRequirement() {
+    const dashboardView = document.getElementById('dashboardView');
+    if (!dashboardView || dashboardView.style.display === 'none') {
+        return;
+    }
+
+    const periodState = getStudentEvaluationPeriodStateForProof();
+    const completion = buildCurrentStudentCompletionSnapshotForProof();
+    if (!completion.ready || !periodState.isClosed || !completion.hasIncomplete) {
+        closeStudentProofModal();
+        return;
+    }
+
+    const latestProof = findLatestStudentProofRecordForCurrentStudent(completion);
+    const status = String(latestProof && latestProof.status || '').toLowerCase().trim();
+
+    if (status === 'approved') {
+        closeStudentProofModal();
+        return;
+    }
+
+    if (status === 'pending') {
+        openStudentProofModal({
+            mode: 'pending',
+            completionSnapshot: completion,
+            periodState: periodState,
+            record: latestProof,
+        });
+        return;
+    }
+
+    openStudentProofModal({
+        mode: 'submit',
+        completionSnapshot: completion,
+        periodState: periodState,
+        record: latestProof,
+    });
+}
+
 /**
  * Setup announcement and profile panels
  */
@@ -722,12 +1083,14 @@ function switchView(viewName) {
         renderAssignedEvaluationList();
         refreshEvaluationStatuses();
         updateSummaryCards();
+        refreshStudentProofRequirement();
     } else if (viewName === 'evaluationForm') {
         if (pageTitle) pageTitle.textContent = 'Evaluation Form';
         dashboardView.style.display = 'none';
         evaluationFormView.style.display = 'block';
         if (profileView) profileView.style.display = 'none';
         if (historyView) historyView.style.display = 'none';
+        closeStudentProofModal();
         // Scroll to top
         window.scrollTo(0, 0);
 
@@ -735,12 +1098,14 @@ function switchView(viewName) {
         if (typeof loadDynamicQuestionnaire === 'function') {
             loadDynamicQuestionnaire();
         }
+        startEvaluationBehaviorCapture(false);
     } else if (viewName === 'profile') {
         if (pageTitle) pageTitle.textContent = 'Profile';
         dashboardView.style.display = 'none';
         evaluationFormView.style.display = 'none';
         if (profileView) profileView.style.display = 'block';
         if (historyView) historyView.style.display = 'none';
+        closeStudentProofModal();
         window.scrollTo(0, 0);
     } else if (viewName === 'history') {
         if (pageTitle) pageTitle.textContent = 'History';
@@ -748,6 +1113,7 @@ function switchView(viewName) {
         evaluationFormView.style.display = 'none';
         if (profileView) profileView.style.display = 'none';
         if (historyView) historyView.style.display = 'block';
+        closeStudentProofModal();
         window.scrollTo(0, 0);
     }
 }
@@ -890,6 +1256,7 @@ function handleStartEvaluation(professorName, courseCode, courseOfferingId) {
     } else {
         sessionStorage.removeItem('selectedCourseOfferingId');
     }
+    startEvaluationBehaviorCapture(true);
 
     // Switch to evaluation form view
     switchView('evaluationForm');
@@ -1137,6 +1504,8 @@ function loadDynamicQuestionnaire() {
     if (typeof setupRatingInputs === 'function') {
         setupRatingInputs();
     }
+    setupExceptionReportingTextValidation();
+    applyExceptionReportingRequirements();
 }
 
 function normalizeValue(value) {
@@ -1177,6 +1546,79 @@ function getSelectedTargetParts() {
 
 function getSelectedCourseOfferingId() {
     return String(sessionStorage.getItem('selectedCourseOfferingId') || '').trim();
+}
+
+function resetEvaluationBehaviorCapture() {
+    evaluationBehaviorCapture.captureKey = '';
+    evaluationBehaviorCapture.startedAt = '';
+}
+
+function buildEvaluationBehaviorCaptureKey() {
+    const target = String(getSelectedEvaluationTarget() || '').trim();
+    const offeringId = String(getSelectedCourseOfferingId() || '').trim();
+    const session = getUserSession() || {};
+    const identity = buildCurrentStudentIdentity(session);
+    const studentUserId = String(identity.primaryStudentUserId || session.userId || '').trim();
+    const semesterId = String(identity.primarySemesterId || getActiveSemesterId() || '').trim();
+    return [studentUserId, semesterId, offeringId || target].join('|').toLowerCase();
+}
+
+function startEvaluationBehaviorCapture(force) {
+    const selectedTarget = String(getSelectedEvaluationTarget() || '').trim();
+    if (!selectedTarget) {
+        resetEvaluationBehaviorCapture();
+        return;
+    }
+
+    const captureKey = buildEvaluationBehaviorCaptureKey();
+    const shouldReset = force === true
+        || evaluationBehaviorCapture.captureKey !== captureKey
+        || String(evaluationBehaviorCapture.startedAt || '').trim() === '';
+
+    if (shouldReset) {
+        evaluationBehaviorCapture.captureKey = captureKey;
+        evaluationBehaviorCapture.startedAt = new Date().toISOString();
+    }
+}
+
+function buildEvaluationBehaviorMeta(payload, questionDefinitions) {
+    const submittedAt = String(payload && payload.submittedAt || '').trim() || new Date().toISOString();
+    const startedAt = String(evaluationBehaviorCapture.startedAt || '').trim() || submittedAt;
+    const startedTs = Date.parse(startedAt);
+    const submittedTs = Date.parse(submittedAt);
+
+    const durationSeconds = (Number.isFinite(startedTs) && Number.isFinite(submittedTs) && submittedTs >= startedTs)
+        ? Math.max((submittedTs - startedTs) / 1000, 0)
+        : 0;
+
+    const questions = Array.isArray(questionDefinitions) ? questionDefinitions : [];
+    const questionCount = questions.length;
+    const ratings = payload && typeof payload.ratings === 'object' && payload.ratings ? payload.ratings : {};
+    const qualitative = payload && typeof payload.qualitative === 'object' && payload.qualitative ? payload.qualitative : {};
+
+    const answeredIds = new Set();
+    Object.keys(ratings).forEach(function (key) {
+        const value = String(ratings[key] == null ? '' : ratings[key]).trim();
+        if (value !== '') answeredIds.add(String(key));
+    });
+    Object.keys(qualitative).forEach(function (key) {
+        const value = String(qualitative[key] == null ? '' : qualitative[key]).trim();
+        if (value !== '') answeredIds.add(String(key));
+    });
+    const answeredCount = answeredIds.size;
+    const secondsPerQuestion = answeredCount > 0
+        ? (durationSeconds / answeredCount)
+        : (questionCount > 0 ? durationSeconds / questionCount : 0);
+
+    return {
+        captureVersion: 1,
+        startedAt,
+        submittedAt,
+        durationSeconds: parseFloat(durationSeconds.toFixed(3)),
+        questionCount,
+        answeredCount,
+        secondsPerQuestion: parseFloat(secondsPerQuestion.toFixed(6)),
+    };
 }
 
 function escapeSelectorToken(value) {
@@ -1685,7 +2127,8 @@ function refreshEvaluationStatuses() {
  */
 function renderQuestionHTML(question, index) {
     if (question.type === 'rating') {
-        const maxRating = parseInt(question.ratingScale.split('-')[1]) || 5;
+        const scale = String(question.ratingScale || '1-5');
+        const maxRating = parseInt(scale.split('-')[1], 10) || 5;
         let ratingHtml = `
             <div class="question-group">
                 <label class="question-label">${index}. ${question.text}${question.required ? ' <span style="color:red">*</span>' : ''}</label>
@@ -1706,13 +2149,165 @@ function renderQuestionHTML(question, index) {
         `;
         return ratingHtml;
     } else {
+        const isBaseRequired = !!question.required;
+        const hasExceptionReporting = !!question.exceptionReporting;
+        const isInitiallyRequired = isBaseRequired;
+        const requiredMarker = `<span class="question-required-star" style="color:red;${isInitiallyRequired ? '' : ' display:none;'}">*</span>`;
         return `
             <div class="question-group">
-                <label class="question-label" for="${question.id}">${index}. ${question.text}${question.required ? ' <span style="color:red">*</span>' : ''}</label>
-                <textarea id="${question.id}" name="${question.id}" class="form-textarea" rows="4" placeholder="Your answer..." ${question.required ? 'required' : ''}></textarea>
+                <label class="question-label" for="${question.id}">${index}. ${question.text} ${requiredMarker}</label>
+                <textarea id="${question.id}" name="${question.id}" class="form-textarea" rows="4" placeholder="Your answer..." ${isInitiallyRequired ? 'required' : ''} data-base-required="${isBaseRequired ? '1' : '0'}" data-exception-reporting="${hasExceptionReporting ? '1' : '0'}"></textarea>
             </div>
         `;
     }
+}
+
+const EXCEPTION_REPORTING_FILLER_VALUES = new Set([
+    'n/a',
+    'na',
+    'none',
+    'no comment',
+    'no comments',
+    'ok',
+    'test',
+    '-',
+    '--',
+    '...'
+]);
+
+const EXCEPTION_REPORTING_COMMON_WORDS = new Set([
+    'the', 'and', 'is', 'are', 'because', 'this', 'that', 'with', 'for', 'from', 'was', 'were',
+    'sa', 'ang', 'at', 'siya', 'pero', 'dahil', 'para', 'mga', 'nang', 'ng', 'ako', 'kami'
+]);
+
+function normalizeExceptionReportingTextValue(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function extractExceptionReportingWordTokens(value) {
+    const normalized = normalizeExceptionReportingTextValue(value).toLowerCase();
+    if (!normalized) return [];
+
+    return normalized
+        .split(/\s+/)
+        .map(token => token
+            .replace(/^[^a-z]+|[^a-z]+$/gi, '')
+            .replace(/[^a-z']/gi, '')
+        )
+        .filter(Boolean);
+}
+
+function isLikelyGibberishExceptionToken(token) {
+    const compact = String(token || '').toLowerCase().replace(/'/g, '');
+    if (!compact) return false;
+    if (compact.length > 24) return true;
+    if (/(.)\1{3,}/.test(compact)) return true;
+    if (compact.length >= 5 && !/[aeiou]/.test(compact)) return true;
+
+    if (compact.length >= 8) {
+        const uniqueRatio = (new Set(compact.split(''))).size / compact.length;
+        if (uniqueRatio < 0.35) return true;
+    }
+
+    return false;
+}
+
+function validateExceptionReportingTextValue(value, isRequired) {
+    const normalized = normalizeExceptionReportingTextValue(value);
+    const normalizedLower = normalized.toLowerCase();
+
+    if (!normalized) {
+        return isRequired ? 'Please enter a meaningful response with at least 8 words.' : '';
+    }
+
+    if (EXCEPTION_REPORTING_FILLER_VALUES.has(normalizedLower)) {
+        return 'Please avoid filler responses like "n/a" or "none".';
+    }
+
+    const tokens = extractExceptionReportingWordTokens(normalized);
+    if (tokens.length < 8) {
+        return 'Please write at least 8 words in one meaningful sentence.';
+    }
+
+    const hasCommonWord = tokens.some(token => EXCEPTION_REPORTING_COMMON_WORDS.has(token));
+    if (!hasCommonWord) {
+        return 'Please write a clearer sentence using normal words.';
+    }
+
+    const gibberishCount = tokens.filter(isLikelyGibberishExceptionToken).length;
+    if (tokens.length > 0 && (gibberishCount / tokens.length) > 0.5) {
+        return 'Please avoid random letters or unreadable words.';
+    }
+
+    return '';
+}
+
+function computeCurrentRatingAverage() {
+    const selectedRatings = document.querySelectorAll('#dynamic-questions-container input[type="radio"]:checked');
+    let total = 0;
+    let count = 0;
+
+    selectedRatings.forEach(input => {
+        const value = parseFloat(input.value);
+        if (!Number.isFinite(value)) return;
+        total += value;
+        count += 1;
+    });
+
+    if (!count) return null;
+    return total / count;
+}
+
+function applyExceptionReportingRequirements(options) {
+    const cfg = options || {};
+    const shouldReport = cfg.report === true;
+    const scopeRoot = cfg.scopeRoot && typeof cfg.scopeRoot.querySelectorAll === 'function'
+        ? cfg.scopeRoot
+        : document;
+    const averageRating = computeCurrentRatingAverage();
+    const isExceptionTriggered = Number.isFinite(averageRating) && averageRating < 2.5;
+    const exceptionTextareas = scopeRoot.querySelectorAll('#dynamic-questions-container textarea[data-exception-reporting="1"], textarea[data-exception-reporting="1"]');
+    let firstInvalidField = null;
+
+    exceptionTextareas.forEach(textarea => {
+        const isBaseRequired = textarea.getAttribute('data-base-required') === '1';
+        const shouldRequire = isBaseRequired || isExceptionTriggered;
+
+        if (shouldRequire) {
+            textarea.setAttribute('required', 'required');
+        } else {
+            textarea.removeAttribute('required');
+        }
+
+        const validationMessage = validateExceptionReportingTextValue(textarea.value, shouldRequire);
+        textarea.setCustomValidity(validationMessage);
+        if (validationMessage && !firstInvalidField) {
+            firstInvalidField = textarea;
+        }
+
+        const group = textarea.closest('.question-group');
+        const marker = group ? group.querySelector('.question-required-star') : null;
+        if (marker) {
+            marker.style.display = shouldRequire ? '' : 'none';
+        }
+    });
+
+    if (shouldReport && firstInvalidField) {
+        firstInvalidField.reportValidity();
+    }
+
+    return !firstInvalidField;
+}
+
+function setupExceptionReportingTextValidation() {
+    const exceptionTextareas = document.querySelectorAll('#dynamic-questions-container textarea[data-exception-reporting="1"]');
+    exceptionTextareas.forEach(textarea => {
+        const validate = () => {
+            applyExceptionReportingRequirements();
+        };
+        textarea.addEventListener('input', validate);
+        textarea.addEventListener('change', validate);
+    });
 }
 
 function setupSectionFlow() {
@@ -1792,6 +2387,9 @@ function toggleStepInputs(stepElement, enabled) {
 function validateCurrentStep() {
     const currentStep = evaluationSectionFlow.sections[evaluationSectionFlow.activeIndex];
     if (!currentStep) return true;
+    if (!applyExceptionReportingRequirements({ report: true, scopeRoot: currentStep })) {
+        return false;
+    }
 
     const requiredFields = Array.from(currentStep.querySelectorAll('input[required], textarea[required], select[required]'));
     for (const field of requiredFields) {
@@ -1805,6 +2403,14 @@ function validateCurrentStep() {
             continue;
         }
 
+        if (!field.checkValidity()) {
+            field.reportValidity();
+            return false;
+        }
+    }
+
+    const exceptionFields = Array.from(currentStep.querySelectorAll('textarea[data-exception-reporting="1"]'));
+    for (const field of exceptionFields) {
         if (!field.checkValidity()) {
             field.reportValidity();
             return false;
@@ -1892,13 +2498,19 @@ function handleChangePassword() {
         return;
     }
 
-    const payload = {
-        username: getUserSession() ? getUserSession().username : '',
-        currentPassword,
-        newPassword
-    };
+    if (!SharedData.changeOwnPassword) {
+        showErrorMessage('Password update service is unavailable.');
+        return;
+    }
 
-    showSuccessMessage('Password update request ready for SQL connection.');
+    try {
+        SharedData.changeOwnPassword(currentPassword, newPassword);
+        showSuccessMessage('Password updated successfully.');
+    } catch (error) {
+        console.error('[StudentPanel] Failed to update password.', error);
+        showErrorMessage(error && error.message ? error.message : 'Failed to update password.');
+        return;
+    }
 
     const form = document.getElementById('changePasswordForm');
     if (form) form.reset();
@@ -2191,6 +2803,9 @@ function handleFormSubmission() {
 
     removeAutosaveTimer();
     enableAllSectionInputs();
+    if (!applyExceptionReportingRequirements({ report: true })) {
+        return;
+    }
 
     // Validate form
     if (!form.checkValidity()) {
@@ -2309,6 +2924,7 @@ function collectFormData() {
         submittedAt: new Date().toISOString(),
         status: 'submitted'
     };
+    data.behaviorMeta = buildEvaluationBehaviorMeta(data, allQuestions);
 
     // Get user session
     if (studentId) {
@@ -2444,6 +3060,7 @@ function clearSelectedEvaluationTarget() {
     sessionStorage.removeItem('selectedProfessor');
     sessionStorage.removeItem('selectedCourse');
     sessionStorage.removeItem('selectedCourseOfferingId');
+    resetEvaluationBehaviorCapture();
 }
 
 /**
@@ -2463,6 +3080,7 @@ function setupRatingInputs() {
                     label.style.transform = 'scale(1.05)';
                 }, 200);
             }
+            applyExceptionReportingRequirements();
         });
     });
 }

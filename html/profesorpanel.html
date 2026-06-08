@@ -336,7 +336,7 @@
                         <div class="section-header">
                             <div class="section-title">
                                 <h2>Faculty Response Rate & Counts</h2>
-                                <p>Evaluations received per subject/section. Counts are per subject evaluation.</p>
+                                <p>Evaluations are grouped by subject. Section Count shows how many sections are handled per subject.</p>
                                 <p class="semester-display">Showing: <span id="selectedEvalType">Student
                                         Evaluation</span> — <span id="selectedSemester">Selected semester</span></p>
                             </div>
@@ -356,21 +356,20 @@
                             </div>
                         </div>
 
-                        <div class="table-container">
+                        <div class="table-container faculty-breakdown-table-wrap">
                             <table class="faculty-breakdown-table" id="facultyBreakdownTable">
                                 <thead>
                                     <tr>
                                         <th>Subject</th>
-                                        <th>Section</th>
+                                        <th>Section Count</th>
                                         <th>Evaluations Received</th>
                                         <th>Response Rate</th>
                                         <th>Avg Rating</th>
-                                        <th>Comments</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <tr>
-                                        <td colspan="6">No evaluation data available.</td>
+                                        <td colspan="5">No evaluation data available.</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -380,14 +379,23 @@
                             <div class="faculty-comments-header">
                                 <div>
                                     <h3 id="profSubjectCommentsTitle">Anonymous Feedback</h3>
-                                    <p class="faculty-comments-meta" id="profSubjectCommentsMeta">Select a subject and
-                                        section to view anonymized comments.</p>
+                                    <p class="faculty-comments-meta" id="profSubjectCommentsMeta">Press View to load
+                                        all anonymized comments for the selected filters.</p>
                                 </div>
-                                <button type="button" class="btn-cancel faculty-comments-close"
-                                    id="profSubjectCommentsClose">Close</button>
+                                <div class="faculty-comments-actions">
+                                    <button type="button" class="btn-submit faculty-comments-ai-btn"
+                                        id="profSubjectCommentsAiSummarize">AI Summarize</button>
+                                    <button type="button" class="btn-submit faculty-comments-view"
+                                        id="profSubjectCommentsView">View</button>
+                                    <button type="button" class="btn-cancel faculty-comments-close"
+                                        id="profSubjectCommentsClose">Close</button>
+                                </div>
+                            </div>
+                            <div class="faculty-comments-ai-summary" id="profSubjectCommentsAiSummary" aria-live="polite">
+                                Click <strong>AI Summarize</strong> after loading comments to generate a student-feedback summary.
                             </div>
                             <ul class="faculty-comments-list" id="profSubjectCommentsList">
-                                <li class="faculty-comments-empty">No summaries loaded yet.</li>
+                                <li class="faculty-comments-empty">Press View to load feedback.</li>
                             </ul>
                         </div>
                     </section>
@@ -397,7 +405,7 @@
                         <div class="section-header">
                             <div class="section-title">
                                 <h2>Faculty Dashboard: Response Rate & Counts</h2>
-                                <p>Evaluations received per subject/section. Counts are per subject evaluation.</p>
+                                <p>Evaluations are grouped by subject. Section Count shows how many sections are handled per subject.</p>
                             </div>
                         </div>
 
@@ -425,6 +433,48 @@
                             <p>Summary ratings and feedback for the current evaluation period.</p>
                         </div>
                     </div>
+
+                    <section class="summary-table-section">
+                        <div class="section-header">
+                            <div class="section-title">
+                                <h2>Semestral Evaluation Trend</h2>
+                                <p>Improvement or decline based on combined average results from all evaluations in the past 4 semesters.</p>
+                            </div>
+                        </div>
+                        <div class="semestral-trend-grid">
+                            <div class="semestral-trend-panel">
+                                <div class="semestral-trend-status" id="semestralTrendStatus">No semestral trend data available.</div>
+                                <p class="semestral-trend-delta" id="semestralTrendDelta">Select a semester to load trend comparison.</p>
+                                <div class="table-container">
+                                    <table class="summary-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Semester</th>
+                                                <th>Overall Avg</th>
+                                                <th>Student</th>
+                                                <th>Peer</th>
+                                                <th>Supervisor</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="semestralTrendTableBody">
+                                            <tr>
+                                                <td colspan="5">No data available.</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div class="semestral-trend-chart-card">
+                                <div class="chart-header">
+                                    <h3>4-Semester Trend</h3>
+                                    <p>Overall average score movement</p>
+                                </div>
+                                <div class="chart-container semestral-trend-chart-container">
+                                    <canvas id="semestralTrendChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
 
                     <!-- Student Evaluation Charts -->
                     <div class="charts-section">
@@ -527,25 +577,6 @@
                         </div>
                     </section>
 
-                    <!-- Student Comments Section -->
-                    <section class="comments-section">
-                        <div class="section-header">
-                            <div class="section-title">
-                                <h2>Student Comments Summary</h2>
-                                <p>Feedback and suggestions from students.</p>
-                            </div>
-                        </div>
-
-                        <div class="comments-list" id="studentCommentsSummaryList">
-                            <div class="comment-card">
-                                <div class="comment-icon">
-                                    <i class="fas fa-quote-left"></i>
-                                </div>
-                                <p class="comment-text">No data available.</p>
-                                <p class="comment-author">- System</p>
-                            </div>
-                        </div>
-                    </section>
                 </section>
 
                 </div>
@@ -664,6 +695,10 @@
                         <div class="form-group">
                             <label for="fpSectionCActionPlanInput">Action Plan</label>
                             <textarea id="fpSectionCActionPlanInput" class="form-input" rows="3" placeholder="Input action plan"></textarea>
+                        </div>
+                        <div class="faculty-paper-ai-actions">
+                            <button type="button" class="btn-submit" id="fpDetailAiRecommendBtn">AI Smart Recommendations</button>
+                            <div class="faculty-paper-ai-feedback" id="fpDetailAiRecommendFeedback" aria-live="polite"></div>
                         </div>
                     </div>
 
@@ -872,8 +907,8 @@
         </main>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="../JsScrip/db-data.js"></script>
-    <script src="../JsScrip/profesorpanel.js"></script>
+    <script src="../JsScrip/db-data.js?v=20260414d"></script>
+    <script src="../JsScrip/profesorpanel.js?v=20260414d"></script>
 </body>
 
 </html>

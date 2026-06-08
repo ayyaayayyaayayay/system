@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/hrpanel.css">
+    <link rel="stylesheet" href="../css/hrpanel.css?v=20260414e">
     <link rel="stylesheet" href="../css/panel-theme.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -45,6 +45,10 @@
                     <a href="#" class="nav-link" data-view="questionnaire">
                         <i class="fas fa-clipboard-list"></i>
                         <span>Questionnaire</span>
+                    </a>
+                    <a href="#" class="nav-link" data-view="ai-insights">
+                        <i class="fas fa-brain"></i>
+                        <span>AI Insights</span>
                     </a>
                     <a href="#" class="nav-link" data-view="profile">
                         <i class="fas fa-id-card"></i>
@@ -780,6 +784,201 @@
                     </div>
                 </div>
 
+                <!-- AI Insights View -->
+                <div id="ai-insights-view" class="content-view" style="display: none;">
+                    <div class="view-header">
+                        <h1><i class="fas fa-brain"></i> AI Insights</h1>
+                        <p>Behavior scoring, bias detection, cross-source discrepancy checks, and credibility scoring.</p>
+                    </div>
+
+                    <section class="admin-section ai-insights-section">
+                        <div class="section-header">
+                            <div class="section-title">
+                                <h2><i class="fas fa-shield-alt"></i> Evaluation Behavior Score</h2>
+                                <p>Future submissions only: detects fast, uniform, and repetitive answer patterns.</p>
+                            </div>
+                            <div class="ai-insights-controls">
+                                <select id="hr-ai-behavior-semester" class="filter-select"></select>
+                                <button type="button" class="btn-add-user" id="hr-run-behavior-analysis-btn">
+                                    <i class="fas fa-play"></i>
+                                    Run Behavior Analysis
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="ai-insights-feedback" id="hr-ai-behavior-feedback" aria-live="polite"></div>
+
+                        <div class="ai-insights-table-wrap">
+                            <h3>Student Aggregate Scores</h3>
+                            <div class="activity-log-table">
+                                <table class="ai-insights-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Student Number</th>
+                                            <th>Forms Analyzed</th>
+                                            <th>Avg Behavior Score</th>
+                                            <th>Assessment Level</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="hr-ai-student-aggregate-body">
+                                        <tr>
+                                            <td colspan="4" style="text-align:center; padding:18px;">Run analysis to view student aggregate scores.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="ai-insights-table-wrap">
+                            <h3>Submission-Level Analysis</h3>
+                            <div class="activity-log-table">
+                                <table class="ai-insights-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Submission ID</th>
+                                            <th>Student Number</th>
+                                            <th>Score</th>
+                                            <th>Fast Flag</th>
+                                            <th>Uniform Flag</th>
+                                            <th>Repetitive Flag</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="hr-ai-submission-body">
+                                        <tr>
+                                            <td colspan="6" style="text-align:center; padding:18px;">No submission analysis yet.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="admin-section ai-insights-section">
+                        <div class="section-header">
+                            <div class="section-title">
+                                <h2><i class="fas fa-comment-dots"></i> Bias Detection</h2>
+                                <p>Classifies student feedback as Constructive, Neutral, or Biased.</p>
+                            </div>
+                            <div class="ai-insights-controls">
+                                <select id="hr-ai-bias-semester" class="filter-select"></select>
+                                <button type="button" class="btn-add-user" id="hr-run-bias-detection-btn">
+                                    <i class="fas fa-play"></i>
+                                    Run Bias Detection
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="ai-insights-feedback" id="hr-ai-bias-feedback" aria-live="polite"></div>
+                        <div class="ai-insights-feedback ai-insights-summary" id="hr-ai-bias-summary" aria-live="polite">No bias analysis yet.</div>
+
+                        <div class="ai-insights-table-wrap">
+                            <div class="activity-log-table">
+                                <table class="ai-insights-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Comment</th>
+                                            <th class="ai-insights-label-col">Label</th>
+                                            <th>Reason</th>
+                                            <th class="ai-insights-source-col">Source</th>
+                                            <th>Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="hr-ai-bias-body">
+                                        <tr>
+                                            <td colspan="5" style="text-align:center; padding:18px;">Run bias detection to classify comments.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="admin-section ai-insights-section">
+                        <div class="section-header">
+                            <div class="section-title">
+                                <h2><i class="fas fa-code-compare"></i> Cross-Source Evaluation Discrepancy</h2>
+                                <p>Flags cases where student ratings are significantly lower than supervisor ratings.</p>
+                            </div>
+                            <div class="ai-insights-controls">
+                                <select id="hr-ai-discrepancy-semester" class="filter-select"></select>
+                                <button type="button" class="btn-add-user" id="hr-run-discrepancy-analysis-btn">
+                                    <i class="fas fa-play"></i>
+                                    Run Discrepancy Check
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="ai-insights-feedback" id="hr-ai-discrepancy-feedback" aria-live="polite">No discrepancy analysis yet.</div>
+                        <div class="ai-insights-feedback ai-insights-summary" id="hr-ai-discrepancy-summary" aria-live="polite">Reviewed: 0 | Flagged: 0 | Threshold: 2.0</div>
+
+                        <div class="ai-insights-table-wrap">
+                            <div class="activity-log-table">
+                                <table class="ai-insights-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Professor</th>
+                                            <th>Student Avg</th>
+                                            <th>Supervisor Avg</th>
+                                            <th>Student vs Supervisor Diff</th>
+                                            <th>Flag Reason</th>
+                                            <th>Severity</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="hr-ai-discrepancy-body">
+                                        <tr>
+                                            <td colspan="6" style="text-align:center; padding:18px;">Run discrepancy check to identify cross-source inconsistencies.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="admin-section ai-insights-section">
+                        <div class="section-header">
+                            <div class="section-title">
+                                <h2><i class="fas fa-shield-alt"></i> Evaluation Credibility Score</h2>
+                                <p>Combines behavior, bias, and cross-source validation into an overall reliability score.</p>
+                            </div>
+                            <div class="ai-insights-controls">
+                                <select id="hr-ai-credibility-semester" class="filter-select"></select>
+                                <button type="button" class="btn-add-user" id="hr-run-credibility-analysis-btn">
+                                    <i class="fas fa-play"></i>
+                                    Run Credibility Analysis
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="ai-insights-feedback" id="hr-ai-credibility-feedback" aria-live="polite">No credibility analysis yet.</div>
+                        <div class="ai-insights-feedback ai-insights-summary" id="hr-ai-credibility-summary" aria-live="polite">Total: 0 | Highly reliable: 0 | Acceptable: 0 | Needs review: 0 | Avg score: 0</div>
+
+                        <div class="ai-insights-table-wrap">
+                            <div class="activity-log-table">
+                                <table class="ai-insights-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Evaluation ID</th>
+                                            <th>Student Number</th>
+                                            <th>Professor</th>
+                                            <th>Behavior Score</th>
+                                            <th>Bias Label</th>
+                                            <th>Cross-Source Status</th>
+                                            <th>Credibility Score</th>
+                                            <th>Category</th>
+                                            <th>Reliability Summary</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="hr-ai-credibility-body">
+                                        <tr>
+                                            <td colspan="9" style="text-align:center; padding:18px;">Run credibility analysis to compute evaluation reliability.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+
                 <!-- Activity Log View -->
                 <div id="activity-log-view" class="content-view" style="display: none;">
                     <div class="view-header">
@@ -1111,6 +1310,8 @@
                     <div class="checkbox-row">
                         <input type="checkbox" id="question-required" name="required">
                         <label for="question-required">Required Question</label>
+                        <input type="checkbox" id="question-exception-reporting" name="exceptionReporting" style="display: none;">
+                        <label for="question-exception-reporting" id="question-exception-reporting-label" style="display: none;">Exception Reporting</label>
                     </div>
                 </div>
                 <div class="modal-actions">
@@ -1121,8 +1322,8 @@
         </div>
     </div>
 
-    <script src="../JsScrip/db-data.js"></script>
-    <script src="../JsScrip/hrpanel.js"></script>
+    <script src="../JsScrip/db-data.js?v=20260414e"></script>
+    <script src="../JsScrip/hrpanel.js?v=20260414e"></script>
 </body>
 
 </html>

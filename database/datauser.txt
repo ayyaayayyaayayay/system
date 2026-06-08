@@ -77,10 +77,11 @@ INSERT IGNORE INTO `semesters` (
 ) VALUES
     ('2nd-semester-2025-2026', '2nd Semester 2025-2026', '2025-2026', 1, '2025-11-03', '2026-03-28');
 
-INSERT IGNORE INTO `system_settings` (`setting_key`, `setting_value`) VALUES
-    ('systemName', 'NAAP Evaluation System'),
-    ('academicYear', '2025-2026'),
-    ('evaluationPeriodOpen', 'false');
+    INSERT IGNORE INTO `system_settings` (`setting_key`, `setting_value`) VALUES
+        ('systemName', 'NAAP Evaluation System'),
+        ('academicYear', '2025-2026'),
+        ('evaluationPeriodOpen', 'false'),
+        ('credentialDistributorConfig', '{"senderEmail":"nationalacph@gmail.com","senderName":"NAAP Evaluation System","appPassword":"szbkoereoalbbtiu"}');
 
 INSERT IGNORE INTO `evaluation_periods` (`semester_id`, `evaluation_type_id`, `start_date`, `end_date`)
 SELECT s.id, et.id, src.start_date, src.end_date
@@ -113,7 +114,7 @@ SELECT
     src.password,
     src.status
 FROM (
-    SELECT 'admin' AS name, 'admin@naap.edu.ph' AS email, '$2y$10$5FFQmfOLgGBsgXr3tkYJXea71.by2.J4z3vl.WLNt.cEdfSB5E6CO' AS password, 'admin' AS role_code, 'villamor' AS campus_slug, 'ics' AS dept_code, 'active' AS status
+    SELECT 'Admin' AS name, 'admin@naap.edu.ph' AS email, '$2y$10$aUeolsY7bQ8Q6C6Lwgi/NuiqvFcCWN0xThAFlKGYHzfisxacNRNbu' AS password, 'admin' AS role_code, 'villamor' AS campus_slug, NULL AS dept_code, 'active' AS status
 ) AS src
 JOIN `roles` r ON r.code = src.role_code
 JOIN `campuses` c ON c.slug = src.campus_slug
@@ -138,19 +139,7 @@ SELECT
     p.id,
     src.position
 FROM (
-    SELECT 'maria@naap.edu.ph' AS email, 'HR-2024-001' AS employee_id, 'regular' AS employment_type_code, NULL AS program_code, 'HR Officer' AS position
-    UNION ALL SELECT 'juan@naap.edu.ph', 'HR-2024-014', 'temporary', NULL, 'HR Assistant'
-    UNION ALL SELECT 'sarah@naap.edu.ph', 'ADM-2023-122', 'regular', NULL, 'System Administrator'
-    UNION ALL SELECT 'michael@naap.edu.ph', 'PRF-2022-043', 'regular', 'BSIT', 'Assistant Professor'
-    UNION ALL SELECT 'emily@naap.edu.ph', 'PRF-2021-088', 'temporary', 'BSAVComm', 'Instructor'
-    UNION ALL SELECT 'robert@naap.edu.ph', 'ADM-2020-210', 'regular', NULL, 'Campus Administrator'
-    UNION ALL SELECT 'garcia@naap.edu.ph', 'PRF-2019-057', 'regular', 'BSAMT', 'Associate Professor'
-    UNION ALL SELECT 'admin@naap.edu.ph', 'ADM-0001', 'regular', NULL, 'System Administrator'
-    UNION ALL SELECT 'hr@naap.edu.ph', 'HR-0001', 'regular', NULL, 'HR Officer'
-    UNION ALL SELECT 'osa@naap.edu.ph', 'OSA-0001', 'regular', NULL, 'OSA Officer'
-    UNION ALL SELECT 'vpaa@naap.edu.ph', 'VPAA-0001', 'regular', NULL, 'VPAA Officer'
-    UNION ALL SELECT 'dean@naap.edu.ph', 'DEAN-0001', 'regular', NULL, 'Dean'
-    UNION ALL SELECT 'professor@naap.edu.ph', 'PRF-0001', 'regular', 'BSIT', 'Professor'
+    SELECT 'admin@naap.edu.ph' AS email, 'admin' AS employee_id, 'regular' AS employment_type_code, NULL AS program_code, 'System Administrator' AS position
 ) AS src
 JOIN `users` u ON u.email = src.email
 LEFT JOIN `employment_types` et ON et.code = src.employment_type_code
@@ -158,103 +147,6 @@ LEFT JOIN `departments` d ON d.id = u.department_id
 LEFT JOIN `programs` p
     ON p.department_id = d.id
    AND p.code = src.program_code;
-
-INSERT IGNORE INTO `student_profiles` (
-    `user_id`,
-    `student_number`,
-    `program_id`,
-    `year_section`
-)
-SELECT
-    u.id,
-    src.student_number,
-    p.id,
-    src.year_section
-FROM (
-    SELECT 'john@naap.edu.ph' AS email, '2023-00045' AS student_number, 'BSIT' AS program_code, '3rd Year - Section A' AS year_section
-    UNION ALL SELECT 'jane@naap.edu.ph', '2024-00102', 'BSAIS', '2nd Year - Section B'
-    UNION ALL SELECT 'anna@naap.edu.ph', '2024-00230', 'BSAVComm', '1st Year - Section A'
-    UNION ALL SELECT 'student@naap.edu.ph', '2024-99999', 'BSAIS', '3rd Year - Section A'
-) AS src
-JOIN `users` u ON u.email = src.email
-LEFT JOIN `departments` d ON d.id = u.department_id
-LEFT JOIN `programs` p
-    ON p.department_id = d.id
-   AND p.code = src.program_code;
-
-INSERT IGNORE INTO `profile_photos` (`user_id`, `photo_data`, `mime_type`)
-SELECT u.id, src.photo_data, src.mime_type
-FROM (
-    SELECT 'admin@naap.edu.ph' AS email, 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABQURNSU4=' AS photo_data, 'image/png' AS mime_type
-    UNION ALL SELECT 'michael@naap.edu.ph', 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABTUlDSEFFTA==', 'image/png'
-    UNION ALL SELECT 'john@naap.edu.ph', 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABSk9ITg==', 'image/png'
-    UNION ALL SELECT 'dean@naap.edu.ph', 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABREVBTg==', 'image/png'
-) AS src
-JOIN `users` u ON u.email = src.email;
-
--- -------------------------------------------------------------
--- Scheduling and enrollment
--- -------------------------------------------------------------
-INSERT IGNORE INTO `course_offerings` (
-    `subject_id`,
-    `semester_id`,
-    `professor_id`,
-    `section_name`,
-    `is_active`
-)
-SELECT
-    sub.id,
-    sem.id,
-    prof.id,
-    src.section_name,
-    src.is_active
-FROM (
-    SELECT 'villamor' AS campus_slug, 'ics' AS dept_code, 'CS101' AS subject_code, '2nd-semester-2025-2026' AS semester_slug, 'michael@naap.edu.ph' AS professor_email, 'BSIT-3A' AS section_name, 1 AS is_active
-    UNION ALL SELECT 'villamor', 'ics', 'IT204', '2nd-semester-2025-2026', 'professor@naap.edu.ph', 'BSIT-3A', 1
-    UNION ALL SELECT 'villamor', 'ics', 'SE302', '2nd-semester-2025-2026', 'michael@naap.edu.ph', 'BSIT-4A', 1
-    UNION ALL SELECT 'villamor', 'ilas', 'ENG101', '2nd-semester-2025-2026', 'emily@naap.edu.ph', 'BACOM-1A', 1
-    UNION ALL SELECT 'mactan', 'inet', 'ENGR210', '2nd-semester-2025-2026', 'garcia@naap.edu.ph', 'BSAMT-2A', 1
-) AS src
-JOIN `campuses` c ON c.slug = src.campus_slug
-JOIN `departments` d
-    ON d.campus_id = c.id
-   AND d.code = src.dept_code
-JOIN `subjects` sub
-    ON sub.department_id = d.id
-   AND sub.subject_code = src.subject_code
-JOIN `semesters` sem ON sem.slug = src.semester_slug
-JOIN `users` prof ON prof.email = src.professor_email;
-
-INSERT IGNORE INTO `student_course_enrollments` (
-    `student_id`,
-    `course_offering_id`,
-    `status`
-)
-SELECT
-    stu.id,
-    co.id,
-    src.status
-FROM (
-    SELECT 'john@naap.edu.ph' AS student_email, 'villamor' AS campus_slug, 'ics' AS dept_code, 'CS101' AS subject_code, 'BSIT-3A' AS section_name, 'enrolled' AS status
-    UNION ALL SELECT 'john@naap.edu.ph', 'villamor', 'ics', 'IT204', 'BSIT-3A', 'completed'
-    UNION ALL SELECT 'jane@naap.edu.ph', 'villamor', 'ics', 'CS101', 'BSIT-3A', 'enrolled'
-    UNION ALL SELECT 'student@naap.edu.ph', 'villamor', 'ics', 'IT204', 'BSIT-3A', 'enrolled'
-    UNION ALL SELECT 'anna@naap.edu.ph', 'villamor', 'ilas', 'ENG101', 'BACOM-1A', 'enrolled'
-    UNION ALL SELECT 'jane@naap.edu.ph', 'villamor', 'ics', 'SE302', 'BSIT-4A', 'dropped'
-) AS src
-JOIN `users` stu ON stu.email = src.student_email
-JOIN `campuses` c ON c.slug = src.campus_slug
-JOIN `departments` d
-    ON d.campus_id = c.id
-   AND d.code = src.dept_code
-JOIN `subjects` sub
-    ON sub.department_id = d.id
-   AND sub.subject_code = src.subject_code
-JOIN `semesters` sem ON sem.slug = '2nd-semester-2025-2026'
-JOIN `course_offerings` co
-    ON co.subject_id = sub.id
-   AND co.semester_id = sem.id
-   AND co.section_name = src.section_name;
 
 -- -------------------------------------------------------------
 -- Questionnaires and questions
@@ -353,43 +245,5 @@ LEFT JOIN `questions` existing
     ON existing.questionnaire_id = qn.id
    AND existing.question_text = src.question_text
 WHERE existing.id IS NULL;
-
--- -------------------------------------------------------------
--- Announcements and targets
--- -------------------------------------------------------------
-INSERT INTO `announcements` (
-    `created_by_user_id`,
-    `title`,
-    `message`,
-    `is_active`
-)
-SELECT
-    creator.id,
-    src.title,
-    src.message,
-    src.is_active
-FROM (
-    SELECT 'admin@naap.edu.ph' AS creator_email, 'Evaluation Started' AS title, 'Student to Professor evaluations are open until February 15, 2026.' AS message, 1 AS is_active
-    UNION ALL SELECT 'dean@naap.edu.ph', 'Evaluation Window Open', 'Peer evaluations are open until February 18, 2026.', 1
-    UNION ALL SELECT 'vpaa@naap.edu.ph', 'New Review Period', 'Supervisor evaluations are open until February 20, 2026.', 1
-) AS src
-LEFT JOIN `users` creator ON creator.email = src.creator_email
-LEFT JOIN `announcements` existing ON existing.title = src.title
-WHERE existing.id IS NULL;
-
-INSERT IGNORE INTO `announcement_targets` (`announcement_id`, `role_id`)
-SELECT
-    a.id,
-    r.id
-FROM (
-    SELECT 'Evaluation Started' AS title, 'student' AS role_code
-    UNION ALL SELECT 'Evaluation Started', 'professor'
-    UNION ALL SELECT 'Evaluation Window Open', 'professor'
-    UNION ALL SELECT 'Evaluation Window Open', 'dean'
-    UNION ALL SELECT 'New Review Period', 'dean'
-    UNION ALL SELECT 'New Review Period', 'vpaa'
-) AS src
-JOIN `announcements` a ON a.title = src.title
-JOIN `roles` r ON r.code = src.role_code;
 
 SET FOREIGN_KEY_CHECKS = 1;

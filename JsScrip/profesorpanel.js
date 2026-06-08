@@ -38,6 +38,10 @@ const professorPanelState = {
         professor: { ...PROFESSOR_PANEL_EMPTY_SUMMARY },
         supervisor: { ...PROFESSOR_PANEL_EMPTY_SUMMARY },
     },
+    feedbackPanel: {
+        items: [],
+        evaluationType: 'student',
+    },
     currentSelection: {
         semesterId: '',
         semesterLabel: '',
@@ -447,7 +451,7 @@ function buildProfessorPanelContext() {
  * @returns {boolean} - True if user is authenticated as professor
  */
 function checkAuthentication() {
-    const session = SharedData.getSession();
+    const session = SharedData.requireSession('professor');
     if (!session) {
         return false;
     }
@@ -1034,6 +1038,18 @@ function switchView(viewName) {
         window.scrollTo(0, 0);
         closeAllPanels();
     } else if (viewName === 'facultyPaper') {
+        const facultyPaperGate = resolveFacultyPaperGateState();
+        if (facultyPaperGate.locked) {
+            if (dashboardView) dashboardView.style.display = 'block';
+            if (peerEvaluationView) peerEvaluationView.style.display = 'none';
+            if (reportsView) reportsView.style.display = 'none';
+            if (facultyPaperView) facultyPaperView.style.display = 'none';
+            if (profileView) profileView.style.display = 'none';
+            updateNavigation('dashboard');
+            closeAllPanels();
+            return;
+        }
+
         if (dashboardView) dashboardView.style.display = 'none';
         if (peerEvaluationView) peerEvaluationView.style.display = 'none';
         if (reportsView) reportsView.style.display = 'none';
@@ -1143,6 +1159,160 @@ function initializeEvaluationCharts(type) {
             }
         });
     }
+}
+
+function getSemestralWindowIds(context, selectedSemesterId, maxCount = 4) {
+    const list = Array.isArray(context && context.semesterList) ? context.semesterList : [];
+    const ids = list
+        .map(item => String(item && item.value || '').trim())
+        .filter(Boolean);
+
+    const selected = String(selectedSemesterId || '').trim();
+    if (ids.length) {
+        const selectedIndex = selected ? ids.indexOf(selected) : 0;
+        const startIndex = selectedIndex >= 0 ? selectedIndex : 0;
+        const windowIds = ids.slice(startIndex, startIndex + maxCount);
+        if (windowIds.length) return windowIds;
+    }
+
+    const fallback = [];
+    if (selected) fallback.push(selected);
+    if (context && context.currentSemester && !fallback.includes(context.currentSemester)) {
+        fallback.push(context.currentSemester);
+    }
+    return fallback.slice(0, maxCount);
+}
+
+function computeOverallAverageFromSummaries(studentSummary, peerSummary, supervisorSummary) {
+    const buckets = [studentSummary, peerSummary, supervisorSummary];
+    let weightedSum = 0;
+    let totalResponses = 0;
+
+    buckets.forEach(summary => {
+        const detailedRows = Array.isArray(summary && summary.detailedRows) ? summary.detailedRows : [];
+        const responseCount = detailedRows.reduce((sum, row) => sum + Number(row && row.responses || 0), 0);
+        const avgScore = Number(summary && summary.totals && summary.totals.averageScore || 0);
+        if (!responseCount || !Number.isFinite(avgScore)) return;
+        weightedSum += avgScore * responseCount;
+        totalResponses += responseCount;
+    });
+
+    if (!totalResponses) return 0;
+    return weightedSum / totalResponses;
+}
+
+function buildSemestralEvaluationTrend(semesterId) {
+    const context = professorPanelState.context || buildProfessorPanelContext();
+    const windowIds = getSemestralWindowIds(context, semesterId, 4);
+    const rows = windowIds.map(id => {
+        const student = fetchFacultySummaryFromSql({ semesterId: id, evaluationType: 'student' });
+        const peer = fetchFacultySummaryFromSql({ semesterId: id, evaluationType: 'professor' });
+        const supervisor = fetchFacultySummaryFromSql({ semesterId: id, evaluationType: 'supervisor' });
+        const overall = computeOverallAverageFromSummaries(student, peer, supervisor);
+
+        return {
+            semesterId: id,
+            semesterLabel: getSemesterLabelById(id, context.semesterList),
+            overallAverage: Number(overall || 0),
+            studentAverage: Number(student && student.totals && student.totals.averageScore || 0),
+            peerAverage: Number(peer && peer.totals && peer.totals.averageScore || 0),
+            supervisorAverage: Number(supervisor && supervisor.totals && supervisor.totals.averageScore || 0),
+        };
+    });
+
+    return rows.filter(item => String(item && item.semesterId || '').trim() !== '');
+}
+
+function renderSemestralTrendChart(rows) {
+    const canvas = document.getElementById('semestralTrendChart');
+    if (!canvas) return;
+
+    const chartRows = (Array.isArray(rows) ? rows.slice() : [])
+        .reverse();
+    const labels = chartRows.map(item => item.semesterLabel);
+    const values = chartRows.map(item => Number((item.overallAverage || 0).toFixed(2)));
+    const hasData = values.some(value => value > 0);
+
+    if (window.semestralTrendChartInstance) {
+        window.semestralTrendChartInstance.destroy();
+    }
+
+    window.semestralTrendChartInstance = new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels: labels.length ? labels : ['No Data'],
+            datasets: [{
+                label: 'Overall Average',
+                data: hasData ? values : [0],
+                borderColor: '#4752c4',
+                backgroundColor: 'rgba(71, 82, 196, 0.15)',
+                fill: true,
+                tension: 0.25,
+                pointRadius: 4,
+                pointHoverRadius: 5,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: { beginAtZero: true, max: 5, ticks: { stepSize: 1 } }
+            },
+            plugins: { legend: { display: true, position: 'bottom' } }
+        }
+    });
+}
+
+function renderSemestralEvaluationTrend(semesterId) {
+    const statusEl = document.getElementById('semestralTrendStatus');
+    const deltaEl = document.getElementById('semestralTrendDelta');
+    const tableBody = document.getElementById('semestralTrendTableBody');
+    if (!statusEl || !deltaEl || !tableBody) return;
+
+    const rows = buildSemestralEvaluationTrend(semesterId);
+    statusEl.classList.remove('improved', 'declined', 'stable');
+
+    if (!rows.length) {
+        statusEl.textContent = 'No semestral trend data available.';
+        deltaEl.textContent = 'No evaluation records found for trend computation.';
+        tableBody.innerHTML = '<tr><td colspan="5">No data available.</td></tr>';
+        renderSemestralTrendChart([]);
+        return;
+    }
+
+    tableBody.innerHTML = rows.map(item => `
+        <tr>
+            <td>${escapeHTML(item.semesterLabel || item.semesterId)}</td>
+            <td class="avg-score">${Number(item.overallAverage || 0).toFixed(2)}</td>
+            <td>${Number(item.studentAverage || 0).toFixed(2)}</td>
+            <td>${Number(item.peerAverage || 0).toFixed(2)}</td>
+            <td>${Number(item.supervisorAverage || 0).toFixed(2)}</td>
+        </tr>
+    `).join('');
+
+    const current = Number(rows[0] && rows[0].overallAverage || 0);
+    const previous = Number(rows[1] && rows[1].overallAverage || 0);
+    if (rows.length < 2 || !Number.isFinite(previous) || previous <= 0) {
+        statusEl.textContent = `Current semestral average: ${current.toFixed(2)}`;
+        statusEl.classList.add('stable');
+        deltaEl.textContent = 'No previous semester baseline yet for improve/decline comparison.';
+    } else {
+        const delta = current - previous;
+        const deltaLabel = `${delta >= 0 ? '+' : ''}${delta.toFixed(2)}`;
+        if (delta > 0.02) {
+            statusEl.textContent = `Improved performance in ${rows[0].semesterLabel}`;
+            statusEl.classList.add('improved');
+        } else if (delta < -0.02) {
+            statusEl.textContent = `Declined performance in ${rows[0].semesterLabel}`;
+            statusEl.classList.add('declined');
+        } else {
+            statusEl.textContent = `Stable performance in ${rows[0].semesterLabel}`;
+            statusEl.classList.add('stable');
+        }
+        deltaEl.textContent = `Current vs previous semester: ${current.toFixed(2)} vs ${previous.toFixed(2)} (${deltaLabel}).`;
+    }
+
+    renderSemestralTrendChart(rows);
 }
 /**
  * Initialize bar chart
@@ -1373,15 +1543,12 @@ function showProfessorPdfPreview(pdfBlob, downloadFilename) {
 
 async function openProfessorStoredPaperPdf(paper, actorUserId, versionNo) {
     const paperId = String(paper && paper.id || '').trim();
-    const actorId = normalizeUserIdToken(actorUserId);
-    if (!paperId || !actorId) {
+    if (!paperId) {
         throw new Error('Unable to resolve stored paper context.');
     }
 
     const params = new URLSearchParams({
-        paper_id: paperId,
-        actor_role: 'professor',
-        actor_user_id: actorId
+        paper_id: paperId
     });
     if (Number.isInteger(versionNo) && versionNo > 0) {
         params.set('version_no', String(versionNo));
@@ -1530,6 +1697,236 @@ function resolvePaperStatusLabel(status) {
     return 'Unknown';
 }
 
+function setFacultyPaperAiFeedback(type, message) {
+    const feedbackEl = document.getElementById('fpDetailAiRecommendFeedback');
+    if (!feedbackEl) return;
+
+    feedbackEl.classList.remove('visible', 'info', 'success', 'warning', 'error', 'processing');
+    feedbackEl.textContent = '';
+
+    const text = String(message || '').trim();
+    if (!text) return;
+
+    feedbackEl.classList.add('visible');
+    if (type === 'processing') {
+        feedbackEl.classList.add('processing');
+        const loader = document.createElement('span');
+        loader.className = 'faculty-paper-ai-loader';
+        loader.setAttribute('aria-hidden', 'true');
+
+        const label = document.createElement('span');
+        label.className = 'faculty-paper-ai-loader-text';
+        label.textContent = text;
+
+        feedbackEl.appendChild(loader);
+        feedbackEl.appendChild(label);
+        return;
+    }
+    if (type === 'success' || type === 'warning' || type === 'error') {
+        feedbackEl.classList.add(type);
+    } else {
+        feedbackEl.classList.add('info');
+    }
+    feedbackEl.textContent = text;
+}
+
+function clampFacultyAiComments(comments, maxItems = 120, maxLength = 400) {
+    const rows = [];
+    const safeLimit = Number(maxItems) > 0 ? Number(maxItems) : 120;
+    const safeLength = Number(maxLength) > 0 ? Number(maxLength) : 400;
+
+    (Array.isArray(comments) ? comments : []).forEach((item, index) => {
+        if (rows.length >= safeLimit) return;
+        const text = String(item && item.text || '').replace(/\s+/g, ' ').trim();
+        if (!text) return;
+
+        rows.push({
+            id: `student_comment_${index + 1}`,
+            source: 'Student to Professor',
+            text: text.length > safeLength ? text.slice(0, safeLength) : text,
+            submittedAt: String(item && item.submittedAt || '').trim(),
+        });
+    });
+
+    return rows;
+}
+
+function buildFacultySectionCRecommendationContext(paper) {
+    const context = professorPanelState.context || buildProfessorPanelContext();
+    const semesterId = String((paper && paper.semester_id) || professorPanelState.currentSelection.semesterId || context.currentSemester || '').trim();
+    const studentSummary = fetchFacultySummaryFromSql({
+        semesterId,
+        evaluationType: 'student',
+    });
+    const criteriaAverages = Array.isArray(studentSummary && studentSummary.criteriaAverages)
+        ? studentSummary.criteriaAverages.map(item => ({
+            name: String(item && item.name || '').trim(),
+            average: Number(item && item.average || 0),
+        })).filter(item => item.name)
+        : [];
+    const detailedRows = Array.isArray(studentSummary && studentSummary.detailedRows)
+        ? studentSummary.detailedRows.map(item => ({
+            category: String(item && item.category || '').trim(),
+            avgScore: Number(item && item.avgScore || 0),
+            responses: Number(item && item.responses || 0),
+            poor: Number(item && item.poor || 0),
+            veryPoor: Number(item && item.veryPoor || 0),
+        })).filter(item => item.category)
+        : [];
+
+    const comments = clampFacultyAiComments(studentSummary && studentSummary.comments);
+
+    return {
+        recommendationScope: 'student',
+        weakThreshold: 3.0,
+        semesterId: semesterId,
+        semesterLabel: String((paper && paper.semester_label) || '').trim(),
+        paperMeta: {
+            paperId: String(paper && paper.id || '').trim(),
+            professorName: String(paper && paper.professor_name || '').trim(),
+            department: String(paper && paper.department || '').trim(),
+            rank: String(paper && paper.rank || '').trim(),
+        },
+        ratings: {
+            setRating: String(paper && paper.set_rating || '').trim(),
+            safRating: String(paper && paper.saf_rating || '').trim(),
+            averageScore: Number(studentSummary && studentSummary.totals && studentSummary.totals.averageScore || 0),
+            responseRate: Number(studentSummary && studentSummary.totals && studentSummary.totals.responseRate || 0),
+            received: Number(studentSummary && studentSummary.totals && studentSummary.totals.received || 0),
+            required: Number(studentSummary && studentSummary.totals && studentSummary.totals.required || 0),
+        },
+        criteriaAverages: criteriaAverages,
+        detailedRows: detailedRows,
+        comments: comments,
+    };
+}
+
+function resolveFacultyRecommendationSourceLabel(source) {
+    const token = normalizeToken(source);
+    if (token === 'gemini') return 'Gemini';
+    if (token === 'gemini+rule') return 'Gemini with rule safety completion';
+    return 'rule fallback';
+}
+
+function runFacultySectionCAiRecommendation(paper) {
+    const aiBtn = document.getElementById('fpDetailAiRecommendBtn');
+    const areasInput = document.getElementById('fpSectionCAreasInput');
+    const activitiesInput = document.getElementById('fpSectionCActivitiesInput');
+    const actionPlanInput = document.getElementById('fpSectionCActionPlanInput');
+
+    if (!paper || !areasInput || !activitiesInput || !actionPlanInput) {
+        setFacultyPaperAiFeedback('error', 'Unable to prepare AI recommendations for this paper.');
+        return;
+    }
+
+    const statusToken = normalizeToken(paper.status);
+    if (statusToken === 'archived') {
+        setFacultyPaperAiFeedback('error', 'Archived papers cannot generate AI recommendations.');
+        return;
+    }
+
+    const actor = getProfessorPaperActor();
+    if (!actor.actorUserId) {
+        setFacultyPaperAiFeedback('error', 'Unable to resolve your professor account.');
+        return;
+    }
+
+    const context = buildFacultySectionCRecommendationContext(paper);
+    const hasCriteriaData = Array.isArray(context.criteriaAverages) && context.criteriaAverages.length > 0;
+    const hasDetailedData = Array.isArray(context.detailedRows) && context.detailedRows.length > 0;
+    const hasCommentData = Array.isArray(context.comments) && context.comments.length > 0;
+    if (!hasCriteriaData && !hasDetailedData && !hasCommentData) {
+        setFacultyPaperAiFeedback('warning', 'No student feedback data is available for AI recommendations.');
+        return;
+    }
+
+    const originalBtnText = aiBtn ? aiBtn.textContent : '';
+    if (aiBtn) {
+        aiBtn.disabled = true;
+        aiBtn.textContent = 'Generating...';
+    }
+    setFacultyPaperAiFeedback('processing', 'Processing...');
+
+    const executeRecommendation = function () {
+        try {
+            if (typeof SharedData.generateFacultyPaperSectionCRecommendations !== 'function') {
+                throw new Error('Recommendation API is unavailable.');
+            }
+
+            const response = SharedData.generateFacultyPaperSectionCRecommendations({
+                actor_role: actor.role,
+                actor_user_id: actor.actorUserId,
+                paper_id: paper.id,
+                context: context,
+            });
+
+            if (!response || response.success === false) {
+                throw new Error((response && response.error) || 'Failed to generate AI recommendations.');
+            }
+
+            const sectionC = response && response.sectionC && typeof response.sectionC === 'object'
+                ? response.sectionC
+                : {};
+            const areas = String(sectionC.areas || '').trim();
+            const activities = String(sectionC.activities || '').trim();
+            const actionPlan = String(sectionC.actionPlan || '').trim();
+            if (!areas && !activities && !actionPlan) {
+                throw new Error('AI returned empty recommendations.');
+            }
+
+            areasInput.value = areas;
+            activitiesInput.value = activities;
+            actionPlanInput.value = actionPlan;
+
+            const weakAreas = Array.isArray(response && response.weakAreas) ? response.weakAreas : [];
+            const weakAreaText = weakAreas.length ? ` Weak areas: ${weakAreas.join(', ')}.` : '';
+            const sourceToken = normalizeToken(response && response.source);
+            if (sourceToken === 'gemini') {
+                setFacultyPaperAiFeedback(
+                    'success',
+                    `Recommendations applied using ${resolveFacultyRecommendationSourceLabel(response.source)}.${weakAreaText} Click Save Section C to persist.`
+                );
+            } else if (sourceToken === 'gemini+rule') {
+                setFacultyPaperAiFeedback(
+                    'warning',
+                    `Recommendations applied using ${resolveFacultyRecommendationSourceLabel(response.source)}.${weakAreaText} Click Save Section C to persist.`
+                );
+            } else {
+                setFacultyPaperAiFeedback(
+                    'warning',
+                    `Gemini unavailable or partial. Recommendations applied using ${resolveFacultyRecommendationSourceLabel(response.source)}.${weakAreaText} Click Save Section C to persist.`
+                );
+            }
+        } catch (error) {
+            setFacultyPaperAiFeedback('error', error && error.message ? error.message : 'Failed to generate AI recommendations.');
+        } finally {
+            if (aiBtn) {
+                aiBtn.disabled = statusToken === 'archived';
+                aiBtn.textContent = originalBtnText || 'AI Smart Recommendations';
+            }
+        }
+    };
+
+    const loadingOverlay = window.AppLoadingOverlay;
+    const canUseOverlay = loadingOverlay
+        && typeof loadingOverlay.show === 'function'
+        && typeof loadingOverlay.hide === 'function';
+
+    if (!canUseOverlay) {
+        executeRecommendation();
+        return;
+    }
+
+    loadingOverlay.show('Generating AI recommendations...');
+    setTimeout(function () {
+        try {
+            executeRecommendation();
+        } finally {
+            loadingOverlay.hide();
+        }
+    }, 0);
+}
+
 function renderProfessorFacultyPaperDetail(paper) {
     const card = document.getElementById('facultyPaperDetailCard');
     const meta = document.getElementById('facultyPaperDetailMeta');
@@ -1537,6 +1934,7 @@ function renderProfessorFacultyPaperDetail(paper) {
     const saveSectionCBtn = document.getElementById('fpDetailSaveSectionCBtn');
     const sendBtn = document.getElementById('fpDetailSendBtn');
     const archiveBtn = document.getElementById('fpDetailArchiveBtn');
+    const aiRecommendBtn = document.getElementById('fpDetailAiRecommendBtn');
     const areasInput = document.getElementById('fpSectionCAreasInput');
     const activitiesInput = document.getElementById('fpSectionCActivitiesInput');
     const actionPlanInput = document.getElementById('fpSectionCActionPlanInput');
@@ -1549,6 +1947,8 @@ function renderProfessorFacultyPaperDetail(paper) {
         if (saveSectionCBtn) saveSectionCBtn.onclick = null;
         if (sendBtn) sendBtn.onclick = null;
         if (archiveBtn) archiveBtn.onclick = null;
+        if (aiRecommendBtn) aiRecommendBtn.onclick = null;
+        setFacultyPaperAiFeedback('', '');
         return;
     }
 
@@ -1583,6 +1983,8 @@ function renderProfessorFacultyPaperDetail(paper) {
     if (saveSectionCBtn) saveSectionCBtn.disabled = archivedStatus;
     if (sendBtn) sendBtn.disabled = !draftStatus;
     if (archiveBtn) archiveBtn.disabled = !draftStatus;
+    if (aiRecommendBtn) aiRecommendBtn.disabled = archivedStatus;
+    setFacultyPaperAiFeedback('', '');
 
     if (previewBtn) {
         previewBtn.onclick = async () => {
@@ -1646,6 +2048,10 @@ function renderProfessorFacultyPaperDetail(paper) {
 
     if (sendBtn) {
         sendBtn.onclick = async () => {
+            if (resolveFacultyPaperGateState().locked) {
+                alert(getFacultyPaperGateMessage());
+                return;
+            }
             const actor = getProfessorPaperActor();
             if (!actor.actorUserId) {
                 alert('Unable to resolve your professor account.');
@@ -1691,12 +2097,25 @@ function renderProfessorFacultyPaperDetail(paper) {
             }
         };
     }
+
+    if (aiRecommendBtn) {
+        aiRecommendBtn.onclick = () => {
+            runFacultySectionCAiRecommendation(paper);
+        };
+    }
 }
 
 async function renderProfessorFacultyPaperList() {
     const tableBody = document.getElementById('facultyPaperTableBody');
     const detailCard = document.getElementById('facultyPaperDetailCard');
     if (!tableBody) return;
+
+    const gate = resolveFacultyPaperGateState();
+    if (gate.locked) {
+        tableBody.innerHTML = `<tr><td colspan="6">${escapeHTML(getFacultyPaperGateMessage())}</td></tr>`;
+        if (detailCard) detailCard.style.display = 'none';
+        return;
+    }
 
     const actor = getProfessorPaperActor();
     if (!actor.context || !actor.context.linked || !actor.actorUserId) {
@@ -1788,6 +2207,10 @@ function setupFacultyPaperWorkflow() {
 
     if (createDraftBtn) {
         createDraftBtn.addEventListener('click', () => {
+            if (resolveFacultyPaperGateState().locked) {
+                alert(getFacultyPaperGateMessage());
+                return;
+            }
             const payload = buildFacultyPaperDraftPayload();
             if (!payload) {
                 alert('Unable to create draft because your session is not linked to an active professor account.');
@@ -2585,8 +3008,9 @@ function loadFacultySummary(selection = {}) {
         renderBreakdownTable([], evaluationType);
         renderEvaluationCount([], unlinkedSummary.totals);
         renderDetailedSummaryTable([], evaluationType);
-        renderCommentsSummary([], evaluationType);
         updateSummaryCards(unlinkedSummary.totals);
+        resetProfessorSubjectCommentsPanel();
+        renderSemestralEvaluationTrend(semesterId);
         return;
     }
 
@@ -2599,8 +3023,9 @@ function loadFacultySummary(selection = {}) {
     renderBreakdownTable(activeSummary.breakdownRows, evaluationType);
     renderEvaluationCount(activeSummary.breakdownRows, activeSummary.totals);
     renderDetailedSummaryTable(activeSummary.detailedRows, evaluationType);
-    renderCommentsSummary(activeSummary.comments, evaluationType);
     updateSummaryCards(activeSummary.totals);
+    resetProfessorSubjectCommentsPanel();
+    renderSemestralEvaluationTrend(semesterId);
 }
 
 /**
@@ -2701,20 +3126,61 @@ function setupProfilePhotoUpload() {
         const file = input.files && input.files[0];
         if (!file) return;
 
-        if (!file.type.startsWith('image/')) {
-            alert('Please select a valid image file.');
+        const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+        if (!allowedTypes.includes(String(file.type || '').toLowerCase())) {
+            alert('Please choose a JPG, JPEG, PNG, or WEBP image.');
             input.value = '';
             return;
         }
 
-        const reader = new FileReader();
-        reader.onload = function () {
-            preview.src = reader.result;
+        if (Number(file.size || 0) > (2 * 1024 * 1024)) {
+            alert('Please choose an image smaller than 2MB.');
+            input.value = '';
+            return;
+        }
+
+        const localPreviewUrl = URL.createObjectURL(file);
+        preview.src = localPreviewUrl;
+        preview.classList.add('active');
+        placeholder.style.display = 'none';
+
+        if (typeof SharedData.uploadProfilePhoto !== 'function') {
+            const reader = new FileReader();
+            reader.onload = function () {
+                preview.src = reader.result;
+                preview.classList.add('active');
+                placeholder.style.display = 'none';
+                SharedData.setProfilePhoto('professor', reader.result);
+                URL.revokeObjectURL(localPreviewUrl);
+                input.value = '';
+            };
+            reader.readAsDataURL(file);
+            return;
+        }
+
+        try {
+            const savedPhoto = SharedData.uploadProfilePhoto(file);
+            if (savedPhoto) {
+                preview.src = savedPhoto;
+            }
             preview.classList.add('active');
             placeholder.style.display = 'none';
-            SharedData.setProfilePhoto('professor', reader.result);
-        };
-        reader.readAsDataURL(file);
+        } catch (error) {
+            alert(error && error.message ? error.message : 'Failed to upload the profile image.');
+            const storedPhoto = SharedData.getProfilePhoto('professor');
+            if (storedPhoto) {
+                preview.src = storedPhoto;
+                preview.classList.add('active');
+                placeholder.style.display = 'none';
+            } else {
+                preview.removeAttribute('src');
+                preview.classList.remove('active');
+                placeholder.style.display = '';
+            }
+        } finally {
+            URL.revokeObjectURL(localPreviewUrl);
+            input.value = '';
+        }
     });
 }
 
@@ -2805,7 +3271,7 @@ function fetchFacultySummaryFromSql(query) {
     let receivedTotal = 0;
 
     if (evaluationType === 'student') {
-        const offeringRows = [];
+        const groupedBySubject = new Map();
         const localBuckets = {};
         const professorOfferings = (context.offerings || []).filter(offering =>
             normalizeUserIdToken(offering && offering.professorUserId) === professorId &&
@@ -2826,29 +3292,61 @@ function fetchFacultySummaryFromSql(query) {
                 String(item && item.courseOfferingId || '').trim() === offeringId
             );
 
-            const received = offeringEvaluations.length;
-            const avgRating = computeAverageRatingFromEvaluations(offeringEvaluations);
-            const subject = offering.subjectCode
-                ? `${offering.subjectCode} - ${offering.subjectName}`
-                : String(offering.subjectName || '').trim();
-            const rowKey = `student|offering|${offeringId}`;
-            localBuckets[rowKey] = offeringEvaluations.flatMap(item => collectEvaluationComments(item)).map(text => ({ text }));
+            const subjectCode = String(offering.subjectCode || '').trim();
+            const subjectName = String(offering.subjectName || '').trim();
+            const subjectDisplay = subjectCode && subjectName
+                ? `${subjectCode} - ${subjectName}`
+                : (subjectName || subjectCode || 'Unknown Subject');
 
-            offeringRows.push({
-                rowKey,
-                subject: subject || 'Unknown Subject',
-                section: formatDisplaySection(offering.sectionName),
-                required,
-                received,
-                avgRating,
-            });
+            const normalizedSubjectCode = normalizeToken(subjectCode);
+            const normalizedSubjectName = normalizeToken(subjectName);
+            const normalizedSubjectDisplay = normalizeToken(subjectDisplay);
+            const subjectIdentity = (normalizedSubjectCode || normalizedSubjectName)
+                ? `${normalizedSubjectCode}|${normalizedSubjectName}`
+                : (normalizedSubjectDisplay || `offering-${offeringId}`);
+            const rowKey = `student|subject|${subjectIdentity}`;
+
+            if (!groupedBySubject.has(subjectIdentity)) {
+                groupedBySubject.set(subjectIdentity, {
+                    rowKey,
+                    subject: subjectDisplay,
+                    required: 0,
+                    received: 0,
+                    sectionSet: new Set(),
+                    evaluations: [],
+                    comments: [],
+                });
+            }
+
+            const group = groupedBySubject.get(subjectIdentity);
+            group.required += required;
+            group.received += offeringEvaluations.length;
+            group.sectionSet.add(formatDisplaySection(offering.sectionName));
+            group.evaluations.push(...offeringEvaluations);
+            group.comments.push(
+                ...offeringEvaluations
+                    .flatMap(item => collectEvaluationComments(item))
+                    .map(text => ({ text }))
+            );
         });
 
-        offeringRows.sort((a, b) => (a.subject + a.section).localeCompare(b.subject + b.section));
-        breakdownRows = offeringRows;
+        const subjectRows = Array.from(groupedBySubject.values()).map(group => {
+            localBuckets[group.rowKey] = group.comments;
+            return {
+                rowKey: group.rowKey,
+                subject: group.subject || 'Unknown Subject',
+                sectionCount: group.sectionSet.size,
+                required: group.required,
+                received: group.received,
+                avgRating: computeAverageRatingFromEvaluations(group.evaluations),
+            };
+        });
+
+        subjectRows.sort((a, b) => String(a.subject || '').localeCompare(String(b.subject || '')));
+        breakdownRows = subjectRows;
         commentBuckets = localBuckets;
-        requiredTotal = offeringRows.reduce((sum, item) => sum + item.required, 0);
-        receivedTotal = offeringRows.reduce((sum, item) => sum + item.received, 0);
+        requiredTotal = subjectRows.reduce((sum, item) => sum + item.required, 0);
+        receivedTotal = subjectRows.reduce((sum, item) => sum + item.received, 0);
     } else {
         const grouped = {};
         const localBuckets = {};
@@ -2968,7 +3466,7 @@ function renderCriteriaSummary(criteria) {
 }
 
 /**
- * Render breakdown table per subject/section
+ * Render breakdown table per subject grouping
  */
 function renderBreakdownTable(rows, evaluationType = 'student') {
     const table = document.getElementById('facultyBreakdownTable');
@@ -2983,23 +3481,21 @@ function renderBreakdownTable(rows, evaluationType = 'student') {
             <tr>
                 <th>Employee Number</th>
                 <th>Avg Rating</th>
-                <th>Comments</th>
             </tr>
         `;
     } else {
         thead.innerHTML = `
             <tr>
                 <th>Subject</th>
-                <th>Section</th>
+                <th>Section Count</th>
                 <th>Evaluations Received</th>
                 <th>Response Rate</th>
                 <th>Avg Rating</th>
-                <th>Comments</th>
             </tr>
         `;
     }
 
-    const colCount = evaluationType === 'student' ? 6 : 3;
+    const colCount = evaluationType === 'student' ? 5 : 2;
 
     if (!rows.length) {
         tbody.innerHTML = `<tr><td colspan="${colCount}">No evaluation data available.</td></tr>`;
@@ -3014,7 +3510,6 @@ function renderBreakdownTable(rows, evaluationType = 'student') {
                 <tr data-required="${item.required || 0}" data-received="${item.received || 0}" data-avg="${item.avgRating}" data-comment-key="${item.rowKey || ''}">
                     <td>${item.employeeId}</td>
                     <td>${item.avgRating.toFixed(1)}</td>
-                    <td><button type="button" class="btn-submit faculty-comments-btn js-prof-comments" data-eval-type="${evaluationType}" data-comment-key="${item.rowKey || ''}" data-subject="${item.employeeId}">View</button></td>
                 </tr>
             `;
         }
@@ -3022,11 +3517,10 @@ function renderBreakdownTable(rows, evaluationType = 'student') {
         return `
             <tr data-required="${item.required}" data-received="${item.received}" data-avg="${item.avgRating}" data-comment-key="${item.rowKey || ''}">
                 <td>${item.subject}</td>
-                <td>${item.section}</td>
+                <td>${Number(item.sectionCount || 0)}</td>
                 <td><span class="count-pill">${item.received}/${item.required}</span></td>
                 <td>${responseRate}%</td>
                 <td>${item.avgRating.toFixed(1)}</td>
-                <td><button type="button" class="btn-submit faculty-comments-btn js-prof-comments" data-eval-type="student" data-comment-key="${item.rowKey || ''}" data-subject="${item.subject}" data-section="${item.section}">View</button></td>
             </tr>
         `;
     }).join('');
@@ -3036,28 +3530,42 @@ function renderBreakdownTable(rows, evaluationType = 'student') {
  * Setup section feedback summary per subject/section
  */
 function setupProfessorSubjectComments() {
-    const table = document.getElementById('facultyBreakdownTable');
     const panel = document.getElementById('profSubjectCommentsPanel');
     const title = document.getElementById('profSubjectCommentsTitle');
     const meta = document.getElementById('profSubjectCommentsMeta');
     const list = document.getElementById('profSubjectCommentsList');
+    const aiBtn = document.getElementById('profSubjectCommentsAiSummarize');
+    const aiSummary = document.getElementById('profSubjectCommentsAiSummary');
+    const viewBtn = document.getElementById('profSubjectCommentsView');
     const closeBtn = document.getElementById('profSubjectCommentsClose');
 
-    if (!table || !panel || !title || !meta || !list || !closeBtn) return;
+    if (!panel || !title || !meta || !list || !aiBtn || !aiSummary || !viewBtn || !closeBtn) return;
 
     closeBtn.addEventListener('click', function () {
-        panel.classList.remove('active');
+        resetProfessorSubjectCommentsPanel();
     });
 
-    table.addEventListener('click', function (e) {
-        const target = e.target;
-        if (!target || !target.classList || !target.classList.contains('js-prof-comments')) return;
+    aiBtn.addEventListener('click', function () {
+        const studentSummary = professorPanelState.summaryByType.student || PROFESSOR_PANEL_EMPTY_SUMMARY;
+        const studentItems = Array.isArray(studentSummary.comments) ? studentSummary.comments : [];
+        if (!studentItems.length) {
+            setProfessorCommentsAiSummary('No student comments available to summarize for the selected semester.', 'warning');
+            return;
+        }
 
-        const subject = target.getAttribute('data-subject');
-        const section = target.getAttribute('data-section');
-        const evalType = target.getAttribute('data-eval-type') || 'student';
-        const commentKey = target.getAttribute('data-comment-key') || '';
-        if (!subject) return;
+        const summaryText = buildStudentFeedbackAiSummary(studentItems);
+        setProfessorCommentsAiSummary(summaryText, 'info');
+        setProfessorCommentsListVisibility(false);
+    });
+
+    viewBtn.addEventListener('click', function () {
+        const evalType = String(
+            professorPanelState.currentSelection && professorPanelState.currentSelection.evaluationType || 'student'
+        ).trim() || 'student';
+        const semesterLabel = String(
+            professorPanelState.currentSelection && professorPanelState.currentSelection.semesterLabel || ''
+        ).trim();
+        const evalMeta = getEvaluationTypeMeta(evalType);
 
         if (evalType === 'professor') {
             title.textContent = 'Professor Feedback Summary';
@@ -3066,34 +3574,225 @@ function setupProfessorSubjectComments() {
         } else {
             title.textContent = 'Anonymous Feedback';
         }
-        const scope = section ? `${subject} • ${section}` : subject;
-        meta.textContent = evalType === 'professor'
-            ? (scope || subject || 'Professor feedback')
-            : evalType === 'supervisor'
-                ? (scope || subject || 'Supervisor feedback')
-                : (scope ? `${scope} — student comments are anonymized.` : 'Anonymized comments');
+
+        meta.textContent = evalType === 'student'
+            ? `All anonymized comments (${evalMeta.label}${semesterLabel ? ` • ${semesterLabel}` : ''}).`
+            : `All ${evalMeta.label.toLowerCase()} comments (${semesterLabel || 'selected semester'}).`;
 
         fetchSectionSummaryFromSql({
-            commentKey,
-            subject,
-            section,
             evaluationType: evalType
         }).then(summaries => {
+            professorPanelState.feedbackPanel = {
+                items: Array.isArray(summaries) ? summaries : [],
+                evaluationType: evalType,
+            };
+
             if (!summaries.length) {
                 list.innerHTML = '<li class="faculty-comments-empty">No anonymized feedback available.</li>';
-            } else {
-                list.innerHTML = summaries.map(item =>
-                    '<li>' +
-                    '<div class="faculty-comment-text">' + item.text + '</div>' +
-                    '</li>'
-                ).join('');
+                setProfessorCommentsAiSummary('No comments loaded in Anonymous Feedback. AI Summarize still summarizes student comments for this semester when available.', 'warning');
+                setProfessorCommentsListVisibility(true);
+                return;
             }
-            panel.classList.add('active');
+            list.innerHTML = summaries.map(item =>
+                '<li>' +
+                '<div class="faculty-comment-meta"><span class="faculty-comment-tag ' + getCommentBiasTagClass(String(item.label || 'Neutral')) + '">' + escapeHTML(String(item.label || 'Neutral')) + '</span></div>' +
+                '<div class="faculty-comment-text">' + escapeHTML(item.text) + '</div>' +
+                '</li>'
+            ).join('');
+            setProfessorCommentsAiSummary('Comments loaded. Press AI Summarize to summarize student comments.', 'info');
+            setProfessorCommentsListVisibility(true);
         }).catch(() => {
+            professorPanelState.feedbackPanel = {
+                items: [],
+                evaluationType: evalType,
+            };
             list.innerHTML = '<li class="faculty-comments-empty">Unable to load anonymized feedback.</li>';
-            panel.classList.add('active');
+            setProfessorCommentsAiSummary('Unable to summarize because feedback could not be loaded.', 'error');
+            setProfessorCommentsListVisibility(true);
         });
     });
+}
+
+function setProfessorCommentsAiSummary(message, type = 'info') {
+    const summaryEl = document.getElementById('profSubjectCommentsAiSummary');
+    if (!summaryEl) return;
+
+    summaryEl.classList.remove('warning', 'error');
+    if (type === 'warning' || type === 'error') {
+        summaryEl.classList.add(type);
+    }
+    summaryEl.textContent = String(message || '').trim();
+}
+
+function classifyFeedbackCommentBiasByRules(text) {
+    const value = String(text || '').trim().replace(/\s+/g, ' ');
+    if (!value) {
+        return { label: 'Neutral' };
+    }
+
+    const lower = value.toLowerCase();
+    const words = lower.split(/\s+/).filter(Boolean);
+    const wordCount = words.length;
+
+    const biasedKeywords = [
+        'hate', 'terror', 'worst', 'stupid', 'dumb', 'useless', 'bobo', 'idiot', 'trash', 'awful', 'pangit',
+        'bwisit', 'gago', 'bobo prof', 'i hate', 'not related', 'irrelevant', 'nonsense',
+    ];
+    for (let i = 0; i < biasedKeywords.length; i += 1) {
+        const keyword = biasedKeywords[i];
+        if (keyword && lower.includes(keyword)) {
+            return { label: 'Biased' };
+        }
+    }
+
+    const constructiveKeywords = [
+        'needs', 'need', 'should', 'improve', 'improvement', 'examples', 'explain', 'explains',
+        'clearer', 'clarify', 'better', 'more', 'less', 'pace', 'feedback',
+    ];
+    let hasConstructiveSignal = false;
+    for (let i = 0; i < constructiveKeywords.length; i += 1) {
+        const keyword = constructiveKeywords[i];
+        if (keyword && lower.includes(keyword)) {
+            hasConstructiveSignal = true;
+            break;
+        }
+    }
+
+    if (hasConstructiveSignal && wordCount >= 4) {
+        return { label: 'Constructive' };
+    }
+
+    const neutralKeywords = ['ok', 'okay', 'fine', 'good', 'nice', 'average', 'pwede'];
+    if (neutralKeywords.includes(lower)) {
+        return { label: 'Neutral' };
+    }
+
+    if (wordCount <= 3) {
+        return { label: 'Neutral' };
+    }
+
+    return { label: 'Neutral' };
+}
+
+function getCommentBiasTagClass(label) {
+    if (label === 'Constructive') return 'constructive';
+    if (label === 'Biased') return 'biased';
+    return 'neutral';
+}
+
+function setProfessorCommentsListVisibility(isVisible) {
+    const list = document.getElementById('profSubjectCommentsList');
+    if (!list) return;
+    list.classList.toggle('summary-hidden', !isVisible);
+}
+
+function detectStudentCommentTopics(comments) {
+    const topicRules = [
+        {
+            label: 'lack of learning materials',
+            keywords: ['material', 'materials', 'module', 'modules', 'learning material', 'handout', 'handouts', 'slides', 'references', 'resources'],
+        },
+        {
+            label: 'need clearer explanations',
+            keywords: ['clear', 'clearer', 'clarify', 'explains', 'explain', 'explanation', 'understand'],
+        },
+        {
+            label: 'need more examples',
+            keywords: ['example', 'examples', 'sample', 'samples'],
+        },
+        {
+            label: 'class pace is too fast',
+            keywords: ['pace', 'fast', 'quick', 'rushed'],
+        },
+        {
+            label: 'want more interactive discussions',
+            keywords: ['interactive', 'discussion', 'engaging', 'participate', 'interaction'],
+        },
+    ];
+
+    const counts = topicRules.map(rule => ({ label: rule.label, count: 0 }));
+    comments.forEach(comment => {
+        const lower = String(comment || '').toLowerCase();
+        topicRules.forEach((rule, index) => {
+            const matched = rule.keywords.some(keyword => lower.includes(keyword));
+            if (matched) counts[index].count += 1;
+        });
+    });
+
+    return counts
+        .filter(item => item.count > 0)
+        .sort((a, b) => b.count - a.count);
+}
+
+function buildStudentFeedbackAiSummary(items) {
+    const comments = (Array.isArray(items) ? items : [])
+        .map(item => String(item && item.text || '').trim())
+        .filter(Boolean);
+    if (!comments.length) {
+        return 'No student comments available to summarize.';
+    }
+
+    let constructive = 0;
+    let neutral = 0;
+    let biased = 0;
+    comments.forEach(text => {
+        const label = classifyFeedbackCommentBiasByRules(text).label;
+        if (label === 'Constructive') constructive += 1;
+        else if (label === 'Biased') biased += 1;
+        else neutral += 1;
+    });
+
+    const topics = detectStudentCommentTopics(comments);
+    const top = topics[0] || null;
+    const second = topics[1] || null;
+    const threshold = Math.ceil(comments.length * 0.4);
+
+    let summaryLine = `Summary of ${comments.length} student comments: feedback is varied.`;
+    if (top && top.count >= threshold) {
+        summaryLine = `Summary of ${comments.length} student comments: majority mention ${top.label}.`;
+    } else if (top && second) {
+        summaryLine = `Summary of ${comments.length} student comments: common points are ${top.label} and ${second.label}.`;
+    } else if (top) {
+        summaryLine = `Summary of ${comments.length} student comments: a common point is ${top.label}.`;
+    }
+
+    let toneLine = 'Overall tone is mostly neutral.';
+    if (constructive >= neutral && constructive >= biased) {
+        toneLine = 'Overall tone is mostly constructive.';
+    } else if (biased > constructive && biased >= neutral) {
+        toneLine = 'Overall tone includes notable biased comments.';
+    }
+
+    return `${summaryLine} ${toneLine}`;
+}
+
+function resetProfessorSubjectCommentsPanel() {
+    const title = document.getElementById('profSubjectCommentsTitle');
+    const meta = document.getElementById('profSubjectCommentsMeta');
+    const list = document.getElementById('profSubjectCommentsList');
+    if (!title || !meta || !list) return;
+
+    const evalType = String(
+        professorPanelState.currentSelection && professorPanelState.currentSelection.evaluationType || 'student'
+    ).trim() || 'student';
+    const evalMeta = getEvaluationTypeMeta(evalType);
+
+    if (evalType === 'professor') {
+        title.textContent = 'Professor Feedback Summary';
+    } else if (evalType === 'supervisor') {
+        title.textContent = 'Supervisor Feedback Summary';
+    } else {
+        title.textContent = 'Anonymous Feedback';
+    }
+
+    meta.textContent = `Press View to load all ${evalMeta.label.toLowerCase()} comments for the selected filters.`;
+    list.innerHTML = '<li class="faculty-comments-empty">Press View to load feedback.</li>';
+    setProfessorCommentsListVisibility(true);
+    professorPanelState.feedbackPanel = {
+        items: [],
+        evaluationType: evalType,
+    };
+    setProfessorCommentsAiSummary('Click AI Summarize after loading comments to generate a summary.', 'info');
 }
 
 /**
@@ -3101,10 +3800,29 @@ function setupProfessorSubjectComments() {
  */
 function fetchSectionSummaryFromSql(query) {
     const evalType = getEvaluationTypeMeta(query && query.evaluationType || 'student').id;
-    const commentKey = String(query && query.commentKey || '').trim();
     const summary = professorPanelState.summaryByType[evalType] || PROFESSOR_PANEL_EMPTY_SUMMARY;
-    const bucket = summary.commentBuckets && commentKey ? summary.commentBuckets[commentKey] : [];
-    return Promise.resolve(Array.isArray(bucket) ? bucket : []);
+    const comments = Array.isArray(summary.comments) ? summary.comments : [];
+
+    const normalized = comments
+        .map(item => ({
+            text: String(item && item.text || '').trim(),
+            submittedAt: String(item && item.submittedAt || '').trim(),
+        }))
+        .filter(item => item.text !== '');
+
+    normalized.sort((a, b) => {
+        const aTime = Date.parse(String(a && a.submittedAt || '')) || 0;
+        const bTime = Date.parse(String(b && b.submittedAt || '')) || 0;
+        return bTime - aTime;
+    });
+
+    return Promise.resolve(normalized.map(item => {
+        const classified = classifyFeedbackCommentBiasByRules(item.text);
+        return {
+            text: item.text,
+            label: classified.label,
+        };
+    }));
 }
 
 /**
@@ -3159,32 +3877,6 @@ function renderDetailedSummaryTable(rows, evaluationType) {
             <td><span class="count poor">${Number(item.poor || 0)}</span></td>
             <td><span class="count very-poor">${Number(item.veryPoor || 0)}</span></td>
         </tr>
-    `).join('');
-}
-
-function renderCommentsSummary(items, evaluationType) {
-    const list = document.getElementById('studentCommentsSummaryList');
-    if (!list) return;
-
-    const comments = Array.isArray(items) ? items.slice(0, 5) : [];
-    if (!comments.length) {
-        const emptyText = getEvaluationTypeMeta(evaluationType).emptyComments;
-        list.innerHTML = `
-            <div class="comment-card">
-                <div class="comment-icon"><i class="fas fa-quote-left"></i></div>
-                <p class="comment-text">${escapeHTML(emptyText)}</p>
-                <p class="comment-author">- System</p>
-            </div>
-        `;
-        return;
-    }
-
-    list.innerHTML = comments.map(item => `
-        <div class="comment-card">
-            <div class="comment-icon"><i class="fas fa-quote-left"></i></div>
-            <p class="comment-text">${escapeHTML(item.text || '')}</p>
-            <p class="comment-author">- ${escapeHTML(item.evaluator || 'Anonymous')}</p>
-        </div>
     `).join('');
 }
 
@@ -3264,14 +3956,29 @@ function handleChangeEmail() {
         return;
     }
 
-    const payload = {
-        username: getUserSession() ? getUserSession().username : '',
-        currentEmail,
-        newEmail
-    };
+    if (!SharedData.changeOwnEmail) {
+        alert('Email update service is unavailable.');
+        return;
+    }
 
-    console.log('Ready for SQL integration: /api/professor/change-email', payload);
-    alert('Email update request ready for SQL connection.');
+    try {
+        const result = SharedData.changeOwnEmail(currentEmail, newEmail);
+        const nextEmail = String(result && result.email || newEmail).trim();
+        alert('Email updated successfully.');
+
+        const profileEmail = document.getElementById('profileEmail');
+        if (profileEmail) profileEmail.textContent = nextEmail;
+        setProfileFieldValue('email', nextEmail || 'N/A');
+        const currentEmailInput = document.getElementById('currentEmail');
+        if (currentEmailInput) {
+            currentEmailInput.value = nextEmail;
+            currentEmailInput.defaultValue = nextEmail;
+        }
+    } catch (error) {
+        console.error('[ProfessorPanel] Failed to update email.', error);
+        alert(error && error.message ? error.message : 'Failed to update email.');
+        return;
+    }
 
     const form = document.getElementById('changeEmailForm');
     if (form) form.reset();
@@ -3308,14 +4015,19 @@ function handleChangePassword() {
         return;
     }
 
-    const payload = {
-        username: getUserSession() ? getUserSession().username : '',
-        currentPassword,
-        newPassword
-    };
+    if (!SharedData.changeOwnPassword) {
+        alert('Password update service is unavailable.');
+        return;
+    }
 
-    console.log('Ready for SQL integration: /api/professor/change-password', payload);
-    alert('Password update request ready for SQL connection.');
+    try {
+        SharedData.changeOwnPassword(currentPassword, newPassword);
+        alert('Password updated successfully.');
+    } catch (error) {
+        console.error('[ProfessorPanel] Failed to update password.', error);
+        alert(error && error.message ? error.message : 'Failed to update password.');
+        return;
+    }
 
     const form = document.getElementById('changePasswordForm');
     if (form) form.reset();
@@ -3385,10 +4097,26 @@ function resolveReportsGateState() {
     };
 }
 
+function resolveFacultyPaperGateState() {
+    return resolveReportsGateState();
+}
+
 function setReportsNavVisibility(locked) {
     const reportsLink = document.querySelector('.nav-link[data-view="reports"]');
     if (!reportsLink) return;
     reportsLink.style.display = locked ? 'none' : '';
+}
+
+function setFacultyPaperNavVisibility(locked) {
+    const facultyPaperLink = document.querySelector('.nav-link[data-view="facultyPaper"]');
+    if (!facultyPaperLink) return;
+    facultyPaperLink.style.display = locked ? 'none' : '';
+}
+
+function getFacultyPaperGateMessage() {
+    const gate = resolveFacultyPaperGateState();
+    const unlockText = gate.endDate ? formatDisplayDate(gate.endDate) : 'the configured close date';
+    return `Faculty Paper is unavailable while Student to Professor evaluation is still open. It will unlock after ${unlockText}.`;
 }
 
 function setDashboardReportActionVisibility(locked) {
@@ -3444,15 +4172,24 @@ function setupReportGateSync() {
  */
 function applyReportBlackout() {
     const gate = resolveReportsGateState();
+    const paperGate = resolveFacultyPaperGateState();
     const locked = gate.locked || !professorPanelState.linked;
+    const facultyPaperLocked = paperGate.locked || !professorPanelState.linked;
     const blackoutEl = document.getElementById('reportsBlackout');
     const contentEl = document.getElementById('reportsContent');
     const unlockDateEl = document.getElementById('reportUnlockDate');
     const reportsView = document.getElementById('reportsView');
+    const createDraftBtn = document.getElementById('facultyPaperCreateDraftBtn');
+    const facultyPaperView = document.getElementById('facultyPaperView');
 
     setReportsNavVisibility(locked);
+    setFacultyPaperNavVisibility(facultyPaperLocked);
     setDashboardReportActionVisibility(locked);
     refreshDashboardAverageScoreVisibility();
+    if (createDraftBtn) {
+        createDraftBtn.disabled = facultyPaperLocked || !professorPanelState.linked;
+        createDraftBtn.setAttribute('aria-disabled', createDraftBtn.disabled ? 'true' : 'false');
+    }
 
     if (unlockDateEl) {
         unlockDateEl.textContent = !professorPanelState.linked
@@ -3468,6 +4205,11 @@ function applyReportBlackout() {
     }
 
     if (locked && reportsView && reportsView.style.display === 'block') {
+        switchView('dashboard');
+        updateNavigation('dashboard');
+    }
+
+    if (facultyPaperLocked && facultyPaperView && facultyPaperView.style.display === 'block') {
         switchView('dashboard');
         updateNavigation('dashboard');
     }

@@ -31,6 +31,10 @@
                     <i class="fas fa-list-check"></i>
                     <span>Student Evaluation Status</span>
                 </a>
+                <a href="#" class="nav-link" data-view="proofReviewView">
+                    <i class="fas fa-file-signature"></i>
+                    <span>Proof Reviews</span>
+                </a>
                 <a href="#" class="nav-link" data-view="profileView">
                     <i class="fas fa-id-card"></i>
                     <span>Profile</span>
@@ -182,7 +186,7 @@
 
                     <div class="api-info-box">
                         <i class="fas fa-database"></i>
-                        <span>Automatic completion is based on submitted evaluations; post-period non-completion can be marked as cleared with reason.</span>
+                        <span>Automatic completion is based on submitted evaluations; after period close, OSA reviews student proof requests and approves/rejects them.</span>
                     </div>
 
                     <div class="table-container">
@@ -196,7 +200,7 @@
                                     <th>Year/Section</th>
                                     <th>Progress</th>
                                     <th>Status</th>
-                                    <th id="statusActionHeader">Action</th>
+                                    <th id="statusActionHeader">Review</th>
                                 </tr>
                             </thead>
                             <tbody id="statusTableBody"></tbody>
@@ -205,6 +209,54 @@
 
                     <p class="empty-state" id="emptyState" style="display: none;">
                         No students found.
+                    </p>
+                </section>
+            </div>
+
+            <div id="proofReviewView" class="content-view">
+                <header class="top-header">
+                    <h1 class="page-title">Submitted Proof Reasons</h1>
+                    <div class="user-profile">
+                        <i class="fas fa-user-circle"></i>
+                        <span id="profileNameProof">OSA User</span>
+                    </div>
+                </header>
+
+                <section class="status-section">
+                    <div class="section-header">
+                        <div class="section-title">
+                            <h2>Student Proof Review Queue</h2>
+                            <p>Review all submitted student reasons and proof links for this semester.</p>
+                        </div>
+                    </div>
+
+                    <p class="status-period-note" id="proofReviewPeriodNote"></p>
+
+                    <div class="api-info-box">
+                        <i class="fas fa-folder-open"></i>
+                        <span>This view lists submitted reasons and Drive links. Use Approve/Reject for pending requests only.</span>
+                    </div>
+
+                    <div class="table-container">
+                        <table class="status-table">
+                            <thead>
+                                <tr>
+                                    <th>Student Number</th>
+                                    <th>Full Name</th>
+                                    <th>Semester</th>
+                                    <th>Status</th>
+                                    <th>Reason</th>
+                                    <th>Drive Link</th>
+                                    <th>Review Note</th>
+                                    <th>Review</th>
+                                </tr>
+                            </thead>
+                            <tbody id="proofReviewTableBody"></tbody>
+                        </table>
+                    </div>
+
+                    <p class="empty-state" id="proofReviewEmptyState" style="display: none;">
+                        No submitted proof requests for the active semester.
                     </p>
                 </section>
             </div>
@@ -349,8 +401,30 @@
         </main>
     </div>
 
-    <script src="../JsScrip/db-data.js"></script>
-    <script src="../JsScrip/osapanel.js"></script>
+    <div class="manual-clear-modal" id="manualClearModal" aria-hidden="true">
+        <div class="manual-clear-dialog" role="dialog" aria-modal="true" aria-labelledby="manualClearTitle">
+            <div class="manual-clear-header">
+                <h3 id="manualClearTitle">Mark Student as Cleared</h3>
+                <button type="button" class="manual-clear-close" id="manualClearCloseBtn" aria-label="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <p class="manual-clear-lead" id="manualClearLead">Enter a reason for this manual clearance.</p>
+            <form id="manualClearForm" class="manual-clear-form" novalidate>
+                <label for="manualClearReasonInput">Clearance Reason</label>
+                <textarea id="manualClearReasonInput" name="manualClearReason" maxlength="1000"
+                    placeholder="Type reason for manually marking this student as cleared..." required></textarea>
+                <p class="manual-clear-message" id="manualClearMessage" aria-live="polite"></p>
+                <div class="manual-clear-actions">
+                    <button type="button" class="btn-cancel" id="manualClearCancelBtn">Cancel</button>
+                    <button type="submit" class="btn-submit" id="manualClearSaveBtn">Save Clearance</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="../JsScrip/db-data.js?v=20260414d"></script>
+    <script src="../JsScrip/osapanel.js?v=20260414d"></script>
 </body>
 
 </html>

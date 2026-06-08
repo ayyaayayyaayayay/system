@@ -20,47 +20,37 @@ let hrUsersRefreshPromise = null;
 let hrUsersLastRefreshAt = 0;
 let hrEvaluationOverviewChartInstance = null;
 let hrSemestralPerformanceChartInstance = null;
+let hrAiInsightsReady = false;
+let hrBehaviorAnalysisHasRun = false;
 const HR_USERS_REFRESH_INTERVAL_MS = 30000;
 
 /**
  * Fetch users from PHP API, with SharedData fallback
  */
 function fetchUsersFromApi(campus = 'all', search = '') {
-    const params = new URLSearchParams();
-    if (campus) params.set('campus', campus);
-    if (search) params.set('search', search);
+    return Promise.resolve().then(() => {
+        adminUsers = SharedData.listUsers({ campus, search });
+        return adminUsers;
+    }).catch(error => {
+        console.warn('[HRPanel] Falling back to cached SharedData users:', error);
+        adminUsers = SharedData.getUsers();
 
-    return fetch(`../api/users.php?${params.toString()}`, { cache: 'no-store' })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-            return response.json();
-        })
-        .then(payload => {
-            adminUsers = Array.isArray(payload && payload.users) ? payload.users : [];
-            return adminUsers;
-        })
-        .catch(error => {
-            console.warn('[HRPanel] Falling back to SharedData users:', error);
-            adminUsers = SharedData.getUsers();
+        let filtered = [...adminUsers];
+        if (campus && campus !== 'all') {
+            filtered = filtered.filter(u => u.campus === campus);
+        }
+        if (search) {
+            const query = search.toLowerCase();
+            filtered = filtered.filter(u =>
+                (u.name && u.name.toLowerCase().includes(query)) ||
+                (u.email && u.email.toLowerCase().includes(query)) ||
+                (u.department && u.department.toLowerCase().includes(query))
+            );
+        }
 
-            let filtered = [...adminUsers];
-            if (campus && campus !== 'all') {
-                filtered = filtered.filter(u => u.campus === campus);
-            }
-            if (search) {
-                const query = search.toLowerCase();
-                filtered = filtered.filter(u =>
-                    (u.name && u.name.toLowerCase().includes(query)) ||
-                    (u.email && u.email.toLowerCase().includes(query)) ||
-                    (u.department && u.department.toLowerCase().includes(query))
-                );
-            }
-
-            adminUsers = filtered;
-            return adminUsers;
-        });
+        adminUsers = filtered;
+        return adminUsers;
+    });
 }
 
 function refreshHrUsersInBackground(force = false) {
@@ -92,13 +82,12 @@ function refreshHrUsersInBackground(force = false) {
  * @returns {boolean} - True if user is authenticated as admin
  */
 function checkAuthentication() {
-    const session = SharedData.getSession();
+    const session = SharedData.requireSession();
     if (!session) {
         return false;
     }
 
     try {
-        // Check if user is authenticated and is an admin
         return session.isAuthenticated === true && (session.role === 'admin' || session.role === 'hr');
     } catch (e) {
         return false;
@@ -138,6 +127,7 @@ function initializeDashboard() {
     renderProfessorDepartmentOptions();
     renderProfessorDepartmentTabs();
     setupQuestionnaire();
+    setupAiInsightsView();
     setupHrSharedDataBindings();
 
     // Cross-tab sync: auto-refresh questionnaire when another panel saves changes
@@ -320,6 +310,7 @@ function handleNavigation(section) {
                     (lower === 'settings' || lower === 'evaluation settings' || lower === 'system settings') ? 'settings' :
                         (lower === 'reports' || lower === 'reports & analytics') ? 'reports' :
                             (lower === 'questionnaire') ? 'questionnaire' :
+                                (lower === 'ai-insights' || lower === 'ai insights') ? 'ai-insights' :
                                 (lower === 'profile') ? 'profile' :
                                     (lower === 'change-password' || lower === 'change password') ? 'change-password' :
                                         'dashboard'
@@ -331,6 +322,7 @@ function handleNavigation(section) {
         'settings': 'Evaluation Settings',
         'reports': 'Reports',
         'questionnaire': 'Questionnaire',
+        'ai-insights': 'AI Insights',
         'profile': 'Profile',
         'change-password': 'Change Password',
     };
@@ -395,6 +387,14 @@ function handleNavigation(section) {
                 loadQuestionnaire();
             }
             break;
+        case 'ai-insights':
+            const aiInsightsView = document.getElementById('ai-insights-view');
+            if (aiInsightsView) {
+                aiInsightsView.style.display = 'block';
+                hrBehaviorAnalysisHasRun = false;
+                resetAiInsightsBehaviorAnalysisPrompt();
+            }
+            break;
         case 'change-password':
             const changePasswordView = document.getElementById('change-password-view');
             if (changePasswordView) {
@@ -411,6 +411,1503 @@ function handleNavigation(section) {
             }
             break;
     }
+}
+
+function setupAiInsightsView() {
+    if (hrAiInsightsReady) {
+        populateAiInsightsSemesterFilters();
+        return;
+    }
+
+    const behaviorBtn = document.getElementById('hr-run-behavior-analysis-btn');
+    const biasBtn = document.getElementById('hr-run-bias-detection-btn');
+    const discrepancyBtn = document.getElementById('hr-run-discrepancy-analysis-btn');
+    const credibilityBtn = document.getElementById('hr-run-credibility-analysis-btn');
+    const behaviorSemester = document.getElementById('hr-ai-behavior-semester');
+    const biasSemester = document.getElementById('hr-ai-bias-semester');
+    const discrepancySemester = document.getElementById('hr-ai-discrepancy-semester');
+    const credibilitySemester = document.getElementById('hr-ai-credibility-semester');
+    const semesterSelects = [behaviorSemester, biasSemester, discrepancySemester, credibilitySemester]
+        .filter(function (element) { return !!element; });
+
+    if (semesterSelects.length === 0) {
+        return;
+    }
+
+    populateAiInsightsSemesterFilters();
+
+    const syncSemesterFilters = function (value) {
+        const nextValue = String(value || 'all').trim() || 'all';
+        semesterSelects.forEach(function (element) {
+            element.value = nextValue;
+        });
+    };
+
+    semesterSelects.forEach(function (element) {
+        element.addEventListener('change', function () {
+            syncSemesterFilters(element.value);
+            hrBehaviorAnalysisHasRun = false;
+            resetAiInsightsBehaviorAnalysisPrompt();
+        });
+    });
+
+    if (behaviorBtn) {
+        behaviorBtn.addEventListener('click', function () {
+            hrBehaviorAnalysisHasRun = true;
+            renderAiInsightsBehaviorAnalysis({ silent: false });
+        });
+    }
+
+    if (biasBtn) {
+        biasBtn.addEventListener('click', function () {
+            runAiBiasDetection();
+        });
+    }
+
+    if (discrepancyBtn) {
+        discrepancyBtn.addEventListener('click', function () {
+            runAiDiscrepancyCheck();
+        });
+    }
+    if (credibilityBtn) {
+        credibilityBtn.addEventListener('click', function () {
+            runAiCredibilityAnalysis();
+        });
+    }
+
+    hrAiInsightsReady = true;
+}
+
+function resetAiInsightsBehaviorAnalysisPrompt() {
+    const feedbackEl = document.getElementById('hr-ai-behavior-feedback');
+    const studentBody = document.getElementById('hr-ai-student-aggregate-body');
+    const submissionBody = document.getElementById('hr-ai-submission-body');
+    if (!feedbackEl || !studentBody || !submissionBody) return;
+
+    feedbackEl.textContent = 'Click "Run Behavior Analysis" to load behavior score results.';
+    studentBody.innerHTML = `
+        <tr>
+            <td colspan="4" style="text-align:center; padding:18px;">Run analysis to view student aggregate scores.</td>
+        </tr>
+    `;
+    submissionBody.innerHTML = `
+        <tr>
+            <td colspan="6" style="text-align:center; padding:18px;">No submission analysis yet.</td>
+        </tr>
+    `;
+}
+
+function populateAiInsightsSemesterFilters() {
+    const behaviorSemester = document.getElementById('hr-ai-behavior-semester');
+    const biasSemester = document.getElementById('hr-ai-bias-semester');
+    const discrepancySemester = document.getElementById('hr-ai-discrepancy-semester');
+    const credibilitySemester = document.getElementById('hr-ai-credibility-semester');
+    const semesterSelects = [behaviorSemester, biasSemester, discrepancySemester, credibilitySemester]
+        .filter(function (element) { return !!element; });
+    if (semesterSelects.length === 0) return;
+
+    const options = getSemesterOptions();
+    const currentSemester = String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : '').trim();
+    const preferred = currentSemester || 'all';
+    const previousValueById = {};
+    semesterSelects.forEach(function (element) {
+        previousValueById[element.id] = String(element.value || '').trim() || preferred;
+    });
+
+    const html = options.map(option => {
+        const value = String(option && option.id || '').trim();
+        const label = String(option && option.label || value).trim() || value;
+        return `<option value="${escapeHrHtml(value)}">${escapeHrHtml(label)}</option>`;
+    }).join('');
+
+    semesterSelects.forEach(function (element) {
+        element.innerHTML = html;
+    });
+
+    const validValues = new Set(options.map(option => String(option && option.id || '').trim()));
+    const fallback = validValues.has(preferred) ? preferred : 'all';
+    semesterSelects.forEach(function (element) {
+        const previous = previousValueById[element.id] || fallback;
+        element.value = validValues.has(previous) ? previous : fallback;
+    });
+}
+
+function renderAiInsightsBehaviorAnalysis(options) {
+    const cfg = options || {};
+    const behaviorSemester = document.getElementById('hr-ai-behavior-semester');
+    const feedbackEl = document.getElementById('hr-ai-behavior-feedback');
+    const studentBody = document.getElementById('hr-ai-student-aggregate-body');
+    const submissionBody = document.getElementById('hr-ai-submission-body');
+    if (!behaviorSemester || !feedbackEl || !studentBody || !submissionBody) return;
+
+    const semesterId = String(behaviorSemester.value || 'all').trim() || 'all';
+    const context = buildHrEvaluationContext();
+    const analysis = analyzeEvaluationBehaviorRecords(context, semesterId);
+    const studentEvaluationCount = (context.evaluations || []).filter(function (evaluation) {
+        return getHrEvaluationTypeKey(evaluation) === 'student' && isHrEvaluationInSemester(evaluation, semesterId);
+    }).length;
+
+    if (analysis.records.length > 0) {
+        if (analysis.timedRecordsCount > 0 && analysis.legacyRecordsCount > 0) {
+            feedbackEl.textContent = `Analyzed ${analysis.records.length} submission(s): ${analysis.timedRecordsCount} with timing metadata and ${analysis.legacyRecordsCount} legacy record(s) using pattern-only fallback. Fast threshold: ${analysis.fastThreshold.toFixed(2)} sec/question.`;
+        } else if (analysis.timedRecordsCount > 0) {
+            feedbackEl.textContent = `Analyzed ${analysis.timedRecordsCount} timing-enabled submission(s). Fast threshold: ${analysis.fastThreshold.toFixed(2)} sec/question.`;
+        } else {
+            feedbackEl.textContent = `Analyzed ${analysis.records.length} legacy submission(s) using answer/comment-pattern fallback (uniformity + repetition). Timing metadata is unavailable, so fast-response risk is marked N/A.`;
+        }
+    } else if (studentEvaluationCount > 0) {
+        feedbackEl.textContent = `Found ${studentEvaluationCount} student evaluation(s), but none include timing metadata (behaviorMeta). Behavior scoring applies to new submissions with captureVersion >= 1.`;
+    } else {
+        feedbackEl.textContent = 'No student evaluations found for the selected semester.';
+    }
+
+    if (analysis.studentRows.length === 0) {
+        studentBody.innerHTML = `
+            <tr>
+                <td colspan="4" style="text-align:center; padding:18px;">No student aggregate results available.</td>
+            </tr>
+        `;
+    } else {
+        studentBody.innerHTML = analysis.studentRows.map(function (row) {
+            const level = getBehaviorRiskLevel(row.averageScore);
+            const badgeClass = level === 'High' ? 'high' : (level === 'Medium' ? 'medium' : 'low');
+            return `
+                <tr>
+                    <td>${escapeHrHtml(row.studentNumber)}</td>
+                    <td>${row.formsAnalyzed}</td>
+                    <td>${row.averageScore}</td>
+                    <td><span class="ai-insights-tag ${badgeClass}">${level}</span></td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    if (analysis.records.length === 0) {
+        submissionBody.innerHTML = `
+            <tr>
+                <td colspan="6" style="text-align:center; padding:18px;">No submission analysis yet.</td>
+            </tr>
+        `;
+    } else {
+        submissionBody.innerHTML = analysis.records.map(function (record) {
+            const fastFlagText = record.timingAvailable ? (record.fastFlag ? 'Yes' : 'No') : 'N/A';
+            return `
+                <tr>
+                    <td>${escapeHrHtml(record.submissionId)}</td>
+                    <td>${escapeHrHtml(record.studentNumber)}</td>
+                    <td>${record.behaviorScore}</td>
+                    <td>${fastFlagText}</td>
+                    <td>${record.uniformFlag ? 'Yes' : 'No'}</td>
+                    <td>${record.repetitiveFlag ? 'Yes' : 'No'}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    if (!cfg.silent) {
+        const biasFeedback = document.getElementById('hr-ai-bias-feedback');
+        if (biasFeedback) {
+            biasFeedback.textContent = '';
+        }
+    }
+}
+
+function resolveAiInsightsStudentNumber(evaluation) {
+    const studentNumber = String(
+        evaluation && (
+            evaluation.evaluatorStudentNumber
+            || evaluation.studentNumber
+            || evaluation.studentId
+            || evaluation.studentUserId
+            || evaluation.evaluatorId
+            || evaluation.evaluatorUsername
+        ) || 'N/A'
+    ).trim();
+    return studentNumber || 'N/A';
+}
+
+function buildBehaviorRepetitionTargetKey(evaluation, context) {
+    const offeringToken = normalizeHrToken(evaluation && evaluation.courseOfferingId);
+    if (offeringToken) return `offering:${offeringToken}`;
+
+    const professorId = resolveHrEvaluationTargetProfessorId(evaluation, 'student', context);
+    const professorToken = professorId || normalizeHrToken(
+        evaluation && (evaluation.targetProfessor || evaluation.professorName || evaluation.targetName)
+    );
+    const subjectToken = normalizeHrToken(
+        evaluation && (evaluation.targetSubjectCode || evaluation.subjectCode)
+    );
+    const professorSubjectToken = normalizeHrToken(evaluation && evaluation.professorSubject);
+
+    if (professorToken && subjectToken) return `professor-subject:${professorToken}|${subjectToken}`;
+    if (professorSubjectToken) return `professor-subject:${professorSubjectToken}`;
+    if (professorToken) return `professor:${professorToken}`;
+    return '';
+}
+
+function getBehaviorRepetitionMinOverlap(ratingCount) {
+    const count = Number(ratingCount);
+    if (!Number.isFinite(count) || count <= 0) return 2;
+    if (count >= 5) return 5;
+    if (count >= 4) return 4;
+    if (count >= 3) return 3;
+    return 2;
+}
+
+function normalizeBehaviorCommentText(value) {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function tokenizeBehaviorCommentText(value) {
+    const normalized = normalizeBehaviorCommentText(value);
+    if (!normalized) return [];
+    return normalized.split(' ').filter(function (token) {
+        return token.length >= 3 && !/^\d+$/.test(token);
+    });
+}
+
+function extractBehaviorCommentPattern(evaluation) {
+    const rawTexts = [];
+    const generalComment = String(evaluation && evaluation.comments || '').trim();
+    if (generalComment) rawTexts.push(generalComment);
+
+    const qualitative = evaluation && typeof evaluation.qualitative === 'object' && evaluation.qualitative
+        ? evaluation.qualitative
+        : {};
+    Object.keys(qualitative).forEach(function (key) {
+        const value = String(qualitative[key] == null ? '' : qualitative[key]).trim();
+        if (value) rawTexts.push(value);
+    });
+
+    const normalizedTexts = rawTexts
+        .map(function (text) { return normalizeBehaviorCommentText(text); })
+        .filter(function (text) { return !!text; });
+    const uniqueNormalized = Array.from(new Set(normalizedTexts));
+    const fingerprint = uniqueNormalized.slice().sort().join(' || ');
+    const tokenSet = new Set();
+    uniqueNormalized.forEach(function (text) {
+        tokenizeBehaviorCommentText(text).forEach(function (token) {
+            tokenSet.add(token);
+        });
+    });
+
+    return {
+        count: normalizedTexts.length,
+        uniqueCount: uniqueNormalized.length,
+        fingerprint,
+        tokens: Array.from(tokenSet),
+    };
+}
+
+function analyzeEvaluationBehaviorRecords(context, semesterIdInput) {
+    const semesterId = String(semesterIdInput || 'all').trim() || 'all';
+    const records = [];
+    const studentNumberByToken = {};
+
+    (context.evaluations || []).forEach(function (evaluation) {
+        if (getHrEvaluationTypeKey(evaluation) !== 'student') return;
+        if (!isHrEvaluationInSemester(evaluation, semesterId)) return;
+
+        const behaviorMeta = evaluation && typeof evaluation.behaviorMeta === 'object' && evaluation.behaviorMeta
+            ? evaluation.behaviorMeta
+            : null;
+        const captureVersion = Number(behaviorMeta && behaviorMeta.captureVersion);
+        const hasTimingMeta = Number.isFinite(captureVersion) && captureVersion >= 1;
+
+        const ratings = evaluation && typeof evaluation.ratings === 'object' && evaluation.ratings
+            ? evaluation.ratings
+            : {};
+        const ratingValues = Object.keys(ratings).map(function (key) {
+            const parsed = parseFloat(ratings[key]);
+            return Number.isFinite(parsed) ? parsed : null;
+        }).filter(function (value) { return value !== null; });
+
+        const answeredCount = Number(behaviorMeta && behaviorMeta.answeredCount);
+        const questionCount = Number(behaviorMeta && behaviorMeta.questionCount);
+        const durationSeconds = Number(behaviorMeta && behaviorMeta.durationSeconds);
+        const secPerQuestionRaw = Number(behaviorMeta && behaviorMeta.secondsPerQuestion);
+        const safeAnswered = Number.isFinite(answeredCount) && answeredCount > 0 ? answeredCount : ratingValues.length;
+        const computedSecPerQuestion = (Number.isFinite(durationSeconds) && durationSeconds > 0 && safeAnswered > 0)
+            ? (durationSeconds / safeAnswered)
+            : null;
+        const secondsPerQuestion = Number.isFinite(secPerQuestionRaw) && secPerQuestionRaw > 0
+            ? secPerQuestionRaw
+            : computedSecPerQuestion;
+        const timingAvailable = hasTimingMeta && Number.isFinite(secondsPerQuestion) && secondsPerQuestion > 0;
+
+        const studentToken = normalizeHrToken(
+            evaluation.evaluatorStudentNumber
+            || evaluation.studentNumber
+            || evaluation.studentUserId
+            || evaluation.studentId
+            || evaluation.evaluatorId
+            || evaluation.evaluatorEmail
+            || evaluation.evaluatorUsername
+            || evaluation.evaluatorName
+        );
+        if (!studentToken) return;
+
+        const studentNumber = resolveAiInsightsStudentNumber(evaluation);
+
+        studentNumberByToken[studentToken] = studentNumberByToken[studentToken] || studentNumber;
+
+        const submissionId = String(
+            evaluation.id
+            || evaluation.evaluationKey
+            || evaluation.submittedAt
+            || evaluation.timestamp
+            || ('submission-' + Date.now())
+        ).trim();
+        const submissionSemester = String(evaluation.semesterId || '').trim() || 'unspecified';
+        const commentPattern = extractBehaviorCommentPattern(evaluation);
+
+        records.push({
+            evaluation,
+            submissionId,
+            studentToken,
+            studentNumber,
+            semesterId: submissionSemester,
+            timingAvailable,
+            secondsPerQuestion: timingAvailable ? secondsPerQuestion : null,
+            questionCount: Number.isFinite(questionCount) && questionCount > 0 ? questionCount : ratingValues.length,
+            answeredCount: safeAnswered,
+            ratingValues,
+            commentCount: Number(commentPattern.count || 0),
+            commentUniqueCount: Number(commentPattern.uniqueCount || 0),
+            commentFingerprint: String(commentPattern.fingerprint || ''),
+            commentTokens: Array.isArray(commentPattern.tokens) ? commentPattern.tokens : [],
+            targetComparisonKey: buildBehaviorRepetitionTargetKey(evaluation, context),
+            speedRisk: null,
+            uniformityRisk: 0,
+            repetitionRisk: 0,
+            behaviorScore: 100,
+            fastFlag: false,
+            uniformFlag: false,
+            repetitiveFlag: false,
+        });
+    });
+
+    const secValues = records
+        .filter(function (item) { return item.timingAvailable; })
+        .map(function (item) { return item.secondsPerQuestion; });
+    const semesterMedian = secValues.length > 0 ? medianFromValues(secValues) : 0;
+    const fastThreshold = secValues.length > 0 ? Math.max(2.5, semesterMedian * 0.65) : 0;
+
+    const groupedByStudent = {};
+    const groupedByTarget = {};
+    records.forEach(function (record) {
+        const studentKey = `${record.studentToken}|${record.semesterId}`;
+        if (!groupedByStudent[studentKey]) groupedByStudent[studentKey] = [];
+        groupedByStudent[studentKey].push(record);
+
+        if (record.targetComparisonKey) {
+            const targetKey = `${record.semesterId}|${record.targetComparisonKey}`;
+            if (!groupedByTarget[targetKey]) groupedByTarget[targetKey] = [];
+            groupedByTarget[targetKey].push(record);
+        }
+    });
+
+    records.forEach(function (record) {
+        if (record.timingAvailable && fastThreshold > 0) {
+            const speedRatio = record.secondsPerQuestion / fastThreshold;
+            record.fastFlag = record.secondsPerQuestion <= fastThreshold;
+            record.speedRisk = record.fastFlag ? clampNumber(1 - speedRatio, 0, 1) : 0;
+        } else {
+            record.fastFlag = false;
+            record.speedRisk = null;
+        }
+
+        const frequencies = {};
+        record.ratingValues.forEach(function (value) {
+            const key = String(value);
+            frequencies[key] = (frequencies[key] || 0) + 1;
+        });
+        const ratingCount = record.ratingValues.length;
+        const dominantCount = Object.values(frequencies).reduce(function (max, count) {
+            return count > max ? count : max;
+        }, 0);
+        const dominantShare = ratingCount > 0 ? (dominantCount / ratingCount) : 0;
+        const allSame = ratingCount > 0 && dominantCount === ratingCount;
+        const ratingUniformFlag = allSame || dominantShare >= 0.90;
+        let ratingUniformRisk = 0;
+        if (allSame) {
+            ratingUniformRisk = 1;
+        } else if (ratingUniformFlag) {
+            ratingUniformRisk = clampNumber(dominantShare, 0, 1);
+        } else {
+            ratingUniformRisk = clampNumber(dominantShare * 0.35, 0, 1);
+        }
+
+        const commentUniformFlag = record.commentCount >= 2
+            && record.commentUniqueCount === 1
+            && record.commentFingerprint !== '';
+        const commentUniformRisk = commentUniformFlag ? 1 : 0;
+
+        record.uniformFlag = ratingUniformFlag || commentUniformFlag;
+        record.uniformityRisk = Math.max(ratingUniformRisk, commentUniformRisk);
+    });
+
+    records.forEach(function (record) {
+        const bucketKey = `${record.studentToken}|${record.semesterId}`;
+        const bucket = groupedByStudent[bucketKey] || [];
+        const crossAccountBucketKey = record.targetComparisonKey
+            ? `${record.semesterId}|${record.targetComparisonKey}`
+            : '';
+        const crossAccountBucket = crossAccountBucketKey
+            ? (groupedByTarget[crossAccountBucketKey] || [])
+            : [];
+        const repetitionMinOverlap = getBehaviorRepetitionMinOverlap(record.ratingValues.length);
+        const commentRepetitionMinOverlap = 5;
+        let bestSimilarity = 0;
+        let bestOverlap = 0;
+        let bestCrossAccountSimilarity = 0;
+        let bestCrossAccountOverlap = 0;
+        let bestCommentSimilarity = 0;
+        let bestCommentOverlap = 0;
+        let bestCrossCommentSimilarity = 0;
+        let bestCrossCommentOverlap = 0;
+        let sameAccountCommentExactMatch = false;
+        let crossAccountCommentExactMatch = false;
+
+        bucket.forEach(function (candidate) {
+            if (candidate === record) return;
+            const similarity = computeBehaviorAnswerSimilarity(record.evaluation, candidate.evaluation);
+            if (
+                similarity.overlapCount > bestOverlap
+                || (similarity.overlapCount === bestOverlap && similarity.similarity > bestSimilarity)
+            ) {
+                bestSimilarity = similarity.similarity;
+                bestOverlap = similarity.overlapCount;
+            }
+
+            const commentSimilarity = computeBehaviorCommentSimilarity(record, candidate);
+            if (commentSimilarity.exactMatch) {
+                sameAccountCommentExactMatch = true;
+            }
+            if (
+                commentSimilarity.overlapCount > bestCommentOverlap
+                || (
+                    commentSimilarity.overlapCount === bestCommentOverlap
+                    && commentSimilarity.similarity > bestCommentSimilarity
+                )
+            ) {
+                bestCommentSimilarity = commentSimilarity.similarity;
+                bestCommentOverlap = commentSimilarity.overlapCount;
+            }
+        });
+
+        crossAccountBucket.forEach(function (candidate) {
+            if (candidate === record) return;
+            if (candidate.studentToken === record.studentToken) return;
+            if (!record.fastFlag && !candidate.fastFlag) return;
+
+            const similarity = computeBehaviorAnswerSimilarity(record.evaluation, candidate.evaluation);
+            if (
+                similarity.overlapCount > bestCrossAccountOverlap
+                || (
+                    similarity.overlapCount === bestCrossAccountOverlap
+                    && similarity.similarity > bestCrossAccountSimilarity
+                )
+            ) {
+                bestCrossAccountSimilarity = similarity.similarity;
+                bestCrossAccountOverlap = similarity.overlapCount;
+            }
+
+            const commentSimilarity = computeBehaviorCommentSimilarity(record, candidate);
+            if (commentSimilarity.exactMatch) {
+                crossAccountCommentExactMatch = true;
+            }
+            if (
+                commentSimilarity.overlapCount > bestCrossCommentOverlap
+                || (
+                    commentSimilarity.overlapCount === bestCrossCommentOverlap
+                    && commentSimilarity.similarity > bestCrossCommentSimilarity
+                )
+            ) {
+                bestCrossCommentSimilarity = commentSimilarity.similarity;
+                bestCrossCommentOverlap = commentSimilarity.overlapCount;
+            }
+        });
+
+        const strongestSimilarity = Math.max(bestSimilarity, bestCrossAccountSimilarity);
+        const strongestCommentSimilarity = Math.max(bestCommentSimilarity, bestCrossCommentSimilarity);
+        const ratingRepetitiveFlag = (
+            (bestOverlap >= repetitionMinOverlap && bestSimilarity >= 0.90)
+            || (bestCrossAccountOverlap >= repetitionMinOverlap && bestCrossAccountSimilarity >= 0.90)
+        );
+        const commentRepetitiveFlag = (
+            sameAccountCommentExactMatch
+            || crossAccountCommentExactMatch
+            || (bestCommentOverlap >= commentRepetitionMinOverlap && bestCommentSimilarity >= 0.90)
+            || (bestCrossCommentOverlap >= commentRepetitionMinOverlap && bestCrossCommentSimilarity >= 0.90)
+        );
+
+        const ratingRepetitionRisk = ratingRepetitiveFlag
+            ? clampNumber(strongestSimilarity, 0, 1)
+            : clampNumber(strongestSimilarity * 0.25, 0, 1);
+        const commentRepetitionRisk = commentRepetitiveFlag
+            ? clampNumber(strongestCommentSimilarity || 1, 0, 1)
+            : clampNumber(strongestCommentSimilarity * 0.25, 0, 1);
+
+        record.repetitiveFlag = ratingRepetitiveFlag || commentRepetitiveFlag;
+        record.repetitionRisk = Math.max(ratingRepetitionRisk, commentRepetitionRisk);
+    });
+
+    records.forEach(function (record) {
+        const weightedRiskParts = [
+            Number.isFinite(record.speedRisk) ? { weight: 0.40, risk: record.speedRisk } : null,
+            { weight: 0.35, risk: record.uniformityRisk },
+            { weight: 0.25, risk: record.repetitionRisk },
+        ].filter(function (part) {
+            return part && Number.isFinite(part.weight) && Number.isFinite(part.risk);
+        });
+        const totalWeight = weightedRiskParts.reduce(function (sum, part) { return sum + part.weight; }, 0);
+        const weightedSuspicion = weightedRiskParts.reduce(function (sum, part) {
+            return sum + (part.weight * part.risk);
+        }, 0);
+        const suspicion = totalWeight > 0 ? (weightedSuspicion / totalWeight) : 0;
+        record.behaviorScore = Math.round((1 - clampNumber(suspicion, 0, 1)) * 100);
+    });
+
+    const studentAggregateMap = {};
+    records.forEach(function (record) {
+        if (!studentAggregateMap[record.studentToken]) {
+            studentAggregateMap[record.studentToken] = {
+                studentNumber: studentNumberByToken[record.studentToken] || record.studentNumber || 'N/A',
+                formsAnalyzed: 0,
+                scoreTotal: 0,
+            };
+        }
+        studentAggregateMap[record.studentToken].formsAnalyzed += 1;
+        studentAggregateMap[record.studentToken].scoreTotal += record.behaviorScore;
+    });
+
+    const studentRows = Object.keys(studentAggregateMap).map(function (token) {
+        const row = studentAggregateMap[token];
+        const averageScore = row.formsAnalyzed > 0
+            ? Math.round(row.scoreTotal / row.formsAnalyzed)
+            : 0;
+        return {
+            studentToken: token,
+            studentNumber: row.studentNumber,
+            formsAnalyzed: row.formsAnalyzed,
+            averageScore,
+        };
+    }).sort(function (a, b) {
+        if (a.averageScore !== b.averageScore) return a.averageScore - b.averageScore;
+        return String(a.studentNumber).localeCompare(String(b.studentNumber));
+    });
+
+    const sortedRecords = records.slice().sort(function (a, b) {
+        if (a.behaviorScore !== b.behaviorScore) return a.behaviorScore - b.behaviorScore;
+        const aTs = Date.parse(String(a.evaluation && (a.evaluation.submittedAt || a.evaluation.timestamp) || '')) || 0;
+        const bTs = Date.parse(String(b.evaluation && (b.evaluation.submittedAt || b.evaluation.timestamp) || '')) || 0;
+        return bTs - aTs;
+    });
+    const timedRecordsCount = sortedRecords.filter(function (record) { return record.timingAvailable; }).length;
+    const legacyRecordsCount = sortedRecords.length - timedRecordsCount;
+
+    return {
+        records: sortedRecords,
+        studentRows,
+        semesterMedianSecPerQuestion: semesterMedian,
+        fastThreshold,
+        timedRecordsCount,
+        legacyRecordsCount,
+    };
+}
+
+function computeBehaviorAnswerSimilarity(evaluationA, evaluationB) {
+    const ratingsA = evaluationA && typeof evaluationA.ratings === 'object' && evaluationA.ratings
+        ? evaluationA.ratings
+        : {};
+    const ratingsB = evaluationB && typeof evaluationB.ratings === 'object' && evaluationB.ratings
+        ? evaluationB.ratings
+        : {};
+
+    const sharedKeys = Object.keys(ratingsA).filter(function (key) {
+        return Object.prototype.hasOwnProperty.call(ratingsB, key);
+    });
+    const overlapCount = sharedKeys.length;
+    if (overlapCount === 0) {
+        return { similarity: 0, overlapCount: 0 };
+    }
+
+    let exactMatches = 0;
+    sharedKeys.forEach(function (key) {
+        const left = String(ratingsA[key] == null ? '' : ratingsA[key]).trim();
+        const right = String(ratingsB[key] == null ? '' : ratingsB[key]).trim();
+        if (left !== '' && left === right) {
+            exactMatches += 1;
+        }
+    });
+
+    return {
+        similarity: overlapCount > 0 ? (exactMatches / overlapCount) : 0,
+        overlapCount,
+    };
+}
+
+function computeBehaviorCommentSimilarity(recordA, recordB) {
+    const leftFingerprint = String(recordA && recordA.commentFingerprint || '').trim();
+    const rightFingerprint = String(recordB && recordB.commentFingerprint || '').trim();
+    if (!leftFingerprint || !rightFingerprint) {
+        return { similarity: 0, overlapCount: 0, exactMatch: false };
+    }
+
+    const exactMatch = leftFingerprint === rightFingerprint;
+    const leftTokens = new Set(Array.isArray(recordA && recordA.commentTokens) ? recordA.commentTokens : []);
+    const rightTokens = new Set(Array.isArray(recordB && recordB.commentTokens) ? recordB.commentTokens : []);
+    if (leftTokens.size === 0 || rightTokens.size === 0) {
+        return { similarity: exactMatch ? 1 : 0, overlapCount: 0, exactMatch };
+    }
+
+    let overlapCount = 0;
+    leftTokens.forEach(function (token) {
+        if (rightTokens.has(token)) {
+            overlapCount += 1;
+        }
+    });
+    const denominator = Math.max(leftTokens.size, rightTokens.size);
+    const similarity = denominator > 0 ? (overlapCount / denominator) : 0;
+    return {
+        similarity: exactMatch ? 1 : similarity,
+        overlapCount,
+        exactMatch,
+    };
+}
+
+function getBehaviorRiskLevel(score) {
+    const numeric = Number(score);
+    if (!Number.isFinite(numeric)) return 'Low';
+    if (numeric < 60) return 'High';
+    if (numeric < 80) return 'Medium';
+    return 'Low';
+}
+
+function countHrEvaluationsByType(context, semesterId, typeKey) {
+    const targetType = String(typeKey || '').trim();
+    return (context && Array.isArray(context.evaluations) ? context.evaluations : []).filter(function (evaluation) {
+        return getHrEvaluationTypeKey(evaluation) === targetType
+            && isHrEvaluationInSemester(evaluation, semesterId);
+    }).length;
+}
+
+function runHrWithGlobalLoading(message, callback) {
+    if (typeof callback !== 'function') return;
+
+    const loadingOverlay = window.AppLoadingOverlay;
+    const canUseOverlay = loadingOverlay
+        && typeof loadingOverlay.show === 'function'
+        && typeof loadingOverlay.hide === 'function';
+
+    if (!canUseOverlay) {
+        callback();
+        return;
+    }
+
+    loadingOverlay.show(message || 'Processing AI request...');
+    setTimeout(function () {
+        try {
+            callback();
+        } finally {
+            loadingOverlay.hide();
+        }
+    }, 0);
+}
+
+function runAiBiasDetection() {
+    const semesterSelect = document.getElementById('hr-ai-bias-semester');
+    const feedbackEl = document.getElementById('hr-ai-bias-feedback');
+    const summaryEl = document.getElementById('hr-ai-bias-summary');
+    const bodyEl = document.getElementById('hr-ai-bias-body');
+    const button = document.getElementById('hr-run-bias-detection-btn');
+
+    if (!semesterSelect || !feedbackEl || !summaryEl || !bodyEl || !button) return;
+
+    if (!SharedData.analyzeBiasComments) {
+        feedbackEl.style.display = 'block';
+        feedbackEl.textContent = 'Bias detection service is unavailable in SharedData.';
+        return;
+    }
+
+    const semesterId = String(semesterSelect.value || '').trim();
+    const original = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running...';
+    feedbackEl.style.display = 'block';
+    feedbackEl.textContent = 'Analyzing comments...';
+
+    runHrWithGlobalLoading('Running AI bias detection...', function () {
+        try {
+            const response = SharedData.analyzeBiasComments({
+                semesterId: semesterId === 'all' ? '' : semesterId,
+                limit: 400,
+            }, {});
+            if (!response || response.success !== true) {
+                throw new Error('Bias detection request failed.');
+            }
+
+            const items = Array.isArray(response && response.items) ? response.items : [];
+            const summary = response && response.summary ? response.summary : {};
+            const total = Number(summary.total || items.length) || 0;
+            const constructive = Number(summary.constructive || 0) || 0;
+            const neutral = Number(summary.neutral || 0) || 0;
+            const biased = Number(summary.biased || 0) || 0;
+            const source = String(summary.source || 'rule').trim() || 'rule';
+            const warning = String(summary.warning || '').trim();
+            const geminiModel = String(summary.geminiModel || '').trim();
+            const geminiStatus = Number(summary.geminiStatus || 0) || 0;
+            const geminiMeta = warning && (geminiModel || geminiStatus)
+                ? ` | Gemini: ${geminiModel || 'unknown'}${geminiStatus ? ` (HTTP ${geminiStatus})` : ''}`
+                : '';
+
+            summaryEl.textContent = `Total: ${total} | Constructive: ${constructive} | Neutral: ${neutral} | Biased: ${biased} | Source: ${source}${warning ? ` | Note: ${warning}` : ''}${geminiMeta}`;
+            feedbackEl.textContent = '';
+            feedbackEl.style.display = 'none';
+
+            if (items.length === 0) {
+                bodyEl.innerHTML = `
+                    <tr>
+                        <td colspan="5" style="text-align:center; padding:18px;">No comments to classify.</td>
+                    </tr>
+                `;
+            } else {
+                bodyEl.innerHTML = items.map(function (item) {
+                    const label = String(item.label || 'Neutral').trim() || 'Neutral';
+                    const badgeClass = label === 'Biased' ? 'high' : (label === 'Neutral' ? 'medium' : 'low');
+                    const dateText = formatAiInsightsDate(item.date || item.submittedAt || item.timestamp || '');
+                    return `
+                        <tr>
+                            <td>${escapeHrHtml(String(item.comment || '').trim())}</td>
+                            <td class="ai-insights-label-cell"><span class="ai-insights-tag ${badgeClass}">${escapeHrHtml(label)}</span></td>
+                            <td>${escapeHrHtml(String(item.reason || '').trim() || 'No reason provided')}</td>
+                            <td class="ai-insights-source-cell">${escapeHrHtml(String(item.source || source))}</td>
+                            <td>${escapeHrHtml(dateText)}</td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+        } catch (error) {
+            console.error('[HRPanel] Bias detection failed.', error);
+            feedbackEl.style.display = 'block';
+            feedbackEl.textContent = error && error.message ? error.message : 'Bias detection failed.';
+        } finally {
+            button.disabled = false;
+            button.innerHTML = original;
+        }
+    });
+}
+
+function runAiDiscrepancyCheck() {
+    const semesterSelect = document.getElementById('hr-ai-discrepancy-semester');
+    const feedbackEl = document.getElementById('hr-ai-discrepancy-feedback');
+    const summaryEl = document.getElementById('hr-ai-discrepancy-summary');
+    const bodyEl = document.getElementById('hr-ai-discrepancy-body');
+    const button = document.getElementById('hr-run-discrepancy-analysis-btn');
+
+    if (!semesterSelect || !feedbackEl || !summaryEl || !bodyEl || !button) return;
+
+    const threshold = 2.0;
+    const semesterId = String(semesterSelect.value || 'all').trim() || 'all';
+    const original = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running...';
+    feedbackEl.textContent = 'Checking cross-source discrepancies...';
+
+    try {
+        const context = buildHrEvaluationContext();
+        const analysis = analyzeCrossSourceDiscrepancies(context, semesterId, threshold);
+        const studentCount = countHrEvaluationsByType(context, semesterId, 'student');
+        const supervisorCount = countHrEvaluationsByType(context, semesterId, 'supervisor');
+        const displayRows = analysis.flaggedCount > 0
+            ? analysis.rows
+            : (Array.isArray(analysis.reviewedRows) ? analysis.reviewedRows : []);
+
+        summaryEl.textContent = `Reviewed: ${analysis.reviewedCount} | Flagged: ${analysis.flaggedCount} | Threshold: ${analysis.threshold.toFixed(1)}`;
+        if (analysis.flaggedCount > 0) {
+            feedbackEl.textContent = `Discrepancy check completed. ${analysis.flaggedCount} professor(s) flagged for review.`;
+        } else if (analysis.reviewedCount > 0) {
+            feedbackEl.textContent = `Compared ${analysis.reviewedCount} professor(s). No discrepancies exceeded the threshold ${analysis.threshold.toFixed(1)}.`;
+        } else if (analysis.reviewedCount === 0 && studentCount > 0 && supervisorCount === 0) {
+            feedbackEl.textContent = 'No supervisor evaluations found to compare against student ratings in the selected semester.';
+        } else if (analysis.reviewedCount === 0 && studentCount === 0) {
+            feedbackEl.textContent = 'No student evaluations found for the selected semester.';
+        } else {
+            feedbackEl.textContent = 'No discrepancies found for the selected semester.';
+        }
+
+        if (!displayRows.length) {
+            bodyEl.innerHTML = `
+                <tr>
+                    <td colspan="6" style="text-align:center; padding:18px;">No discrepancies found.</td>
+                </tr>
+            `;
+            return;
+        }
+
+        bodyEl.innerHTML = displayRows.map(function (row) {
+            const severityClass = row.severity === 'High'
+                ? 'high'
+                : (row.severity === 'Medium' ? 'medium' : 'low');
+            return `
+                <tr>
+                    <td>${escapeHrHtml(row.professorName)}</td>
+                    <td>${escapeHrHtml(formatAiDiscrepancyAverage(row.studentAvg))}</td>
+                    <td>${escapeHrHtml(formatAiDiscrepancyAverage(row.supervisorAvg))}</td>
+                    <td>${escapeHrHtml(formatAiDiscrepancyDiff(row.supervisorDiff))}</td>
+                    <td>${escapeHrHtml(row.flagReason)}</td>
+                    <td><span class="ai-insights-tag ${severityClass}">${escapeHrHtml(row.severity)}</span></td>
+                </tr>
+            `;
+        }).join('');
+    } catch (error) {
+        console.error('[HRPanel] Discrepancy check failed.', error);
+        feedbackEl.textContent = error && error.message ? error.message : 'Discrepancy check failed.';
+    } finally {
+        button.disabled = false;
+        button.innerHTML = original;
+    }
+}
+
+function runAiCredibilityAnalysis() {
+    const semesterSelect = document.getElementById('hr-ai-credibility-semester');
+    const feedbackEl = document.getElementById('hr-ai-credibility-feedback');
+    const summaryEl = document.getElementById('hr-ai-credibility-summary');
+    const bodyEl = document.getElementById('hr-ai-credibility-body');
+    const button = document.getElementById('hr-run-credibility-analysis-btn');
+
+    if (!semesterSelect || !feedbackEl || !summaryEl || !bodyEl || !button) return;
+
+    const semesterId = String(semesterSelect.value || 'all').trim() || 'all';
+    const original = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running...';
+    feedbackEl.textContent = 'Computing credibility scores...';
+
+    runHrWithGlobalLoading('Running AI credibility analysis...', function () {
+        try {
+            const context = buildHrEvaluationContext();
+            const analysis = analyzeEvaluationCredibility(context, semesterId);
+
+            summaryEl.textContent = `Total: ${analysis.total} | Highly reliable: ${analysis.highlyReliable} | Acceptable: ${analysis.acceptable} | Needs review: ${analysis.needsReview} | Avg score: ${analysis.averageScore.toFixed(1)}`;
+            if (analysis.total === 0) {
+                feedbackEl.textContent = 'No student evaluations found for the selected semester.';
+            } else if (analysis.biasSource === 'unavailable') {
+                feedbackEl.textContent = 'Credibility analysis completed. Bias component unavailable, so scores were reweighted using available signals.';
+            } else {
+                feedbackEl.textContent = 'Credibility analysis completed.';
+            }
+
+            if (!analysis.rows.length) {
+                bodyEl.innerHTML = `
+                    <tr>
+                        <td colspan="9" style="text-align:center; padding:18px;">No evaluations to analyze.</td>
+                    </tr>
+                `;
+                return;
+            }
+
+            bodyEl.innerHTML = analysis.rows.map(function (row) {
+                const categoryClass = getAiCredibilityCategoryBadgeClass(row.category);
+                return `
+                    <tr>
+                        <td>${escapeHrHtml(row.evaluationId)}</td>
+                        <td>${escapeHrHtml(row.studentNumber)}</td>
+                        <td>${escapeHrHtml(row.professorName)}</td>
+                        <td>${escapeHrHtml(formatAiCredibilityComponentValue(row.behaviorScore))}</td>
+                        <td>${escapeHrHtml(row.biasLabel)}</td>
+                        <td>${escapeHrHtml(row.crossStatus)}</td>
+                        <td>${row.credibilityScore}</td>
+                        <td><span class="ai-insights-tag ${categoryClass}">${escapeHrHtml(row.category)}</span></td>
+                        <td>${escapeHrHtml(row.reliabilitySummary)}</td>
+                    </tr>
+                `;
+            }).join('');
+        } catch (error) {
+            console.error('[HRPanel] Credibility analysis failed.', error);
+            feedbackEl.textContent = error && error.message ? error.message : 'Credibility analysis failed.';
+        } finally {
+            button.disabled = false;
+            button.innerHTML = original;
+        }
+    });
+}
+
+function analyzeEvaluationCredibility(contextInput, semesterIdInput) {
+    const context = contextInput || buildHrEvaluationContext();
+    const semesterId = String(semesterIdInput || 'all').trim() || 'all';
+
+    const baseWeights = {
+        behavior: 0.40,
+        bias: 0.30,
+        cross: 0.30,
+    };
+
+    const professorNameById = {};
+    (context.professorUsers || []).forEach(function (user) {
+        const professorId = normalizeHrUserIdToken(user && user.id);
+        if (!professorId || professorNameById[professorId]) return;
+        const name = String(user && (user.name || user.username || user.employeeId) || '').trim();
+        professorNameById[professorId] = name || professorId;
+    });
+
+    const baseRows = [];
+    (context.evaluations || []).forEach(function (evaluation) {
+        if (getHrEvaluationTypeKey(evaluation) !== 'student') return;
+        if (!isHrEvaluationInSemester(evaluation, semesterId)) return;
+
+        const evaluationId = getAiInsightsSubmissionId(evaluation);
+        const biasSubmissionId = String(
+            evaluation && (evaluation.id || evaluation.evaluationKey) || ''
+        ).trim();
+        const studentNumber = resolveAiInsightsStudentNumber(evaluation);
+        const professorId = resolveHrEvaluationTargetProfessorId(evaluation, 'student', context);
+        const fallbackProfessor = String(
+            evaluation && (evaluation.targetProfessor || evaluation.professorName || evaluation.targetName || evaluation.professorSubject) || ''
+        ).trim();
+        const professorName = String(professorNameById[professorId] || fallbackProfessor || professorId || 'Unknown Professor').trim() || 'Unknown Professor';
+        const evaluationAverage = computeAiEvaluationAverageRating(evaluation);
+
+        baseRows.push({
+            evaluation,
+            evaluationId,
+            biasSubmissionId,
+            studentNumber,
+            professorId,
+            professorName,
+            evaluationAverage,
+        });
+    });
+
+    if (baseRows.length === 0) {
+        return {
+            rows: [],
+            total: 0,
+            highlyReliable: 0,
+            acceptable: 0,
+            needsReview: 0,
+            averageScore: 0,
+            biasSource: 'unavailable',
+        };
+    }
+
+    const behaviorAnalysis = analyzeEvaluationBehaviorRecords(context, semesterId);
+    const behaviorByEvaluation = new Map();
+    (behaviorAnalysis.records || []).forEach(function (record) {
+        if (!record || !record.evaluation) return;
+        behaviorByEvaluation.set(record.evaluation, Number(record.behaviorScore));
+    });
+
+    let biasSource = 'unavailable';
+    const biasItems = [];
+    if (typeof SharedData.analyzeBiasComments === 'function') {
+        try {
+            const biasResponse = SharedData.analyzeBiasComments({
+                semesterId: semesterId === 'all' ? '' : semesterId,
+                limit: 1000,
+            }, {});
+            if (biasResponse && biasResponse.success === true) {
+                const source = String(biasResponse.summary && biasResponse.summary.source || '').trim();
+                biasSource = source || 'rule';
+                (Array.isArray(biasResponse.items) ? biasResponse.items : []).forEach(function (item) {
+                    biasItems.push(item);
+                });
+            }
+        } catch (error) {
+            console.warn('[HRPanel] Credibility bias component unavailable.', error);
+            biasSource = 'unavailable';
+        }
+    }
+
+    const biasBySubmission = {};
+    const biasLabelRank = { Constructive: 1, Neutral: 2, Biased: 3 };
+    biasItems.forEach(function (item) {
+        const submissionId = String(item && item.submissionId || '').trim();
+        if (!submissionId) return;
+        const label = normalizeAiCredibilityBiasLabel(item && item.label);
+        if (!biasBySubmission[submissionId]) {
+            biasBySubmission[submissionId] = {
+                sum: 0,
+                count: 0,
+                worstLabel: 'Constructive',
+                worstRank: 1,
+            };
+        }
+        const bucket = biasBySubmission[submissionId];
+        bucket.sum += mapAiCredibilityBiasLabelToScore(label);
+        bucket.count += 1;
+        const nextRank = biasLabelRank[label] || 1;
+        if (nextRank >= bucket.worstRank) {
+            bucket.worstRank = nextRank;
+            bucket.worstLabel = label;
+        }
+    });
+
+    const uniqueProfessorIds = new Set(
+        baseRows
+            .map(function (row) { return String(row.professorId || '').trim(); })
+            .filter(function (value) { return value !== ''; })
+    );
+
+    const comparatorByProfessor = {};
+    uniqueProfessorIds.forEach(function (professorId) {
+        const supervisorAggregate = aggregateHrEvaluationData({
+            context,
+            typeKey: 'supervisor',
+            semesterId,
+            targetProfessorId: professorId,
+            includeCategoryScores: false,
+        });
+
+        const supervisorAverage = Number(supervisorAggregate && supervisorAggregate.averageRating);
+        comparatorByProfessor[professorId] = {
+            supervisorAvg: Number(supervisorAggregate && supervisorAggregate.totalEvaluations) > 0 && Number.isFinite(supervisorAverage) && supervisorAverage > 0 ? supervisorAverage : null,
+        };
+    });
+
+    const rows = [];
+    let highlyReliable = 0;
+    let acceptable = 0;
+    let needsReview = 0;
+    let totalScore = 0;
+
+    baseRows.forEach(function (baseRow) {
+        const behaviorRaw = behaviorByEvaluation.get(baseRow.evaluation);
+        const behaviorScore = Number.isFinite(behaviorRaw) ? behaviorRaw : null;
+
+        const biasGroup = baseRow.biasSubmissionId ? biasBySubmission[baseRow.biasSubmissionId] : null;
+        const biasScore = biasGroup && biasGroup.count > 0
+            ? Math.round(biasGroup.sum / biasGroup.count)
+            : null;
+        const biasLabel = biasGroup && biasGroup.count > 0 ? biasGroup.worstLabel : 'N/A';
+
+        const crossComponent = computeAiCredibilityCrossSourceComponent(
+            baseRow.evaluationAverage,
+            comparatorByProfessor[baseRow.professorId] || { supervisorAvg: null }
+        );
+
+        const weightedParts = [];
+        if (Number.isFinite(behaviorScore)) {
+            weightedParts.push({ score: behaviorScore, weight: baseWeights.behavior });
+        }
+        if (Number.isFinite(biasScore)) {
+            weightedParts.push({ score: biasScore, weight: baseWeights.bias });
+        }
+        if (Number.isFinite(crossComponent.score)) {
+            weightedParts.push({ score: crossComponent.score, weight: baseWeights.cross });
+        }
+
+        let credibilityScore = 50;
+        if (weightedParts.length > 0) {
+            const totalWeight = weightedParts.reduce(function (sum, part) { return sum + part.weight; }, 0);
+            const weightedSum = weightedParts.reduce(function (sum, part) { return sum + (part.score * part.weight); }, 0);
+            credibilityScore = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 50;
+        }
+
+        const category = getAiCredibilityCategory(credibilityScore);
+        if (category === 'Highly reliable') {
+            highlyReliable += 1;
+        } else if (category === 'Acceptable') {
+            acceptable += 1;
+        } else {
+            needsReview += 1;
+        }
+        totalScore += credibilityScore;
+
+        const reliabilitySummary = buildAiCredibilitySummary({
+            behaviorScore,
+            biasLabel,
+            crossStatus: crossComponent.status,
+            noSignals: weightedParts.length === 0,
+        });
+
+        rows.push({
+            evaluationId: baseRow.evaluationId,
+            studentNumber: baseRow.studentNumber,
+            professorName: baseRow.professorName,
+            behaviorScore,
+            biasLabel,
+            crossStatus: crossComponent.status,
+            credibilityScore,
+            category,
+            reliabilitySummary,
+            submittedAt: String(baseRow.evaluation && (baseRow.evaluation.submittedAt || baseRow.evaluation.timestamp) || ''),
+        });
+    });
+
+    rows.sort(function (left, right) {
+        if (left.credibilityScore !== right.credibilityScore) {
+            return left.credibilityScore - right.credibilityScore;
+        }
+        const rightDate = Date.parse(String(right.submittedAt || '')) || 0;
+        const leftDate = Date.parse(String(left.submittedAt || '')) || 0;
+        return rightDate - leftDate;
+    });
+
+    return {
+        rows,
+        total: rows.length,
+        highlyReliable,
+        acceptable,
+        needsReview,
+        averageScore: rows.length > 0 ? (totalScore / rows.length) : 0,
+        biasSource,
+    };
+}
+
+function getAiInsightsSubmissionId(evaluation) {
+    const sourceId = String(
+        evaluation && (evaluation.id || evaluation.evaluationKey || evaluation.submittedAt || evaluation.timestamp || evaluation.createdAt || evaluation.updatedAt) || ''
+    ).trim();
+    if (sourceId) return sourceId;
+
+    const studentToken = String(
+        evaluation && (evaluation.studentUserId || evaluation.studentId || evaluation.evaluatorId || evaluation.evaluatorUsername || evaluation.evaluatorName) || 'student'
+    ).trim() || 'student';
+    const targetToken = String(
+        evaluation && (evaluation.targetProfessorId || evaluation.targetId || evaluation.professorId || evaluation.professorUserId || evaluation.professorSubject) || 'target'
+    ).trim() || 'target';
+    const semesterToken = String(evaluation && evaluation.semesterId || 'semester').trim() || 'semester';
+    const normalizedComposite = `${studentToken}-${targetToken}-${semesterToken}`
+        .replace(/\s+/g, '-')
+        .replace(/[^a-zA-Z0-9._-]/g, '')
+        .slice(0, 120);
+    return `evaluation-${normalizedComposite || 'unknown'}`;
+}
+
+function computeAiEvaluationAverageRating(evaluation) {
+    const ratings = evaluation && typeof evaluation.ratings === 'object' && evaluation.ratings
+        ? evaluation.ratings
+        : {};
+    const numericValues = Object.keys(ratings).map(function (key) {
+        const parsed = parseFloat(ratings[key]);
+        return Number.isFinite(parsed) ? clampNumber(parsed, 1, 5) : null;
+    }).filter(function (value) { return value !== null; });
+
+    if (numericValues.length === 0) {
+        return null;
+    }
+    const total = numericValues.reduce(function (sum, value) { return sum + value; }, 0);
+    return total / numericValues.length;
+}
+
+function normalizeAiCredibilityBiasLabel(value) {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'constructive') return 'Constructive';
+    if (raw === 'biased') return 'Biased';
+    return 'Neutral';
+}
+
+function mapAiCredibilityBiasLabelToScore(label) {
+    if (label === 'Constructive') return 100;
+    if (label === 'Biased') return 40;
+    return 80;
+}
+
+function computeAiCredibilityCrossSourceComponent(evaluationAverage, comparator) {
+    const studentAvg = Number(evaluationAverage);
+    const supervisorAvg = Number(comparator && comparator.supervisorAvg);
+
+    if (!Number.isFinite(studentAvg) || studentAvg <= 0) {
+        return { score: null, status: 'Comparator unavailable' };
+    }
+
+    if (!Number.isFinite(supervisorAvg)) {
+        return { score: null, status: 'Comparator unavailable' };
+    }
+
+    const discrepancy = supervisorAvg - studentAvg;
+    if (discrepancy < 2.0) {
+        return { score: 100, status: 'No discrepancy' };
+    }
+    if (discrepancy < 3.0) {
+        return { score: 60, status: 'Discrepancy Medium' };
+    }
+    return { score: 35, status: 'Discrepancy High' };
+}
+
+function getAiCredibilityCategory(score) {
+    const numeric = Number(score);
+    if (!Number.isFinite(numeric)) return 'Needs review';
+    if (numeric >= 90) return 'Highly reliable';
+    if (numeric >= 70) return 'Acceptable';
+    return 'Needs review';
+}
+
+function getAiCredibilityCategoryBadgeClass(category) {
+    if (category === 'Highly reliable') return 'low';
+    if (category === 'Acceptable') return 'medium';
+    return 'high';
+}
+
+function buildAiCredibilitySummary(input) {
+    const payload = input || {};
+    if (payload.noSignals) {
+        return 'Insufficient evidence from behavior, bias, and cross-source signals.';
+    }
+
+    const parts = [];
+    if (Number.isFinite(Number(payload.behaviorScore))) {
+        parts.push(`Behavior ${Math.round(Number(payload.behaviorScore))}/100`);
+    } else {
+        parts.push('Behavior unavailable');
+    }
+
+    if (String(payload.biasLabel || '').trim() && String(payload.biasLabel || '').trim() !== 'N/A') {
+        parts.push(`Bias ${String(payload.biasLabel).trim()}`);
+    } else {
+        parts.push('Bias unavailable');
+    }
+
+    const crossStatus = String(payload.crossStatus || '').trim();
+    if (crossStatus) {
+        if (crossStatus === 'No discrepancy') {
+            parts.push('No cross-source discrepancy');
+        } else if (crossStatus === 'Comparator unavailable') {
+            parts.push('Cross-source unavailable');
+        } else {
+            parts.push(`Cross-source ${crossStatus.toLowerCase()}`);
+        }
+    } else {
+        parts.push('Cross-source unavailable');
+    }
+
+    return parts.join('; ') + '.';
+}
+
+function formatAiCredibilityComponentValue(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 'N/A';
+    return String(Math.round(numeric));
+}
+
+function analyzeCrossSourceDiscrepancies(contextInput, semesterIdInput, thresholdInput) {
+    const context = contextInput || buildHrEvaluationContext();
+    const semesterId = String(semesterIdInput || 'all').trim() || 'all';
+    const threshold = Number.isFinite(Number(thresholdInput)) && Number(thresholdInput) > 0
+        ? Number(thresholdInput)
+        : 2.0;
+
+    const professorNameById = {};
+    (context.professorUsers || []).forEach(function (user) {
+        const professorId = normalizeHrUserIdToken(user && user.id);
+        if (!professorId || professorNameById[professorId]) return;
+        const name = String(user && (user.name || user.username || user.employeeId) || '').trim();
+        professorNameById[professorId] = name || professorId;
+    });
+
+    const candidateProfessorIds = new Set();
+    (context.evaluations || []).forEach(function (evaluation) {
+        const typeKey = getHrEvaluationTypeKey(evaluation);
+        if (typeKey !== 'student' && typeKey !== 'supervisor') return;
+        if (!isHrEvaluationInSemester(evaluation, semesterId)) return;
+
+        const ratings = evaluation && typeof evaluation.ratings === 'object' && evaluation.ratings
+            ? evaluation.ratings
+            : {};
+        const hasNumericRating = Object.keys(ratings).some(function (questionId) {
+            return Number.isFinite(parseFloat(ratings[questionId]));
+        });
+        if (!hasNumericRating) return;
+
+        const professorId = resolveHrEvaluationTargetProfessorId(evaluation, typeKey, context);
+        if (!professorId) return;
+
+        candidateProfessorIds.add(professorId);
+        if (professorNameById[professorId]) return;
+
+        const fallbackRaw = String(
+            evaluation && (evaluation.targetProfessor || evaluation.professorName || evaluation.targetName || evaluation.professorSubject) || ''
+        ).trim();
+        if (!fallbackRaw) return;
+        professorNameById[professorId] = fallbackRaw.includes(' - ')
+            ? (String(fallbackRaw.split(' - ')[0]).trim() || fallbackRaw)
+            : fallbackRaw;
+    });
+
+    const rows = [];
+    const reviewedRows = [];
+    let reviewedCount = 0;
+
+    candidateProfessorIds.forEach(function (professorId) {
+        const studentAggregate = aggregateHrEvaluationData({
+            context,
+            typeKey: 'student',
+            semesterId,
+            targetProfessorId: professorId,
+            includeCategoryScores: false,
+        });
+        const supervisorAggregate = aggregateHrEvaluationData({
+            context,
+            typeKey: 'supervisor',
+            semesterId,
+            targetProfessorId: professorId,
+            includeCategoryScores: false,
+        });
+
+        const hasStudent = Number(studentAggregate.totalEvaluations) > 0 && Number(studentAggregate.averageRating) > 0;
+        const hasSupervisor = Number(supervisorAggregate.totalEvaluations) > 0 && Number(supervisorAggregate.averageRating) > 0;
+
+        const studentAvg = hasStudent ? Number(studentAggregate.averageRating) : null;
+        const supervisorAvg = hasSupervisor ? Number(supervisorAggregate.averageRating) : null;
+
+        const supervisorComparable = Number.isFinite(studentAvg) && Number.isFinite(supervisorAvg);
+        if (!supervisorComparable) {
+            return;
+        }
+
+        reviewedCount += 1;
+
+        const supervisorDiff = supervisorAvg - studentAvg;
+        const supervisorFlag = Number.isFinite(supervisorDiff) && supervisorDiff >= threshold;
+
+        const reasonParts = [];
+        if (supervisorFlag) {
+            reasonParts.push(`Student lower than Supervisor by ${supervisorDiff.toFixed(2)}`);
+        }
+
+        const maxDifference = Number(supervisorDiff);
+        const row = {
+            professorId,
+            professorName: String(professorNameById[professorId] || professorId).trim() || professorId,
+            studentAvg,
+            supervisorAvg,
+            supervisorDiff,
+            flagReason: reasonParts.length ? reasonParts.join('; ') : 'No discrepancy (below threshold)',
+            severity: !supervisorFlag
+                ? 'Low'
+                : (maxDifference >= 3.0 ? 'High' : 'Medium'),
+            maxDifference,
+        };
+        reviewedRows.push(row);
+
+        if (!supervisorFlag) {
+            return;
+        }
+
+        rows.push(row);
+    });
+
+    rows.sort(function (left, right) {
+        if (right.maxDifference !== left.maxDifference) {
+            return right.maxDifference - left.maxDifference;
+        }
+        return String(left.professorName).localeCompare(String(right.professorName));
+    });
+    reviewedRows.sort(function (left, right) {
+        if (right.maxDifference !== left.maxDifference) {
+            return right.maxDifference - left.maxDifference;
+        }
+        return String(left.professorName).localeCompare(String(right.professorName));
+    });
+
+    return {
+        semesterId,
+        threshold,
+        reviewedCount,
+        flaggedCount: rows.length,
+        rows,
+        reviewedRows,
+    };
+}
+
+function formatAiDiscrepancyAverage(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 'N/A';
+    return numeric.toFixed(2);
+}
+
+function formatAiDiscrepancyDiff(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 'N/A';
+    return `${numeric >= 0 ? '+' : ''}${numeric.toFixed(2)}`;
+}
+
+function medianFromValues(values) {
+    const sorted = (Array.isArray(values) ? values : [])
+        .map(function (value) { return Number(value); })
+        .filter(function (value) { return Number.isFinite(value) && value > 0; })
+        .sort(function (a, b) { return a - b; });
+
+    if (!sorted.length) return 1.5;
+    const mid = Math.floor(sorted.length / 2);
+    if (sorted.length % 2 === 0) {
+        return (sorted[mid - 1] + sorted[mid]) / 2;
+    }
+    return sorted[mid];
+}
+
+function escapeHrHtml(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function escapeHrAttr(value) {
+    return escapeHrHtml(value).replace(/`/g, '&#96;');
+}
+
+function sanitizeHrPhotoSource(value) {
+    const photo = String(value || '').trim();
+    if (!photo) return '';
+    if (/^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+$/i.test(photo)) {
+        return photo;
+    }
+    if (/^https?:\/\//i.test(photo)) {
+        return photo;
+    }
+    if (/^(\/|\.{1,2}\/|uploads\/)/i.test(photo)) {
+        return photo;
+    }
+    return '';
+}
+
+function getHrProfessorPhotoSource(professor) {
+    if (!professor || typeof professor !== 'object') {
+        return '';
+    }
+
+    const candidates = [
+        professor.profileImageUrl,
+        professor.photoData,
+        professor.profileImage,
+    ];
+
+    for (const value of candidates) {
+        const normalized = sanitizeHrPhotoSource(value);
+        if (normalized) {
+            return normalized;
+        }
+    }
+
+    return '';
+}
+
+function buildHrProfessorAvatarHtml(professor, avatarClassName) {
+    const className = String(avatarClassName || '').trim();
+    const photoSource = getHrProfessorPhotoSource(professor);
+    if (photoSource) {
+        return `<div class="${className}"><img src="${escapeHrAttr(photoSource)}" alt="${escapeHrAttr(professor && professor.name ? professor.name : 'Professor')} photo"></div>`;
+    }
+
+    const initials = escapeHrHtml(buildInitials(professor && professor.name ? professor.name : '') || 'PR');
+    return `<div class="${className}"><span class="avatar-fallback-text">${initials}</span></div>`;
+}
+
+function formatAiInsightsDate(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '-';
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return raw;
+    return parsed.toLocaleString();
 }
 
 /**
@@ -954,20 +2451,61 @@ function setupProfilePhotoUpload() {
         const file = input.files && input.files[0];
         if (!file) return;
 
-        if (!file.type.startsWith('image/')) {
-            alert('Please select a valid image file.');
+        const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+        if (!allowedTypes.includes(String(file.type || '').toLowerCase())) {
+            alert('Please choose a JPG, JPEG, PNG, or WEBP image.');
             input.value = '';
             return;
         }
 
-        const reader = new FileReader();
-        reader.onload = function () {
-            preview.src = reader.result;
+        if (Number(file.size || 0) > (2 * 1024 * 1024)) {
+            alert('Please choose an image smaller than 2MB.');
+            input.value = '';
+            return;
+        }
+
+        const localPreviewUrl = URL.createObjectURL(file);
+        preview.src = localPreviewUrl;
+        preview.classList.add('active');
+        placeholder.style.display = 'none';
+
+        if (typeof SharedData.uploadProfilePhoto !== 'function') {
+            const reader = new FileReader();
+            reader.onload = function () {
+                preview.src = reader.result;
+                preview.classList.add('active');
+                placeholder.style.display = 'none';
+                SharedData.setProfilePhoto('hr', reader.result);
+                URL.revokeObjectURL(localPreviewUrl);
+                input.value = '';
+            };
+            reader.readAsDataURL(file);
+            return;
+        }
+
+        try {
+            const savedPhoto = SharedData.uploadProfilePhoto(file);
+            if (savedPhoto) {
+                preview.src = savedPhoto;
+            }
             preview.classList.add('active');
             placeholder.style.display = 'none';
-            SharedData.setProfilePhoto('hr', reader.result);
-        };
-        reader.readAsDataURL(file);
+        } catch (error) {
+            alert(error && error.message ? error.message : 'Failed to upload the profile image.');
+            const storedPhoto = SharedData.getProfilePhoto('hr');
+            if (storedPhoto) {
+                preview.src = storedPhoto;
+                preview.classList.add('active');
+                placeholder.style.display = 'none';
+            } else {
+                preview.removeAttribute('src');
+                preview.classList.remove('active');
+                placeholder.style.display = '';
+            }
+        } finally {
+            URL.revokeObjectURL(localPreviewUrl);
+            input.value = '';
+        }
     });
 }
 
@@ -1068,21 +2606,27 @@ function handleChangeEmail() {
         return;
     }
 
-    const payload = {
-        username: getUserSession() ? getUserSession().username : '',
-        currentEmail,
-        newEmail
-    };
+    if (!SharedData.changeOwnEmail) {
+        alert('Email update service is unavailable.');
+        return;
+    }
 
-    console.log('Ready for SQL integration: /api/hr/change-email', payload);
-    alert('Email update request ready for SQL connection.');
+    try {
+        const result = SharedData.changeOwnEmail(currentEmail, newEmail);
+        const nextEmail = String(result && result.email || newEmail).trim();
+        alert('Email updated successfully.');
 
-    const profileEmail = document.getElementById('profileEmail');
-    if (profileEmail) profileEmail.textContent = newEmail;
-    const currentEmailInput = document.getElementById('currentEmail');
-    if (currentEmailInput) {
-        currentEmailInput.value = newEmail;
-        currentEmailInput.defaultValue = newEmail;
+        const profileEmail = document.getElementById('profileEmail');
+        if (profileEmail) profileEmail.textContent = nextEmail;
+        const currentEmailInput = document.getElementById('currentEmail');
+        if (currentEmailInput) {
+            currentEmailInput.value = nextEmail;
+            currentEmailInput.defaultValue = nextEmail;
+        }
+    } catch (error) {
+        console.error('[HRPanel] Failed to update email.', error);
+        alert(error && error.message ? error.message : 'Failed to update email.');
+        return;
     }
 
     const form = document.getElementById('changeEmailForm');
@@ -1150,14 +2694,19 @@ function handleChangePassword() {
         return;
     }
 
-    const payload = {
-        username: getUserSession() ? getUserSession().username : '',
-        currentPassword,
-        newPassword
-    };
+    if (!SharedData.changeOwnPassword) {
+        alert('Password update service is unavailable.');
+        return;
+    }
 
-    console.log('Ready for SQL integration: /api/hr/change-password', payload);
-    alert('Password update request ready for SQL connection.');
+    try {
+        SharedData.changeOwnPassword(currentPassword, newPassword);
+        alert('Password updated successfully.');
+    } catch (error) {
+        console.error('[HRPanel] Failed to update password.', error);
+        alert(error && error.message ? error.message : 'Failed to update password.');
+        return;
+    }
 
     const form = document.getElementById('changePasswordForm');
     if (form) form.reset();
@@ -1380,16 +2929,10 @@ function getProfessorsFromSharedData() {
  * Merges professor records with non-professor users
  */
 function saveProfessorsToSharedData() {
-    const allUsers = SharedData.getUsers();
-    // Remove all existing professor users
-    const nonProfessors = allUsers.filter(function (u) {
-        return normalizeHrToken(u && u.role) !== 'professor';
-    });
-    // Add current professorsData with role marker
     const professorsWithRole = professorsData.map(function (p) {
         return Object.assign({}, p, { role: 'professor', status: p.isActive !== false ? 'active' : 'inactive' });
     });
-    SharedData.setUsers(nonProfessors.concat(professorsWithRole));
+    SharedData.bulkUpsertUsers(professorsWithRole);
 }
 let currentEditingProfessorId = null;
 let currentDepartmentFilter = 'all';
@@ -2452,6 +3995,13 @@ function setupHrSharedDataBindings() {
             updateFormHeader(currentQuestionnaireType);
             renderQuestions();
             applyQuestionnaireEditMode(isQuestionnaireEditable());
+
+            if (key === keys.CURRENT_SEMESTER || key === keys.SEMESTER_LIST) {
+                populateAiInsightsSemesterFilters();
+                if (hrBehaviorAnalysisHasRun && isContentViewVisible('ai-insights-view')) {
+                    renderAiInsightsBehaviorAnalysis({ silent: true });
+                }
+            }
         }
 
         if (key === keys.EVAL_PERIODS) {
@@ -2491,6 +4041,7 @@ function setupHrSharedDataBindings() {
             key === keys.SEMESTER_LIST ||
             key === keys.QUESTIONNAIRES
         ) {
+            loadProfessorsData();
             if (isContentViewVisible('dashboard-view')) {
                 updateOverviewCards();
                 renderProfessorRanking();
@@ -2508,6 +4059,9 @@ function setupHrSharedDataBindings() {
                 if (modal && modal.style.display === 'flex') {
                     viewProfessorAnalytics(currentAnalyticsProfessorId);
                 }
+            }
+            if (hrBehaviorAnalysisHasRun && isContentViewVisible('ai-insights-view')) {
+                renderAiInsightsBehaviorAnalysis({ silent: true });
             }
         }
 
@@ -2664,6 +4218,7 @@ function loadProfessorsData() {
     // Always load from the canonical shared user snapshot.
     // Using filtered adminUsers can drop professors when later persisted.
     const sourceUsers = SharedData.getUsers();
+    const context = buildHrEvaluationContext();
 
     professorsData = sourceUsers.filter(function (u) {
         return String(u.role || '').toLowerCase() === 'professor';
@@ -2692,6 +4247,12 @@ function loadProfessorsData() {
             updated.status = updated.isActive ? 'active' : 'inactive';
         }
         ensureProfessorSemesterData(updated);
+        const studentSnapshot = getHrProfessorEvaluationSnapshot(updated.id, 'all', 'student', context);
+        updated.evaluatedCount = Number(studentSnapshot && studentSnapshot.evaluatedCount) || 0;
+        updated.evaluationsCount = updated.evaluatedCount;
+        updated.totalStudents = Number(studentSnapshot && studentSnapshot.totalRaters) || 0;
+        updated.notEvaluatedCount = Number(studentSnapshot && studentSnapshot.notEvaluatedCount)
+            || Math.max(updated.totalStudents - updated.evaluatedCount, 0);
 
         return updated;
     });
@@ -2989,6 +4550,8 @@ function loadUserManagement() {
 function renderProfessors() {
     const professorsList = document.getElementById('professors-list');
     if (!professorsList) return;
+    const analyticsContext = buildHrEvaluationContext();
+    const studentsEvaluatedCountMap = buildHrStudentsEvaluatedCountMap(analyticsContext, 'all');
 
     const searchInput = document.getElementById('professor-search');
     const searchTerm = searchInput ? searchInput.value.trim().toLowerCase() : '';
@@ -3047,7 +4610,12 @@ function renderProfessors() {
                 </thead>
                 <tbody>
                     ${filteredProfessors.map(professor => {
-                        const studentsEvaluated = Number(professor.evaluatedCount || professor.evaluationsCount) || 0;
+                        const professorToken = normalizeHrUserIdToken(professor.id);
+                        const studentsEvaluated = Number(
+                            studentsEvaluatedCountMap[professorToken]
+                            ?? professor.evaluatedCount
+                            ?? professor.evaluationsCount
+                        ) || 0;
                         return `
                         <tr class="${professor.isActive === false ? 'inactive' : ''}" data-id="${professor.id}">
                             <td>
@@ -3315,9 +4883,7 @@ function viewProfessorDetails(professorId) {
         content.innerHTML = `
             <div class="professor-details-view">
                 <div class="detail-header">
-                    <div class="detail-avatar">
-                        <i class="fas fa-user-tie"></i>
-                    </div>
+                    ${buildHrProfessorAvatarHtml(professor, 'detail-avatar')}
                     <div class="detail-name">
                         <h2>${professor.name}</h2>
                         <span class="dept-badge dept-${professor.department}">${professor.department}</span>
@@ -3392,7 +4958,7 @@ function buildEvaluationTypeOptionsHtml(selectedType) {
     }).join('');
 }
 
-function getEvaluationSnapshotForType(professor, semesterId, evaluationType) {
+function getEvaluationSnapshotForType(professor, semesterId, evaluationType, contextInput) {
     if (!professor) {
         const meta = getEvaluationTypeMeta(evaluationType);
         return {
@@ -3409,8 +4975,216 @@ function getEvaluationSnapshotForType(professor, semesterId, evaluationType) {
         professor.id,
         semesterId || 'all',
         evaluationType || 'student',
-        buildHrEvaluationContext()
+        contextInput || buildHrEvaluationContext()
     );
+}
+
+function resolveHistoricalTrendSourceAverage(aggregate) {
+    const total = Number(aggregate && aggregate.totalEvaluations);
+    const average = Number(aggregate && aggregate.averageRating);
+    if (!Number.isFinite(total) || total <= 0) return null;
+    if (!Number.isFinite(average) || average <= 0) return null;
+    return average;
+}
+
+function buildProfessorHistoricalTrend(professorId, contextInput) {
+    const context = contextInput || buildHrEvaluationContext();
+    const normalizedProfessorId = normalizeHrUserIdToken(professorId);
+    const windowSize = 4;
+    const semesters = getHrLatestSemestersForTrend(context, windowSize);
+    const weights = { student: 0.50, peer: 0.25, supervisor: 0.25 };
+
+    const points = semesters.map(function (semester) {
+        const semesterId = String(semester && semester.id || '').trim();
+        const semesterLabel = String(semester && (semester.label || semester.id) || semesterId).trim() || semesterId;
+
+        const studentAggregate = aggregateHrEvaluationData({
+            context,
+            typeKey: 'student',
+            semesterId,
+            targetProfessorId: normalizedProfessorId,
+            includeCategoryScores: false,
+        });
+        const peerAggregate = aggregateHrEvaluationData({
+            context,
+            typeKey: 'peer',
+            semesterId,
+            targetProfessorId: normalizedProfessorId,
+            includeCategoryScores: false,
+        });
+        const supervisorAggregate = aggregateHrEvaluationData({
+            context,
+            typeKey: 'supervisor',
+            semesterId,
+            targetProfessorId: normalizedProfessorId,
+            includeCategoryScores: false,
+        });
+
+        const sourceScores = {
+            student: resolveHistoricalTrendSourceAverage(studentAggregate),
+            peer: resolveHistoricalTrendSourceAverage(peerAggregate),
+            supervisor: resolveHistoricalTrendSourceAverage(supervisorAggregate),
+        };
+
+        let weightedSum = 0;
+        let availableWeight = 0;
+        Object.keys(weights).forEach(function (key) {
+            const value = Number(sourceScores[key]);
+            if (!Number.isFinite(value)) return;
+            const weight = Number(weights[key]);
+            weightedSum += value * weight;
+            availableWeight += weight;
+        });
+
+        const combinedScore = availableWeight > 0 ? parseFloat((weightedSum / availableWeight).toFixed(2)) : null;
+
+        return {
+            semesterId,
+            semesterLabel,
+            score: combinedScore,
+            delta: null,
+        };
+    });
+
+    let previousScore = null;
+    points.forEach(function (point) {
+        const score = Number(point && point.score);
+        if (!Number.isFinite(score)) {
+            point.delta = null;
+            return;
+        }
+        point.delta = Number.isFinite(previousScore)
+            ? parseFloat((score - previousScore).toFixed(2))
+            : null;
+        previousScore = score;
+    });
+
+    return {
+        points,
+        windowSize,
+        summary: computeHistoricalTrendSummary(points),
+    };
+}
+
+function computeHistoricalTrendSummary(pointsInput) {
+    const points = Array.isArray(pointsInput) ? pointsInput : [];
+    const validPoints = points.filter(function (point) {
+        return Number.isFinite(Number(point && point.score));
+    }).map(function (point) {
+        return Number(point.score);
+    });
+
+    if (validPoints.length < 2) {
+        return {
+            hasSufficientData: false,
+            direction: 'insufficient',
+            percentChange: null,
+            variationPercent: null,
+            isConsistent: false,
+            declinePatternDetected: false,
+            semesterCount: validPoints.length,
+            statement: 'Insufficient historical data to determine performance trend.',
+        };
+    }
+
+    const earliest = validPoints[0];
+    const latest = validPoints[validPoints.length - 1];
+    const safeBaseline = earliest > 0 ? earliest : 0.01;
+    const percentChange = ((latest - earliest) / safeBaseline) * 100;
+
+    let direction = 'stable';
+    if (percentChange >= 10) {
+        direction = 'improved';
+    } else if (percentChange <= -10) {
+        direction = 'declined';
+    }
+
+    const mean = validPoints.reduce(function (sum, value) { return sum + value; }, 0) / validPoints.length;
+    const variance = validPoints.reduce(function (sum, value) {
+        return sum + Math.pow(value - mean, 2);
+    }, 0) / validPoints.length;
+    const standardDeviation = Math.sqrt(variance);
+    const variationPercent = mean > 0 ? (standardDeviation / mean) * 100 : 0;
+    const isConsistent = variationPercent <= 5;
+
+    let maxConsecutiveDrops = 0;
+    let consecutiveDrops = 0;
+    for (let index = 1; index < validPoints.length; index += 1) {
+        if (validPoints[index] < validPoints[index - 1]) {
+            consecutiveDrops += 1;
+            if (consecutiveDrops > maxConsecutiveDrops) {
+                maxConsecutiveDrops = consecutiveDrops;
+            }
+        } else {
+            consecutiveDrops = 0;
+        }
+    }
+    const declinePatternDetected = maxConsecutiveDrops >= 2;
+    const semesterCount = validPoints.length;
+
+    let statement = `Faculty remained stable (${formatHistoricalTrendSignedPercent(percentChange)}) over ${semesterCount} semester${semesterCount === 1 ? '' : 's'}.`;
+    if (direction === 'improved') {
+        statement = `Faculty improved by ${Math.abs(percentChange).toFixed(1)}% over ${semesterCount} semester${semesterCount === 1 ? '' : 's'}.`;
+    } else if (direction === 'declined') {
+        statement = `Faculty declined by ${Math.abs(percentChange).toFixed(1)}% over ${semesterCount} semester${semesterCount === 1 ? '' : 's'}.`;
+    }
+
+    return {
+        hasSufficientData: true,
+        direction,
+        percentChange,
+        variationPercent,
+        isConsistent,
+        declinePatternDetected,
+        semesterCount,
+        statement,
+    };
+}
+
+function getHistoricalTrendDirectionLabel(direction) {
+    if (direction === 'improved') return 'Improving';
+    if (direction === 'declined') return 'Declining';
+    if (direction === 'stable') return 'Stable';
+    return 'Insufficient Data';
+}
+
+function getHistoricalTrendDirectionClass(direction) {
+    if (direction === 'improved') return 'positive';
+    if (direction === 'declined') return 'negative';
+    if (direction === 'stable') return 'neutral';
+    return 'neutral';
+}
+
+function getHistoricalTrendConsistencyLabel(summary) {
+    if (!summary || !summary.hasSufficientData) return 'Unknown';
+    return summary.isConsistent ? 'Consistent' : 'Variable';
+}
+
+function getHistoricalTrendConsistencyClass(summary) {
+    if (!summary || !summary.hasSufficientData) return 'neutral';
+    return summary.isConsistent ? 'positive' : 'warning';
+}
+
+function getHistoricalTrendDeclinePatternLabel(summary) {
+    if (!summary || !summary.hasSufficientData) return 'Unknown';
+    return summary.declinePatternDetected ? 'Detected' : 'Not detected';
+}
+
+function getHistoricalTrendDeclinePatternClass(summary) {
+    if (!summary || !summary.hasSufficientData) return 'neutral';
+    return summary.declinePatternDetected ? 'negative' : 'positive';
+}
+
+function formatHistoricalTrendSignedPercent(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 'N/A';
+    return `${numeric >= 0 ? '+' : ''}${numeric.toFixed(1)}%`;
+}
+
+function formatHistoricalTrendDelta(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return '-';
+    return `${numeric >= 0 ? '+' : ''}${numeric.toFixed(2)}`;
 }
 
 /**
@@ -3460,8 +5234,19 @@ function viewProfessorAnalytics(professorId) {
         const normalizedEvaluationType = getEvaluationTypeMeta(selectedEvaluationType).id;
         currentAnalyticsEvaluationType = normalizedEvaluationType;
         const evaluationMeta = getEvaluationTypeMeta(normalizedEvaluationType);
-
-        const snapshot = getEvaluationSnapshotForType(professor, normalizedSemester, normalizedEvaluationType);
+        const analyticsContext = buildHrEvaluationContext();
+        const snapshot = getEvaluationSnapshotForType(professor, normalizedSemester, normalizedEvaluationType, analyticsContext);
+        const trend = buildProfessorHistoricalTrend(professor.id, analyticsContext);
+        const trendSummary = trend && trend.summary ? trend.summary : {
+            hasSufficientData: false,
+            direction: 'insufficient',
+            percentChange: null,
+            variationPercent: null,
+            isConsistent: false,
+            declinePatternDetected: false,
+            statement: 'Insufficient historical data to determine performance trend.',
+        };
+        const trendRows = Array.isArray(trend && trend.points) ? trend.points : [];
 
         const totalRaters = snapshot.totalRaters || 0;
         const evaluatedCount = snapshot.evaluatedCount || 0;
@@ -3486,9 +5271,7 @@ function viewProfessorAnalytics(professorId) {
         content.innerHTML = `
         <div class="analytics-view">
             <div class="analytics-header">
-                <div class="analytics-avatar">
-                    <i class="fas fa-user-tie"></i>
-                </div>
+                ${buildHrProfessorAvatarHtml(professor, 'analytics-avatar')}
                 <div class="analytics-name">
                     <h2>${professor.name}</h2>
                     <span class="dept-badge dept-${professor.department}">${professor.department}</span>
@@ -3581,20 +5364,68 @@ function viewProfessorAnalytics(professorId) {
                     </div>
                 </div>
             </div>
-            
-         
-            
+
+            <div class="analytics-section historical-trend-section">
+                <h3 class="section-title">
+                    <i class="fas fa-chart-line"></i>
+                    Historical Trend Analytics
+                </h3>
+                <div class="historical-trend-banner">
+                    <p class="historical-trend-statement">${escapeHrHtml(trendSummary.statement || 'Insufficient historical data to determine performance trend.')}</p>
+                    <p class="historical-trend-note">Combined source metric uses Student 50%, Peer 25%, Supervisor 25%, across latest 4 semesters.</p>
+                    <div class="historical-trend-chips">
+                        <span class="historical-trend-chip ${getHistoricalTrendDirectionClass(trendSummary.direction)}">
+                            Direction: ${escapeHrHtml(getHistoricalTrendDirectionLabel(trendSummary.direction))}
+                        </span>
+                        <span class="historical-trend-chip neutral">
+                            Change: ${escapeHrHtml(formatHistoricalTrendSignedPercent(trendSummary.percentChange))}
+                        </span>
+                        <span class="historical-trend-chip ${getHistoricalTrendConsistencyClass(trendSummary)}">
+                            Consistency: ${escapeHrHtml(getHistoricalTrendConsistencyLabel(trendSummary))}
+                        </span>
+                        <span class="historical-trend-chip ${getHistoricalTrendDeclinePatternClass(trendSummary)}">
+                            Decline Pattern: ${escapeHrHtml(getHistoricalTrendDeclinePatternLabel(trendSummary))}
+                        </span>
+                    </div>
+                </div>
+                <div class="historical-trend-table-wrap">
+                    <table class="historical-trend-table">
+                        <thead>
+                            <tr>
+                                <th>Semester</th>
+                                <th>Combined Score (/5)</th>
+                                <th>Delta vs Prior</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${trendRows.length > 0 ? trendRows.map(point => `
+                                <tr>
+                                    <td>${escapeHrHtml(String(point.semesterLabel || point.semesterId || 'Semester'))}</td>
+                                    <td>${Number.isFinite(Number(point.score)) ? Number(point.score).toFixed(2) : 'N/A'}</td>
+                                    <td>${escapeHrHtml(formatHistoricalTrendDelta(point.delta))}</td>
+                                </tr>
+                            `).join('') : `
+                                <tr>
+                                    <td colspan="3" style="text-align:center; padding:14px;">No semester trend data available.</td>
+                                </tr>
+                            `}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             <div class="qualitative-responses-section">
                 <div class="section-header-with-button">
                     <h3 class="section-title">
                         <i class="fas fa-comments"></i>
                         ${evaluationMeta.label} Feedback
                     </h3>
-                    <button class="btn-ai-summarize" id="ai-summarize-btn" onclick="handleAISummarization(${professor.id})">
+                    <button type="button" class="btn-ai-analytics" id="hr-ai-analytics-btn" data-professor-id="${escapeHrHtml(String(professor.id))}">
                         <i class="fas fa-robot"></i>
-                        AI Summarization
+                        AI Analytics
                     </button>
                 </div>
+                <div class="hr-ai-insights" id="hr-ai-insight-output" aria-live="polite"></div>
                 <div class="qualitative-responses-list">
                     ${snapshot.qualitativeResponses && snapshot.qualitativeResponses.length > 0
                 ? snapshot.qualitativeResponses.map(response => `
@@ -3631,6 +5462,13 @@ function viewProfessorAnalytics(professorId) {
             evaluationTypeSelect.addEventListener('change', function () {
                 currentAnalyticsEvaluationType = this.value;
                 viewProfessorAnalytics(professor.id);
+            });
+        }
+        const aiAnalyticsBtn = content.querySelector('#hr-ai-analytics-btn');
+        const aiInsightOutput = content.querySelector('#hr-ai-insight-output');
+        if (aiAnalyticsBtn && aiInsightOutput) {
+            aiAnalyticsBtn.addEventListener('click', function () {
+                runHrAiAnalyticsForProfessor(professor.id, currentAnalyticsSemester || normalizedSemester, aiInsightOutput, aiAnalyticsBtn);
             });
         }
         console.log('Analytics modal displayed');
@@ -3673,33 +5511,640 @@ function closeProfessorAnalyticsModal() {
     currentAnalyticsProfessorId = null;
 }
 
-/**
- * Handle AI Summarization button click
- */
-function handleAISummarization(professorId) {
-    const id = typeof professorId === 'string' ? parseFloat(professorId) : professorId;
-    const professor = professorsData.find(t => Math.abs(t.id - id) < 0.0001 || t.id === id);
+const HR_AI_WORD_FREQUENCY_STOP_WORDS = new Set([
+    'the', 'and', 'for', 'that', 'this', 'with', 'from', 'they', 'them', 'their', 'there', 'were',
+    'been', 'have', 'has', 'had', 'will', 'would', 'could', 'should', 'about', 'after', 'before',
+    'into', 'over', 'under', 'very', 'much', 'more', 'most', 'only', 'also', 'just', 'some', 'such',
+    'than', 'then', 'when', 'what', 'where', 'which', 'while', 'because', 'being', 'your', 'you',
+    'our', 'ours', 'his', 'her', 'hers', 'its', 'too', 'can', 'did', 'does', 'doing', 'done', 'get',
+    'got', 'gotten', 'may', 'might', 'not', 'yes', 'are', 'was', 'is', 'it', 'to', 'of', 'in', 'on',
+    'at', 'by', 'as', 'or', 'an', 'a'
+]);
 
+function sanitizeHrAiAnalyticsText(value, maxLength) {
+    const limit = Number.isFinite(Number(maxLength)) && Number(maxLength) > 0
+        ? Math.floor(Number(maxLength))
+        : 260;
+    const text = String(value == null ? '' : value)
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!text) return '';
+    if (text.length <= limit) return text;
+    return text.slice(0, Math.max(1, limit - 1)).trim() + '…';
+}
+
+function normalizeHrAiAnalyticsTone(value) {
+    const token = String(value || '').trim().toLowerCase();
+    if (token === 'positive') return 'positive';
+    if (token === 'negative') return 'negative';
+    return 'neutral';
+}
+
+function normalizeHrAiAnalyticsJudgmentLabel(value) {
+    const token = String(value || '').trim().toLowerCase();
+    if (token === 'excellent') return 'Excellent';
+    if (token === 'good') return 'Good';
+    if (token === 'critical concern' || token === 'critical' || token === 'critical_concern') return 'Critical Concern';
+    return 'Needs Improvement';
+}
+
+function normalizeHrAiAnalyticsSourceLabel(value) {
+    const token = String(value || '').trim().toLowerCase();
+    if (!token) return 'General';
+    if (token.includes('student')) return 'Student to Professor';
+    if (token.includes('peer') || token.includes('professor')) return 'Professor to Professor';
+    if (token.includes('supervisor') || token.includes('dean') || token.includes('vpaa') || token.includes('hr')) return 'Supervisor to Professor';
+    return 'General';
+}
+
+function formatHrAiInsightSource(source) {
+    const token = String(source || 'rule').trim().toLowerCase();
+    if (token === 'gemini') return 'Gemini';
+    if (token === 'gemini+rule') return 'Gemini + Rule fallback';
+    return 'Rule fallback';
+}
+
+function getHrAiJudgmentClass(label) {
+    const normalized = normalizeHrAiAnalyticsJudgmentLabel(label);
+    if (normalized === 'Excellent') return 'excellent';
+    if (normalized === 'Good') return 'good';
+    if (normalized === 'Critical Concern') return 'critical';
+    return 'needs-improvement';
+}
+
+function getHrAiAnalyticsActorIdentity() {
+    const session = SharedData.getSession ? SharedData.getSession() : null;
+    return {
+        userId: session && session.userId ? session.userId : '',
+        email: session && session.email ? session.email : '',
+        username: session && session.username ? session.username : '',
+        employeeId: session && session.employeeId ? session.employeeId : '',
+        role: session && session.role ? session.role : '',
+        fullName: session && session.fullName ? session.fullName : (session && session.username ? session.username : ''),
+    };
+}
+
+function normalizeHrAiCommentTokens(value) {
+    const text = String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!text) return [];
+
+    return text.split(' ').filter(function (token) {
+        if (token.length < 3) return false;
+        if (HR_AI_WORD_FREQUENCY_STOP_WORDS.has(token)) return false;
+        if (/^\d+$/.test(token)) return false;
+        return true;
+    });
+}
+
+function computeHrAiTopWordFrequency(comments, limit) {
+    const counts = new Map();
+    const safeLimit = Math.max(1, Number(limit) || 10);
+
+    (Array.isArray(comments) ? comments : []).forEach(function (comment) {
+        normalizeHrAiCommentTokens(comment).forEach(function (token) {
+            counts.set(token, (counts.get(token) || 0) + 1);
+        });
+    });
+
+    return Array.from(counts.entries())
+        .map(function (entry) {
+            return { label: entry[0], count: entry[1] };
+        })
+        .sort(function (a, b) {
+            return b.count - a.count || String(a.label).localeCompare(String(b.label));
+        })
+        .slice(0, safeLimit);
+}
+
+function buildHrProfessorAiAnalyticsPayload(professor, semesterId, contextInput) {
+    const context = contextInput || buildHrEvaluationContext();
+    const normalizedSemester = String(semesterId || 'all').trim() || 'all';
+    const professorId = professor && professor.id ? professor.id : '';
+    const baseId = String(professorId || 'prof').trim() || 'prof';
+
+    const studentSnapshot = getHrProfessorEvaluationSnapshot(professorId, normalizedSemester, 'student', context);
+    const peerSnapshot = getHrProfessorEvaluationSnapshot(professorId, normalizedSemester, 'peer', context);
+    const supervisorSnapshot = getHrProfessorEvaluationSnapshot(professorId, normalizedSemester, 'supervisor', context);
+
+    const sourceRows = [
+        { source: 'student', rows: Array.isArray(studentSnapshot.qualitativeResponses) ? studentSnapshot.qualitativeResponses : [] },
+        { source: 'peer', rows: Array.isArray(peerSnapshot.qualitativeResponses) ? peerSnapshot.qualitativeResponses : [] },
+        { source: 'supervisor', rows: Array.isArray(supervisorSnapshot.qualitativeResponses) ? supervisorSnapshot.qualitativeResponses : [] },
+    ];
+
+    const dedupe = new Set();
+    const comments = [];
+    sourceRows.forEach(function (bucket) {
+        const sourceLabel = normalizeHrAiAnalyticsSourceLabel(bucket.source);
+        bucket.rows.forEach(function (row) {
+            const text = sanitizeHrAiAnalyticsText(row && row.text, 700);
+            if (!text) return;
+            const dateKey = sanitizeHrAiAnalyticsText(row && row.date, 80).toLowerCase();
+            const dedupeKey = `${sourceLabel.toLowerCase()}|${text.toLowerCase()}|${dateKey}`;
+            if (dedupe.has(dedupeKey)) return;
+            dedupe.add(dedupeKey);
+            comments.push({
+                id: `${baseId}_${comments.length + 1}`,
+                source: sourceLabel,
+                text,
+            });
+        });
+    });
+
+    const limitedComments = comments.slice(0, 240);
+    const sourceCounts = {
+        student: sourceRows[0].rows.length,
+        professor: sourceRows[1].rows.length,
+        supervisor: sourceRows[2].rows.length,
+    };
+
+    const studentAvg = Number(studentSnapshot && studentSnapshot.averageRating);
+    const peerAvg = Number(peerSnapshot && peerSnapshot.averageRating);
+    const supervisorAvg = Number(supervisorSnapshot && supervisorSnapshot.averageRating);
+    const averagesBySource = {
+        student: Number(studentSnapshot && studentSnapshot.evaluatedCount) > 0 && Number.isFinite(studentAvg) && studentAvg > 0 ? studentAvg : null,
+        professor: Number(peerSnapshot && peerSnapshot.evaluatedCount) > 0 && Number.isFinite(peerAvg) && peerAvg > 0 ? peerAvg : null,
+        supervisor: Number(supervisorSnapshot && supervisorSnapshot.evaluatedCount) > 0 && Number.isFinite(supervisorAvg) && supervisorAvg > 0 ? supervisorAvg : null,
+    };
+
+    const availableAverages = Object.values(averagesBySource).filter(function (value) {
+        return Number.isFinite(Number(value));
+    }).map(Number);
+    const combinedAverage = availableAverages.length
+        ? Number((availableAverages.reduce(function (sum, value) { return sum + value; }, 0) / availableAverages.length).toFixed(2))
+        : null;
+
+    const totalRaters = Number(studentSnapshot.totalRaters || 0) + Number(peerSnapshot.totalRaters || 0) + Number(supervisorSnapshot.totalRaters || 0);
+    const totalEvaluated = Number(studentSnapshot.evaluatedCount || 0) + Number(peerSnapshot.evaluatedCount || 0) + Number(supervisorSnapshot.evaluatedCount || 0);
+    const responseRate = totalRaters > 0
+        ? Number(((totalEvaluated / totalRaters) * 100).toFixed(2))
+        : null;
+    const overallRatingRaw = Number(professor && professor.averageRating);
+    const overallRating = Number.isFinite(overallRatingRaw) && overallRatingRaw > 0
+        ? Number(overallRatingRaw.toFixed(2))
+        : combinedAverage;
+
+    return {
+        professor: {
+            id: sanitizeHrAiAnalyticsText(professor && professor.id, 80),
+            name: sanitizeHrAiAnalyticsText(professor && professor.name, 160),
+            semester: sanitizeHrAiAnalyticsText(getSemesterLabel(normalizedSemester), 120),
+        },
+        comments: limitedComments,
+        metrics: {
+            overallRating,
+            combinedAverage,
+            responseRate,
+            totalEvaluations: totalEvaluated,
+            averagesBySource,
+            countsBySource: sourceCounts,
+        },
+    };
+}
+
+function buildHrLocalAiKeywordRows(comments) {
+    const texts = (Array.isArray(comments) ? comments : [])
+        .map(function (item) { return String(item && item.text || '').trim(); })
+        .filter(Boolean);
+    const base = computeHrAiTopWordFrequency(texts, 12);
+    const positive = new Set(['excellent', 'great', 'good', 'clear', 'helpful', 'organized', 'engaging', 'respectful', 'supportive', 'effective', 'fair']);
+    const negative = new Set(['hate', 'terror', 'worst', 'bad', 'poor', 'unclear', 'confusing', 'boring', 'late', 'rude', 'unfair', 'strict', 'difficult', 'awful']);
+    return base.map(function (item) {
+        const term = sanitizeHrAiAnalyticsText(item && item.label, 40).toLowerCase();
+        let tone = 'neutral';
+        if (positive.has(term)) tone = 'positive';
+        if (negative.has(term)) tone = 'negative';
+        return {
+            term: sanitizeHrAiAnalyticsText(item && item.label, 40),
+            count: Math.max(1, Number(item && item.count || 1)),
+            tone,
+        };
+    });
+}
+
+function buildHrLocalAiClusters(comments) {
+    const rows = Array.isArray(comments) ? comments : [];
+    const themes = {
+        'Teaching Clarity': ['explain', 'explains', 'clear', 'clarity', 'understand', 'confusing', 'discussion', 'lecture'],
+        'Engagement & Delivery': ['engaging', 'interactive', 'boring', 'enthusiasm', 'pace', 'energy', 'participation'],
+        'Assessment & Fairness': ['exam', 'quiz', 'grade', 'grading', 'fair', 'rubric', 'assignment', 'assessment'],
+        'Professionalism & Conduct': ['respectful', 'rude', 'late', 'punctual', 'attitude', 'professional', 'behavior', 'approachable'],
+        'Learning Support': ['examples', 'consultation', 'feedback', 'materials', 'resources', 'guidance', 'support', 'helpful'],
+    };
+
+    const buckets = {};
+    rows.forEach(function (row) {
+        const text = String(row && row.text || '').toLowerCase();
+        const source = normalizeHrAiAnalyticsSourceLabel(row && row.source);
+        let bestTheme = 'General Feedback';
+        let bestHits = 0;
+
+        Object.keys(themes).forEach(function (theme) {
+            const hits = themes[theme].reduce(function (sum, keyword) {
+                return sum + (text.includes(keyword) ? 1 : 0);
+            }, 0);
+            if (hits > bestHits) {
+                bestHits = hits;
+                bestTheme = theme;
+            }
+        });
+
+        if (!buckets[bestTheme]) {
+            buckets[bestTheme] = {
+                theme: bestTheme,
+                count: 0,
+                sources: new Set(),
+                sampleComments: [],
+            };
+        }
+
+        buckets[bestTheme].count += 1;
+        buckets[bestTheme].sources.add(source);
+        if (buckets[bestTheme].sampleComments.length < 2) {
+            buckets[bestTheme].sampleComments.push(sanitizeHrAiAnalyticsText(row && row.text, 220));
+        }
+    });
+
+    return Object.values(buckets)
+        .sort(function (a, b) {
+            return b.count - a.count || String(a.theme).localeCompare(String(b.theme));
+        })
+        .slice(0, 5)
+        .map(function (item) {
+            return {
+                theme: sanitizeHrAiAnalyticsText(item.theme, 90),
+                count: Math.max(1, Number(item.count || 1)),
+                sources: Array.from(item.sources),
+                sampleComments: item.sampleComments.filter(Boolean),
+            };
+        });
+}
+
+function buildHrLocalAiJudgment(payload, keywords) {
+    const metrics = payload && payload.metrics ? payload.metrics : {};
+    const comments = Array.isArray(payload && payload.comments) ? payload.comments : [];
+    const combinedAverage = Number.isFinite(Number(metrics.combinedAverage)) ? Number(metrics.combinedAverage) : null;
+    const responseRate = Number.isFinite(Number(metrics.responseRate)) ? Number(metrics.responseRate) : null;
+    const totalComments = comments.length;
+
+    let positiveWeight = 0;
+    let negativeWeight = 0;
+    let neutralWeight = 0;
+    (Array.isArray(keywords) ? keywords : []).forEach(function (row) {
+        const count = Math.max(1, Number(row && row.count || 1));
+        const tone = normalizeHrAiAnalyticsTone(row && row.tone);
+        if (tone === 'positive') positiveWeight += count;
+        else if (tone === 'negative') negativeWeight += count;
+        else neutralWeight += count;
+    });
+
+    const toneTotal = Math.max(1, positiveWeight + negativeWeight + neutralWeight);
+    const toneBalance = ((positiveWeight * 1.0) - (negativeWeight * 1.2)) / toneTotal;
+
+    let score = 50;
+    if (Number.isFinite(combinedAverage)) {
+        score += (combinedAverage - 3) * 18;
+    }
+    score += Math.max(-20, Math.min(20, toneBalance * 24));
+    if (Number.isFinite(responseRate)) {
+        score += ((responseRate - 50) / 50) * 10;
+    }
+    if (totalComments <= 3) score -= 8;
+    else if (totalComments >= 20) score += 4;
+    score = Math.round(Math.max(0, Math.min(100, score)));
+
+    let label = 'Needs Improvement';
+    if (score >= 85) label = 'Excellent';
+    else if (score >= 70) label = 'Good';
+    else if (score < 50) label = 'Critical Concern';
+
+    let confidence = 45 + Math.min(35, totalComments * 2);
+    if (Number.isFinite(responseRate)) confidence += Math.min(10, responseRate / 10);
+    if (Number.isFinite(combinedAverage)) confidence += 10;
+    if (totalComments < 3) confidence -= 10;
+    confidence = Math.round(Math.max(25, Math.min(98, confidence)));
+
+    let rationale = 'Mixed sentiment and performance indicators suggest improvements are needed.';
+    if (label === 'Excellent') rationale = 'Consistent positive feedback and strong rating indicators across available sources.';
+    if (label === 'Good') rationale = 'Feedback is generally positive with limited critical concerns.';
+    if (label === 'Critical Concern') rationale = 'Negative patterns and lower performance indicators suggest urgent review.';
+    if (!Number.isFinite(combinedAverage)) rationale += ' Overall rating context is limited.';
+
+    return { label, rationale, confidence, score };
+}
+
+function buildHrLocalAiReasoning(payload, keywords, clusters, judgment) {
+    const sourceCounts = payload && payload.metrics && payload.metrics.countsBySource ? payload.metrics.countsBySource : {};
+    const lines = [];
+    lines.push(
+        `Analyzed ${Array.isArray(payload && payload.comments) ? payload.comments.length : 0} comments from Student (${Number(sourceCounts.student || 0)}), Professor (${Number(sourceCounts.professor || 0)}), and Supervisor (${Number(sourceCounts.supervisor || 0)}) sources.`
+    );
+
+    if (payload && payload.metrics && Number.isFinite(Number(payload.metrics.combinedAverage))) {
+        lines.push(`Combined rating context is ${Number(payload.metrics.combinedAverage).toFixed(2)} / 5.00 based on available evaluation data.`);
+    } else {
+        lines.push('Combined rating context is limited, so conclusions rely more on textual feedback patterns.');
+    }
+
+    const positiveTerms = (Array.isArray(keywords) ? keywords : [])
+        .filter(function (row) { return normalizeHrAiAnalyticsTone(row && row.tone) === 'positive'; })
+        .slice(0, 2)
+        .map(function (row) { return row.term; });
+    const negativeTerms = (Array.isArray(keywords) ? keywords : [])
+        .filter(function (row) { return normalizeHrAiAnalyticsTone(row && row.tone) === 'negative'; })
+        .slice(0, 2)
+        .map(function (row) { return row.term; });
+    if (positiveTerms.length || negativeTerms.length) {
+        lines.push(`Detected positive markers (${positiveTerms.length ? positiveTerms.join(', ') : 'none'}) and negative markers (${negativeTerms.length ? negativeTerms.join(', ') : 'none'}).`);
+    }
+
+    if (Array.isArray(clusters) && clusters.length) {
+        const dominant = clusters[0];
+        lines.push(`Most comments cluster around "${sanitizeHrAiAnalyticsText(dominant && dominant.theme, 90)}" (${Number(dominant && dominant.count || 0)} comments).`);
+    }
+
+    lines.push(`Final judgment: ${normalizeHrAiAnalyticsJudgmentLabel(judgment && judgment.label)} (confidence ${Math.round(Number(judgment && judgment.confidence || 0))}%).`);
+    return lines.slice(0, 5);
+}
+
+function buildHrLocalAiExplainabilityInsight(payload) {
+    const comments = Array.isArray(payload && payload.comments) ? payload.comments : [];
+    const keywords = buildHrLocalAiKeywordRows(comments);
+    const clusters = buildHrLocalAiClusters(comments);
+    const judgment = buildHrLocalAiJudgment(payload, keywords);
+    const reasoning = buildHrLocalAiReasoning(payload, keywords, clusters, judgment);
+    return {
+        keywords,
+        clusters,
+        reasoning,
+        judgment: {
+            label: normalizeHrAiAnalyticsJudgmentLabel(judgment.label),
+            rationale: sanitizeHrAiAnalyticsText(judgment.rationale, 320),
+            confidence: Math.max(0, Math.min(100, Number(judgment.confidence || 0))),
+        },
+        stats: {
+            totalComments: comments.length,
+            sourceCounts: payload && payload.metrics && payload.metrics.countsBySource
+                ? payload.metrics.countsBySource
+                : { student: 0, professor: 0, supervisor: 0 },
+            combinedAverage: payload && payload.metrics ? payload.metrics.combinedAverage : null,
+            responseRate: payload && payload.metrics ? payload.metrics.responseRate : null,
+            totalEvaluations: payload && payload.metrics ? payload.metrics.totalEvaluations : 0,
+        },
+    };
+}
+
+function normalizeHrAiInsightData(rawInsight, fallbackInsight) {
+    const fallback = fallbackInsight && typeof fallbackInsight === 'object'
+        ? fallbackInsight
+        : buildHrLocalAiExplainabilityInsight({ comments: [], metrics: {} });
+    const insight = rawInsight && typeof rawInsight === 'object' ? rawInsight : {};
+
+    const keywords = Array.isArray(insight.keywords) && insight.keywords.length
+        ? insight.keywords.map(function (row) {
+            return {
+                term: sanitizeHrAiAnalyticsText(row && row.term, 40),
+                count: Math.max(1, Number(row && row.count || 1)),
+                tone: normalizeHrAiAnalyticsTone(row && row.tone),
+            };
+        }).filter(function (row) { return row.term; })
+        : fallback.keywords;
+
+    const clusters = Array.isArray(insight.clusters) && insight.clusters.length
+        ? insight.clusters.map(function (row) {
+            return {
+                theme: sanitizeHrAiAnalyticsText(row && row.theme, 90) || 'General Feedback',
+                count: Math.max(1, Number(row && row.count || 1)),
+                sources: Array.isArray(row && row.sources)
+                    ? row.sources.map(function (source) { return normalizeHrAiAnalyticsSourceLabel(source); }).slice(0, 4)
+                    : [],
+                sampleComments: Array.isArray(row && row.sampleComments)
+                    ? row.sampleComments.map(function (item) { return sanitizeHrAiAnalyticsText(item, 220); }).filter(Boolean).slice(0, 2)
+                    : [],
+            };
+        })
+        : fallback.clusters;
+
+    const reasoning = Array.isArray(insight.reasoning) && insight.reasoning.length
+        ? insight.reasoning.map(function (line) { return sanitizeHrAiAnalyticsText(line, 260); }).filter(Boolean).slice(0, 8)
+        : fallback.reasoning;
+
+    const rawJudgment = insight.judgment && typeof insight.judgment === 'object' ? insight.judgment : {};
+    const fallbackJudgment = fallback.judgment || {};
+    const label = normalizeHrAiAnalyticsJudgmentLabel(rawJudgment.label || fallbackJudgment.label);
+    const rationale = sanitizeHrAiAnalyticsText(rawJudgment.rationale, 320)
+        || sanitizeHrAiAnalyticsText(fallbackJudgment.rationale, 320)
+        || 'No detailed rationale available.';
+    let confidence = Number(rawJudgment.confidence);
+    if (!Number.isFinite(confidence) || confidence <= 0) confidence = Number(fallbackJudgment.confidence || 0);
+    if (confidence > 0 && confidence <= 1) confidence *= 100;
+    confidence = Math.round(Math.max(0, Math.min(100, confidence)));
+
+    const sourceCounts = insight.stats && insight.stats.sourceCounts && typeof insight.stats.sourceCounts === 'object'
+        ? insight.stats.sourceCounts
+        : (fallback.stats && fallback.stats.sourceCounts ? fallback.stats.sourceCounts : { student: 0, professor: 0, supervisor: 0 });
+    const stats = {
+        totalComments: Number(insight.stats && insight.stats.totalComments),
+        sourceCounts: {
+            student: Number(sourceCounts.student || 0),
+            professor: Number(sourceCounts.professor || 0),
+            supervisor: Number(sourceCounts.supervisor || 0),
+        },
+        combinedAverage: Number.isFinite(Number(insight.stats && insight.stats.combinedAverage))
+            ? Number(insight.stats.combinedAverage)
+            : (fallback.stats ? fallback.stats.combinedAverage : null),
+        responseRate: Number.isFinite(Number(insight.stats && insight.stats.responseRate))
+            ? Number(insight.stats.responseRate)
+            : (fallback.stats ? fallback.stats.responseRate : null),
+        totalEvaluations: Number.isFinite(Number(insight.stats && insight.stats.totalEvaluations))
+            ? Number(insight.stats.totalEvaluations)
+            : (fallback.stats ? fallback.stats.totalEvaluations : 0),
+    };
+    if (!Number.isFinite(stats.totalComments)) {
+        stats.totalComments = fallback.stats && Number.isFinite(Number(fallback.stats.totalComments))
+            ? Number(fallback.stats.totalComments)
+            : 0;
+    }
+
+    return {
+        keywords,
+        clusters,
+        reasoning,
+        judgment: { label, rationale, confidence },
+        stats,
+    };
+}
+
+function renderHrAiInsightState(outputEl, stateType, message) {
+    if (!outputEl) return;
+    const type = String(stateType || 'info').toLowerCase();
+    outputEl.classList.add('visible');
+    outputEl.innerHTML = `
+        <div class="hr-ai-note">AI Analytics uses all comment sources (student, peer, supervisor).</div>
+        <div class="hr-ai-state ${escapeHrHtml(type)}">${escapeHrHtml(message || 'No data available.')}</div>
+    `;
+}
+
+function renderHrAiInsightResult(outputEl, insightData, source, noticeText) {
+    if (!outputEl) return;
+    const insight = insightData && typeof insightData === 'object' ? insightData : {};
+    const keywords = Array.isArray(insight.keywords) ? insight.keywords : [];
+    const clusters = Array.isArray(insight.clusters) ? insight.clusters : [];
+    const reasoning = Array.isArray(insight.reasoning) ? insight.reasoning : [];
+    const judgment = insight.judgment && typeof insight.judgment === 'object' ? insight.judgment : {};
+    const stats = insight.stats && typeof insight.stats === 'object' ? insight.stats : {};
+    const sourceLabel = formatHrAiInsightSource(source);
+    const judgmentLabel = normalizeHrAiAnalyticsJudgmentLabel(judgment.label);
+    const judgmentClass = getHrAiJudgmentClass(judgmentLabel);
+    const confidence = Math.round(Math.max(0, Math.min(100, Number(judgment.confidence || 0))));
+
+    const keywordHtml = keywords.length
+        ? keywords.map(function (row) {
+            return `
+                <span class="hr-ai-keyword-chip tone-${escapeHrHtml(normalizeHrAiAnalyticsTone(row.tone))}">
+                    <span class="hr-ai-keyword-term">${escapeHrHtml(row.term || 'keyword')}</span>
+                    <span class="hr-ai-keyword-count">${Math.max(1, Number(row.count || 1))}x</span>
+                </span>
+            `;
+        }).join('')
+        : '<div class="hr-ai-empty">No keywords detected.</div>';
+
+    const clusterHtml = clusters.length
+        ? clusters.map(function (cluster) {
+            const sources = Array.isArray(cluster.sources) && cluster.sources.length
+                ? cluster.sources.map(function (sourceName) { return `<span class="hr-ai-source-chip">${escapeHrHtml(normalizeHrAiAnalyticsSourceLabel(sourceName))}</span>`; }).join('')
+                : '<span class="hr-ai-empty-inline">No source tags</span>';
+            const samples = Array.isArray(cluster.sampleComments) && cluster.sampleComments.length
+                ? `<ul class="hr-ai-sample-list">${cluster.sampleComments.map(function (sample) { return `<li>${escapeHrHtml(sample)}</li>`; }).join('')}</ul>`
+                : '<div class="hr-ai-empty-inline">No sample comments.</div>';
+            return `
+                <div class="hr-ai-cluster-card">
+                    <div class="hr-ai-cluster-header">
+                        <strong>${escapeHrHtml(cluster.theme || 'General Feedback')}</strong>
+                        <span>${Math.max(1, Number(cluster.count || 1))} comments</span>
+                    </div>
+                    <div class="hr-ai-cluster-sources">${sources}</div>
+                    ${samples}
+                </div>
+            `;
+        }).join('')
+        : '<div class="hr-ai-empty">No comment clusters detected.</div>';
+
+    const reasoningHtml = reasoning.length
+        ? `<ul class="hr-ai-reasoning-list">${reasoning.map(function (line) { return `<li>${escapeHrHtml(line)}</li>`; }).join('')}</ul>`
+        : '<div class="hr-ai-empty">No reasoning details available.</div>';
+
+    const noticeHtml = noticeText
+        ? `<div class="hr-ai-alert">${escapeHrHtml(noticeText)}</div>`
+        : '';
+
+    outputEl.classList.add('visible');
+    outputEl.innerHTML = `
+        <div class="hr-ai-note">AI Analytics uses all comment sources (student, peer, supervisor).</div>
+        ${noticeHtml}
+        <div class="hr-ai-meta">
+            <span class="hr-ai-meta-pill">Source: ${escapeHrHtml(sourceLabel)}</span>
+            <span class="hr-ai-meta-pill">Comments analyzed: ${Math.max(0, Number(stats.totalComments || 0))}</span>
+        </div>
+        <div class="hr-ai-section">
+            <div class="hr-ai-section-title">Detected Keywords</div>
+            <div class="hr-ai-keywords">${keywordHtml}</div>
+        </div>
+        <div class="hr-ai-section">
+            <div class="hr-ai-section-title">Comment Clusters</div>
+            <div class="hr-ai-clusters">${clusterHtml}</div>
+        </div>
+        <div class="hr-ai-section">
+            <div class="hr-ai-section-title">AI Reasoning</div>
+            ${reasoningHtml}
+        </div>
+        <div class="hr-ai-judgment-card ${escapeHrHtml(judgmentClass)}">
+            <div class="hr-ai-judgment-head">
+                <span class="hr-ai-judgment-label">${escapeHrHtml(judgmentLabel)}</span>
+                <span class="hr-ai-judgment-confidence">${confidence}% confidence</span>
+            </div>
+            <p class="hr-ai-judgment-rationale">${escapeHrHtml(judgment.rationale || 'No rationale available.')}</p>
+        </div>
+    `;
+}
+
+function runHrAiAnalyticsForProfessor(professorId, semesterId, outputEl, btnEl) {
+    const professor = professorsData.find(function (item) {
+        return String(item && item.id) === String(professorId);
+    });
     if (!professor) {
-        alert('Professor not found.');
+        renderHrAiInsightState(outputEl, 'error', 'Unable to load professor data for AI analytics.');
         return;
     }
 
-    // For now, just show a placeholder message
-    // This will be replaced with actual API call later
-    const btn = document.getElementById('ai-summarize-btn');
-    if (btn) {
-        const originalText = btn.innerHTML;
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating Summary...';
-
-        // Simulate API call (replace with actual API call later)
-        setTimeout(() => {
-            alert('AI Summarization feature will be implemented soon!\n\nThis will analyze all student feedback and generate a comprehensive summary.');
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-        }, 1500);
+    const context = buildHrEvaluationContext();
+    const payload = buildHrProfessorAiAnalyticsPayload(professor, semesterId, context);
+    if (!Array.isArray(payload.comments) || payload.comments.length === 0) {
+        renderHrAiInsightState(outputEl, 'empty', 'No comments available for AI analytics.');
+        return;
     }
+
+    const fallbackInsight = buildHrLocalAiExplainabilityInsight(payload);
+    renderHrAiInsightState(outputEl, 'loading', 'Analyzing comments with AI...');
+
+    const originalText = btnEl ? btnEl.innerHTML : '';
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
+    }
+
+    const executeAnalysis = function () {
+        try {
+            let response = null;
+            if (typeof SharedData.analyzeEvaluationExplainability === 'function') {
+                response = SharedData.analyzeEvaluationExplainability(payload, getHrAiAnalyticsActorIdentity());
+            } else {
+                throw new Error('SharedData.analyzeEvaluationExplainability is unavailable.');
+            }
+            const insight = normalizeHrAiInsightData(response && response.insight, fallbackInsight);
+            const source = response && response.source ? response.source : 'rule';
+            const notice = source === 'gemini'
+                ? ''
+                : 'Gemini is unavailable or partial; showing rule-based fallback insights.';
+            renderHrAiInsightResult(outputEl, insight, source, notice);
+        } catch (error) {
+            console.error('[HRPanel] AI analytics failed, using local fallback.', error);
+            renderHrAiInsightResult(
+                outputEl,
+                fallbackInsight,
+                'rule',
+                'Gemini is unavailable right now. Showing rule-based fallback analytics.'
+            );
+        } finally {
+            if (btnEl) {
+                btnEl.disabled = false;
+                btnEl.innerHTML = originalText || '<i class="fas fa-robot"></i> AI Analytics';
+            }
+        }
+    };
+
+    const loadingOverlay = window.AppLoadingOverlay;
+    const canUseOverlay = loadingOverlay
+        && typeof loadingOverlay.show === 'function'
+        && typeof loadingOverlay.hide === 'function';
+
+    if (!canUseOverlay) {
+        executeAnalysis();
+        return;
+    }
+
+    loadingOverlay.show('Analyzing comments with AI...');
+    setTimeout(function () {
+        try {
+            executeAnalysis();
+        } finally {
+            loadingOverlay.hide();
+        }
+    }, 0);
 }
 
 function generateEmployeeId() {
@@ -4149,6 +6594,14 @@ function setupQuestionnaire() {
     if (questionTypeSelect) {
         questionTypeSelect.addEventListener('change', handleQuestionTypeChange);
     }
+    const questionRequiredCheckbox = document.getElementById('question-required');
+    if (questionRequiredCheckbox) {
+        questionRequiredCheckbox.addEventListener('change', handleQuestionRequirementModeChange);
+    }
+    const exceptionReportingCheckbox = document.getElementById('question-exception-reporting');
+    if (exceptionReportingCheckbox) {
+        exceptionReportingCheckbox.addEventListener('change', handleQuestionRequirementModeChange);
+    }
 
     // Modal close buttons
     const closeQuestionModalBtn = document.getElementById('close-question-modal');
@@ -4247,7 +6700,6 @@ function loadQuestionsData() {
     if (activeSemester) {
         questionsData = questionnairesBySemester[activeSemester] || buildEmptyQuestionsData();
         questionnairesBySemester[activeSemester] = questionsData;
-        persistQuestionsData();
     } else {
         questionsData = buildEmptyQuestionsData();
     }
@@ -4624,7 +7076,13 @@ function normalizeQuestionsData(parsed) {
         return {
             'student-to-professor': {
                 sections: [defaultSection],
-                questions: parsed.map((q, idx) => ({ ...q, sectionId: defaultSection.id, order: idx + 1 }))
+                questions: parsed.map((q, idx) => ({
+                    ...q,
+                    sectionId: defaultSection.id,
+                    order: idx + 1,
+                    required: !!q.exceptionReporting ? false : !!q.required,
+                    exceptionReporting: !!q.exceptionReporting
+                }))
             },
             'professor-to-professor': { sections: [], questions: [] },
             'supervisor-to-professor': { sections: [], questions: [] }
@@ -4642,23 +7100,46 @@ function normalizeQuestionsData(parsed) {
         return {
             'student-to-professor': {
                 sections: [defaultSection],
-                questions: parsed['student-to-professor'].map((q, idx) => ({ ...q, sectionId: defaultSection.id, order: idx + 1 }))
+                questions: parsed['student-to-professor'].map((q, idx) => ({
+                    ...q,
+                    sectionId: defaultSection.id,
+                    order: idx + 1,
+                    required: !!q.exceptionReporting ? false : !!q.required,
+                    exceptionReporting: !!q.exceptionReporting
+                }))
             },
             'professor-to-professor': {
                 sections: [],
-                questions: parsed['professor-to-professor'] ? parsed['professor-to-professor'].map((q, idx) => ({ ...q, sectionId: null, order: idx + 1 })) : []
+                questions: parsed['professor-to-professor'] ? parsed['professor-to-professor'].map((q, idx) => ({
+                    ...q,
+                    sectionId: null,
+                    order: idx + 1,
+                    required: !!q.exceptionReporting ? false : !!q.required,
+                    exceptionReporting: !!q.exceptionReporting
+                })) : []
             },
             'supervisor-to-professor': {
                 sections: [],
-                questions: parsed['supervisor-to-professor'] ? parsed['supervisor-to-professor'].map((q, idx) => ({ ...q, sectionId: null, order: idx + 1 })) : []
+                questions: parsed['supervisor-to-professor'] ? parsed['supervisor-to-professor'].map((q, idx) => ({
+                    ...q,
+                    sectionId: null,
+                    order: idx + 1,
+                    required: !!q.exceptionReporting ? false : !!q.required,
+                    exceptionReporting: !!q.exceptionReporting
+                })) : []
             }
         };
     }
 
     const normalized = { ...buildEmptyQuestionsData(), ...parsed };
     Object.keys(normalized).forEach(type => {
-        if (!normalized[type].sections) normalized[type].sections = [];
-        if (!normalized[type].questions) normalized[type].questions = [];
+        if (!Array.isArray(normalized[type].sections)) normalized[type].sections = [];
+        if (!Array.isArray(normalized[type].questions)) normalized[type].questions = [];
+        normalized[type].questions = normalized[type].questions.map(question => ({
+            ...question,
+            required: !!question.exceptionReporting ? false : !!question.required,
+            exceptionReporting: !!question.exceptionReporting
+        }));
     });
     return normalized;
 }
@@ -4718,7 +7199,6 @@ function saveQuestionnaireHeader(type, updates) {
     const existingHeader = getQuestionnaireHeader(type);
     currentData.header = { ...existingHeader, ...updates };
     questionsData[type] = currentData;
-    persistQuestionsData();
 }
 
 function setupFormHeaderEditing() {
@@ -4939,6 +7419,15 @@ function openAddQuestionModal() {
         currentEditingQuestionId = null;
         document.getElementById('rating-options-group').style.display = 'none';
         document.getElementById('qualitative-options-group').style.display = 'none';
+        const exceptionReportingCheckbox = document.getElementById('question-exception-reporting');
+        const exceptionReportingLabel = document.getElementById('question-exception-reporting-label');
+        if (exceptionReportingCheckbox) {
+            exceptionReportingCheckbox.checked = false;
+            exceptionReportingCheckbox.style.display = 'none';
+        }
+        if (exceptionReportingLabel) {
+            exceptionReportingLabel.style.display = 'none';
+        }
 
         // Populate sections dropdown
         populateSectionsDropdown();
@@ -4998,16 +7487,53 @@ function handleQuestionTypeChange() {
     const questionType = document.getElementById('question-type').value;
     const ratingGroup = document.getElementById('rating-options-group');
     const qualitativeGroup = document.getElementById('qualitative-options-group');
+    const exceptionReportingCheckbox = document.getElementById('question-exception-reporting');
+    const exceptionReportingLabel = document.getElementById('question-exception-reporting-label');
 
     if (questionType === 'rating') {
         ratingGroup.style.display = 'block';
         qualitativeGroup.style.display = 'none';
+        if (exceptionReportingCheckbox) {
+            exceptionReportingCheckbox.checked = false;
+            exceptionReportingCheckbox.style.display = 'none';
+        }
+        if (exceptionReportingLabel) {
+            exceptionReportingLabel.style.display = 'none';
+        }
     } else if (questionType === 'qualitative') {
         ratingGroup.style.display = 'none';
         qualitativeGroup.style.display = 'block';
+        if (exceptionReportingCheckbox) {
+            exceptionReportingCheckbox.style.display = '';
+        }
+        if (exceptionReportingLabel) {
+            exceptionReportingLabel.style.display = '';
+        }
     } else {
         ratingGroup.style.display = 'none';
         qualitativeGroup.style.display = 'none';
+        if (exceptionReportingCheckbox) {
+            exceptionReportingCheckbox.checked = false;
+            exceptionReportingCheckbox.style.display = 'none';
+        }
+        if (exceptionReportingLabel) {
+            exceptionReportingLabel.style.display = 'none';
+        }
+    }
+}
+
+function handleQuestionRequirementModeChange(event) {
+    const requiredCheckbox = document.getElementById('question-required');
+    const exceptionCheckbox = document.getElementById('question-exception-reporting');
+    if (!requiredCheckbox || !exceptionCheckbox || !event || !event.target) return;
+
+    if (event.target === requiredCheckbox && requiredCheckbox.checked) {
+        exceptionCheckbox.checked = false;
+        return;
+    }
+
+    if (event.target === exceptionCheckbox && exceptionCheckbox.checked) {
+        requiredCheckbox.checked = false;
     }
 }
 
@@ -5028,6 +7554,7 @@ function handleQuestionFormSubmit(e) {
         text: document.getElementById('question-text').value,
         type: document.getElementById('question-type').value,
         required: document.getElementById('question-required').checked,
+        exceptionReporting: false,
         sectionId: parseFloat(sectionId)
     };
 
@@ -5036,6 +7563,13 @@ function handleQuestionFormSubmit(e) {
         formData.ratingScale = '1-' + ratingMax;
     } else if (formData.type === 'qualitative') {
         formData.maxLength = parseInt(document.getElementById('max-length').value) || 500;
+        const exceptionCheckbox = document.getElementById('question-exception-reporting');
+        formData.exceptionReporting = !!(exceptionCheckbox && exceptionCheckbox.checked);
+        if (formData.exceptionReporting) {
+            formData.required = false;
+        }
+    } else {
+        formData.exceptionReporting = false;
     }
 
     // Get current questionnaire data
@@ -5071,9 +7605,6 @@ function handleQuestionFormSubmit(e) {
     currentData.questions = currentQuestions;
     questionsData[currentQuestionnaireType] = currentData;
 
-    // Save to localStorage
-    persistQuestionsData();
-
     // Re-render and close modal
     renderQuestions();
     closeQuestionModal();
@@ -5096,7 +7627,12 @@ function editQuestion(questionId) {
         modalTitle.textContent = 'Edit Question';
         document.getElementById('question-text').value = question.text;
         document.getElementById('question-type').value = question.type;
-        document.getElementById('question-required').checked = question.required || false;
+        const hasExceptionReporting = question.type === 'qualitative' && !!question.exceptionReporting;
+        document.getElementById('question-required').checked = hasExceptionReporting ? false : (question.required || false);
+        const exceptionCheckbox = document.getElementById('question-exception-reporting');
+        if (exceptionCheckbox) {
+            exceptionCheckbox.checked = hasExceptionReporting;
+        }
 
         // Populate sections dropdown and select current section
         populateSectionsDropdown();
@@ -5141,7 +7677,6 @@ function deleteQuestion(questionId) {
         }
         currentData.questions = updatedQuestions;
         questionsData[currentQuestionnaireType] = currentData;
-        persistQuestionsData();
         renderQuestions();
     }
 }
@@ -5177,7 +7712,6 @@ function moveQuestion(questionId, direction) {
     // Update questionsData
     currentData.questions = currentQuestions;
     questionsData[currentQuestionnaireType] = currentData;
-    persistQuestionsData();
     renderQuestions();
 }
 
@@ -5303,9 +7837,6 @@ function handleSectionFormSubmit(e) {
     currentData.sections = currentSections;
     questionsData[currentQuestionnaireType] = currentData;
 
-    // Save to localStorage
-    persistQuestionsData();
-
     // Re-render and close modal
     renderQuestions();
     closeSectionModal();
@@ -5370,7 +7901,6 @@ function deleteSection(sectionId) {
     currentData.questions = updatedQuestions;
     questionsData[currentQuestionnaireType] = currentData;
 
-    persistQuestionsData();
     renderQuestions();
 }
 
@@ -5386,7 +7916,6 @@ window.viewProfessorDetails = viewProfessorDetails;
 window.editProfessor = editProfessor;
 window.deleteProfessor = deleteProfessor;
 window.viewProfessorAnalytics = viewProfessorAnalytics;
-window.handleAISummarization = handleAISummarization;
 
 // Export functions for future use
 if (typeof module !== 'undefined' && module.exports) {

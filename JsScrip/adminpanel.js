@@ -19,46 +19,39 @@ let adminSemestralPerformanceChartInstance = null;
 let announcementComposerReady = false;
 let credentialDistributorParsedRows = [];
 let credentialDistributorFailures = [];
+let credentialDistributorSmtpConfig = {
+    senderEmail: '',
+    senderName: '',
+    hasAppPassword: false
+};
 
 /**
  * Fetch users from PHP API, falls back to hardcoded data
  */
 function fetchUsersFromApi(campus = 'all', search = '') {
-    const params = new URLSearchParams();
-    if (campus) params.set('campus', campus);
-    if (search) params.set('search', search);
+    return Promise.resolve().then(() => {
+        adminUsers = SharedData.listUsers({ campus, search });
+        return adminUsers;
+    }).catch(error => {
+        console.warn('[AdminPanel] Falling back to cached SharedData users:', error);
+        adminUsers = SharedData.getUsers();
 
-    return fetch(`../api/users.php?${params.toString()}`, { cache: 'no-store' })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-            return response.json();
-        })
-        .then(payload => {
-            adminUsers = Array.isArray(payload && payload.users) ? payload.users : [];
-            return adminUsers;
-        })
-        .catch(error => {
-            console.warn('[AdminPanel] Falling back to SharedData users:', error);
-            adminUsers = SharedData.getUsers();
+        let filtered = [...adminUsers];
+        if (campus && campus !== 'all') {
+            filtered = filtered.filter(u => u.campus === campus);
+        }
+        if (search) {
+            const query = search.toLowerCase();
+            filtered = filtered.filter(u =>
+                (u.name && u.name.toLowerCase().includes(query)) ||
+                (u.email && u.email.toLowerCase().includes(query)) ||
+                (u.department && u.department.toLowerCase().includes(query))
+            );
+        }
 
-            let filtered = [...adminUsers];
-            if (campus && campus !== 'all') {
-                filtered = filtered.filter(u => u.campus === campus);
-            }
-            if (search) {
-                const query = search.toLowerCase();
-                filtered = filtered.filter(u =>
-                    (u.name && u.name.toLowerCase().includes(query)) ||
-                    (u.email && u.email.toLowerCase().includes(query)) ||
-                    (u.department && u.department.toLowerCase().includes(query))
-                );
-            }
-
-            adminUsers = filtered;
-            return adminUsers;
-        });
+        adminUsers = filtered;
+        return adminUsers;
+    });
 }
 
 // Campus data from centralized SharedData storage
@@ -68,7 +61,9 @@ let campusData = SharedData.getCampuses();
  * Initialize the admin panel
  */
 function initializeAdminPanel() {
-    checkAuthentication();
+    if (!checkAuthentication()) {
+        return;
+    }
     setupNavigation();
     setupLogout();
     setupModals();
@@ -88,6 +83,7 @@ function initializeAdminPanel() {
     setupActivityLogButton();
     setupSecuritySettings();
     setupCredentialDistributor();
+    setupCredentialTestGmailComposer();
     setupAdminProfilePhotoUpload();
     setupAdminProfileActions();
     setupAdminChangeEmailForm();
@@ -225,15 +221,17 @@ function setupEvalPeriodSaving() {
  * Check if user is authenticated as admin
  */
 function checkAuthentication() {
-    if (!SharedData.isAuthenticated() || SharedData.getRole() !== 'admin') {
+    const session = SharedData.requireSession('admin');
+    if (!session) {
         window.location.href = 'mainpage.html';
-        return;
+        return false;
     }
 
     const usernameElement = document.getElementById('admin-username');
     if (usernameElement) {
-        usernameElement.textContent = SharedData.getUsername() || 'Administrator';
+        usernameElement.textContent = session.username || 'Administrator';
     }
+    return true;
 }
 
 /**
@@ -812,6 +810,47 @@ function downloadCredentialDistributorFailuresCsv(failures) {
     URL.revokeObjectURL(url);
 }
 
+function downloadCredentialTestGmailFailuresFile(failures) {
+    if (!Array.isArray(failures) || failures.length === 0) return;
+
+    const rows = failures.map((item, index) => ({
+        No: index + 1,
+        Email: item && item.email ? String(item.email) : '',
+        Reason: item && item.reason ? String(item.reason) : 'Unknown error'
+    }));
+
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+
+    if (typeof XLSX !== 'undefined' && XLSX.utils && XLSX.writeFile) {
+        const worksheet = XLSX.utils.json_to_sheet(rows);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Failed Emails');
+        XLSX.writeFile(workbook, `test_gmail_failed_emails_${stamp}.xlsx`);
+        return;
+    }
+
+    const header = ['No', 'Email', 'Reason'];
+    const lines = [header.join(',')];
+    rows.forEach(row => {
+        lines.push([
+            escapeCsvCell(row.No),
+            escapeCsvCell(row.Email),
+            escapeCsvCell(row.Reason)
+        ].join(','));
+    });
+
+    const csvContent = '\uFEFF' + lines.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `test_gmail_failed_emails_${stamp}.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+}
+
 function setCredentialDistributorFeedback(type, message) {
     const feedback = document.getElementById('credential-distributor-feedback');
     if (!feedback) return;
@@ -833,21 +872,36 @@ function setCredentialDistributorBusyState(isBusy) {
     const selectBtn = document.getElementById('credential-distributor-select-btn');
     const sendBtn = document.getElementById('credential-distributor-send-btn');
     const input = document.getElementById('credential-distributor-input');
+    const saveConfigBtn = document.getElementById('credential-save-config-btn');
+    const clearPasswordBtn = document.getElementById('credential-clear-password-btn');
+    const senderEmailInput = document.getElementById('credential-sender-email');
+    const senderNameInput = document.getElementById('credential-sender-name');
+    const appPasswordInput = document.getElementById('credential-app-password');
 
-    [selectBtn, sendBtn].forEach(button => {
+    [selectBtn, sendBtn, saveConfigBtn, clearPasswordBtn].forEach(button => {
         if (button) button.disabled = !!isBusy;
     });
-    if (input) input.disabled = !!isBusy;
+    [input, senderEmailInput, senderNameInput, appPasswordInput].forEach(field => {
+        if (field) field.disabled = !!isBusy;
+    });
 }
 
-function setCredentialDistributorLoadingState(isLoading, message, progressText) {
+function isCredentialDistributorSmtpConfigured() {
+    return !!(credentialDistributorSmtpConfig.senderEmail && credentialDistributorSmtpConfig.hasAppPassword);
+}
+
+function setCredentialDistributorLoadingState(isLoading, message, progressText, titleText) {
     const overlay = document.getElementById('credential-distributor-loading');
+    const titleEl = document.getElementById('credential-distributor-loading-title');
     const textEl = document.getElementById('credential-distributor-loading-text');
     const progressEl = document.getElementById('credential-distributor-loading-progress');
 
     if (overlay) {
         overlay.classList.toggle('active', Boolean(isLoading));
         overlay.setAttribute('aria-hidden', isLoading ? 'false' : 'true');
+    }
+    if (titleEl && typeof titleText === 'string' && titleText.trim() !== '') {
+        titleEl.textContent = titleText;
     }
     if (textEl && typeof message === 'string' && message.trim() !== '') {
         textEl.textContent = message;
@@ -875,6 +929,121 @@ function setupCredentialDistributor() {
         username: session && session.username ? session.username : '',
         role: session && session.role ? session.role : '',
     };
+    const senderEmailInput = document.getElementById('credential-sender-email');
+    const senderNameInput = document.getElementById('credential-sender-name');
+    const appPasswordInput = document.getElementById('credential-app-password');
+    const saveConfigBtn = document.getElementById('credential-save-config-btn');
+    const clearPasswordBtn = document.getElementById('credential-clear-password-btn');
+    const configStatus = document.getElementById('credential-config-status');
+
+    function setCredentialConfigStatus(message, type) {
+        if (!configStatus) return;
+        configStatus.textContent = String(message || '');
+        if (type === 'error') {
+            configStatus.style.color = 'var(--danger-color)';
+        } else if (type === 'success') {
+            configStatus.style.color = 'var(--success-color)';
+        } else {
+            configStatus.style.color = 'var(--text-secondary)';
+        }
+    }
+
+    function applyCredentialSmtpConfig(config) {
+        credentialDistributorSmtpConfig = {
+            senderEmail: String(config && config.senderEmail || '').trim(),
+            senderName: String(config && config.senderName || '').trim(),
+            hasAppPassword: !!(config && config.hasAppPassword)
+        };
+
+        if (senderEmailInput) senderEmailInput.value = credentialDistributorSmtpConfig.senderEmail;
+        if (senderNameInput) senderNameInput.value = credentialDistributorSmtpConfig.senderName || 'NAAP Evaluation System';
+        if (appPasswordInput) appPasswordInput.value = '';
+
+        if (!credentialDistributorSmtpConfig.senderEmail) {
+            setCredentialConfigStatus('SMTP not configured. Enter sender Gmail and app password.', 'error');
+        } else if (!credentialDistributorSmtpConfig.hasAppPassword) {
+            setCredentialConfigStatus('Sender Gmail saved, but app password is missing.', 'error');
+        } else {
+            setCredentialConfigStatus(`SMTP ready (${credentialDistributorSmtpConfig.senderEmail}).`, 'success');
+        }
+    }
+
+    function loadCredentialSmtpConfig() {
+        try {
+            const config = SharedData.getCredentialDistributorConfig(actor);
+            applyCredentialSmtpConfig(config);
+        } catch (error) {
+            console.error('[AdminPanel] Failed to load SMTP config.', error);
+            setCredentialConfigStatus('Unable to load SMTP config: ' + (error.message || 'Unknown error'), 'error');
+        }
+    }
+
+    if (saveConfigBtn && senderEmailInput && senderNameInput && appPasswordInput) {
+        saveConfigBtn.addEventListener('click', () => {
+            const senderEmail = String(senderEmailInput.value || '').trim();
+            const senderName = String(senderNameInput.value || '').trim();
+            const appPassword = String(appPasswordInput.value || '').trim();
+
+            if (!senderEmail) {
+                setCredentialConfigStatus('Sender Gmail is required.', 'error');
+                senderEmailInput.focus();
+                return;
+            }
+
+            setCredentialDistributorBusyState(true);
+            setCredentialConfigStatus('Saving SMTP configuration...', 'info');
+            try {
+                const payload = {
+                    senderEmail,
+                    senderName: senderName || 'NAAP Evaluation System'
+                };
+                if (appPassword !== '') {
+                    payload.appPassword = appPassword;
+                }
+
+                const saved = SharedData.saveCredentialDistributorConfig(payload, actor);
+                applyCredentialSmtpConfig(saved);
+                setCredentialDistributorFeedback('success', 'SMTP configuration saved successfully.');
+            } catch (error) {
+                console.error('[AdminPanel] Failed to save SMTP config.', error);
+                setCredentialConfigStatus('Failed to save SMTP config: ' + (error.message || 'Unknown error'), 'error');
+            } finally {
+                setCredentialDistributorBusyState(false);
+            }
+        });
+    }
+
+    if (clearPasswordBtn && senderEmailInput && senderNameInput && appPasswordInput) {
+        clearPasswordBtn.addEventListener('click', () => {
+            const senderEmail = String(senderEmailInput.value || '').trim();
+            const senderName = String(senderNameInput.value || '').trim();
+            if (!senderEmail) {
+                setCredentialConfigStatus('Enter sender Gmail first before clearing password.', 'error');
+                senderEmailInput.focus();
+                return;
+            }
+
+            setCredentialDistributorBusyState(true);
+            setCredentialConfigStatus('Clearing saved app password...', 'info');
+            try {
+                const saved = SharedData.saveCredentialDistributorConfig({
+                    senderEmail,
+                    senderName: senderName || 'NAAP Evaluation System',
+                    appPassword: '',
+                    clearAppPassword: true
+                }, actor);
+                applyCredentialSmtpConfig(saved);
+                setCredentialDistributorFeedback('info', 'Saved app password cleared.');
+            } catch (error) {
+                console.error('[AdminPanel] Failed to clear SMTP password.', error);
+                setCredentialConfigStatus('Failed to clear app password: ' + (error.message || 'Unknown error'), 'error');
+            } finally {
+                setCredentialDistributorBusyState(false);
+            }
+        });
+    }
+
+    loadCredentialSmtpConfig();
 
     function clearFailures() {
         credentialDistributorFailures = [];
@@ -939,6 +1108,19 @@ function setupCredentialDistributor() {
     });
 
     sendBtn.addEventListener('click', () => {
+        if (!isCredentialDistributorSmtpConfigured()) {
+            setCredentialDistributorFeedback(
+                'error',
+                'Credential distributor SMTP is not fully configured. Set Sender Gmail and App Password, then click "Save SMTP Config".'
+            );
+            if (appPasswordInput && !credentialDistributorSmtpConfig.hasAppPassword) {
+                appPasswordInput.focus();
+            } else if (senderEmailInput && !credentialDistributorSmtpConfig.senderEmail) {
+                senderEmailInput.focus();
+            }
+            return;
+        }
+
         if (!Array.isArray(credentialDistributorParsedRows) || credentialDistributorParsedRows.length === 0) {
             setCredentialDistributorFeedback('error', 'Please upload a valid Excel file before distributing credentials.');
             return;
@@ -951,7 +1133,8 @@ function setupCredentialDistributor() {
         setCredentialDistributorLoadingState(
             true,
             `Sending login credentials to ${rowCount} recipient(s) via email. This may take a few minutes — please do not close this page.`,
-            `Processing ${rowCount} row(s)...`
+            `Processing ${rowCount} row(s)...`,
+            'Distributing Credentials'
         );
 
         // Use setTimeout so the loading overlay renders before the synchronous XHR blocks
@@ -990,7 +1173,7 @@ function setupCredentialDistributor() {
                 console.error('[AdminPanel] Credential distribution failed.', error);
                 setCredentialDistributorFeedback('error', 'Credential distribution failed: ' + (error.message || 'Unknown error'));
             } finally {
-                setCredentialDistributorLoadingState(false);
+                setCredentialDistributorLoadingState(false, '', '', 'Distributing Credentials');
                 setCredentialDistributorBusyState(false);
             }
         }, 100);
@@ -1002,6 +1185,137 @@ function setupCredentialDistributor() {
             downloadCredentialDistributorFailuresCsv(credentialDistributorFailures);
         });
     }
+}
+
+function setCredentialTestGmailFeedback(type, message) {
+    const feedback = document.getElementById('credential-test-gmail-feedback');
+    if (!feedback) return;
+
+    feedback.classList.remove('success', 'error', 'info');
+    feedback.textContent = '';
+
+    if (!message) {
+        feedback.style.display = 'none';
+        return;
+    }
+
+    feedback.classList.add(type || 'info');
+    feedback.textContent = message;
+    feedback.style.display = 'block';
+}
+
+function setCredentialTestGmailBusyState(isBusy) {
+    const subjectInput = document.getElementById('credential-test-gmail-subject');
+    const messageInput = document.getElementById('credential-test-gmail-message');
+    const sendBtn = document.getElementById('credential-test-gmail-send-btn');
+
+    [subjectInput, messageInput, sendBtn].forEach(element => {
+        if (element) element.disabled = !!isBusy;
+    });
+}
+
+function setupCredentialTestGmailComposer() {
+    const subjectInput = document.getElementById('credential-test-gmail-subject');
+    const messageInput = document.getElementById('credential-test-gmail-message');
+    const sendBtn = document.getElementById('credential-test-gmail-send-btn');
+
+    if (!subjectInput || !messageInput || !sendBtn) {
+        return;
+    }
+
+    const session = SharedData.getSession ? SharedData.getSession() : null;
+    const actor = {
+        userId: session && session.userId ? session.userId : '',
+        email: session && session.email ? session.email : '',
+        username: session && session.username ? session.username : '',
+        role: session && session.role ? session.role : '',
+    };
+
+    function estimateActiveRecipientCount() {
+        const users = SharedData.getUsers ? SharedData.getUsers() : [];
+        const seenEmails = new Set();
+        (Array.isArray(users) ? users : []).forEach(user => {
+            if (!user) return;
+            const status = String(user.status || 'active').trim().toLowerCase();
+            if (status !== 'active') return;
+            const email = String(user.email || '').trim().toLowerCase();
+            if (!email) return;
+            seenEmails.add(email);
+        });
+        return seenEmails.size;
+    }
+
+    sendBtn.addEventListener('click', () => {
+        if (!isCredentialDistributorSmtpConfigured()) {
+            setCredentialTestGmailFeedback(
+                'error',
+                'SMTP is not configured. In Bulk Credential Distributor, save Sender Gmail and App Password first.'
+            );
+            return;
+        }
+
+        const subject = String(subjectInput.value || '').trim();
+        const message = String(messageInput.value || '').trim();
+
+        if (!subject) {
+            setCredentialTestGmailFeedback('error', 'Please enter an email subject.');
+            subjectInput.focus();
+            return;
+        }
+        if (!message) {
+            setCredentialTestGmailFeedback('error', 'Please enter an email message.');
+            messageInput.focus();
+            return;
+        }
+
+        setCredentialTestGmailBusyState(true);
+        setCredentialTestGmailFeedback('info', 'Sending test Gmail broadcast. Please wait...');
+        const estimatedCount = estimateActiveRecipientCount();
+        setCredentialDistributorLoadingState(
+            true,
+            `Sending test Gmail broadcast to approximately ${estimatedCount} active user(s). This may take a while for large lists.`,
+            'Preparing email batch...',
+            'Sending Test Broadcast'
+        );
+
+        setTimeout(() => {
+            try {
+                const response = SharedData.sendBulkTestGmail(subject, message, actor);
+                const summary = response && response.summary ? response.summary : { total: 0, sent: 0, failed: 0 };
+                const failures = Array.isArray(response && response.failures) ? response.failures : [];
+
+                const lines = [
+                    'Test Gmail broadcast completed.',
+                    `Total: ${summary.total || 0}`,
+                    `Sent: ${summary.sent || 0}`,
+                    `Failed: ${summary.failed || 0}`
+                ];
+                if (failures.length > 0) {
+                    lines.push('');
+                    lines.push('Top failures:');
+                    failures.slice(0, 10).forEach(item => {
+                        const emailText = item && item.email ? item.email : 'no-email';
+                        const reason = item && item.reason ? item.reason : 'Unknown error';
+                        lines.push(`- ${emailText}: ${reason}`);
+                    });
+                    if (failures.length > 10) {
+                        lines.push(`- ... and ${failures.length - 10} more`);
+                    }
+                }
+
+                setCredentialTestGmailFeedback(failures.length > 0 ? 'error' : 'success', lines.join('\n'));
+                if (failures.length > 0) {
+                    downloadCredentialTestGmailFailuresFile(failures);
+                }
+            } catch (error) {
+                console.error('[AdminPanel] Test Gmail broadcast failed.', error);
+                setCredentialTestGmailFeedback('error', 'Test Gmail broadcast failed: ' + (error.message || 'Unknown error'));
+            } finally {
+                setCredentialDistributorLoadingState(false, '', '', 'Distributing Credentials');
+                setCredentialTestGmailBusyState(false);
+            }
+        }, 50);
+    });
 }
 
 function buildBulkUserFromRow(row, rowNumber, existingUsersByEmail, fileEmailSet, campusMap, departmentMap, programMap, importSeed, importIndex) {
@@ -1307,8 +1621,8 @@ function setupBulkRegister() {
             if (processedRows > 0) {
                 let savedUsers = [];
                 try {
-                    savedUsers = (typeof SharedData.setUsersStrict === 'function')
-                        ? SharedData.setUsersStrict(usersToPersist)
+                    savedUsers = (typeof SharedData.bulkUpsertUsers === 'function')
+                        ? SharedData.bulkUpsertUsers(usersToPersist)
                         : SharedData.setUsers(usersToPersist);
                 } catch (persistError) {
                     console.error('[BulkRegister] Persist failed:', persistError);
@@ -2150,15 +2464,14 @@ function loadDashboardData() {
  */
 function getDashboardStats() {
     const users = SharedData.getUsers();
-    const professors = SharedData.getProfessors();
     const registrationStats = getStudentRegistrationEvaluationStats();
 
     // Count active professors from users list
-    const professorUsers = users.filter(function (u) {
-        return normalizeRoleCode(u.role) === 'professor' && u.status === 'active';
-    });
-    // Use whichever source has more professors (users list or professors list)
-    const professorCount = Math.max(professorUsers.length, professors.length);
+    const activeProfessorCount = users.filter(function (u) {
+        const role = normalizeRoleCode(u.role);
+        const status = String(u.status || '').trim().toLowerCase();
+        return role === 'professor' && status === 'active';
+    }).length;
 
     // Count active students from users list
     const studentCount = getActiveStudentCount(users);
@@ -2168,7 +2481,7 @@ function getDashboardStats() {
         : 0;
 
     return {
-        professors: professorCount,
+        professors: activeProfessorCount,
         students: studentCount,
         completionRate: completionRate,
         pendingEvaluations: registrationStats.pending
@@ -2281,7 +2594,20 @@ function normalizeAdminAnalyticsToken(value) {
     return String(value || '').trim().toLowerCase();
 }
 
+function normalizeAdminUserIdToken(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^u\d+$/i.test(raw)) {
+        return 'u' + raw.replace(/^u/i, '');
+    }
+    if (/^\d+$/.test(raw)) {
+        return 'u' + String(parseInt(raw, 10));
+    }
+    return normalizeAdminAnalyticsToken(raw);
+}
+
 function getAdminAnalyticsContext() {
+    const users = SharedData.getUsers ? SharedData.getUsers() : [];
     const evaluations = SharedData.getEvaluations ? SharedData.getEvaluations() : [];
     const studentEvaluationDrafts = SharedData.getStudentEvaluationDrafts ? SharedData.getStudentEvaluationDrafts() : [];
     const subjectManagement = SharedData.getSubjectManagement ? SharedData.getSubjectManagement() : { offerings: [], enrollments: [] };
@@ -2297,12 +2623,45 @@ function getAdminAnalyticsContext() {
         if (offeringId) offeringsById[offeringId] = offering;
     });
 
+    const professorUsers = (Array.isArray(users) ? users : []).filter(user => {
+        return normalizeAdminAnalyticsToken(user && user.role) === 'professor';
+    });
+    const supervisorUsers = (Array.isArray(users) ? users : []).filter(user => {
+        const role = normalizeAdminAnalyticsToken(user && user.role);
+        return role === 'dean' || role === 'hr' || role === 'supervisor' || role === 'vpaa';
+    });
+
+    const professorIdSet = new Set();
+    const professorNameMap = {};
+    const professorEmployeeIdMap = {};
+    professorUsers.forEach(user => {
+        const normalizedId = normalizeAdminUserIdToken(user && user.id);
+        if (!normalizedId) return;
+        professorIdSet.add(normalizedId);
+
+        const nameToken = normalizeAdminAnalyticsToken(user && user.name);
+        if (nameToken && !professorNameMap[nameToken]) {
+            professorNameMap[nameToken] = normalizedId;
+        }
+
+        const employeeToken = normalizeAdminAnalyticsToken(user && user.employeeId);
+        if (employeeToken && !professorEmployeeIdMap[employeeToken]) {
+            professorEmployeeIdMap[employeeToken] = normalizedId;
+        }
+    });
+
     return {
+        users: Array.isArray(users) ? users : [],
         evaluations: Array.isArray(evaluations) ? evaluations : [],
         studentEvaluationDrafts: Array.isArray(studentEvaluationDrafts) ? studentEvaluationDrafts : [],
         offerings,
         enrollments,
         offeringsById,
+        professorUsers,
+        supervisorUsers,
+        professorIdSet,
+        professorNameMap,
+        professorEmployeeIdMap,
         semesterList: Array.isArray(semesterList) ? semesterList : [],
         questionnaires: questionnaires || {},
         currentSemester,
@@ -2313,7 +2672,62 @@ function getAdminEvaluationTypeKey(evaluation) {
     const role = normalizeAdminAnalyticsToken(evaluation && (evaluation.evaluatorRole || evaluation.evaluationType));
     if (role === 'student' || role === 'student-to-professor') return 'student';
     if (role === 'professor' || role === 'peer' || role === 'professor-to-professor') return 'peer';
-    if (role === 'dean' || role === 'hr' || role === 'supervisor' || role === 'supervisor-to-professor') return 'supervisor';
+    if (role === 'dean' || role === 'hr' || role === 'supervisor' || role === 'vpaa' || role === 'supervisor-to-professor') return 'supervisor';
+    return '';
+}
+
+function resolveAdminProfessorIdToken(rawValue, context) {
+    const normalizedId = normalizeAdminUserIdToken(rawValue);
+    if (normalizedId && context && context.professorIdSet && context.professorIdSet.has(normalizedId)) {
+        return normalizedId;
+    }
+
+    const token = normalizeAdminAnalyticsToken(rawValue);
+    if (!token) return '';
+    if (context && context.professorEmployeeIdMap && context.professorEmployeeIdMap[token]) {
+        return context.professorEmployeeIdMap[token];
+    }
+    if (context && context.professorNameMap && context.professorNameMap[token]) {
+        return context.professorNameMap[token];
+    }
+    if (token.includes(' - ')) {
+        const head = normalizeAdminAnalyticsToken(token.split(' - ')[0]);
+        if (head && context && context.professorNameMap && context.professorNameMap[head]) {
+            return context.professorNameMap[head];
+        }
+    }
+
+    return '';
+}
+
+function resolveAdminEvaluationTargetProfessorId(evaluation, typeKey, context) {
+    if (typeKey === 'student') {
+        const offeringId = String(evaluation && evaluation.courseOfferingId || '').trim();
+        const offering = context && context.offeringsById ? context.offeringsById[offeringId] : null;
+        if (offering && offering.professorUserId) {
+            const resolvedByOffering = resolveAdminProfessorIdToken(offering.professorUserId, context);
+            if (resolvedByOffering) return resolvedByOffering;
+        }
+    }
+
+    const candidates = [
+        evaluation && evaluation.targetProfessorId,
+        evaluation && evaluation.targetId,
+        evaluation && evaluation.targetUserId,
+        evaluation && evaluation.colleagueId,
+        evaluation && evaluation.professorId,
+        evaluation && evaluation.professorUserId,
+        evaluation && evaluation.evaluateeUserId,
+        evaluation && evaluation.evaluateeId,
+        evaluation && evaluation.targetProfessor,
+        evaluation && evaluation.professorSubject,
+    ];
+
+    for (let index = 0; index < candidates.length; index += 1) {
+        const resolved = resolveAdminProfessorIdToken(candidates[index], context);
+        if (resolved) return resolved;
+    }
+
     return '';
 }
 
@@ -2754,6 +3168,94 @@ function normalizeDepartmentCode(value) {
     return trimmed ? trimmed.toUpperCase() : BULK_UNASSIGNED_DEPARTMENT;
 }
 
+function normalizeUserManagementUserId(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^u\d+$/i.test(raw)) {
+        return 'u' + raw.replace(/^u/i, '');
+    }
+    if (/^\d+$/.test(raw)) {
+        return 'u' + String(parseInt(raw, 10));
+    }
+    return raw.toLowerCase();
+}
+
+function buildUserManagementSemesterActiveContext() {
+    const subjectManagement = SharedData.getSubjectManagement
+        ? SharedData.getSubjectManagement()
+        : { offerings: [], enrollments: [] };
+    const offerings = Array.isArray(subjectManagement && subjectManagement.offerings)
+        ? subjectManagement.offerings
+        : [];
+    const enrollments = Array.isArray(subjectManagement && subjectManagement.enrollments)
+        ? subjectManagement.enrollments
+        : [];
+
+    const activeOfferingIds = new Set();
+    const activeProfessorIds = new Set();
+    offerings.forEach(offering => {
+        if (!offering || offering.isActive === false) return;
+        const offeringId = String(offering.id || '').trim();
+        if (offeringId) {
+            activeOfferingIds.add(offeringId);
+        }
+        const professorId = normalizeUserManagementUserId(
+            offering.professorUserId || offering.professorId
+        );
+        if (professorId) {
+            activeProfessorIds.add(professorId);
+        }
+    });
+
+    const activeStudentIds = new Set();
+    enrollments.forEach(enrollment => {
+        if (!enrollment) return;
+        const status = String(enrollment.status || '').trim().toLowerCase();
+        if (status !== 'enrolled') return;
+        const offeringId = String(enrollment.courseOfferingId || '').trim();
+        if (!offeringId || !activeOfferingIds.has(offeringId)) return;
+        const studentId = normalizeUserManagementUserId(
+            enrollment.studentUserId || enrollment.studentId
+        );
+        if (studentId) {
+            activeStudentIds.add(studentId);
+        }
+    });
+
+    return {
+        hasSemesterScope: activeOfferingIds.size > 0,
+        activeProfessorIds,
+        activeStudentIds
+    };
+}
+
+function isUserActiveForOrganizationCount(user, semesterContext) {
+    if (!user) return false;
+    const status = String(user.status || 'active').trim().toLowerCase();
+    if (status === 'inactive' || user.isActive === false) {
+        return false;
+    }
+
+    const role = normalizeRoleCode(user.role);
+    if (!semesterContext || !semesterContext.hasSemesterScope) {
+        return true;
+    }
+
+    if (role !== 'professor' && role !== 'student') {
+        return true;
+    }
+
+    const userId = normalizeUserManagementUserId(user.id);
+    if (!userId) {
+        return true;
+    }
+
+    if (role === 'professor') {
+        return semesterContext.activeProfessorIds.has(userId);
+    }
+    return semesterContext.activeStudentIds.has(userId);
+}
+
 /**
  * Render the organization view with the current adminUsers data
  */
@@ -2796,12 +3298,13 @@ function renderOrganizationView(campusFilter = 'all') {
     }
 
     renderUserSearchResults(searchTerm, filteredUsers);
+    const semesterContext = buildUserManagementSemesterActiveContext();
 
     // Populate HR section
     let hrUsers = filteredUsers.filter(u => normalizeRoleCode(u.role) === 'hr');
     hrUsers = sortUsersByStatusAndName(hrUsers);
     const hrCountEl = document.getElementById('hr-count');
-    if (hrCountEl) hrCountEl.textContent = hrUsers.length;
+    if (hrCountEl) hrCountEl.textContent = hrUsers.filter(u => isUserActiveForOrganizationCount(u, semesterContext)).length;
     const hrList = document.getElementById('hr-user-list');
     if (hrList) {
         hrList.innerHTML = hrUsers.length > 0 ? hrUsers.map(u => createUserCard(u)).join('') : createEmptyState('No HR staff found');
@@ -2811,7 +3314,7 @@ function renderOrganizationView(campusFilter = 'all') {
     let adminUsersList = filteredUsers.filter(u => normalizeRoleCode(u.role) === 'admin');
     adminUsersList = sortUsersByStatusAndName(adminUsersList);
     const adminCountEl = document.getElementById('admin-count');
-    if (adminCountEl) adminCountEl.textContent = adminUsersList.length;
+    if (adminCountEl) adminCountEl.textContent = adminUsersList.filter(u => isUserActiveForOrganizationCount(u, semesterContext)).length;
     const adminList = document.getElementById('admin-user-list');
     if (adminList) {
         adminList.innerHTML = adminUsersList.length > 0 ? adminUsersList.map(u => createUserCard(u)).join('') : createEmptyState('No administrators found');
@@ -2821,7 +3324,7 @@ function renderOrganizationView(campusFilter = 'all') {
     let vpaaUsersInfo = filteredUsers.filter(u => normalizeRoleCode(u.role) === 'vpaa');
     vpaaUsersInfo = sortUsersByStatusAndName(vpaaUsersInfo);
     const vpaaCountEl = document.getElementById('vpaa-count');
-    if (vpaaCountEl) vpaaCountEl.textContent = vpaaUsersInfo.length;
+    if (vpaaCountEl) vpaaCountEl.textContent = vpaaUsersInfo.filter(u => isUserActiveForOrganizationCount(u, semesterContext)).length;
     const vpaaList = document.getElementById('vpaa-user-list');
     if (vpaaList) {
         vpaaList.innerHTML = vpaaUsersInfo.length > 0 ? vpaaUsersInfo.map(u => createUserCard(u)).join('') : createEmptyState('No VPAA staff found');
@@ -2831,7 +3334,7 @@ function renderOrganizationView(campusFilter = 'all') {
     let osaUsersInfo = filteredUsers.filter(u => normalizeRoleCode(u.role) === 'osa');
     osaUsersInfo = sortUsersByStatusAndName(osaUsersInfo);
     const osaCountEl = document.getElementById('osa-count');
-    if (osaCountEl) osaCountEl.textContent = osaUsersInfo.length;
+    if (osaCountEl) osaCountEl.textContent = osaUsersInfo.filter(u => isUserActiveForOrganizationCount(u, semesterContext)).length;
     const osaList = document.getElementById('osa-user-list');
     if (osaList) {
         osaList.innerHTML = osaUsersInfo.length > 0 ? osaUsersInfo.map(u => createUserCard(u)).join('') : createEmptyState('No OSA staff found');
@@ -2864,7 +3367,7 @@ function renderOrganizationView(campusFilter = 'all') {
         let deans = deptUsers.filter(u => normalizeRoleCode(u.role) === 'dean');
         deans = sortUsersByStatusAndName(deans);
         const deanCount = document.getElementById(`${slug}-dean-count`);
-        if (deanCount) deanCount.textContent = deans.length;
+        if (deanCount) deanCount.textContent = deans.filter(u => isUserActiveForOrganizationCount(u, semesterContext)).length;
         const deanContainer = document.getElementById(`${slug}-deans`);
         if (deanContainer) deanContainer.innerHTML = deans.length > 0 ? deans.map(u => createUserCard(u)).join('') : createEmptyState('No deans');
 
@@ -2872,7 +3375,7 @@ function renderOrganizationView(campusFilter = 'all') {
         let profs = deptUsers.filter(u => normalizeRoleCode(u.role) === 'professor');
         profs = sortUsersByStatusAndName(profs);
         const profCount = document.getElementById(`${slug}-prof-count`);
-        if (profCount) profCount.textContent = profs.length;
+        if (profCount) profCount.textContent = profs.filter(u => isUserActiveForOrganizationCount(u, semesterContext)).length;
         const profContainer = document.getElementById(`${slug}-professors`);
         if (profContainer) profContainer.innerHTML = profs.length > 0 ? profs.map(u => createUserCard(u)).join('') : createEmptyState('No professors');
 
@@ -2880,7 +3383,7 @@ function renderOrganizationView(campusFilter = 'all') {
         let students = deptUsers.filter(u => normalizeRoleCode(u.role) === 'student');
         students = sortUsersByStatusAndName(students);
         const studentCount = document.getElementById(`${slug}-student-count`);
-        if (studentCount) studentCount.textContent = students.length;
+        if (studentCount) studentCount.textContent = students.filter(u => isUserActiveForOrganizationCount(u, semesterContext)).length;
         const studentContainer = document.getElementById(`${slug}-students`);
         if (studentContainer) studentContainer.innerHTML = students.length > 0 ? students.map(u => createUserCard(u)).join('') : createEmptyState('No students');
     });
@@ -2902,6 +3405,7 @@ function renderUserSearchResults(searchTerm, users) {
     const resultsContainer = document.getElementById('user-search-results');
     const resultsList = document.getElementById('user-search-list');
     if (!resultsContainer || !resultsList) return;
+    const sortedUsers = sortUsersByStatusAndName(Array.isArray(users) ? users : []);
 
     if (!searchTerm) {
         resultsContainer.style.display = 'none';
@@ -2911,7 +3415,7 @@ function renderUserSearchResults(searchTerm, users) {
 
     resultsContainer.style.display = 'block';
 
-    if (!users.length) {
+    if (!sortedUsers.length) {
         resultsList.innerHTML = `
             <tr>
                 <td class="result-empty" colspan="9">No users match your search</td>
@@ -2920,7 +3424,7 @@ function renderUserSearchResults(searchTerm, users) {
         return;
     }
 
-    resultsList.innerHTML = users.map(user => createSearchResultRow(user)).join('');
+    resultsList.innerHTML = sortedUsers.map(user => createSearchResultRow(user)).join('');
     resultsList.querySelectorAll('tr[data-user-id]').forEach(row => {
         row.addEventListener('click', () => {
             openEditUserModal(row.getAttribute('data-user-id'));
@@ -4731,14 +5235,19 @@ function handleHrChangePassword() {
         return;
     }
 
-    const payload = {
-        username: getUserSession() ? getUserSession().username : '',
-        currentPassword,
-        newPassword
-    };
+    if (!SharedData.changeOwnPassword) {
+        alert('Password update service is unavailable.');
+        return;
+    }
 
-    console.log('Ready for SQL integration: /api/hr/change-password', payload);
-    alert('Password update request ready for SQL connection.');
+    try {
+        SharedData.changeOwnPassword(currentPassword, newPassword);
+        alert('Password updated successfully.');
+    } catch (error) {
+        console.error('[AdminPanel] Failed to update password.', error);
+        alert(error && error.message ? error.message : 'Failed to update password.');
+        return;
+    }
 
     const form = document.getElementById('changePasswordForm');
     if (form) form.reset();
@@ -4788,20 +5297,61 @@ function setupAdminProfilePhotoUpload() {
         const file = input.files && input.files[0];
         if (!file) return;
 
-        if (!file.type.startsWith('image/')) {
-            alert('Please select a valid image file.');
+        const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+        if (!allowedTypes.includes(String(file.type || '').toLowerCase())) {
+            alert('Please choose a JPG, JPEG, PNG, or WEBP image.');
             input.value = '';
             return;
         }
 
-        const reader = new FileReader();
-        reader.onload = function () {
-            preview.src = reader.result;
+        if (Number(file.size || 0) > (2 * 1024 * 1024)) {
+            alert('Please choose an image smaller than 2MB.');
+            input.value = '';
+            return;
+        }
+
+        const localPreviewUrl = URL.createObjectURL(file);
+        preview.src = localPreviewUrl;
+        preview.classList.add('active');
+        placeholder.style.display = 'none';
+
+        if (typeof SharedData.uploadProfilePhoto !== 'function') {
+            const reader = new FileReader();
+            reader.onload = function () {
+                preview.src = reader.result;
+                preview.classList.add('active');
+                placeholder.style.display = 'none';
+                SharedData.setProfilePhoto('admin', reader.result);
+                URL.revokeObjectURL(localPreviewUrl);
+                input.value = '';
+            };
+            reader.readAsDataURL(file);
+            return;
+        }
+
+        try {
+            const savedPhoto = SharedData.uploadProfilePhoto(file);
+            if (savedPhoto) {
+                preview.src = savedPhoto;
+            }
             preview.classList.add('active');
             placeholder.style.display = 'none';
-            SharedData.setProfilePhoto('admin', reader.result);
-        };
-        reader.readAsDataURL(file);
+        } catch (error) {
+            alert(error && error.message ? error.message : 'Failed to upload the profile image.');
+            const storedPhoto = SharedData.getProfilePhoto('admin');
+            if (storedPhoto) {
+                preview.src = storedPhoto;
+                preview.classList.add('active');
+                placeholder.style.display = 'none';
+            } else {
+                preview.removeAttribute('src');
+                preview.classList.remove('active');
+                placeholder.style.display = '';
+            }
+        } finally {
+            URL.revokeObjectURL(localPreviewUrl);
+            input.value = '';
+        }
     });
 }
 
@@ -4899,21 +5449,27 @@ function handleAdminChangeEmail() {
         return;
     }
 
-    const payload = {
-        username: getUserSession() ? getUserSession().username : '',
-        currentEmail,
-        newEmail
-    };
+    if (!SharedData.changeOwnEmail) {
+        alert('Email update service is unavailable.');
+        return;
+    }
 
-    console.log('Ready for SQL integration: /api/admin/change-email', payload);
-    alert('Email update request ready for SQL connection.');
+    try {
+        const result = SharedData.changeOwnEmail(currentEmail, newEmail);
+        const nextEmail = String(result && result.email || newEmail).trim();
+        alert('Email updated successfully.');
 
-    const profileEmail = document.getElementById('adminProfileEmail');
-    if (profileEmail) profileEmail.textContent = newEmail;
-    const currentEmailInput = document.getElementById('adminCurrentEmail');
-    if (currentEmailInput) {
-        currentEmailInput.value = newEmail;
-        currentEmailInput.defaultValue = newEmail;
+        const profileEmail = document.getElementById('adminProfileEmail');
+        if (profileEmail) profileEmail.textContent = nextEmail;
+        const currentEmailInput = document.getElementById('adminCurrentEmail');
+        if (currentEmailInput) {
+            currentEmailInput.value = nextEmail;
+            currentEmailInput.defaultValue = nextEmail;
+        }
+    } catch (error) {
+        console.error('[AdminPanel] Failed to update email.', error);
+        alert(error && error.message ? error.message : 'Failed to update email.');
+        return;
     }
 
     const form = document.getElementById('adminChangeEmailForm');
@@ -4948,14 +5504,19 @@ function handleAdminProfilePasswordChange() {
         return;
     }
 
-    const payload = {
-        username: getUserSession() ? getUserSession().username : '',
-        currentPassword,
-        newPassword
-    };
+    if (!SharedData.changeOwnPassword) {
+        alert('Password update service is unavailable.');
+        return;
+    }
 
-    console.log('Ready for SQL integration: /api/admin/change-password', payload);
-    alert('Password update request ready for SQL connection.');
+    try {
+        SharedData.changeOwnPassword(currentPassword, newPassword);
+        alert('Password updated successfully.');
+    } catch (error) {
+        console.error('[AdminPanel] Failed to update password.', error);
+        alert(error && error.message ? error.message : 'Failed to update password.');
+        return;
+    }
 
     const form = document.getElementById('adminChangePasswordForm');
     if (form) form.reset();
@@ -4970,8 +5531,9 @@ let currentEditingProfessorId = null;
 let currentDepartmentFilter = 'all';
 let currentAnalyticsSemester = 'all';
 let currentAnalyticsEvaluationType = 'student';
+let professorManagementDataSyncBound = false;
 
-const SEMESTER_OPTIONS = [
+const DEFAULT_SEMESTER_OPTIONS = [
     { id: 'all', label: 'All Semesters' },
     { id: 'sem1', label: '1st Semester' },
     { id: 'sem2', label: '2nd Semester' },
@@ -5020,12 +5582,56 @@ function formatEmploymentType(type) {
 }
 
 function getSemesterLabel(id) {
-    const option = SEMESTER_OPTIONS.find(item => item.id === id);
+    const option = getSemesterOptions().find(item => item.id === id);
     return option ? option.label : 'Semester';
 }
 
 function getSemesterOptions() {
-    return SEMESTER_OPTIONS;
+    const options = [{ id: 'all', label: 'All Semesters' }];
+    const seen = new Set(['all']);
+    const pushOption = function (id, label) {
+        const normalizedId = String(id || '').trim();
+        if (!normalizedId || seen.has(normalizedId)) return;
+        seen.add(normalizedId);
+        options.push({
+            id: normalizedId,
+            label: String(label || normalizedId).trim() || normalizedId,
+        });
+    };
+
+    const semesterList = SharedData.getSemesterList ? SharedData.getSemesterList() : [];
+    if (Array.isArray(semesterList)) {
+        semesterList.forEach(item => {
+            if (!item || typeof item !== 'object') return;
+            const semesterId = item.value || item.id || item.slug || '';
+            const semesterLabel = item.label || item.text || semesterId;
+            pushOption(semesterId, semesterLabel);
+        });
+    }
+
+    const currentSemester = String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : '').trim();
+    if (currentSemester) {
+        const currentSemesterLabel = Array.isArray(semesterList)
+            ? (semesterList.find(item => String(item && (item.value || item.id || item.slug || '')).trim() === currentSemester) || {}).label
+            : '';
+        pushOption(currentSemester, currentSemesterLabel || currentSemester);
+    }
+
+    const evaluations = SharedData.getEvaluations ? SharedData.getEvaluations() : [];
+    if (Array.isArray(evaluations)) {
+        evaluations.forEach(evaluation => {
+            pushOption(evaluation && evaluation.semesterId, evaluation && evaluation.semesterId);
+        });
+    }
+
+    if (options.length <= 1) {
+        DEFAULT_SEMESTER_OPTIONS.forEach(option => {
+            if (!option || option.id === 'all') return;
+            pushOption(option.id, option.label);
+        });
+    }
+
+    return options;
 }
 
 function getEvaluationTypeOptions() {
@@ -5043,17 +5649,96 @@ function clampNumber(value, min, max) {
 
 
 // Real Data Utilities
-function getProfessorEvaluationsFromShared(professorId) {
-    const allEvals = typeof SharedData !== 'undefined' && SharedData.getEvaluations ? SharedData.getEvaluations() : [];
-    return allEvals.filter(e => {
-        const tId = String(e.targetId || e.colleagueId || e.professorSubject || '');
-        // professorSubject might be "1|CS101" so check startsWith or exactly equals
-        return tId === String(professorId) || tId.startsWith(String(professorId) + '|');
+function getProfessorIdentityTokens(professor) {
+    const source = (professor && typeof professor === 'object')
+        ? professor
+        : { id: professor };
+    const tokens = new Set();
+    const add = function (value) {
+        const token = normalizeAdminAnalyticsToken(value);
+        if (token) tokens.add(token);
+    };
+
+    const rawId = String(source && source.id || '').trim();
+    add(rawId);
+    if (/^u\d+$/i.test(rawId)) add(rawId.slice(1));
+    if (/^\d+$/.test(rawId)) add('u' + rawId);
+
+    add(source && source.employeeId);
+    add(source && source.name);
+    add(source && source.username);
+    add(source && source.email);
+
+    return tokens;
+}
+
+function getProfessorEvaluationsFromShared(professorInput, contextInput) {
+    const context = contextInput || getAdminAnalyticsContext();
+    const allEvals = Array.isArray(context && context.evaluations) ? context.evaluations : [];
+    const professorTokens = getProfessorIdentityTokens(professorInput);
+    if (!professorTokens.size) return [];
+    const preferredProfessorId = resolveAdminProfessorIdToken(
+        (professorInput && typeof professorInput === 'object')
+            ? (professorInput.id || professorInput.employeeId || professorInput.name || professorInput.email)
+            : professorInput,
+        context
+    );
+
+    const matchesProfessor = function (value) {
+        const raw = String(value == null ? '' : value).trim();
+        const token = normalizeAdminAnalyticsToken(raw);
+        if (!token) return false;
+        if (professorTokens.has(token)) return true;
+        if (/^u\d+$/i.test(token) && professorTokens.has(token.slice(1))) return true;
+        if (/^\d+$/.test(token) && professorTokens.has('u' + token)) return true;
+        if (token.includes('|')) {
+            const head = normalizeAdminAnalyticsToken(token.split('|')[0]);
+            if (head && professorTokens.has(head)) return true;
+        }
+        if (token.includes(' - ')) {
+            const head = normalizeAdminAnalyticsToken(token.split(' - ')[0]);
+            if (head && professorTokens.has(head)) return true;
+        }
+        return false;
+    };
+
+    return allEvals.filter(function (evaluation) {
+        const typeKey = getAdminEvaluationTypeKey(evaluation) || 'student';
+        const resolvedTargetProfessorId = resolveAdminEvaluationTargetProfessorId(evaluation, typeKey, context);
+        if (preferredProfessorId && resolvedTargetProfessorId && resolvedTargetProfessorId === preferredProfessorId) {
+            return true;
+        }
+        if (resolvedTargetProfessorId && matchesProfessor(resolvedTargetProfessorId)) {
+            return true;
+        }
+
+        const offeringId = String(evaluation && evaluation.courseOfferingId || '').trim();
+        if (offeringId) {
+            const offering = context && context.offeringsById ? context.offeringsById[offeringId] : null;
+            if (offering && matchesProfessor(offering.professorUserId)) {
+                return true;
+            }
+        }
+
+        const candidates = [
+            evaluation && evaluation.targetProfessorId,
+            evaluation && evaluation.targetId,
+            evaluation && evaluation.targetUserId,
+            evaluation && evaluation.colleagueId,
+            evaluation && evaluation.professorId,
+            evaluation && evaluation.professorUserId,
+            evaluation && evaluation.evaluateeUserId,
+            evaluation && evaluation.evaluateeId,
+            evaluation && evaluation.targetProfessor,
+            evaluation && evaluation.professorSubject,
+        ];
+
+        return candidates.some(matchesProfessor);
     });
 }
 
 function calculateAggregatedMetrics(evaluations, semesterId) {
-    const filtered = evaluations.filter(e => !semesterId || e.semesterId === semesterId || !e.semesterId);
+    const filtered = evaluations.filter(e => isAdminEvaluationInSemester(e, semesterId));
     let totalRatings = 0;
     let ratingCount = 0;
     const qualitativeResponses = [];
@@ -5166,7 +5851,8 @@ function ensureProfessorSemesterData(professor) {
         didUpdate = true;
     }
 
-    const profEvals = getProfessorEvaluationsFromShared(professor.id);
+    const context = getAdminAnalyticsContext();
+    const profEvals = getProfessorEvaluationsFromShared(professor, context);
 
     semesterIds.forEach(semesterId => {
         if (!professor.semesterData[semesterId]) {
@@ -5247,18 +5933,15 @@ function buildEvaluationTypeOptionsHtml(selectedType) {
 
 function getEvaluationSnapshotForType(professor, semesterId, evaluationType) {
     const meta = getEvaluationTypeMeta(evaluationType);
+    const normalizedEvaluationType = meta.id;
 
     // Fetch all evaluations for this professor from SharedData
-    const profEvals = getProfessorEvaluationsFromShared(professor.id);
+    const context = getAdminAnalyticsContext();
+    const profEvals = getProfessorEvaluationsFromShared(professor, context);
 
     // Filter by type
     const typeFiltered = profEvals.filter(e => {
-        // Map UI evaluation type to data evaluatorRole
-        const dataRole = e.evaluatorRole || e.evaluationType;
-        if (evaluationType === 'student') return dataRole === 'student';
-        if (evaluationType === 'peer') return dataRole === 'professor' || dataRole === 'peer';
-        if (evaluationType === 'supervisor') return dataRole === 'dean' || dataRole === 'hr' || dataRole === 'supervisor';
-        return false;
+        return getAdminEvaluationTypeKey(e) === normalizedEvaluationType;
     });
 
     // Calculate aggregated stats for this specific type and semester
@@ -5266,13 +5949,18 @@ function getEvaluationSnapshotForType(professor, semesterId, evaluationType) {
 
     // Approximate total potential raters if real data isn't configured
     let totalRaters = 0;
-    if (evaluationType === 'student') {
+    if (normalizedEvaluationType === 'student') {
         totalRaters = Math.max(getActiveStudentCount(), metrics.evaluatedCount);
-    } else if (evaluationType === 'peer') {
-        const professorCount = professorsData ? professorsData.length : 0;
-        totalRaters = Math.max(professorCount - 1, 0, metrics.evaluatedCount);
+    } else if (normalizedEvaluationType === 'peer') {
+        const activeProfessors = Array.isArray(context.professorUsers)
+            ? context.professorUsers.filter(user => normalizeAdminAnalyticsToken(user && user.status) !== 'inactive')
+            : [];
+        totalRaters = Math.max(activeProfessors.length - 1, 0, metrics.evaluatedCount);
     } else {
-        totalRaters = Math.max(1, metrics.evaluatedCount); // At least 1 supervisor (Dean)
+        const activeSupervisors = Array.isArray(context.supervisorUsers)
+            ? context.supervisorUsers.filter(user => normalizeAdminAnalyticsToken(user && user.status) !== 'inactive')
+            : [];
+        totalRaters = Math.max(activeSupervisors.length, 1, metrics.evaluatedCount);
     }
 
     return {
@@ -5285,6 +5973,258 @@ function getEvaluationSnapshotForType(professor, semesterId, evaluationType) {
     };
 }
 
+function escapeAdminAnalyticsHtml(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function escapeAdminAnalyticsAttr(value) {
+    return escapeAdminAnalyticsHtml(value).replace(/`/g, '&#96;');
+}
+
+function sanitizeAdminProfessorPhotoSource(value) {
+    const photo = String(value || '').trim();
+    if (!photo) return '';
+    if (/^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+$/i.test(photo)) {
+        return photo;
+    }
+    if (/^https?:\/\//i.test(photo)) {
+        return photo;
+    }
+    if (/^(\/|\.{1,2}\/|uploads\/)/i.test(photo)) {
+        return photo;
+    }
+    return '';
+}
+
+function getAdminProfessorPhotoSource(professor) {
+    if (!professor || typeof professor !== 'object') {
+        return '';
+    }
+
+    const candidates = [
+        professor.profileImageUrl,
+        professor.photoData,
+        professor.profileImage,
+    ];
+
+    for (const value of candidates) {
+        const normalized = sanitizeAdminProfessorPhotoSource(value);
+        if (normalized) {
+            return normalized;
+        }
+    }
+
+    return '';
+}
+
+function buildAdminProfessorAvatarHtml(professor, avatarClassName) {
+    const className = String(avatarClassName || '').trim();
+    const photoSource = getAdminProfessorPhotoSource(professor);
+    if (photoSource) {
+        return `<div class="${className}"><img src="${escapeAdminAnalyticsAttr(photoSource)}" alt="${escapeAdminAnalyticsAttr(professor && professor.name ? professor.name : 'Professor')} photo"></div>`;
+    }
+
+    const initials = escapeAdminAnalyticsHtml(buildInitials(professor && professor.name ? professor.name : '') || 'PR');
+    return `<div class="${className}"><span class="admin-avatar-fallback-text">${initials}</span></div>`;
+}
+
+function resolveProfessorHistoricalTrendAverage(snapshot) {
+    const avg = Number(snapshot && snapshot.averageRating);
+    const count = Number(snapshot && snapshot.evaluatedCount);
+    if (!Number.isFinite(avg) || avg <= 0) return null;
+    if (!Number.isFinite(count) || count <= 0) return null;
+    return avg;
+}
+
+function buildProfessorHistoricalTrend(professor, contextInput) {
+    const context = contextInput || getAdminAnalyticsContext();
+    const semesters = getAdminLatestSemestersForTrend(context, 4);
+    const weights = {
+        student: 0.50,
+        peer: 0.25,
+        supervisor: 0.25
+    };
+
+    const points = semesters.map(function (semester) {
+        const semesterId = String(semester && semester.id || '').trim();
+        const semesterLabel = String(semester && (semester.label || semester.id) || semesterId).trim() || semesterId;
+
+        const studentSnapshot = getEvaluationSnapshotForType(professor, semesterId, 'student');
+        const peerSnapshot = getEvaluationSnapshotForType(professor, semesterId, 'peer');
+        const supervisorSnapshot = getEvaluationSnapshotForType(professor, semesterId, 'supervisor');
+
+        const sourceAverages = {
+            student: resolveProfessorHistoricalTrendAverage(studentSnapshot),
+            peer: resolveProfessorHistoricalTrendAverage(peerSnapshot),
+            supervisor: resolveProfessorHistoricalTrendAverage(supervisorSnapshot),
+        };
+
+        let weightedSum = 0;
+        let availableWeight = 0;
+        Object.keys(weights).forEach(function (key) {
+            const value = Number(sourceAverages[key]);
+            if (!Number.isFinite(value)) return;
+            const weight = Number(weights[key]) || 0;
+            weightedSum += (value * weight);
+            availableWeight += weight;
+        });
+
+        const combinedScore = availableWeight > 0
+            ? parseFloat((weightedSum / availableWeight).toFixed(2))
+            : null;
+
+        return {
+            semesterId,
+            semesterLabel,
+            score: combinedScore,
+            delta: null
+        };
+    });
+
+    let previousScore = null;
+    points.forEach(function (point) {
+        const score = Number(point && point.score);
+        if (!Number.isFinite(score)) {
+            point.delta = null;
+            return;
+        }
+        point.delta = Number.isFinite(previousScore)
+            ? parseFloat((score - previousScore).toFixed(2))
+            : null;
+        previousScore = score;
+    });
+
+    return {
+        points,
+        summary: computeProfessorHistoricalTrendSummary(points)
+    };
+}
+
+function computeProfessorHistoricalTrendSummary(pointsInput) {
+    const points = Array.isArray(pointsInput) ? pointsInput : [];
+    const validScores = points
+        .map(function (point) { return Number(point && point.score); })
+        .filter(function (score) { return Number.isFinite(score); });
+
+    if (validScores.length < 2) {
+        return {
+            hasSufficientData: false,
+            direction: 'insufficient',
+            percentChange: null,
+            variationPercent: null,
+            isConsistent: false,
+            declinePatternDetected: false,
+            semesterCount: validScores.length,
+            statement: 'Insufficient historical data to determine performance trend.'
+        };
+    }
+
+    const earliest = validScores[0];
+    const latest = validScores[validScores.length - 1];
+    const safeBaseline = earliest > 0 ? earliest : 0.01;
+    const percentChange = ((latest - earliest) / safeBaseline) * 100;
+
+    let direction = 'stable';
+    if (percentChange >= 10) {
+        direction = 'improved';
+    } else if (percentChange <= -10) {
+        direction = 'declined';
+    }
+
+    const mean = validScores.reduce(function (sum, value) { return sum + value; }, 0) / validScores.length;
+    const variance = validScores.reduce(function (sum, value) {
+        const diff = value - mean;
+        return sum + (diff * diff);
+    }, 0) / validScores.length;
+    const stdDev = Math.sqrt(variance);
+    const variationPercent = mean > 0 ? (stdDev / mean) * 100 : 0;
+    const isConsistent = variationPercent <= 5;
+
+    let consecutiveDrops = 0;
+    let maxConsecutiveDrops = 0;
+    for (let index = 1; index < validScores.length; index += 1) {
+        if (validScores[index] < validScores[index - 1]) {
+            consecutiveDrops += 1;
+            if (consecutiveDrops > maxConsecutiveDrops) {
+                maxConsecutiveDrops = consecutiveDrops;
+            }
+        } else {
+            consecutiveDrops = 0;
+        }
+    }
+    const declinePatternDetected = maxConsecutiveDrops >= 2;
+    const semesterCount = validScores.length;
+
+    let statement = `Faculty remained stable (${formatProfessorHistoricalTrendSignedPercent(percentChange)}) over ${semesterCount} semester${semesterCount === 1 ? '' : 's'}.`;
+    if (direction === 'improved') {
+        statement = `Faculty improved by ${Math.abs(percentChange).toFixed(1)}% over ${semesterCount} semester${semesterCount === 1 ? '' : 's'}.`;
+    } else if (direction === 'declined') {
+        statement = `Faculty declined by ${Math.abs(percentChange).toFixed(1)}% over ${semesterCount} semester${semesterCount === 1 ? '' : 's'}.`;
+    }
+
+    return {
+        hasSufficientData: true,
+        direction,
+        percentChange,
+        variationPercent,
+        isConsistent,
+        declinePatternDetected,
+        semesterCount,
+        statement
+    };
+}
+
+function getProfessorHistoricalTrendDirectionLabel(direction) {
+    if (direction === 'improved') return 'Improving';
+    if (direction === 'declined') return 'Declining';
+    if (direction === 'stable') return 'Stable';
+    return 'Insufficient Data';
+}
+
+function getProfessorHistoricalTrendDirectionClass(direction) {
+    if (direction === 'improved') return 'positive';
+    if (direction === 'declined') return 'negative';
+    if (direction === 'stable') return 'neutral';
+    return 'neutral';
+}
+
+function getProfessorHistoricalTrendConsistencyLabel(summary) {
+    if (!summary || !summary.hasSufficientData) return 'Unknown';
+    return summary.isConsistent ? 'Consistent' : 'Variable';
+}
+
+function getProfessorHistoricalTrendConsistencyClass(summary) {
+    if (!summary || !summary.hasSufficientData) return 'neutral';
+    return summary.isConsistent ? 'positive' : 'warning';
+}
+
+function getProfessorHistoricalTrendDeclineLabel(summary) {
+    if (!summary || !summary.hasSufficientData) return 'Unknown';
+    return summary.declinePatternDetected ? 'Detected' : 'Not detected';
+}
+
+function getProfessorHistoricalTrendDeclineClass(summary) {
+    if (!summary || !summary.hasSufficientData) return 'neutral';
+    return summary.declinePatternDetected ? 'negative' : 'positive';
+}
+
+function formatProfessorHistoricalTrendSignedPercent(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 'N/A';
+    return `${numeric >= 0 ? '+' : ''}${numeric.toFixed(1)}%`;
+}
+
+function formatProfessorHistoricalTrendDelta(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return '-';
+    return `${numeric >= 0 ? '+' : ''}${numeric.toFixed(2)}`;
+}
+
 /**
  * Helper: save professors to centralized sharedUsersData (if not already defined)
  */
@@ -5293,12 +6233,10 @@ if (typeof saveProfessorsToSharedData !== 'function') {
         return SharedData.getUsers().filter(function (u) { return normalizeRoleCode(u.role) === 'professor'; });
     }
     function saveProfessorsToSharedData() {
-        var allUsers = SharedData.getUsers();
-        var nonProfessors = allUsers.filter(function (u) { return normalizeRoleCode(u.role) !== 'professor'; });
         var professorsWithRole = professorsData.map(function (p) {
             return Object.assign({}, p, { role: 'professor', status: p.isActive !== false ? 'active' : 'inactive' });
         });
-        SharedData.setUsers(nonProfessors.concat(professorsWithRole));
+        SharedData.bulkUpsertUsers(professorsWithRole);
     }
 }
 
@@ -5394,6 +6332,21 @@ function limitProfessorsPerDepartment() {
 function setupProfessorManagement() {
     // Load professor data from SharedData
     loadProfessorsData();
+
+    if (!professorManagementDataSyncBound && SharedData.onDataChange) {
+        professorManagementDataSyncBound = true;
+        SharedData.onDataChange(function (key) {
+            if (
+                key === SharedData.KEYS.EVALUATIONS ||
+                key === SharedData.KEYS.SUBJECT_MANAGEMENT ||
+                key === SharedData.KEYS.CURRENT_SEMESTER ||
+                key === SharedData.KEYS.SEMESTER_LIST
+            ) {
+                loadProfessorsData();
+                renderProfessors();
+            }
+        });
+    }
 
     // Department tabs
     const deptTabs = document.querySelectorAll('.dept-tab');
@@ -5796,9 +6749,7 @@ function viewProfessorDetails(professorId) {
         content.innerHTML = `
             <div class="professor-details-view">
                 <div class="detail-header">
-                    <div class="detail-avatar">
-                        <i class="fas fa-user-tie"></i>
-                    </div>
+                    ${buildAdminProfessorAvatarHtml(professor, 'detail-avatar')}
                     <div class="detail-name">
                         <h2>${professor.name}</h2>
                         <span class="dept-badge dept-${professor.department}">${professor.department}</span>
@@ -5910,8 +6861,9 @@ function viewProfessorAnalytics(professorId) {
             saveProfessorsToSharedData();
         }
 
+        const semesterOptions = getSemesterOptions();
         const selectedSemester = currentAnalyticsSemester || 'all';
-        const normalizedSemester = professor.semesterData && professor.semesterData[selectedSemester]
+        const normalizedSemester = semesterOptions.some(option => option.id === selectedSemester)
             ? selectedSemester
             : 'all';
 
@@ -5923,6 +6875,19 @@ function viewProfessorAnalytics(professorId) {
         const evaluationMeta = getEvaluationTypeMeta(normalizedEvaluationType);
 
         const snapshot = getEvaluationSnapshotForType(professor, normalizedSemester, normalizedEvaluationType);
+        const analyticsContext = getAdminAnalyticsContext();
+        const historicalTrend = buildProfessorHistoricalTrend(professor, analyticsContext);
+        const trendSummary = historicalTrend && historicalTrend.summary ? historicalTrend.summary : {
+            hasSufficientData: false,
+            direction: 'insufficient',
+            percentChange: null,
+            variationPercent: null,
+            isConsistent: false,
+            declinePatternDetected: false,
+            semesterCount: 0,
+            statement: 'Insufficient historical data to determine performance trend.'
+        };
+        const trendRows = Array.isArray(historicalTrend && historicalTrend.points) ? historicalTrend.points : [];
         const totalRaters = snapshot.totalRaters || 0;
         const evaluatedCount = snapshot.evaluatedCount || 0;
         const notEvaluatedCount = snapshot.notEvaluatedCount || Math.max(totalRaters - evaluatedCount, 0);
@@ -5946,9 +6911,7 @@ function viewProfessorAnalytics(professorId) {
         content.innerHTML = `
         <div class="analytics-view">
             <div class="analytics-header">
-                <div class="analytics-avatar">
-                    <i class="fas fa-user-tie"></i>
-                </div>
+                ${buildAdminProfessorAvatarHtml(professor, 'analytics-avatar')}
                 <div class="analytics-name">
                     <h2>${professor.name}</h2>
                     <span class="dept-badge dept-${professor.department}">${professor.department}</span>
@@ -6059,6 +7022,55 @@ function viewProfessorAnalytics(professorId) {
                     </div>
                 </div>
             </div>
+
+            <div class="analytics-section historical-trend-section">
+                <h3 class="section-title">
+                    <i class="fas fa-chart-line"></i>
+                    Historical Trend Analytics
+                </h3>
+                <div class="historical-trend-banner">
+                    <p class="historical-trend-statement">${escapeAdminAnalyticsHtml(trendSummary.statement || 'Insufficient historical data to determine performance trend.')}</p>
+                    <p class="historical-trend-note">Combined source metric uses Student 50%, Peer 25%, Supervisor 25%, across latest 4 semesters.</p>
+                    <div class="historical-trend-chips">
+                        <span class="historical-trend-chip ${getProfessorHistoricalTrendDirectionClass(trendSummary.direction)}">
+                            Direction: ${escapeAdminAnalyticsHtml(getProfessorHistoricalTrendDirectionLabel(trendSummary.direction))}
+                        </span>
+                        <span class="historical-trend-chip neutral">
+                            Change: ${escapeAdminAnalyticsHtml(formatProfessorHistoricalTrendSignedPercent(trendSummary.percentChange))}
+                        </span>
+                        <span class="historical-trend-chip ${getProfessorHistoricalTrendConsistencyClass(trendSummary)}">
+                            Consistency: ${escapeAdminAnalyticsHtml(getProfessorHistoricalTrendConsistencyLabel(trendSummary))}
+                        </span>
+                        <span class="historical-trend-chip ${getProfessorHistoricalTrendDeclineClass(trendSummary)}">
+                            Decline Pattern: ${escapeAdminAnalyticsHtml(getProfessorHistoricalTrendDeclineLabel(trendSummary))}
+                        </span>
+                    </div>
+                </div>
+                <div class="historical-trend-table-wrap">
+                    <table class="historical-trend-table">
+                        <thead>
+                            <tr>
+                                <th>Semester</th>
+                                <th>Combined Score (/5)</th>
+                                <th>Delta vs Prior</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${trendRows.length > 0 ? trendRows.map(point => `
+                                <tr>
+                                    <td>${escapeAdminAnalyticsHtml(String(point.semesterLabel || point.semesterId || 'Semester'))}</td>
+                                    <td>${Number.isFinite(Number(point.score)) ? Number(point.score).toFixed(2) : 'N/A'}</td>
+                                    <td>${escapeAdminAnalyticsHtml(formatProfessorHistoricalTrendDelta(point.delta))}</td>
+                                </tr>
+                            `).join('') : `
+                                <tr>
+                                    <td colspan="3" style="text-align:center; padding:14px;">No semester trend data available.</td>
+                                </tr>
+                            `}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
             
             <div class="qualitative-responses-section">
                 <div class="section-header-with-button">
@@ -6066,11 +7078,12 @@ function viewProfessorAnalytics(professorId) {
                         <i class="fas fa-comments"></i>
                         ${evaluationMeta.label} Feedback
                     </h3>
-                    <button class="btn-ai-summarize" id="ai-summarize-btn" onclick="handleAISummarization(${professor.id})">
+                    <button class="btn-ai-analytics" id="ai-analytics-btn" type="button">
                         <i class="fas fa-robot"></i>
-                        AI Summarization
+                        AI Analytics
                     </button>
                 </div>
+                <div class="admin-ai-insights" id="admin-ai-insight-output"></div>
                 <div class="qualitative-responses-list">
                     ${snapshot.qualitativeResponses && snapshot.qualitativeResponses.length > 0
                 ? snapshot.qualitativeResponses.map(response => `
@@ -6108,6 +7121,19 @@ function viewProfessorAnalytics(professorId) {
             evaluationTypeSelect.addEventListener('change', function () {
                 currentAnalyticsEvaluationType = this.value;
                 viewProfessorAnalytics(professor.id);
+            });
+        }
+
+        const aiAnalyticsBtn = content.querySelector('#ai-analytics-btn');
+        const aiInsightOutput = content.querySelector('#admin-ai-insight-output');
+        if (aiAnalyticsBtn && aiInsightOutput) {
+            aiAnalyticsBtn.addEventListener('click', function () {
+                runAdminAiAnalyticsForProfessor(
+                    professor.id,
+                    currentAnalyticsSemester || normalizedSemester,
+                    aiInsightOutput,
+                    aiAnalyticsBtn
+                );
             });
         }
 
@@ -6151,33 +7177,638 @@ function closeProfessorAnalyticsModal() {
     }
 }
 
-/**
- * Handle AI Summarization button click
- */
-function handleAISummarization(professorId) {
-    const id = typeof professorId === 'string' ? parseFloat(professorId) : professorId;
-    const professor = professorsData.find(t => Math.abs(t.id - id) < 0.0001 || t.id === id);
+const ADMIN_AI_WORD_FREQUENCY_STOP_WORDS = new Set([
+    'the', 'and', 'for', 'that', 'this', 'with', 'from', 'they', 'them', 'their', 'there', 'were',
+    'been', 'have', 'has', 'had', 'will', 'would', 'could', 'should', 'about', 'after', 'before',
+    'into', 'over', 'under', 'very', 'much', 'more', 'most', 'only', 'also', 'just', 'some', 'such',
+    'than', 'then', 'when', 'what', 'where', 'which', 'while', 'because', 'being', 'your', 'you',
+    'our', 'ours', 'his', 'her', 'hers', 'its', 'too', 'can', 'did', 'does', 'doing', 'done', 'get',
+    'got', 'gotten', 'may', 'might', 'not', 'yes', 'are', 'was', 'is', 'it', 'to', 'of', 'in', 'on',
+    'at', 'by', 'as', 'or', 'an', 'a'
+]);
 
+function sanitizeAdminAiAnalyticsText(value, maxLength) {
+    const limit = Number.isFinite(Number(maxLength)) && Number(maxLength) > 0
+        ? Math.floor(Number(maxLength))
+        : 260;
+    const text = String(value == null ? '' : value)
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!text) return '';
+    if (text.length <= limit) return text;
+    return text.slice(0, Math.max(1, limit - 3)).trim() + '...';
+}
+
+function normalizeAdminAiAnalyticsTone(value) {
+    const token = String(value || '').trim().toLowerCase();
+    if (token === 'positive') return 'positive';
+    if (token === 'negative') return 'negative';
+    return 'neutral';
+}
+
+function normalizeAdminAiAnalyticsJudgmentLabel(value) {
+    const token = String(value || '').trim().toLowerCase();
+    if (token === 'excellent') return 'Excellent';
+    if (token === 'good') return 'Good';
+    if (token === 'critical concern' || token === 'critical' || token === 'critical_concern') return 'Critical Concern';
+    return 'Needs Improvement';
+}
+
+function normalizeAdminAiAnalyticsSourceLabel(value) {
+    const token = String(value || '').trim().toLowerCase();
+    if (!token) return 'General';
+    if (token.includes('student')) return 'Student to Professor';
+    if (token.includes('peer') || token.includes('professor')) return 'Professor to Professor';
+    if (token.includes('supervisor') || token.includes('dean') || token.includes('vpaa') || token.includes('hr')) return 'Supervisor to Professor';
+    return 'General';
+}
+
+function formatAdminAiInsightSource(source) {
+    const token = String(source || 'rule').trim().toLowerCase();
+    if (token === 'gemini') return 'Gemini';
+    if (token === 'gemini+rule') return 'Gemini + Rule fallback';
+    return 'Rule fallback';
+}
+
+function getAdminAiJudgmentClass(label) {
+    const normalized = normalizeAdminAiAnalyticsJudgmentLabel(label);
+    if (normalized === 'Excellent') return 'excellent';
+    if (normalized === 'Good') return 'good';
+    if (normalized === 'Critical Concern') return 'critical';
+    return 'needs-improvement';
+}
+
+function getAdminAiAnalyticsActorIdentity() {
+    const session = SharedData.getSession ? SharedData.getSession() : null;
+    return {
+        userId: session && session.userId ? session.userId : '',
+        email: session && session.email ? session.email : '',
+        username: session && session.username ? session.username : '',
+        employeeId: session && session.employeeId ? session.employeeId : '',
+        role: session && session.role ? session.role : '',
+        fullName: session && session.fullName ? session.fullName : (session && session.username ? session.username : ''),
+    };
+}
+
+function normalizeAdminAiCommentTokens(value) {
+    const text = String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!text) return [];
+
+    return text.split(' ').filter(function (token) {
+        if (token.length < 3) return false;
+        if (ADMIN_AI_WORD_FREQUENCY_STOP_WORDS.has(token)) return false;
+        if (/^\d+$/.test(token)) return false;
+        return true;
+    });
+}
+
+function computeAdminAiTopWordFrequency(comments, limit) {
+    const counts = new Map();
+    const safeLimit = Math.max(1, Number(limit) || 10);
+
+    (Array.isArray(comments) ? comments : []).forEach(function (comment) {
+        normalizeAdminAiCommentTokens(comment).forEach(function (token) {
+            counts.set(token, (counts.get(token) || 0) + 1);
+        });
+    });
+
+    return Array.from(counts.entries())
+        .map(function (entry) {
+            return { label: entry[0], count: entry[1] };
+        })
+        .sort(function (a, b) {
+            return b.count - a.count || String(a.label).localeCompare(String(b.label));
+        })
+        .slice(0, safeLimit);
+}
+
+function buildAdminProfessorAiAnalyticsPayload(professor, semesterId) {
+    const normalizedSemester = String(semesterId || 'all').trim() || 'all';
+    const professorId = professor && professor.id ? professor.id : '';
+    const baseId = String(professorId || 'prof').trim() || 'prof';
+
+    const studentSnapshot = getEvaluationSnapshotForType(professor, normalizedSemester, 'student');
+    const peerSnapshot = getEvaluationSnapshotForType(professor, normalizedSemester, 'peer');
+    const supervisorSnapshot = getEvaluationSnapshotForType(professor, normalizedSemester, 'supervisor');
+
+    const sourceRows = [
+        { source: 'student', rows: Array.isArray(studentSnapshot.qualitativeResponses) ? studentSnapshot.qualitativeResponses : [] },
+        { source: 'peer', rows: Array.isArray(peerSnapshot.qualitativeResponses) ? peerSnapshot.qualitativeResponses : [] },
+        { source: 'supervisor', rows: Array.isArray(supervisorSnapshot.qualitativeResponses) ? supervisorSnapshot.qualitativeResponses : [] },
+    ];
+
+    const dedupe = new Set();
+    const comments = [];
+    sourceRows.forEach(function (bucket) {
+        const sourceLabel = normalizeAdminAiAnalyticsSourceLabel(bucket.source);
+        bucket.rows.forEach(function (row) {
+            const text = sanitizeAdminAiAnalyticsText(row && row.text, 700);
+            if (!text) return;
+            const dateKey = sanitizeAdminAiAnalyticsText(row && row.date, 80).toLowerCase();
+            const dedupeKey = `${sourceLabel.toLowerCase()}|${text.toLowerCase()}|${dateKey}`;
+            if (dedupe.has(dedupeKey)) return;
+            dedupe.add(dedupeKey);
+            comments.push({
+                id: `${baseId}_${comments.length + 1}`,
+                source: sourceLabel,
+                text,
+            });
+        });
+    });
+
+    const limitedComments = comments.slice(0, 240);
+    const sourceCounts = {
+        student: sourceRows[0].rows.length,
+        professor: sourceRows[1].rows.length,
+        supervisor: sourceRows[2].rows.length,
+    };
+
+    const studentAvg = Number(studentSnapshot && studentSnapshot.averageRating);
+    const peerAvg = Number(peerSnapshot && peerSnapshot.averageRating);
+    const supervisorAvg = Number(supervisorSnapshot && supervisorSnapshot.averageRating);
+    const averagesBySource = {
+        student: Number(studentSnapshot && studentSnapshot.evaluatedCount) > 0 && Number.isFinite(studentAvg) && studentAvg > 0 ? studentAvg : null,
+        professor: Number(peerSnapshot && peerSnapshot.evaluatedCount) > 0 && Number.isFinite(peerAvg) && peerAvg > 0 ? peerAvg : null,
+        supervisor: Number(supervisorSnapshot && supervisorSnapshot.evaluatedCount) > 0 && Number.isFinite(supervisorAvg) && supervisorAvg > 0 ? supervisorAvg : null,
+    };
+
+    const availableAverages = Object.values(averagesBySource).filter(function (value) {
+        return Number.isFinite(Number(value));
+    }).map(Number);
+    const combinedAverage = availableAverages.length
+        ? Number((availableAverages.reduce(function (sum, value) { return sum + value; }, 0) / availableAverages.length).toFixed(2))
+        : null;
+
+    const totalRaters = Number(studentSnapshot.totalRaters || 0) + Number(peerSnapshot.totalRaters || 0) + Number(supervisorSnapshot.totalRaters || 0);
+    const totalEvaluated = Number(studentSnapshot.evaluatedCount || 0) + Number(peerSnapshot.evaluatedCount || 0) + Number(supervisorSnapshot.evaluatedCount || 0);
+    const responseRate = totalRaters > 0
+        ? Number(((totalEvaluated / totalRaters) * 100).toFixed(2))
+        : null;
+    const overallRatingRaw = Number(professor && professor.averageRating);
+    const overallRating = Number.isFinite(overallRatingRaw) && overallRatingRaw > 0
+        ? Number(overallRatingRaw.toFixed(2))
+        : combinedAverage;
+
+    return {
+        professor: {
+            id: sanitizeAdminAiAnalyticsText(professor && professor.id, 80),
+            name: sanitizeAdminAiAnalyticsText(professor && professor.name, 160),
+            semester: sanitizeAdminAiAnalyticsText(getSemesterLabel(normalizedSemester), 120),
+        },
+        comments: limitedComments,
+        metrics: {
+            overallRating,
+            combinedAverage,
+            responseRate,
+            totalEvaluations: totalEvaluated,
+            averagesBySource,
+            countsBySource: sourceCounts,
+        },
+    };
+}
+
+function buildAdminLocalAiKeywordRows(comments) {
+    const texts = (Array.isArray(comments) ? comments : [])
+        .map(function (item) { return String(item && item.text || '').trim(); })
+        .filter(Boolean);
+    const base = computeAdminAiTopWordFrequency(texts, 12);
+    const positive = new Set(['excellent', 'great', 'good', 'clear', 'helpful', 'organized', 'engaging', 'respectful', 'supportive', 'effective', 'fair']);
+    const negative = new Set(['hate', 'terror', 'worst', 'bad', 'poor', 'unclear', 'confusing', 'boring', 'late', 'rude', 'unfair', 'strict', 'difficult', 'awful']);
+    return base.map(function (item) {
+        const term = sanitizeAdminAiAnalyticsText(item && item.label, 40).toLowerCase();
+        let tone = 'neutral';
+        if (positive.has(term)) tone = 'positive';
+        if (negative.has(term)) tone = 'negative';
+        return {
+            term: sanitizeAdminAiAnalyticsText(item && item.label, 40),
+            count: Math.max(1, Number(item && item.count || 1)),
+            tone,
+        };
+    });
+}
+
+function buildAdminLocalAiClusters(comments) {
+    const rows = Array.isArray(comments) ? comments : [];
+    const themes = {
+        'Teaching Clarity': ['explain', 'explains', 'clear', 'clarity', 'understand', 'confusing', 'discussion', 'lecture'],
+        'Engagement & Delivery': ['engaging', 'interactive', 'boring', 'enthusiasm', 'pace', 'energy', 'participation'],
+        'Assessment & Fairness': ['exam', 'quiz', 'grade', 'grading', 'fair', 'rubric', 'assignment', 'assessment'],
+        'Professionalism & Conduct': ['respectful', 'rude', 'late', 'punctual', 'attitude', 'professional', 'behavior', 'approachable'],
+        'Learning Support': ['examples', 'consultation', 'feedback', 'materials', 'resources', 'guidance', 'support', 'helpful'],
+    };
+
+    const buckets = {};
+    rows.forEach(function (row) {
+        const text = String(row && row.text || '').toLowerCase();
+        const source = normalizeAdminAiAnalyticsSourceLabel(row && row.source);
+        let bestTheme = 'General Feedback';
+        let bestHits = 0;
+
+        Object.keys(themes).forEach(function (theme) {
+            const hits = themes[theme].reduce(function (sum, keyword) {
+                return sum + (text.includes(keyword) ? 1 : 0);
+            }, 0);
+            if (hits > bestHits) {
+                bestHits = hits;
+                bestTheme = theme;
+            }
+        });
+
+        if (!buckets[bestTheme]) {
+            buckets[bestTheme] = {
+                theme: bestTheme,
+                count: 0,
+                sources: new Set(),
+                sampleComments: [],
+            };
+        }
+
+        buckets[bestTheme].count += 1;
+        buckets[bestTheme].sources.add(source);
+        if (buckets[bestTheme].sampleComments.length < 2) {
+            buckets[bestTheme].sampleComments.push(sanitizeAdminAiAnalyticsText(row && row.text, 220));
+        }
+    });
+
+    return Object.values(buckets)
+        .sort(function (a, b) {
+            return b.count - a.count || String(a.theme).localeCompare(String(b.theme));
+        })
+        .slice(0, 5)
+        .map(function (item) {
+            return {
+                theme: sanitizeAdminAiAnalyticsText(item.theme, 90),
+                count: Math.max(1, Number(item.count || 1)),
+                sources: Array.from(item.sources),
+                sampleComments: item.sampleComments.filter(Boolean),
+            };
+        });
+}
+
+function buildAdminLocalAiJudgment(payload, keywords) {
+    const metrics = payload && payload.metrics ? payload.metrics : {};
+    const comments = Array.isArray(payload && payload.comments) ? payload.comments : [];
+    const combinedAverage = Number.isFinite(Number(metrics.combinedAverage)) ? Number(metrics.combinedAverage) : null;
+    const responseRate = Number.isFinite(Number(metrics.responseRate)) ? Number(metrics.responseRate) : null;
+    const totalComments = comments.length;
+
+    let positiveWeight = 0;
+    let negativeWeight = 0;
+    let neutralWeight = 0;
+    (Array.isArray(keywords) ? keywords : []).forEach(function (row) {
+        const count = Math.max(1, Number(row && row.count || 1));
+        const tone = normalizeAdminAiAnalyticsTone(row && row.tone);
+        if (tone === 'positive') positiveWeight += count;
+        else if (tone === 'negative') negativeWeight += count;
+        else neutralWeight += count;
+    });
+
+    const toneTotal = Math.max(1, positiveWeight + negativeWeight + neutralWeight);
+    const toneBalance = ((positiveWeight * 1.0) - (negativeWeight * 1.2)) / toneTotal;
+
+    let score = 50;
+    if (Number.isFinite(combinedAverage)) {
+        score += (combinedAverage - 3) * 18;
+    }
+    score += Math.max(-20, Math.min(20, toneBalance * 24));
+    if (Number.isFinite(responseRate)) {
+        score += ((responseRate - 50) / 50) * 10;
+    }
+    if (totalComments <= 3) score -= 8;
+    else if (totalComments >= 20) score += 4;
+    score = Math.round(Math.max(0, Math.min(100, score)));
+
+    let label = 'Needs Improvement';
+    if (score >= 85) label = 'Excellent';
+    else if (score >= 70) label = 'Good';
+    else if (score < 50) label = 'Critical Concern';
+
+    let confidence = 45 + Math.min(35, totalComments * 2);
+    if (Number.isFinite(responseRate)) confidence += Math.min(10, responseRate / 10);
+    if (Number.isFinite(combinedAverage)) confidence += 10;
+    if (totalComments < 3) confidence -= 10;
+    confidence = Math.round(Math.max(25, Math.min(98, confidence)));
+
+    let rationale = 'Mixed sentiment and performance indicators suggest improvements are needed.';
+    if (label === 'Excellent') rationale = 'Consistent positive feedback and strong rating indicators across available sources.';
+    if (label === 'Good') rationale = 'Feedback is generally positive with limited critical concerns.';
+    if (label === 'Critical Concern') rationale = 'Negative patterns and lower performance indicators suggest urgent review.';
+    if (!Number.isFinite(combinedAverage)) rationale += ' Overall rating context is limited.';
+
+    return { label, rationale, confidence, score };
+}
+
+function buildAdminLocalAiReasoning(payload, keywords, clusters, judgment) {
+    const sourceCounts = payload && payload.metrics && payload.metrics.countsBySource ? payload.metrics.countsBySource : {};
+    const lines = [];
+    lines.push(
+        `Analyzed ${Array.isArray(payload && payload.comments) ? payload.comments.length : 0} comments from Student (${Number(sourceCounts.student || 0)}), Professor (${Number(sourceCounts.professor || 0)}), and Supervisor (${Number(sourceCounts.supervisor || 0)}) sources.`
+    );
+
+    if (payload && payload.metrics && Number.isFinite(Number(payload.metrics.combinedAverage))) {
+        lines.push(`Combined rating context is ${Number(payload.metrics.combinedAverage).toFixed(2)} / 5.00 based on available evaluation data.`);
+    } else {
+        lines.push('Combined rating context is limited, so conclusions rely more on textual feedback patterns.');
+    }
+
+    const positiveTerms = (Array.isArray(keywords) ? keywords : [])
+        .filter(function (row) { return normalizeAdminAiAnalyticsTone(row && row.tone) === 'positive'; })
+        .slice(0, 2)
+        .map(function (row) { return row.term; });
+    const negativeTerms = (Array.isArray(keywords) ? keywords : [])
+        .filter(function (row) { return normalizeAdminAiAnalyticsTone(row && row.tone) === 'negative'; })
+        .slice(0, 2)
+        .map(function (row) { return row.term; });
+    if (positiveTerms.length || negativeTerms.length) {
+        lines.push(`Detected positive markers (${positiveTerms.length ? positiveTerms.join(', ') : 'none'}) and negative markers (${negativeTerms.length ? negativeTerms.join(', ') : 'none'}).`);
+    }
+
+    if (Array.isArray(clusters) && clusters.length) {
+        const dominant = clusters[0];
+        lines.push(`Most comments cluster around "${sanitizeAdminAiAnalyticsText(dominant && dominant.theme, 90)}" (${Number(dominant && dominant.count || 0)} comments).`);
+    }
+
+    lines.push(`Final judgment: ${normalizeAdminAiAnalyticsJudgmentLabel(judgment && judgment.label)} (confidence ${Math.round(Number(judgment && judgment.confidence || 0))}%).`);
+    return lines.slice(0, 5);
+}
+
+function buildAdminLocalAiExplainabilityInsight(payload) {
+    const comments = Array.isArray(payload && payload.comments) ? payload.comments : [];
+    const keywords = buildAdminLocalAiKeywordRows(comments);
+    const clusters = buildAdminLocalAiClusters(comments);
+    const judgment = buildAdminLocalAiJudgment(payload, keywords);
+    const reasoning = buildAdminLocalAiReasoning(payload, keywords, clusters, judgment);
+    return {
+        keywords,
+        clusters,
+        reasoning,
+        judgment: {
+            label: normalizeAdminAiAnalyticsJudgmentLabel(judgment.label),
+            rationale: sanitizeAdminAiAnalyticsText(judgment.rationale, 320),
+            confidence: Math.max(0, Math.min(100, Number(judgment.confidence || 0))),
+        },
+        stats: {
+            totalComments: comments.length,
+            sourceCounts: payload && payload.metrics && payload.metrics.countsBySource
+                ? payload.metrics.countsBySource
+                : { student: 0, professor: 0, supervisor: 0 },
+            combinedAverage: payload && payload.metrics ? payload.metrics.combinedAverage : null,
+            responseRate: payload && payload.metrics ? payload.metrics.responseRate : null,
+            totalEvaluations: payload && payload.metrics ? payload.metrics.totalEvaluations : 0,
+        },
+    };
+}
+
+function normalizeAdminAiInsightData(rawInsight, fallbackInsight) {
+    const fallback = fallbackInsight && typeof fallbackInsight === 'object'
+        ? fallbackInsight
+        : buildAdminLocalAiExplainabilityInsight({ comments: [], metrics: {} });
+    const insight = rawInsight && typeof rawInsight === 'object' ? rawInsight : {};
+
+    const keywords = Array.isArray(insight.keywords) && insight.keywords.length
+        ? insight.keywords.map(function (row) {
+            return {
+                term: sanitizeAdminAiAnalyticsText(row && row.term, 40),
+                count: Math.max(1, Number(row && row.count || 1)),
+                tone: normalizeAdminAiAnalyticsTone(row && row.tone),
+            };
+        }).filter(function (row) { return row.term; })
+        : fallback.keywords;
+
+    const clusters = Array.isArray(insight.clusters) && insight.clusters.length
+        ? insight.clusters.map(function (row) {
+            return {
+                theme: sanitizeAdminAiAnalyticsText(row && row.theme, 90) || 'General Feedback',
+                count: Math.max(1, Number(row && row.count || 1)),
+                sources: Array.isArray(row && row.sources)
+                    ? row.sources.map(function (source) { return normalizeAdminAiAnalyticsSourceLabel(source); }).slice(0, 4)
+                    : [],
+                sampleComments: Array.isArray(row && row.sampleComments)
+                    ? row.sampleComments.map(function (item) { return sanitizeAdminAiAnalyticsText(item, 220); }).filter(Boolean).slice(0, 2)
+                    : [],
+            };
+        })
+        : fallback.clusters;
+
+    const reasoning = Array.isArray(insight.reasoning) && insight.reasoning.length
+        ? insight.reasoning.map(function (line) { return sanitizeAdminAiAnalyticsText(line, 260); }).filter(Boolean).slice(0, 8)
+        : fallback.reasoning;
+
+    const rawJudgment = insight.judgment && typeof insight.judgment === 'object' ? insight.judgment : {};
+    const fallbackJudgment = fallback.judgment || {};
+    const label = normalizeAdminAiAnalyticsJudgmentLabel(rawJudgment.label || fallbackJudgment.label);
+    const rationale = sanitizeAdminAiAnalyticsText(rawJudgment.rationale, 320)
+        || sanitizeAdminAiAnalyticsText(fallbackJudgment.rationale, 320)
+        || 'No detailed rationale available.';
+    let confidence = Number(rawJudgment.confidence);
+    if (!Number.isFinite(confidence) || confidence <= 0) confidence = Number(fallbackJudgment.confidence || 0);
+    if (confidence > 0 && confidence <= 1) confidence *= 100;
+    confidence = Math.round(Math.max(0, Math.min(100, confidence)));
+
+    const sourceCounts = insight.stats && insight.stats.sourceCounts && typeof insight.stats.sourceCounts === 'object'
+        ? insight.stats.sourceCounts
+        : (fallback.stats && fallback.stats.sourceCounts ? fallback.stats.sourceCounts : { student: 0, professor: 0, supervisor: 0 });
+    const stats = {
+        totalComments: Number(insight.stats && insight.stats.totalComments),
+        sourceCounts: {
+            student: Number(sourceCounts.student || 0),
+            professor: Number(sourceCounts.professor || 0),
+            supervisor: Number(sourceCounts.supervisor || 0),
+        },
+        combinedAverage: Number.isFinite(Number(insight.stats && insight.stats.combinedAverage))
+            ? Number(insight.stats.combinedAverage)
+            : (fallback.stats ? fallback.stats.combinedAverage : null),
+        responseRate: Number.isFinite(Number(insight.stats && insight.stats.responseRate))
+            ? Number(insight.stats.responseRate)
+            : (fallback.stats ? fallback.stats.responseRate : null),
+        totalEvaluations: Number.isFinite(Number(insight.stats && insight.stats.totalEvaluations))
+            ? Number(insight.stats.totalEvaluations)
+            : (fallback.stats ? fallback.stats.totalEvaluations : 0),
+    };
+    if (!Number.isFinite(stats.totalComments)) {
+        stats.totalComments = fallback.stats && Number.isFinite(Number(fallback.stats.totalComments))
+            ? Number(fallback.stats.totalComments)
+            : 0;
+    }
+
+    return {
+        keywords,
+        clusters,
+        reasoning,
+        judgment: { label, rationale, confidence },
+        stats,
+    };
+}
+
+function renderAdminAiInsightState(outputEl, stateType, message) {
+    if (!outputEl) return;
+    const type = String(stateType || 'info').toLowerCase();
+    outputEl.classList.add('visible');
+    outputEl.innerHTML = `
+        <div class="admin-ai-note">AI Analytics uses all comment sources (student, peer, supervisor).</div>
+        <div class="admin-ai-state ${escapeAdminAnalyticsHtml(type)}">${escapeAdminAnalyticsHtml(message || 'No data available.')}</div>
+    `;
+}
+
+function renderAdminAiInsightResult(outputEl, insightData, source, noticeText) {
+    if (!outputEl) return;
+    const insight = insightData && typeof insightData === 'object' ? insightData : {};
+    const keywords = Array.isArray(insight.keywords) ? insight.keywords : [];
+    const clusters = Array.isArray(insight.clusters) ? insight.clusters : [];
+    const reasoning = Array.isArray(insight.reasoning) ? insight.reasoning : [];
+    const judgment = insight.judgment && typeof insight.judgment === 'object' ? insight.judgment : {};
+    const stats = insight.stats && typeof insight.stats === 'object' ? insight.stats : {};
+    const sourceLabel = formatAdminAiInsightSource(source);
+    const judgmentLabel = normalizeAdminAiAnalyticsJudgmentLabel(judgment.label);
+    const judgmentClass = getAdminAiJudgmentClass(judgmentLabel);
+    const confidence = Math.round(Math.max(0, Math.min(100, Number(judgment.confidence || 0))));
+
+    const keywordHtml = keywords.length
+        ? keywords.map(function (row) {
+            return `
+                <span class="admin-ai-keyword-chip tone-${escapeAdminAnalyticsHtml(normalizeAdminAiAnalyticsTone(row.tone))}">
+                    <span class="admin-ai-keyword-term">${escapeAdminAnalyticsHtml(row.term || 'keyword')}</span>
+                    <span class="admin-ai-keyword-count">${Math.max(1, Number(row.count || 1))}x</span>
+                </span>
+            `;
+        }).join('')
+        : '<div class="admin-ai-empty">No keywords detected.</div>';
+
+    const clusterHtml = clusters.length
+        ? clusters.map(function (cluster) {
+            const sources = Array.isArray(cluster.sources) && cluster.sources.length
+                ? cluster.sources.map(function (sourceName) { return `<span class="admin-ai-source-chip">${escapeAdminAnalyticsHtml(normalizeAdminAiAnalyticsSourceLabel(sourceName))}</span>`; }).join('')
+                : '<span class="admin-ai-empty-inline">No source tags</span>';
+            const samples = Array.isArray(cluster.sampleComments) && cluster.sampleComments.length
+                ? `<ul class="admin-ai-sample-list">${cluster.sampleComments.map(function (sample) { return `<li>${escapeAdminAnalyticsHtml(sample)}</li>`; }).join('')}</ul>`
+                : '<div class="admin-ai-empty-inline">No sample comments.</div>';
+            return `
+                <div class="admin-ai-cluster-card">
+                    <div class="admin-ai-cluster-header">
+                        <strong>${escapeAdminAnalyticsHtml(cluster.theme || 'General Feedback')}</strong>
+                        <span>${Math.max(1, Number(cluster.count || 1))} comments</span>
+                    </div>
+                    <div class="admin-ai-cluster-sources">${sources}</div>
+                    ${samples}
+                </div>
+            `;
+        }).join('')
+        : '<div class="admin-ai-empty">No comment clusters detected.</div>';
+
+    const reasoningHtml = reasoning.length
+        ? `<ul class="admin-ai-reasoning-list">${reasoning.map(function (line) { return `<li>${escapeAdminAnalyticsHtml(line)}</li>`; }).join('')}</ul>`
+        : '<div class="admin-ai-empty">No reasoning details available.</div>';
+
+    const noticeHtml = noticeText
+        ? `<div class="admin-ai-alert">${escapeAdminAnalyticsHtml(noticeText)}</div>`
+        : '';
+
+    outputEl.classList.add('visible');
+    outputEl.innerHTML = `
+        <div class="admin-ai-note">AI Analytics uses all comment sources (student, peer, supervisor).</div>
+        ${noticeHtml}
+        <div class="admin-ai-meta">
+            <span class="admin-ai-meta-pill">Source: ${escapeAdminAnalyticsHtml(sourceLabel)}</span>
+            <span class="admin-ai-meta-pill">Comments analyzed: ${Math.max(0, Number(stats.totalComments || 0))}</span>
+        </div>
+        <div class="admin-ai-section">
+            <div class="admin-ai-section-title">Detected Keywords</div>
+            <div class="admin-ai-keywords">${keywordHtml}</div>
+        </div>
+        <div class="admin-ai-section">
+            <div class="admin-ai-section-title">Comment Clusters</div>
+            <div class="admin-ai-clusters">${clusterHtml}</div>
+        </div>
+        <div class="admin-ai-section">
+            <div class="admin-ai-section-title">AI Reasoning</div>
+            ${reasoningHtml}
+        </div>
+        <div class="admin-ai-judgment-card ${escapeAdminAnalyticsHtml(judgmentClass)}">
+            <div class="admin-ai-judgment-head">
+                <span class="admin-ai-judgment-label">${escapeAdminAnalyticsHtml(judgmentLabel)}</span>
+                <span class="admin-ai-judgment-confidence">${confidence}% confidence</span>
+            </div>
+            <p class="admin-ai-judgment-rationale">${escapeAdminAnalyticsHtml(judgment.rationale || 'No rationale available.')}</p>
+        </div>
+    `;
+}
+
+function runAdminAiAnalyticsForProfessor(professorId, semesterId, outputEl, btnEl) {
+    const professor = professorsData.find(function (item) {
+        return String(item && item.id) === String(professorId);
+    });
     if (!professor) {
-        alert('Professor not found.');
+        renderAdminAiInsightState(outputEl, 'error', 'Unable to load professor data for AI analytics.');
         return;
     }
 
-    // For now, just show a placeholder message
-    // This will be replaced with actual API call later
-    const btn = document.getElementById('ai-summarize-btn');
-    if (btn) {
-        const originalText = btn.innerHTML;
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating Summary...';
-
-        // Simulate API call (replace with actual API call later)
-        setTimeout(() => {
-            alert('AI Summarization feature will be implemented soon!\n\nThis will analyze all student feedback and generate a comprehensive summary.');
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-        }, 1500);
+    const payload = buildAdminProfessorAiAnalyticsPayload(professor, semesterId);
+    if (!Array.isArray(payload.comments) || payload.comments.length === 0) {
+        renderAdminAiInsightState(outputEl, 'empty', 'No comments available for AI analytics.');
+        return;
     }
+
+    const fallbackInsight = buildAdminLocalAiExplainabilityInsight(payload);
+    renderAdminAiInsightState(outputEl, 'loading', 'Analyzing comments with AI...');
+
+    const originalText = btnEl ? btnEl.innerHTML : '';
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
+    }
+
+    const executeAnalysis = function () {
+        try {
+            let response = null;
+            if (typeof SharedData.analyzeEvaluationExplainability === 'function') {
+                response = SharedData.analyzeEvaluationExplainability(payload, getAdminAiAnalyticsActorIdentity());
+            } else {
+                throw new Error('SharedData.analyzeEvaluationExplainability is unavailable.');
+            }
+            const insight = normalizeAdminAiInsightData(response && response.insight, fallbackInsight);
+            const source = response && response.source ? response.source : 'rule';
+            const notice = source === 'gemini'
+                ? ''
+                : 'Gemini is unavailable or partial; showing rule-based fallback insights.';
+            renderAdminAiInsightResult(outputEl, insight, source, notice);
+        } catch (error) {
+            console.error('[AdminPanel] AI analytics failed, using local fallback.', error);
+            renderAdminAiInsightResult(
+                outputEl,
+                fallbackInsight,
+                'rule',
+                'Gemini is unavailable right now. Showing rule-based fallback analytics.'
+            );
+        } finally {
+            if (btnEl) {
+                btnEl.disabled = false;
+                btnEl.innerHTML = originalText || '<i class="fas fa-robot"></i> AI Analytics';
+            }
+        }
+    };
+
+    const loadingOverlay = window.AppLoadingOverlay;
+    const canUseOverlay = loadingOverlay
+        && typeof loadingOverlay.show === 'function'
+        && typeof loadingOverlay.hide === 'function';
+
+    if (!canUseOverlay) {
+        executeAnalysis();
+        return;
+    }
+
+    loadingOverlay.show('Analyzing comments with AI...');
+    setTimeout(function () {
+        try {
+            executeAnalysis();
+        } finally {
+            loadingOverlay.hide();
+        }
+    }, 0);
 }
 
 /**
@@ -6769,6 +8400,14 @@ function setupQuestionnaire() {
     if (questionTypeSelect) {
         questionTypeSelect.addEventListener('change', handleQuestionTypeChange);
     }
+    const questionRequiredCheckbox = document.getElementById('question-required');
+    if (questionRequiredCheckbox) {
+        questionRequiredCheckbox.addEventListener('change', handleQuestionRequirementModeChange);
+    }
+    const exceptionReportingCheckbox = document.getElementById('question-exception-reporting');
+    if (exceptionReportingCheckbox) {
+        exceptionReportingCheckbox.addEventListener('change', handleQuestionRequirementModeChange);
+    }
 
     // Modal close buttons
     const closeQuestionModalBtn = document.getElementById('close-question-modal');
@@ -6891,7 +8530,6 @@ function loadQuestionsData() {
     if (activeSemester) {
         questionsData = questionnairesBySemester[activeSemester] || buildEmptyQuestionsData();
         questionnairesBySemester[activeSemester] = questionsData;
-        persistQuestionsData();
     } else {
         questionsData = buildEmptyQuestionsData();
     }
@@ -7268,7 +8906,13 @@ function normalizeQuestionsData(parsed) {
         return {
             'student-to-professor': {
                 sections: [defaultSection],
-                questions: parsed.map((q, idx) => ({ ...q, sectionId: defaultSection.id, order: idx + 1 }))
+                questions: parsed.map((q, idx) => ({
+                    ...q,
+                    sectionId: defaultSection.id,
+                    order: idx + 1,
+                    required: !!q.exceptionReporting ? false : !!q.required,
+                    exceptionReporting: !!q.exceptionReporting
+                }))
             },
             'professor-to-professor': { sections: [], questions: [] },
             'supervisor-to-professor': { sections: [], questions: [] }
@@ -7286,23 +8930,46 @@ function normalizeQuestionsData(parsed) {
         return {
             'student-to-professor': {
                 sections: [defaultSection],
-                questions: parsed['student-to-professor'].map((q, idx) => ({ ...q, sectionId: defaultSection.id, order: idx + 1 }))
+                questions: parsed['student-to-professor'].map((q, idx) => ({
+                    ...q,
+                    sectionId: defaultSection.id,
+                    order: idx + 1,
+                    required: !!q.exceptionReporting ? false : !!q.required,
+                    exceptionReporting: !!q.exceptionReporting
+                }))
             },
             'professor-to-professor': {
                 sections: [],
-                questions: parsed['professor-to-professor'] ? parsed['professor-to-professor'].map((q, idx) => ({ ...q, sectionId: null, order: idx + 1 })) : []
+                questions: parsed['professor-to-professor'] ? parsed['professor-to-professor'].map((q, idx) => ({
+                    ...q,
+                    sectionId: null,
+                    order: idx + 1,
+                    required: !!q.exceptionReporting ? false : !!q.required,
+                    exceptionReporting: !!q.exceptionReporting
+                })) : []
             },
             'supervisor-to-professor': {
                 sections: [],
-                questions: parsed['supervisor-to-professor'] ? parsed['supervisor-to-professor'].map((q, idx) => ({ ...q, sectionId: null, order: idx + 1 })) : []
+                questions: parsed['supervisor-to-professor'] ? parsed['supervisor-to-professor'].map((q, idx) => ({
+                    ...q,
+                    sectionId: null,
+                    order: idx + 1,
+                    required: !!q.exceptionReporting ? false : !!q.required,
+                    exceptionReporting: !!q.exceptionReporting
+                })) : []
             }
         };
     }
 
     const normalized = { ...buildEmptyQuestionsData(), ...parsed };
     Object.keys(normalized).forEach(type => {
-        if (!normalized[type].sections) normalized[type].sections = [];
-        if (!normalized[type].questions) normalized[type].questions = [];
+        if (!Array.isArray(normalized[type].sections)) normalized[type].sections = [];
+        if (!Array.isArray(normalized[type].questions)) normalized[type].questions = [];
+        normalized[type].questions = normalized[type].questions.map(question => ({
+            ...question,
+            required: !!question.exceptionReporting ? false : !!question.required,
+            exceptionReporting: !!question.exceptionReporting
+        }));
     });
     return normalized;
 }
@@ -7320,7 +8987,6 @@ function buildSampleQuestionsData() {
  */
 function generateSampleQuestions() {
     questionsData = buildSampleQuestionsData();
-    persistQuestionsData();
 }
 
 /**
@@ -7363,7 +9029,6 @@ function saveQuestionnaireHeader(type, updates) {
     const existingHeader = getQuestionnaireHeader(type);
     currentData.header = { ...existingHeader, ...updates };
     questionsData[type] = currentData;
-    persistQuestionsData();
 }
 
 function setupFormHeaderEditing() {
@@ -7585,6 +9250,15 @@ function openAddQuestionModal() {
         currentEditingQuestionId = null;
         document.getElementById('rating-options-group').style.display = 'none';
         document.getElementById('qualitative-options-group').style.display = 'none';
+        const exceptionReportingCheckbox = document.getElementById('question-exception-reporting');
+        const exceptionReportingLabel = document.getElementById('question-exception-reporting-label');
+        if (exceptionReportingCheckbox) {
+            exceptionReportingCheckbox.checked = false;
+            exceptionReportingCheckbox.style.display = 'none';
+        }
+        if (exceptionReportingLabel) {
+            exceptionReportingLabel.style.display = 'none';
+        }
 
         // Populate sections dropdown
         populateSectionsDropdown();
@@ -7644,16 +9318,53 @@ function handleQuestionTypeChange() {
     const questionType = document.getElementById('question-type').value;
     const ratingGroup = document.getElementById('rating-options-group');
     const qualitativeGroup = document.getElementById('qualitative-options-group');
+    const exceptionReportingCheckbox = document.getElementById('question-exception-reporting');
+    const exceptionReportingLabel = document.getElementById('question-exception-reporting-label');
 
     if (questionType === 'rating') {
         ratingGroup.style.display = 'block';
         qualitativeGroup.style.display = 'none';
+        if (exceptionReportingCheckbox) {
+            exceptionReportingCheckbox.checked = false;
+            exceptionReportingCheckbox.style.display = 'none';
+        }
+        if (exceptionReportingLabel) {
+            exceptionReportingLabel.style.display = 'none';
+        }
     } else if (questionType === 'qualitative') {
         ratingGroup.style.display = 'none';
         qualitativeGroup.style.display = 'block';
+        if (exceptionReportingCheckbox) {
+            exceptionReportingCheckbox.style.display = '';
+        }
+        if (exceptionReportingLabel) {
+            exceptionReportingLabel.style.display = '';
+        }
     } else {
         ratingGroup.style.display = 'none';
         qualitativeGroup.style.display = 'none';
+        if (exceptionReportingCheckbox) {
+            exceptionReportingCheckbox.checked = false;
+            exceptionReportingCheckbox.style.display = 'none';
+        }
+        if (exceptionReportingLabel) {
+            exceptionReportingLabel.style.display = 'none';
+        }
+    }
+}
+
+function handleQuestionRequirementModeChange(event) {
+    const requiredCheckbox = document.getElementById('question-required');
+    const exceptionCheckbox = document.getElementById('question-exception-reporting');
+    if (!requiredCheckbox || !exceptionCheckbox || !event || !event.target) return;
+
+    if (event.target === requiredCheckbox && requiredCheckbox.checked) {
+        exceptionCheckbox.checked = false;
+        return;
+    }
+
+    if (event.target === exceptionCheckbox && exceptionCheckbox.checked) {
+        requiredCheckbox.checked = false;
     }
 }
 
@@ -7674,6 +9385,7 @@ function handleQuestionFormSubmit(e) {
         text: document.getElementById('question-text').value,
         type: document.getElementById('question-type').value,
         required: document.getElementById('question-required').checked,
+        exceptionReporting: false,
         sectionId: parseFloat(sectionId)
     };
 
@@ -7682,6 +9394,13 @@ function handleQuestionFormSubmit(e) {
         formData.ratingScale = '1-' + ratingMax;
     } else if (formData.type === 'qualitative') {
         formData.maxLength = parseInt(document.getElementById('max-length').value) || 500;
+        const exceptionCheckbox = document.getElementById('question-exception-reporting');
+        formData.exceptionReporting = !!(exceptionCheckbox && exceptionCheckbox.checked);
+        if (formData.exceptionReporting) {
+            formData.required = false;
+        }
+    } else {
+        formData.exceptionReporting = false;
     }
 
     // Get current questionnaire data
@@ -7717,9 +9436,6 @@ function handleQuestionFormSubmit(e) {
     currentData.questions = currentQuestions;
     questionsData[currentQuestionnaireType] = currentData;
 
-    // Save to localStorage
-    persistQuestionsData();
-
     // Re-render and close modal
     renderQuestions();
     closeQuestionModal();
@@ -7742,7 +9458,12 @@ function editQuestion(questionId) {
         modalTitle.textContent = 'Edit Question';
         document.getElementById('question-text').value = question.text;
         document.getElementById('question-type').value = question.type;
-        document.getElementById('question-required').checked = question.required || false;
+        const hasExceptionReporting = question.type === 'qualitative' && !!question.exceptionReporting;
+        document.getElementById('question-required').checked = hasExceptionReporting ? false : (question.required || false);
+        const exceptionCheckbox = document.getElementById('question-exception-reporting');
+        if (exceptionCheckbox) {
+            exceptionCheckbox.checked = hasExceptionReporting;
+        }
 
         // Populate sections dropdown and select current section
         populateSectionsDropdown();
@@ -7787,7 +9508,6 @@ function deleteQuestion(questionId) {
         }
         currentData.questions = updatedQuestions;
         questionsData[currentQuestionnaireType] = currentData;
-        persistQuestionsData();
         renderQuestions();
     }
 }
@@ -7823,7 +9543,6 @@ function moveQuestion(questionId, direction) {
     // Update questionsData
     currentData.questions = currentQuestions;
     questionsData[currentQuestionnaireType] = currentData;
-    persistQuestionsData();
     renderQuestions();
 }
 
@@ -7949,9 +9668,6 @@ function handleSectionFormSubmit(e) {
     currentData.sections = currentSections;
     questionsData[currentQuestionnaireType] = currentData;
 
-    // Save to localStorage
-    persistQuestionsData();
-
     // Re-render and close modal
     renderQuestions();
     closeSectionModal();
@@ -8016,7 +9732,6 @@ function deleteSection(sectionId) {
     currentData.questions = updatedQuestions;
     questionsData[currentQuestionnaireType] = currentData;
 
-    persistQuestionsData();
     renderQuestions();
 }
 
@@ -8032,7 +9747,6 @@ window.viewProfessorDetails = viewProfessorDetails;
 window.editProfessor = editProfessor;
 window.deleteProfessor = deleteProfessor;
 window.viewProfessorAnalytics = viewProfessorAnalytics;
-window.handleAISummarization = handleAISummarization;
 
 // Export functions for future use
 if (typeof module !== 'undefined' && module.exports) {

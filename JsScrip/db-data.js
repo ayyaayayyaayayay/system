@@ -3,6 +3,302 @@
  * Replaces localStorage app-state persistence with PHP/MySQL persistence.
  */
 
+(function initAppLoadingOverlay() {
+    if (typeof window === 'undefined' || window.AppLoadingOverlay) {
+        return;
+    }
+
+    const DEFAULT_MESSAGE = 'Loading, please wait...';
+    const NETWORK_MESSAGE = 'Processing request...';
+    const DEDICATED_OVERLAY_IDS = ['bulk-register-loading', 'credential-distributor-loading'];
+
+    const state = {
+        manualInFlight: 0,
+        networkInFlight: 0,
+        manualMessage: '',
+        networkMessage: NETWORK_MESSAGE,
+    };
+
+    let overlayEl = null;
+    let textEl = null;
+    let dedicatedOverlayObserver = null;
+
+    function normalizeMessage(value, fallback) {
+        const message = String(value || '').trim();
+        return message || fallback;
+    }
+
+    function isDedicatedOverlayActive() {
+        return DEDICATED_OVERLAY_IDS.some(function (id) {
+            const element = document.getElementById(id);
+            return !!(element && element.classList && element.classList.contains('active'));
+        });
+    }
+
+    function ensureOverlayElement() {
+        if (overlayEl && document.body && document.body.contains(overlayEl)) {
+            return overlayEl;
+        }
+        if (!document.body) {
+            return null;
+        }
+
+        overlayEl = document.getElementById('app-global-loading-overlay');
+        if (!overlayEl) {
+            overlayEl = document.createElement('div');
+            overlayEl.id = 'app-global-loading-overlay';
+            overlayEl.className = 'app-loading-overlay';
+            overlayEl.setAttribute('aria-hidden', 'true');
+            overlayEl.innerHTML = [
+                '<div class="app-loading-overlay-card" role="status" aria-live="polite" aria-label="Loading in progress">',
+                '  <div class="app-loading-overlay-spinner" aria-hidden="true"></div>',
+                '  <p class="app-loading-overlay-text" id="app-global-loading-text">Loading, please wait...</p>',
+                '</div>'
+            ].join('');
+            document.body.appendChild(overlayEl);
+        }
+
+        textEl = overlayEl.querySelector('#app-global-loading-text');
+        return overlayEl;
+    }
+
+    function renderOverlay() {
+        const overlay = ensureOverlayElement();
+        if (!overlay) {
+            return;
+        }
+
+        const hasActivity = state.manualInFlight > 0 || state.networkInFlight > 0;
+        const shouldShow = hasActivity && !isDedicatedOverlayActive();
+        const message = state.manualMessage || state.networkMessage || DEFAULT_MESSAGE;
+
+        overlay.classList.toggle('active', shouldShow);
+        overlay.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+        if (textEl) {
+            textEl.textContent = normalizeMessage(message, DEFAULT_MESSAGE);
+        }
+    }
+
+    function show(message) {
+        state.manualInFlight += 1;
+        if (typeof message === 'string' && message.trim() !== '') {
+            state.manualMessage = message.trim();
+        }
+        renderOverlay();
+    }
+
+    function hide() {
+        state.manualInFlight = Math.max(0, state.manualInFlight - 1);
+        if (state.manualInFlight === 0) {
+            state.manualMessage = '';
+        }
+        renderOverlay();
+    }
+
+    function beginNetworkRequest(url) {
+        if (isDedicatedOverlayActive()) {
+            return false;
+        }
+        state.networkInFlight += 1;
+        state.networkMessage = NETWORK_MESSAGE;
+        renderOverlay();
+        return true;
+    }
+
+    function endNetworkRequest() {
+        state.networkInFlight = Math.max(0, state.networkInFlight - 1);
+        if (state.networkInFlight === 0) {
+            state.networkMessage = NETWORK_MESSAGE;
+        }
+        renderOverlay();
+    }
+
+    function resolveRequestUrl(input) {
+        if (typeof input === 'string') {
+            return input;
+        }
+        if (input && typeof input.url === 'string') {
+            return input.url;
+        }
+        return '';
+    }
+
+    function isApiRequestUrl(url) {
+        const raw = String(url || '').trim();
+        if (!raw) {
+            return false;
+        }
+        try {
+            const parsed = new URL(raw, window.location.href);
+            return /\/api\//i.test(parsed.pathname);
+        } catch (_error) {
+            return /\/api\//i.test(raw);
+        }
+    }
+
+    function patchFetch() {
+        const nativeFetch = window.fetch;
+        if (typeof nativeFetch !== 'function' || nativeFetch.__appLoadingPatched) {
+            return;
+        }
+
+        const patchedFetch = function () {
+            const url = resolveRequestUrl(arguments[0]);
+            const shouldTrack = isApiRequestUrl(url);
+            const tracked = shouldTrack ? beginNetworkRequest(url) : false;
+
+            let requestPromise;
+            try {
+                requestPromise = nativeFetch.apply(this, arguments);
+            } catch (error) {
+                if (tracked) {
+                    endNetworkRequest();
+                }
+                throw error;
+            }
+
+            if (!tracked) {
+                return requestPromise;
+            }
+
+            return Promise.resolve(requestPromise).finally(function () {
+                endNetworkRequest();
+            });
+        };
+
+        patchedFetch.__appLoadingPatched = true;
+        window.fetch = patchedFetch;
+    }
+
+    function finalizeTrackedXhr(xhr) {
+        if (!xhr || !xhr.__appLoadingTracked || xhr.__appLoadingCompleted) {
+            return;
+        }
+
+        xhr.__appLoadingCompleted = true;
+        if (typeof xhr.__appLoadingCleanup === 'function') {
+            xhr.__appLoadingCleanup();
+        }
+        xhr.__appLoadingCleanup = null;
+        endNetworkRequest();
+    }
+
+    function patchXmlHttpRequest() {
+        const xhrProto = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
+        if (!xhrProto || xhrProto.__appLoadingPatched) {
+            return;
+        }
+
+        const nativeOpen = xhrProto.open;
+        const nativeSend = xhrProto.send;
+        const nativeAbort = xhrProto.abort;
+
+        xhrProto.open = function (method, url, async) {
+            this.__appLoadingUrl = url;
+            this.__appLoadingShouldTrack = isApiRequestUrl(url);
+            this.__appLoadingTracked = false;
+            this.__appLoadingCompleted = false;
+            this.__appLoadingAsync = async !== false;
+            return nativeOpen.apply(this, arguments);
+        };
+
+        xhrProto.send = function () {
+            if (this.__appLoadingShouldTrack && !this.__appLoadingTracked) {
+                this.__appLoadingTracked = beginNetworkRequest(this.__appLoadingUrl);
+
+                if (this.__appLoadingTracked) {
+                    const xhr = this;
+                    const onLoadEnd = function () {
+                        finalizeTrackedXhr(xhr);
+                    };
+                    const onError = function () {
+                        finalizeTrackedXhr(xhr);
+                    };
+                    const onAbort = function () {
+                        finalizeTrackedXhr(xhr);
+                    };
+
+                    xhr.addEventListener('loadend', onLoadEnd);
+                    xhr.addEventListener('error', onError);
+                    xhr.addEventListener('abort', onAbort);
+
+                    xhr.__appLoadingCleanup = function () {
+                        xhr.removeEventListener('loadend', onLoadEnd);
+                        xhr.removeEventListener('error', onError);
+                        xhr.removeEventListener('abort', onAbort);
+                    };
+                }
+            }
+
+            try {
+                const result = nativeSend.apply(this, arguments);
+                if (this.__appLoadingTracked && this.__appLoadingAsync === false && this.readyState === 4) {
+                    finalizeTrackedXhr(this);
+                }
+                return result;
+            } catch (error) {
+                finalizeTrackedXhr(this);
+                throw error;
+            }
+        };
+
+        xhrProto.abort = function () {
+            try {
+                return nativeAbort.apply(this, arguments);
+            } finally {
+                finalizeTrackedXhr(this);
+            }
+        };
+
+        xhrProto.__appLoadingPatched = true;
+    }
+
+    function watchDedicatedOverlays() {
+        if (typeof MutationObserver === 'undefined') {
+            return;
+        }
+        if (dedicatedOverlayObserver) {
+            dedicatedOverlayObserver.disconnect();
+        }
+
+        dedicatedOverlayObserver = new MutationObserver(function () {
+            renderOverlay();
+        });
+
+        DEDICATED_OVERLAY_IDS.forEach(function (id) {
+            const element = document.getElementById(id);
+            if (element) {
+                dedicatedOverlayObserver.observe(element, {
+                    attributes: true,
+                    attributeFilter: ['class', 'aria-hidden'],
+                });
+            }
+        });
+    }
+
+    window.AppLoadingOverlay = {
+        show: show,
+        hide: hide,
+        _trackNetworkStart: beginNetworkRequest,
+        _trackNetworkEnd: endNetworkRequest,
+    };
+
+    patchFetch();
+    patchXmlHttpRequest();
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function () {
+            ensureOverlayElement();
+            watchDedicatedOverlays();
+            renderOverlay();
+        });
+    } else {
+        ensureOverlayElement();
+        watchDedicatedOverlays();
+        renderOverlay();
+    }
+})();
+
 const SharedData = (() => {
     const KEYS = {
         USER_SESSION: 'userSession',
@@ -19,13 +315,17 @@ const SharedData = (() => {
         EVALUATIONS: 'sharedEvaluations',
         STUDENT_EVAL_DRAFTS: 'studentEvaluationDrafts',
         OSA_STUDENT_CLEARANCES: 'osaStudentClearances',
+        STUDENT_EVAL_PROOF_REQUESTS: 'studentEvaluationProofRequests',
         SUBJECT_MANAGEMENT: 'subjectManagement',
         PROGRAMS: 'sharedProgramsData',
         FACULTY_PAPERS: 'facultyAcknowledgementPapers',
     };
 
-    const ROLE_KEYS = ['admin', 'hr', 'dean', 'professor', 'vpaa', 'osa', 'student'];
     const API_URL = '../api/app_state.php';
+    const LOGIN_API_URL = '../api/login.php';
+    const SESSION_URL = LOGIN_API_URL + '?action=session';
+    const PROFILE_IMAGE_UPLOAD_URL = '../api/profile_image_upload.php';
+    const USERS_CACHE_TTL_MS = 30000;
 
     const state = {
         users: [],
@@ -51,17 +351,19 @@ const SharedData = (() => {
         evaluations: [],
         studentEvaluationDrafts: [],
         osaStudentClearances: [],
+        studentEvaluationProofRequests: [],
         subjectManagement: {
             subjects: [],
             offerings: [],
             enrollments: [],
         },
         facultyAcknowledgementPapers: [],
-        profileData: {},
-        profilePhotos: {},
+        profileData: null,
+        profilePhotos: null,
     };
 
     let initialized = false;
+    let usersLastSyncedAt = 0;
 
     function deepClone(value) {
         return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -73,6 +375,54 @@ const SharedData = (() => {
         }));
     }
 
+    function normalizeSessionPayload(payload) {
+        const source = payload && typeof payload === 'object'
+            ? (payload.user && typeof payload.user === 'object'
+                ? Object.assign({}, payload.user, {
+                    csrfToken: payload.csrfToken || (payload.user && payload.user.csrfToken) || '',
+                })
+                : payload)
+            : null;
+        if (!source || typeof source !== 'object') {
+            return null;
+        }
+
+        const role = String(source.role || '').trim();
+        const username = String(source.username || '').trim();
+        if (!role || !username) {
+            return null;
+        }
+
+        return {
+            username: username,
+            role: role,
+            fullName: String(source.fullName || username).trim(),
+            userId: String(source.userId || '').trim(),
+            email: String(source.email || '').trim(),
+            studentNumber: String(source.studentNumber || '').trim(),
+            employeeId: String(source.employeeId || '').trim(),
+            status: String(source.status || 'active').trim().toLowerCase() === 'inactive' ? 'inactive' : 'active',
+            profileImage: String(source.profileImage || '').trim(),
+            profileImageUrl: String(source.profileImageUrl || source.profilePhoto || '').trim(),
+            csrfToken: String(source.csrfToken || '').trim(),
+            loginTime: String(source.loginTime || new Date().toISOString()).trim(),
+            isAuthenticated: true,
+        };
+    }
+
+    function storeSessionPayload(payload) {
+        const session = normalizeSessionPayload(payload);
+        if (!session) {
+            return null;
+        }
+        setJSON(KEYS.USER_SESSION, session);
+        return session;
+    }
+
+    function clearSessionCache() {
+        remove(KEYS.USER_SESSION);
+    }
+
     function syncRequest(method, action, payload) {
         const xhr = new XMLHttpRequest();
         let url = API_URL + '?action=' + encodeURIComponent(action);
@@ -81,6 +431,13 @@ const SharedData = (() => {
         }
         xhr.open(method, url, false);
         xhr.setRequestHeader('Content-Type', 'application/json');
+        if (method !== 'GET') {
+            const session = getSession();
+            const csrfToken = String(session && session.csrfToken || '').trim();
+            if (csrfToken) {
+                xhr.setRequestHeader('X-CSRF-Token', csrfToken);
+            }
+        }
         xhr.send(payload ? JSON.stringify(payload) : null);
 
         if (xhr.status < 200 || xhr.status >= 300) {
@@ -93,16 +450,26 @@ const SharedData = (() => {
                     message = xhr.responseText;
                 }
             }
+            if (xhr.status === 401 || xhr.status === 403) {
+                initialized = false;
+                clearSessionCache();
+                clearProfilePhotoState();
+            }
             const error = new Error(message);
             error.status = xhr.status;
             throw error;
         }
 
-        return xhr.responseText ? JSON.parse(xhr.responseText) : {};
+        const response = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+        if (response && response.session) {
+            storeSessionPayload(response.session);
+        }
+        return response;
     }
 
     function applyBootstrap(snapshot) {
         state.users = Array.isArray(snapshot.users) ? snapshot.users : [];
+        usersLastSyncedAt = state.users.length ? Date.now() : 0;
         state.programs = Array.isArray(snapshot.programs) ? snapshot.programs : [];
         state.campuses = Array.isArray(snapshot.campuses) && snapshot.campuses.length
             ? snapshot.campuses
@@ -117,6 +484,7 @@ const SharedData = (() => {
         state.evaluations = Array.isArray(snapshot.evaluations) ? snapshot.evaluations : [];
         state.studentEvaluationDrafts = Array.isArray(snapshot.studentEvaluationDrafts) ? snapshot.studentEvaluationDrafts : [];
         state.osaStudentClearances = Array.isArray(snapshot.osaStudentClearances) ? snapshot.osaStudentClearances : [];
+        state.studentEvaluationProofRequests = Array.isArray(snapshot.studentEvaluationProofRequests) ? snapshot.studentEvaluationProofRequests : [];
         const subjectManagement = snapshot.subjectManagement || {};
         state.subjectManagement = {
             subjects: Array.isArray(subjectManagement.subjects) ? subjectManagement.subjects : [],
@@ -126,9 +494,132 @@ const SharedData = (() => {
         state.facultyAcknowledgementPapers = Array.isArray(snapshot.facultyAcknowledgementPapers)
             ? snapshot.facultyAcknowledgementPapers
             : [];
-        state.profileData = snapshot.profileData || {};
-        state.profilePhotos = snapshot.profilePhotos || {};
+        state.profileData = snapshot.currentUserProfileData && typeof snapshot.currentUserProfileData === 'object'
+            ? snapshot.currentUserProfileData
+            : null;
+        state.profilePhotos = typeof snapshot.currentUserProfileImageUrl === 'string' && snapshot.currentUserProfileImageUrl
+            ? snapshot.currentUserProfileImageUrl
+            : (typeof snapshot.currentUserProfilePhoto === 'string'
+                ? snapshot.currentUserProfilePhoto
+                : null);
     }
+
+    function uploadProfilePhoto(file) {
+        bootstrap();
+
+        if (!file) {
+            throw new Error('Please choose an image file to upload.');
+        }
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', PROFILE_IMAGE_UPLOAD_URL, false);
+
+        const session = getSession();
+        const csrfToken = String(session && session.csrfToken || '').trim();
+        if (csrfToken) {
+            xhr.setRequestHeader('X-CSRF-Token', csrfToken);
+        }
+
+        const formData = new FormData();
+        formData.append('profile_image', file);
+        xhr.send(formData);
+
+        if (xhr.status < 200 || xhr.status >= 300) {
+            let message = 'Upload failed with status ' + xhr.status;
+            if (xhr.responseText) {
+                try {
+                    const parsed = JSON.parse(xhr.responseText);
+                    message = parsed && parsed.error ? String(parsed.error) : xhr.responseText;
+                } catch (_error) {
+                    message = xhr.responseText;
+                }
+            }
+            if (xhr.status === 401 || xhr.status === 403) {
+                initialized = false;
+                clearSessionCache();
+                clearProfilePhotoState();
+            }
+            const error = new Error(message);
+            error.status = xhr.status;
+            throw error;
+        }
+
+        const response = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+        if (response && response.session) {
+            storeSessionPayload(response.session);
+        }
+
+        state.profilePhotos = typeof response.profileImageUrl === 'string'
+            ? response.profileImageUrl
+            : (typeof response.profilePhoto === 'string' ? response.profilePhoto : '');
+        dispatchChange('profilePhoto', state.profilePhotos);
+
+        return state.profilePhotos || null;
+    }
+
+    function clearProfilePhotoState() {
+        state.profilePhotos = null;
+        dispatchChange('profilePhoto', state.profilePhotos);
+    }
+
+    function setProfilePhoto(role, dataUrl) {
+        if (typeof File !== 'undefined' && dataUrl instanceof File) {
+            return uploadProfilePhoto(dataUrl);
+        }
+
+        if (dataUrl && typeof dataUrl === 'object' && typeof dataUrl.name === 'string') {
+            return uploadProfilePhoto(dataUrl);
+        }
+
+        bootstrap();
+        state.profilePhotos = dataUrl || '';
+        dispatchChange('profilePhoto', state.profilePhotos);
+        try {
+            const response = syncRequest('POST', 'setProfilePhoto', { dataUrl: dataUrl || '' });
+            if (response && Object.prototype.hasOwnProperty.call(response, 'profilePhoto')) {
+                state.profilePhotos = response.profilePhoto || '';
+                dispatchChange('profilePhoto', state.profilePhotos);
+            }
+        } catch (error) {
+            console.error('[DBData] Failed to persist profile photo.', error);
+        }
+
+        return state.profilePhotos || null;
+    }
+
+    function getProfilePhoto() {
+        bootstrap();
+        return state.profilePhotos || null;
+    }
+
+    function setProfilePhotoFromResponse(urlValue) {
+        state.profilePhotos = typeof urlValue === 'string' && urlValue.trim() ? urlValue.trim() : null;
+        dispatchChange('profilePhoto', state.profilePhotos);
+        return state.profilePhotos;
+    }
+
+    function clearSession(options) {
+        const session = getSession();
+        const config = options && typeof options === 'object' ? options : {};
+        if (!config.localOnly && session && session.isAuthenticated === true) {
+            try {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', LOGIN_API_URL, false);
+                xhr.setRequestHeader('Content-Type', 'application/json');
+                if (session.csrfToken) {
+                    xhr.setRequestHeader('X-CSRF-Token', session.csrfToken);
+                }
+                xhr.send(JSON.stringify({ action: 'logout' }));
+            } catch (error) {
+                console.warn('[DBData] Logout request failed.', error);
+            }
+        }
+        initialized = false;
+        usersLastSyncedAt = 0;
+        clearSessionCache();
+        clearProfilePhotoState();
+    }
+    
 
     function applySubjectManagementSnapshot(payload) {
         const snapshot = payload && payload.subjectManagement ? payload.subjectManagement : payload;
@@ -145,6 +636,58 @@ const SharedData = (() => {
         return state.subjectManagement;
     }
 
+    function refreshSession(forceRefresh) {
+        const cached = getSession();
+        if (cached && !forceRefresh) {
+            return cached;
+        }
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', SESSION_URL + '&_ts=' + Date.now(), false);
+        xhr.send(null);
+
+        if (xhr.status >= 200 && xhr.status < 300) {
+            const payload = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+            return storeSessionPayload(payload);
+        }
+
+        if (xhr.status === 401 || xhr.status === 403) {
+            initialized = false;
+            clearSessionCache();
+            clearProfilePhotoState();
+            return null;
+        }
+
+        let message = 'Session validation failed with status ' + xhr.status;
+        if (xhr.responseText) {
+            try {
+                const parsed = JSON.parse(xhr.responseText);
+                message = parsed && parsed.error ? String(parsed.error) : message;
+            } catch (_error) {
+                message = xhr.responseText;
+            }
+        }
+        throw new Error(message);
+    }
+
+    function requireSession(expectedRole) {
+        let session = null;
+        try {
+            session = refreshSession(true);
+        } catch (error) {
+            console.warn('[DBData] Session validation failed.', error);
+            return null;
+        }
+        if (!session || session.isAuthenticated !== true) {
+            return null;
+        }
+        const requiredRole = String(expectedRole || '').trim().toLowerCase();
+        if (requiredRole && String(session.role || '').trim().toLowerCase() !== requiredRole) {
+            return null;
+        }
+        return session;
+    }
+
     function bootstrap(forceRefresh) {
         if (initialized && !forceRefresh) {
             return true;
@@ -154,14 +697,19 @@ const SharedData = (() => {
             const response = syncRequest('GET', 'bootstrap');
             if (response && response.success && response.state) {
                 applyBootstrap(response.state);
+                if (response.session) {
+                    storeSessionPayload(response.session);
+                }
                 initialized = true;
                 return true;
             }
         } catch (error) {
-            console.warn(
-                '[DBData] Bootstrap failed. Open the site through Apache/XAMPP over http://localhost so ../api/app_state.php can run.',
-                error
-            );
+            if (!error || (error.status !== 401 && error.status !== 403)) {
+                console.warn(
+                    '[DBData] Bootstrap failed. Open the site through Apache/XAMPP over http://localhost so ../api/app_state.php can run.',
+                    error
+                );
+            }
         }
 
         initialized = true;
@@ -200,18 +748,16 @@ const SharedData = (() => {
     }
 
     function setSession(username, role, extra = {}) {
+        if (username && typeof username === 'object') {
+            return storeSessionPayload(username);
+        }
         const session = Object.assign({
             username,
             role,
             loginTime: new Date().toISOString(),
             isAuthenticated: true,
         }, extra);
-        setJSON(KEYS.USER_SESSION, session);
-        return session;
-    }
-
-    function clearSession() {
-        remove(KEYS.USER_SESSION);
+        return storeSessionPayload(session);
     }
 
     function isAuthenticated() {
@@ -229,37 +775,23 @@ const SharedData = (() => {
         return session ? session.username : null;
     }
 
-    function getProfilePhoto(role) {
+    function getProfileData() {
         bootstrap();
-        return state.profilePhotos[role || getRole()] || null;
-    }
-
-    function setProfilePhoto(role, dataUrl) {
-        bootstrap();
-        const finalRole = role || getRole();
-        if (!finalRole) return;
-        state.profilePhotos[finalRole] = dataUrl;
-        dispatchChange('profilePhoto:' + finalRole, dataUrl);
-        try {
-            syncRequest('POST', 'setProfilePhoto', { role: finalRole, dataUrl });
-        } catch (error) {
-            console.error('[DBData] Failed to persist profile photo.', error);
-        }
-    }
-
-    function getProfileData(role) {
-        bootstrap();
-        return state.profileData[role || getRole()] || null;
+        return state.profileData || null;
     }
 
     function setProfileData(role, data) {
         bootstrap();
-        const finalRole = role || getRole();
-        if (!finalRole) return;
-        state.profileData[finalRole] = data;
-        dispatchChange('profileData:' + finalRole, data);
+        state.profileData = data && typeof data === 'object' ? data : null;
+        dispatchChange('profileData', deepClone(state.profileData));
         try {
-            syncRequest('POST', 'setProfileData', { role: finalRole, data });
+            const response = syncRequest('POST', 'setProfileData', { data: data || null });
+            if (response && Object.prototype.hasOwnProperty.call(response, 'profileData')) {
+                state.profileData = response.profileData && typeof response.profileData === 'object'
+                    ? response.profileData
+                    : null;
+                dispatchChange('profileData', deepClone(state.profileData));
+            }
         } catch (error) {
             console.error('[DBData] Failed to persist profile data.', error);
         }
@@ -275,40 +807,85 @@ const SharedData = (() => {
         return state.programs || [];
     }
 
-    function persistUsers() {
-        try {
-            return persistUsersStrict();
-        } catch (error) {
-            console.error('[DBData] Failed to persist users.', error);
+    function filterCachedUsers(filters) {
+        const cfg = filters && typeof filters === 'object' ? filters : {};
+        const campus = String(cfg.campus || '').trim().toLowerCase();
+        const search = String(cfg.search || '').trim().toLowerCase();
+        const users = Array.isArray(state.users) ? state.users : [];
+
+        return users.filter(function (user) {
+            if (campus && campus !== 'all' && String(user && user.campus || '').trim().toLowerCase() !== campus) {
+                return false;
+            }
+
+            if (!search) {
+                return true;
+            }
+
+            const haystacks = [
+                String(user && user.name || '').trim().toLowerCase(),
+                String(user && user.email || '').trim().toLowerCase(),
+                String(user && user.role || '').trim().toLowerCase(),
+                String(user && user.department || '').trim().toLowerCase(),
+                String(user && user.employeeId || '').trim().toLowerCase(),
+                String(user && user.studentNumber || '').trim().toLowerCase(),
+            ];
+
+            return haystacks.some(function (value) {
+                return value && value.indexOf(search) !== -1;
+            });
+        });
+    }
+
+    function applyUsersResponse(response) {
+        if (response && Array.isArray(response.users)) {
+            state.users = response.users;
+            usersLastSyncedAt = Date.now();
+            dispatchChange(KEYS.USERS, deepClone(state.users));
         }
         return state.users;
     }
 
-    function persistUsersStrict() {
-        const response = syncRequest('POST', 'setUsers', { users: state.users });
-        if (response && Array.isArray(response.users)) {
-            state.users = response.users;
+    function listUsers(filters) {
+        bootstrap();
+        const normalizedFilters = filters && typeof filters === 'object' ? filters : {};
+        const shouldUseCache = Array.isArray(state.users)
+            && state.users.length > 0
+            && (Date.now() - usersLastSyncedAt) < USERS_CACHE_TTL_MS
+            && normalizedFilters.forceRefresh !== true;
+
+        if (shouldUseCache) {
+            return filterCachedUsers(normalizedFilters);
         }
-        dispatchChange(KEYS.USERS, deepClone(state.users));
-        return state.users;
+
+        const response = syncRequest('POST', 'listUsers', { filters: normalizedFilters });
+        applyUsersResponse(response);
+        return filterCachedUsers(normalizedFilters);
+    }
+
+    function bulkUpsertUsers(users) {
+        bootstrap();
+        const response = syncRequest('POST', 'bulkUpsertUsers', {
+            users: Array.isArray(users) ? users : [],
+        });
+        return applyUsersResponse(response);
     }
 
     function setUsers(users) {
-        bootstrap();
-        state.users = Array.isArray(users) ? users : [];
-        return persistUsers();
+        return bulkUpsertUsers(users);
     }
 
     function setUsersStrict(users) {
-        bootstrap();
-        state.users = Array.isArray(users) ? users : [];
-        return persistUsersStrict();
+        return bulkUpsertUsers(users);
     }
 
     function addUser(user) {
         bootstrap();
-        state.users.push(user);
-        return persistUsers();
+        const response = syncRequest('POST', 'createUser', { user: user || {} });
+        if (response && response.user) {
+            updateCachedUserRecord(response.user);
+        }
+        return applyUsersResponse(response);
     }
 
     function updateUser(idOrUser, updatedData) {
@@ -321,24 +898,20 @@ const SharedData = (() => {
             patch = idOrUser;
         }
 
-        const index = state.users.findIndex(function (user) {
-            return user.id === id;
+        const response = syncRequest('POST', 'updateUser', {
+            userId: id,
+            user: patch || {},
         });
-
-        if (index !== -1) {
-            state.users[index] = Object.assign({}, state.users[index], patch || {});
-            persistUsers();
+        if (response && response.user) {
+            updateCachedUserRecord(response.user);
         }
-
-        return state.users;
+        return applyUsersResponse(response);
     }
 
     function deleteUser(id) {
         bootstrap();
-        state.users = state.users.filter(function (user) {
-            return user.id !== id;
-        });
-        return persistUsers();
+        const response = syncRequest('POST', 'deleteUser', { userId: id });
+        return applyUsersResponse(response);
     }
 
     function getCampuses() {
@@ -559,7 +1132,8 @@ const SharedData = (() => {
 
     function upsertOsaStudentClearance(record) {
         bootstrap();
-        const response = syncRequest('POST', 'upsertOsaStudentClearance', { record: record || {} });
+        const body = Object.assign({ record: record || {} }, buildActorPayload(record || {}));
+        const response = syncRequest('POST', 'upsertOsaStudentClearance', body);
         if (Array.isArray(response && response.osaStudentClearances)) {
             state.osaStudentClearances = response.osaStudentClearances;
             dispatchChange(KEYS.OSA_STUDENT_CLEARANCES, deepClone(state.osaStudentClearances));
@@ -586,6 +1160,45 @@ const SharedData = (() => {
             state.osaStudentClearances = next;
             dispatchChange(KEYS.OSA_STUDENT_CLEARANCES, deepClone(state.osaStudentClearances));
         }
+        return response || {};
+    }
+
+    function getStudentEvaluationProofRequests() {
+        bootstrap();
+        return deepClone(state.studentEvaluationProofRequests || []);
+    }
+
+    function submitStudentEvaluationProof(record) {
+        bootstrap();
+        const body = Object.assign({ record: record || {} }, buildActorPayload(record || {}));
+        const response = syncRequest('POST', 'submitStudentEvaluationProof', body);
+
+        if (Array.isArray(response && response.studentEvaluationProofRequests)) {
+            state.studentEvaluationProofRequests = response.studentEvaluationProofRequests;
+            dispatchChange(KEYS.STUDENT_EVAL_PROOF_REQUESTS, deepClone(state.studentEvaluationProofRequests));
+        }
+        if (Array.isArray(response && response.osaStudentClearances)) {
+            state.osaStudentClearances = response.osaStudentClearances;
+            dispatchChange(KEYS.OSA_STUDENT_CLEARANCES, deepClone(state.osaStudentClearances));
+        }
+
+        return response || {};
+    }
+
+    function reviewStudentEvaluationProof(payload) {
+        bootstrap();
+        const body = Object.assign({ payload: payload || {} }, buildActorPayload(payload || {}));
+        const response = syncRequest('POST', 'reviewStudentEvaluationProof', body);
+
+        if (Array.isArray(response && response.studentEvaluationProofRequests)) {
+            state.studentEvaluationProofRequests = response.studentEvaluationProofRequests;
+            dispatchChange(KEYS.STUDENT_EVAL_PROOF_REQUESTS, deepClone(state.studentEvaluationProofRequests));
+        }
+        if (Array.isArray(response && response.osaStudentClearances)) {
+            state.osaStudentClearances = response.osaStudentClearances;
+            dispatchChange(KEYS.OSA_STUDENT_CLEARANCES, deepClone(state.osaStudentClearances));
+        }
+
         return response || {};
     }
 
@@ -721,6 +1334,81 @@ const SharedData = (() => {
         return {
             summary: response && response.summary ? response.summary : { total: 0, sent: 0, failed: 0 },
             failures: Array.isArray(response && response.failures) ? response.failures : [],
+        };
+    }
+
+    function sendBulkTestGmail(subject, message, actor) {
+        bootstrap();
+        const body = Object.assign({}, buildActorPayload(actor || {}), {
+            subject: String(subject || ''),
+            message: String(message || ''),
+        });
+        const response = syncRequest('POST', 'sendBulkTestGmail', body);
+        return {
+            summary: response && response.summary ? response.summary : { total: 0, sent: 0, failed: 0 },
+            failures: Array.isArray(response && response.failures) ? response.failures : [],
+        };
+    }
+
+    function analyzeBiasComments(filters, actor) {
+        bootstrap();
+        const body = Object.assign({}, buildActorPayload(actor || {}), {
+            filters: Object.assign({}, filters || {}),
+        });
+        const response = syncRequest('POST', 'analyzeBiasComments', body);
+        return {
+            success: response && response.success === true,
+            summary: response && response.summary ? response.summary : { total: 0, constructive: 0, neutral: 0, biased: 0, source: 'rule' },
+            items: Array.isArray(response && response.items) ? response.items : [],
+        };
+    }
+
+    function analyzeEvaluationExplainability(payload, actor) {
+        bootstrap();
+        const body = Object.assign({}, buildActorPayload(actor || {}), {
+            payload: payload && typeof payload === 'object' ? payload : {},
+        });
+        const response = syncRequest('POST', 'analyzeEvaluationExplainability', body);
+        const fallbackInsight = {
+            keywords: [],
+            clusters: [],
+            reasoning: ['No explainability details available.'],
+            judgment: {
+                label: 'Needs Improvement',
+                rationale: 'Insufficient AI explainability data.',
+                confidence: 0,
+            },
+            stats: {
+                totalComments: 0,
+                sourceCounts: {},
+            },
+        };
+
+        return {
+            success: response && response.success === true,
+            source: String(response && response.source || 'rule'),
+            insight: response && response.insight && typeof response.insight === 'object'
+                ? response.insight
+                : fallbackInsight,
+        };
+    }
+
+    function generateFacultyPaperSectionCRecommendations(payload) {
+        bootstrap();
+        const response = syncRequest('POST', 'generateFacultyPaperSectionCRecommendations', payload || {});
+        return {
+            success: response && response.success === true,
+            source: String(response && response.source || 'rule'),
+            weakAreas: Array.isArray(response && response.weakAreas) ? response.weakAreas : [],
+            sectionC: response && response.sectionC && typeof response.sectionC === 'object'
+                ? {
+                    areas: String(response.sectionC.areas || ''),
+                    activities: String(response.sectionC.activities || ''),
+                    actionPlan: String(response.sectionC.actionPlan || ''),
+                }
+                : { areas: '', activities: '', actionPlan: '' },
+            reasoning: Array.isArray(response && response.reasoning) ? response.reasoning : [],
+            error: response && response.error ? String(response.error) : '',
         };
     }
 
@@ -1142,6 +1830,80 @@ const SharedData = (() => {
         };
     }
 
+    function patchSessionData(partial) {
+        const current = getSession();
+        if (!current || typeof current !== 'object') return null;
+        const next = Object.assign({}, current, partial || {});
+        setJSON(KEYS.USER_SESSION, next);
+        return next;
+    }
+
+    function updateCachedUserRecord(updatedUser) {
+        if (!updatedUser || typeof updatedUser !== 'object') return;
+        const targetId = String(updatedUser.id || '').trim();
+        const targetEmail = String(updatedUser.email || '').trim().toLowerCase();
+        if (!targetId && !targetEmail) return;
+
+        const index = state.users.findIndex(function (user) {
+            const userId = String(user && user.id || '').trim();
+            const userEmail = String(user && user.email || '').trim().toLowerCase();
+            return (targetId && userId === targetId) || (targetEmail && userEmail === targetEmail);
+        });
+        if (index < 0) return;
+
+        state.users[index] = Object.assign({}, state.users[index], updatedUser);
+        dispatchChange(KEYS.USERS, deepClone(state.users));
+    }
+
+    function changeOwnEmail(currentEmail, newEmail, actor) {
+        bootstrap();
+        const body = Object.assign({}, buildActorPayload(actor || {}), {
+            currentEmail: String(currentEmail || '').trim(),
+            newEmail: String(newEmail || '').trim(),
+        });
+
+        const response = syncRequest('POST', 'changeOwnEmail', body);
+        const updatedUser = response && response.user && typeof response.user === 'object'
+            ? response.user
+            : null;
+        const updatedEmail = String(response && response.email || body.newEmail || '').trim();
+
+        if (updatedUser) {
+            updateCachedUserRecord(updatedUser);
+        }
+
+        if (updatedEmail) {
+            const currentSession = getSession() || {};
+            const sessionUserId = String(currentSession.userId || '').trim();
+            const updatedUserId = String(updatedUser && updatedUser.id || '').trim();
+            const shouldPatchSession =
+                (sessionUserId && updatedUserId && sessionUserId === updatedUserId) ||
+                (sessionUserId === '' && sessionUserId === updatedUserId);
+            if (shouldPatchSession || !updatedUserId) {
+                patchSessionData({ email: updatedEmail });
+            }
+        }
+
+        return {
+            success: !!(response && response.success !== false),
+            email: updatedEmail,
+            user: updatedUser,
+        };
+    }
+
+    function changeOwnPassword(currentPassword, newPassword, actor) {
+        bootstrap();
+        const body = Object.assign({}, buildActorPayload(actor || {}), {
+            currentPassword: String(currentPassword || ''),
+            newPassword: String(newPassword || ''),
+        });
+        const response = syncRequest('POST', 'changeOwnPassword', body);
+        return {
+            success: !!(response && response.success !== false),
+            updated: !!(response && response.updated),
+        };
+    }
+
     function autoGeneratePeerRoom(payload) {
         bootstrap();
         const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
@@ -1190,10 +1952,7 @@ const SharedData = (() => {
 
     function listFacultyPapers(actorRole, actorUserId) {
         bootstrap();
-        const response = syncRequest('POST', 'listFacultyPapers', {
-            actor_role: actorRole,
-            actor_user_id: actorUserId,
-        });
+        const response = syncRequest('POST', 'listFacultyPapers', {});
         state.facultyAcknowledgementPapers = Array.isArray(response.papers) ? response.papers : [];
         dispatchChange(KEYS.FACULTY_PAPERS, deepClone(state.facultyAcknowledgementPapers));
         return deepClone(state.facultyAcknowledgementPapers);
@@ -1260,6 +2019,8 @@ const SharedData = (() => {
         setJSON,
         remove,
         getSession,
+        refreshSession,
+        requireSession,
         setSession,
         clearSession,
         isAuthenticated,
@@ -1267,10 +2028,13 @@ const SharedData = (() => {
         getUsername,
         getProfilePhoto,
         setProfilePhoto,
+        uploadProfilePhoto,
         getProfileData,
         setProfileData,
         getUsers,
+        listUsers,
         getPrograms,
+        bulkUpsertUsers,
         setUsers,
         setUsersStrict,
         addUser,
@@ -1294,6 +2058,9 @@ const SharedData = (() => {
         removeStudentEvaluationDraft,
         getOsaStudentClearances,
         upsertOsaStudentClearance,
+        getStudentEvaluationProofRequests,
+        submitStudentEvaluationProof,
+        reviewStudentEvaluationProof,
         getSubjectManagement,
         upsertSubject,
         importSubjects,
@@ -1307,6 +2074,10 @@ const SharedData = (() => {
         getCredentialDistributorConfig,
         saveCredentialDistributorConfig,
         bulkDistributeCredentials,
+        sendBulkTestGmail,
+        analyzeBiasComments,
+        analyzeEvaluationExplainability,
+        generateFacultyPaperSectionCRecommendations,
         getAnnouncements,
         getAnnouncementsForCurrentUser,
         addAnnouncement,
@@ -1321,6 +2092,8 @@ const SharedData = (() => {
         getSemesterList,
         setSemesterList,
         addSemester,
+        changeOwnEmail,
+        changeOwnPassword,
         autoGeneratePeerRoom,
         listDeanPeerRoomsCurrent,
         listProfessorPeerAssignmentsCurrent,

@@ -38,6 +38,14 @@ let deanSummaryState = {
     selectedSemesterLabel: '',
     selectedEvaluationType: 'student'
 };
+let deanFacultyFeedbackState = {
+    selectedProfessorUserId: '',
+    selectedProfessorId: '',
+    selectedProfessorName: '',
+    selectedSourceView: 'student',
+    loadedComments: [],
+    lastTrendRows: []
+};
 let deanSupervisorTargetDirectory = [];
 
 const DEAN_EMPTY_SUMMARY = {
@@ -56,7 +64,7 @@ function normalizeUserIdToken(value) {
     if (!raw) return '';
     if (/^u\d+$/i.test(raw)) return 'u' + raw.replace(/^u/i, '');
     if (/^\d+$/.test(raw)) return 'u' + String(parseInt(raw, 10));
-    return '';
+    return normalizeRoleToken(raw);
 }
 
 function normalizeRoleToken(value) {
@@ -177,6 +185,374 @@ function collectEvaluationComments(evaluation) {
         if (value) comments.push(value);
     });
     return comments;
+}
+
+function classifyDeanFeedbackCommentBiasByRules(text) {
+    const value = String(text || '').trim().replace(/\s+/g, ' ');
+    if (!value) return { label: 'Neutral' };
+
+    const lower = value.toLowerCase();
+    const words = lower.split(/\s+/).filter(Boolean);
+    const wordCount = words.length;
+
+    const biasedKeywords = [
+        'hate', 'terror', 'worst', 'stupid', 'dumb', 'useless', 'bobo', 'idiot', 'trash', 'awful', 'pangit',
+        'bwisit', 'gago', 'bobo prof', 'i hate', 'not related', 'irrelevant', 'nonsense',
+    ];
+    for (let i = 0; i < biasedKeywords.length; i += 1) {
+        const keyword = biasedKeywords[i];
+        if (keyword && lower.includes(keyword)) {
+            return { label: 'Biased' };
+        }
+    }
+
+    const constructiveKeywords = [
+        'needs', 'need', 'should', 'improve', 'improvement', 'examples', 'explain', 'explains',
+        'clearer', 'clarify', 'better', 'more', 'less', 'pace', 'feedback',
+    ];
+    let hasConstructiveSignal = false;
+    for (let i = 0; i < constructiveKeywords.length; i += 1) {
+        const keyword = constructiveKeywords[i];
+        if (keyword && lower.includes(keyword)) {
+            hasConstructiveSignal = true;
+            break;
+        }
+    }
+
+    if (hasConstructiveSignal && wordCount >= 4) return { label: 'Constructive' };
+
+    const neutralKeywords = ['ok', 'okay', 'fine', 'good', 'nice', 'average', 'pwede'];
+    if (neutralKeywords.includes(lower)) return { label: 'Neutral' };
+    if (wordCount <= 3) return { label: 'Neutral' };
+
+    return { label: 'Neutral' };
+}
+
+function getDeanCommentBiasTagClass(label) {
+    if (label === 'Constructive') return 'constructive';
+    if (label === 'Biased') return 'biased';
+    return 'neutral';
+}
+
+function setDeanCommentsAiSummary(message, type = 'info') {
+    const summaryEl = document.getElementById('facultyCommentsAiSummary');
+    if (!summaryEl) return;
+
+    summaryEl.classList.remove('warning', 'error');
+    if (type === 'warning' || type === 'error') {
+        summaryEl.classList.add(type);
+    }
+    summaryEl.textContent = String(message || '').trim();
+}
+
+function detectDeanFeedbackTopics(comments) {
+    const topicRules = [
+        {
+            label: 'lack of learning materials',
+            keywords: ['material', 'materials', 'module', 'modules', 'learning material', 'handout', 'handouts', 'slides', 'references', 'resources'],
+        },
+        {
+            label: 'need clearer explanations',
+            keywords: ['clear', 'clearer', 'clarify', 'explains', 'explain', 'explanation', 'understand'],
+        },
+        {
+            label: 'need more examples',
+            keywords: ['example', 'examples', 'sample', 'samples'],
+        },
+        {
+            label: 'class pace is too fast',
+            keywords: ['pace', 'fast', 'quick', 'rushed'],
+        },
+        {
+            label: 'want more interactive discussions',
+            keywords: ['interactive', 'discussion', 'engaging', 'participate', 'interaction'],
+        },
+    ];
+
+    const counts = topicRules.map(rule => ({ label: rule.label, count: 0 }));
+    comments.forEach(comment => {
+        const lower = String(comment || '').toLowerCase();
+        topicRules.forEach((rule, index) => {
+            const matched = rule.keywords.some(keyword => lower.includes(keyword));
+            if (matched) counts[index].count += 1;
+        });
+    });
+
+    return counts
+        .filter(item => item.count > 0)
+        .sort((a, b) => b.count - a.count);
+}
+
+function buildDeanFeedbackAiSummary(items, options = {}) {
+    const comments = (Array.isArray(items) ? items : [])
+        .map(item => String(item && item.text || '').trim())
+        .filter(Boolean);
+    if (!comments.length) {
+        return 'No comments available to summarize.';
+    }
+
+    const evaluationLabel = String(options && options.evaluationLabel || 'evaluation').trim() || 'evaluation';
+
+    let constructive = 0;
+    let neutral = 0;
+    let biased = 0;
+    comments.forEach(text => {
+        const label = classifyDeanFeedbackCommentBiasByRules(text).label;
+        if (label === 'Constructive') constructive += 1;
+        else if (label === 'Biased') biased += 1;
+        else neutral += 1;
+    });
+
+    const topics = detectDeanFeedbackTopics(comments);
+    const top = topics[0] || null;
+    const second = topics[1] || null;
+    const threshold = Math.ceil(comments.length * 0.4);
+
+    let summaryLine = `Summary of ${comments.length} ${evaluationLabel.toLowerCase()} comments: feedback is varied.`;
+    if (top && top.count >= threshold) {
+        summaryLine = `Summary of ${comments.length} ${evaluationLabel.toLowerCase()} comments: majority mention ${top.label}.`;
+    } else if (top && second) {
+        summaryLine = `Summary of ${comments.length} ${evaluationLabel.toLowerCase()} comments: common points are ${top.label} and ${second.label}.`;
+    } else if (top) {
+        summaryLine = `Summary of ${comments.length} ${evaluationLabel.toLowerCase()} comments: a common point is ${top.label}.`;
+    }
+
+    let toneLine = 'Overall tone is mostly neutral.';
+    if (constructive >= neutral && constructive >= biased) {
+        toneLine = 'Overall tone is mostly constructive.';
+    } else if (biased > constructive && biased >= neutral) {
+        toneLine = 'Overall tone includes notable biased comments.';
+    }
+
+    return `${summaryLine} ${toneLine}`;
+}
+
+function buildDeanCommentIdentityFields(evaluation) {
+    return {
+        evaluatorStudentNumber: String(evaluation && evaluation.evaluatorStudentNumber || '').trim(),
+        studentNumber: String(evaluation && evaluation.studentNumber || '').trim(),
+        studentId: String(evaluation && evaluation.studentId || '').trim(),
+        studentUserId: String(evaluation && evaluation.studentUserId || '').trim(),
+        evaluatorId: String(evaluation && evaluation.evaluatorId || '').trim(),
+        evaluatorUsername: String(evaluation && evaluation.evaluatorUsername || '').trim(),
+        evaluatorName: String(evaluation && evaluation.evaluatorName || '').trim()
+    };
+}
+
+function buildDeanCommentRecord(evaluation, text, sourceLabel) {
+    return {
+        text: String(text || '').trim(),
+        source: String(sourceLabel || '').trim(),
+        date: String(evaluation && (evaluation.submittedAt || evaluation.timestamp) || '').trim(),
+        ...buildDeanCommentIdentityFields(evaluation)
+    };
+}
+
+function resolveDeanCommentStudentNumber(comment) {
+    const priority = [
+        comment && comment.evaluatorStudentNumber,
+        comment && comment.studentNumber,
+        comment && comment.studentId,
+        comment && comment.studentUserId,
+        comment && comment.evaluatorId,
+        comment && comment.evaluatorUsername
+    ];
+    for (let index = 0; index < priority.length; index += 1) {
+        const value = String(priority[index] || '').trim();
+        if (value) return value;
+    }
+    return 'N/A';
+}
+
+function countRatingEntriesFromEvaluations(evaluations) {
+    let count = 0;
+    (Array.isArray(evaluations) ? evaluations : []).forEach(item => {
+        const ratings = item && typeof item.ratings === 'object' && item.ratings ? item.ratings : {};
+        Object.keys(ratings).forEach(questionId => {
+            const parsed = parseFloat(ratings[questionId]);
+            if (!Number.isFinite(parsed)) return;
+            count += 1;
+        });
+    });
+    return count;
+}
+
+function getDeanSemestralWindowIds(context, selectedSemesterId, maxCount = 4) {
+    const list = Array.isArray(context && context.semesterList) ? context.semesterList : [];
+    const ids = list
+        .map(item => String(item && item.value || '').trim())
+        .filter(Boolean);
+
+    if (!ids.length) {
+        const fallback = String(selectedSemesterId || context && context.currentSemester || '').trim();
+        return fallback ? [fallback] : [];
+    }
+
+    const selected = String(selectedSemesterId || '').trim();
+    let index = selected ? ids.indexOf(selected) : -1;
+    if (index < 0) index = ids.length - 1;
+
+    const windowIds = [];
+    for (let cursor = index; cursor >= 0 && windowIds.length < maxCount; cursor -= 1) {
+        windowIds.push(ids[cursor]);
+    }
+    return windowIds;
+}
+
+function fetchDeanProfessorEvaluationsByType(context, professorUserId, evaluationType, semesterId) {
+    return (context.evaluations || []).filter(evaluation => {
+        if (resolveEvaluationTypeToken(evaluation) !== evaluationType) return false;
+        if (!isEvaluationInSemester(evaluation, semesterId)) return false;
+        const targetProfessorId = resolveDeanTargetProfessorId(evaluation, evaluationType, context);
+        return targetProfessorId === professorUserId;
+    });
+}
+
+function buildDeanProfessorSemestralTrendRows(professorUserId, selectedSemesterId) {
+    const context = buildDeanPanelContext();
+    const targetProfessorId = normalizeUserIdToken(professorUserId);
+    if (!targetProfessorId || !context.professorById[targetProfessorId]) {
+        return [];
+    }
+
+    const semesterIds = getDeanSemestralWindowIds(context, selectedSemesterId, 4);
+    return semesterIds.map(semesterId => {
+        const studentEvaluations = fetchDeanProfessorEvaluationsByType(context, targetProfessorId, 'student', semesterId);
+        const peerEvaluations = fetchDeanProfessorEvaluationsByType(context, targetProfessorId, 'professor', semesterId);
+        const supervisorEvaluations = fetchDeanProfessorEvaluationsByType(context, targetProfessorId, 'supervisor', semesterId);
+
+        const studentAverage = computeAverageRatingFromEvaluations(studentEvaluations);
+        const peerAverage = computeAverageRatingFromEvaluations(peerEvaluations);
+        const supervisorAverage = computeAverageRatingFromEvaluations(supervisorEvaluations);
+
+        const studentRatings = countRatingEntriesFromEvaluations(studentEvaluations);
+        const peerRatings = countRatingEntriesFromEvaluations(peerEvaluations);
+        const supervisorRatings = countRatingEntriesFromEvaluations(supervisorEvaluations);
+
+        const totalRatings = studentRatings + peerRatings + supervisorRatings;
+        const weightedSum = (studentAverage * studentRatings)
+            + (peerAverage * peerRatings)
+            + (supervisorAverage * supervisorRatings);
+        const overallAverage = totalRatings ? (weightedSum / totalRatings) : 0;
+
+        return {
+            semesterId,
+            semesterLabel: getSemesterLabelById(semesterId),
+            overallAverage,
+            studentAverage,
+            peerAverage,
+            supervisorAverage
+        };
+    });
+}
+
+function renderDeanSemestralTrendChart(rows) {
+    const canvas = document.getElementById('deanSemestralTrendChart');
+    if (!canvas) return;
+
+    const chartRows = (Array.isArray(rows) ? rows.slice() : []).reverse();
+    const labels = chartRows.length ? chartRows.map(item => item.semesterLabel) : ['No Data'];
+    const values = chartRows.length ? chartRows.map(item => Number((item.overallAverage || 0).toFixed(2))) : [0];
+
+    if (window.deanSemestralTrendChartInstance) {
+        window.deanSemestralTrendChartInstance.destroy();
+    }
+
+    window.deanSemestralTrendChartInstance = new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Overall Average',
+                data: values,
+                borderColor: '#4752c4',
+                backgroundColor: 'rgba(71, 82, 196, 0.15)',
+                fill: true,
+                tension: 0.25,
+                pointRadius: 4,
+                pointHoverRadius: 5
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: { beginAtZero: true, max: 5, ticks: { stepSize: 1 } }
+            },
+            plugins: { legend: { display: true, position: 'bottom' } }
+        }
+    });
+}
+
+function resetDeanProfessorSemestralTrend() {
+    const statusEl = document.getElementById('deanSemestralTrendStatus');
+    const deltaEl = document.getElementById('deanSemestralTrendDelta');
+    const tableBody = document.getElementById('deanSemestralTrendTableBody');
+    if (!statusEl || !deltaEl || !tableBody) return;
+
+    statusEl.classList.remove('improved', 'declined', 'stable');
+    statusEl.textContent = 'No semestral trend data available.';
+    deltaEl.textContent = 'Open a professor comments list to load the last 4-semester performance trend.';
+    tableBody.innerHTML = '<tr><td colspan="5">No data available.</td></tr>';
+    deanFacultyFeedbackState.lastTrendRows = [];
+    renderDeanSemestralTrendChart([]);
+}
+
+function setDeanSemestralTrendVisibility(isVisible) {
+    const section = document.getElementById('deanSemestralTrendSection');
+    if (!section) return;
+    section.style.display = isVisible ? 'block' : 'none';
+}
+
+function renderDeanProfessorSemestralTrend(professorUserId, selectedSemesterId) {
+    const statusEl = document.getElementById('deanSemestralTrendStatus');
+    const deltaEl = document.getElementById('deanSemestralTrendDelta');
+    const tableBody = document.getElementById('deanSemestralTrendTableBody');
+    if (!statusEl || !deltaEl || !tableBody) return;
+
+    const rows = buildDeanProfessorSemestralTrendRows(professorUserId, selectedSemesterId);
+    statusEl.classList.remove('improved', 'declined', 'stable');
+
+    if (!rows.length) {
+        resetDeanProfessorSemestralTrend();
+        return;
+    }
+
+    tableBody.innerHTML = rows.map(item => `
+        <tr>
+            <td>${escapeHTML(item.semesterLabel || item.semesterId)}</td>
+            <td class="avg-score">${Number(item.overallAverage || 0).toFixed(2)}</td>
+            <td>${Number(item.studentAverage || 0).toFixed(2)}</td>
+            <td>${Number(item.peerAverage || 0).toFixed(2)}</td>
+            <td>${Number(item.supervisorAverage || 0).toFixed(2)}</td>
+        </tr>
+    `).join('');
+
+    const current = Number(rows[0] && rows[0].overallAverage || 0);
+    const previous = Number(rows[1] && rows[1].overallAverage || 0);
+
+    if (rows.length < 2 || !Number.isFinite(previous) || previous <= 0) {
+        statusEl.textContent = `Current semestral average: ${current.toFixed(2)}`;
+        statusEl.classList.add('stable');
+        deltaEl.textContent = 'No previous semester baseline yet for improve/decline comparison.';
+    } else {
+        const delta = current - previous;
+        const deltaLabel = `${delta >= 0 ? '+' : ''}${delta.toFixed(2)}`;
+        if (delta > 0.02) {
+            statusEl.textContent = `Improved performance in ${rows[0].semesterLabel}`;
+            statusEl.classList.add('improved');
+        } else if (delta < -0.02) {
+            statusEl.textContent = `Declined performance in ${rows[0].semesterLabel}`;
+            statusEl.classList.add('declined');
+        } else {
+            statusEl.textContent = `Stable performance in ${rows[0].semesterLabel}`;
+            statusEl.classList.add('stable');
+        }
+        deltaEl.textContent = `Current vs previous semester: ${current.toFixed(2)} vs ${previous.toFixed(2)} (${deltaLabel}).`;
+    }
+
+    deanFacultyFeedbackState.lastTrendRows = rows;
+    renderDeanSemestralTrendChart(rows);
 }
 
 function computeAverageRatingFromEvaluations(evaluations) {
@@ -450,11 +826,11 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
         });
 
         collectEvaluationComments(evaluation).forEach(text => {
-            comments.push({
+            comments.push(buildDeanCommentRecord(
+                evaluation,
                 text,
-                source: getDeanEvaluationTypeMeta(evaluationType).label,
-                date: String(evaluation && (evaluation.submittedAt || evaluation.timestamp) || '').trim()
-            });
+                getDeanEvaluationTypeMeta(evaluationType).label
+            ));
         });
     });
 
@@ -489,11 +865,9 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
             const rowKey = `student|offering|${offeringId}`;
 
             commentBuckets[rowKey] = offeringEvaluations.flatMap(evaluation =>
-                collectEvaluationComments(evaluation).map(text => ({
-                    text,
-                    source: 'Student Evaluation',
-                    date: String(evaluation && (evaluation.submittedAt || evaluation.timestamp) || '').trim()
-                }))
+                collectEvaluationComments(evaluation).map(text =>
+                    buildDeanCommentRecord(evaluation, text, 'Student Evaluation')
+                )
             );
 
             breakdownRows.push({
@@ -534,11 +908,9 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
             const evaluationsForProfessor = groupMap[userId] || [];
             const rowKey = `${evaluationType}|professor|${userId}`;
             commentBuckets[rowKey] = evaluationsForProfessor.flatMap(evaluation =>
-                collectEvaluationComments(evaluation).map(text => ({
-                    text,
-                    source: getDeanEvaluationTypeMeta(evaluationType).label,
-                    date: String(evaluation && (evaluation.submittedAt || evaluation.timestamp) || '').trim()
-                }))
+                collectEvaluationComments(evaluation).map(text =>
+                    buildDeanCommentRecord(evaluation, text, getDeanEvaluationTypeMeta(evaluationType).label)
+                )
             );
 
             breakdownRows.push({
@@ -619,15 +991,14 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
  * @returns {boolean} - True if user is authenticated as dean
  */
 function checkAuthentication() {
-    const session = SharedData.getSession();
+    const session = SharedData.requireSession('dean');
     if (!session) {
         return false;
     }
 
     try {
-        // Check if user is authenticated and is a dean
         return session.isAuthenticated === true
-            && (session.role === 'dean' || session.role === 'daen')
+            && session.role === 'dean'
             && normalizeDeanToken(session.status || 'active') !== 'inactive';
     } catch (e) {
         return false;
@@ -1225,7 +1596,7 @@ function normalizeDeanUserIdToken(value) {
     if (!raw) return '';
     if (/^u\d+$/i.test(raw)) return 'u' + raw.replace(/^u/i, '');
     if (/^\d+$/.test(raw)) return 'u' + String(parseInt(raw, 10));
-    return '';
+    return normalizeDeanToken(raw);
 }
 
 function normalizeDeanToken(value) {
@@ -1373,14 +1744,12 @@ async function openDeanFacultyPaperPdf(payload, downloadFilename) {
 async function openDeanStoredPaperPdf(paper, actorUserId, versionNo) {
     const paperId = String(paper && paper.id || '').trim();
     const actorId = normalizeDeanUserIdToken(actorUserId);
-    if (!paperId || !actorId) {
+    if (!paperId) {
         throw new Error('Unable to resolve stored paper context.');
     }
 
     const params = new URLSearchParams({
-        paper_id: paperId,
-        actor_role: 'dean',
-        actor_user_id: actorId
+        paper_id: paperId
     });
     if (Number.isInteger(versionNo) && versionNo > 0) {
         params.set('version_no', String(versionNo));
@@ -1776,7 +2145,7 @@ function populatePeerProfessorOptions() {
 
     const currentUserId = String(hiddenSelectValue.value || '').trim();
     const professors = getScopedProfessorUsers(false);
-    deanSupervisorTargetDirectory = professors.map(professor => {
+    const scopedDirectory = professors.map(professor => {
         const userId = normalizeUserIdToken(professor && professor.id) || String(professor && professor.employeeId || '').trim();
         if (!userId) return null;
         const name = String(professor && professor.name || 'Unknown').trim() || 'Unknown';
@@ -1790,6 +2159,9 @@ function populatePeerProfessorOptions() {
             label
         };
     }).filter(Boolean);
+    const availableDirectory = scopedDirectory.filter(item => !isSupervisorTargetLocked(item.userId));
+    const lockedCount = Math.max(0, scopedDirectory.length - availableDirectory.length);
+    deanSupervisorTargetDirectory = availableDirectory;
 
     datalist.innerHTML = '';
     deanSupervisorTargetDirectory.forEach(item => {
@@ -1799,10 +2171,16 @@ function populatePeerProfessorOptions() {
     });
 
     if (searchMeta) {
-        const label = deanSupervisorTargetDirectory.length === 1 ? 'employee' : 'employees';
-        searchMeta.textContent = deanSupervisorTargetDirectory.length
-            ? `Showing ${deanSupervisorTargetDirectory.length} ${label} in your department scope.`
-            : 'No active professors in your department scope.';
+        if (deanSupervisorTargetDirectory.length) {
+            const label = deanSupervisorTargetDirectory.length === 1 ? 'employee' : 'employees';
+            searchMeta.textContent = lockedCount > 0
+                ? `Showing ${deanSupervisorTargetDirectory.length} ${label}. ${lockedCount} already evaluated this semester were hidden.`
+                : `Showing ${deanSupervisorTargetDirectory.length} ${label} in your department scope.`;
+        } else if (scopedDirectory.length > 0) {
+            searchMeta.textContent = 'All employees in your department scope were already evaluated this semester.';
+        } else {
+            searchMeta.textContent = 'No active professors in your department scope.';
+        }
     }
 
     const currentMatch = deanSupervisorTargetDirectory.find(item => item.userId === currentUserId);
@@ -1811,6 +2189,7 @@ function populatePeerProfessorOptions() {
         searchInput.value = currentMatch.label;
     } else {
         hiddenSelectValue.value = '';
+        searchInput.value = '';
     }
     syncSupervisorTargetFromInput();
 }
@@ -2038,20 +2417,16 @@ function handlePeerEvaluation() {
         'success'
     );
 
-    // Auto redirect after briefly showing the success state
+    // Keep user on evaluation view and reload the target list after successful submission.
     setTimeout(() => {
         form.reset();
+        populatePeerProfessorOptions();
         syncSupervisorTargetFromInput();
         const evaluationTypeInput = document.getElementById('evaluationType');
         if (evaluationTypeInput) evaluationTypeInput.value = evaluationType;
         refreshSupervisorTargetLockState();
-        switchView('dashboard');
-
-        // Find and update the active nav link for dashboard
-        const navLinks = document.querySelectorAll('.nav-link:not(.logout)');
-        navLinks.forEach(l => l.classList.remove('active'));
-        const dashboardLink = document.querySelector('.nav-link[data-view="dashboard"]');
-        if (dashboardLink) dashboardLink.classList.add('active');
+        switchView('peerEvaluation');
+        updateNavigation('peerEvaluation');
     }, 1500);
 }
 
@@ -2421,20 +2796,61 @@ function setupProfilePhotoUpload() {
         const file = input.files && input.files[0];
         if (!file) return;
 
-        if (!file.type.startsWith('image/')) {
-            alert('Please select a valid image file.');
+        const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+        if (!allowedTypes.includes(String(file.type || '').toLowerCase())) {
+            alert('Please choose a JPG, JPEG, PNG, or WEBP image.');
             input.value = '';
             return;
         }
 
-        const reader = new FileReader();
-        reader.onload = function () {
-            preview.src = reader.result;
+        if (Number(file.size || 0) > (2 * 1024 * 1024)) {
+            alert('Please choose an image smaller than 2MB.');
+            input.value = '';
+            return;
+        }
+
+        const localPreviewUrl = URL.createObjectURL(file);
+        preview.src = localPreviewUrl;
+        preview.classList.add('active');
+        placeholder.style.display = 'none';
+
+        if (typeof SharedData.uploadProfilePhoto !== 'function') {
+            const reader = new FileReader();
+            reader.onload = function () {
+                preview.src = reader.result;
+                preview.classList.add('active');
+                placeholder.style.display = 'none';
+                SharedData.setProfilePhoto('dean', reader.result);
+                URL.revokeObjectURL(localPreviewUrl);
+                input.value = '';
+            };
+            reader.readAsDataURL(file);
+            return;
+        }
+
+        try {
+            const savedPhoto = SharedData.uploadProfilePhoto(file);
+            if (savedPhoto) {
+                preview.src = savedPhoto;
+            }
             preview.classList.add('active');
             placeholder.style.display = 'none';
-            SharedData.setProfilePhoto('dean', reader.result);
-        };
-        reader.readAsDataURL(file);
+        } catch (error) {
+            alert(error && error.message ? error.message : 'Failed to upload the profile image.');
+            const storedPhoto = SharedData.getProfilePhoto('dean');
+            if (storedPhoto) {
+                preview.src = storedPhoto;
+                preview.classList.add('active');
+                placeholder.style.display = 'none';
+            } else {
+                preview.removeAttribute('src');
+                preview.classList.remove('active');
+                placeholder.style.display = '';
+            }
+        } finally {
+            URL.revokeObjectURL(localPreviewUrl);
+            input.value = '';
+        }
     });
 }
 
@@ -2605,11 +3021,6 @@ function hideAccountActionCards() {
 function setupChangeEmailForm() {
     const form = document.getElementById('changeEmailForm');
     if (!form) return;
-    const newEmail = document.getElementById('newEmail');
-    const confirmEmail = document.getElementById('confirmEmail');
-
-    if (newEmail) newEmail.disabled = true;
-    if (confirmEmail) confirmEmail.disabled = true;
 
     form.addEventListener('submit', function (e) {
         e.preventDefault();
@@ -2618,12 +3029,51 @@ function setupChangeEmailForm() {
 }
 
 /**
- * Placeholder change email handler (SQL-ready)
+ * Change email handler
  */
 function handleChangeEmail() {
     const form = document.getElementById('changeEmailForm');
     if (!form) return;
-    showFormMessage(form, 'Email update is not available yet in this panel.', 'error');
+
+    const currentEmail = String((document.getElementById('currentEmail') || {}).value || '').trim();
+    const newEmail = String((document.getElementById('newEmail') || {}).value || '').trim();
+    const confirmEmail = String((document.getElementById('confirmEmail') || {}).value || '').trim();
+
+    if (!newEmail || !confirmEmail) {
+        showFormMessage(form, 'Please fill out all email fields.', 'error');
+        return;
+    }
+    if (newEmail !== confirmEmail) {
+        showFormMessage(form, 'New email and confirmation do not match.', 'error');
+        return;
+    }
+    if (currentEmail && newEmail.toLowerCase() === currentEmail.toLowerCase()) {
+        showFormMessage(form, 'New email must be different from the current email.', 'error');
+        return;
+    }
+    if (!SharedData.changeOwnEmail) {
+        showFormMessage(form, 'Email update service is unavailable.', 'error');
+        return;
+    }
+
+    try {
+        const result = SharedData.changeOwnEmail(currentEmail, newEmail);
+        const nextEmail = String(result && result.email || newEmail).trim();
+        const currentEmailInput = document.getElementById('currentEmail');
+        if (currentEmailInput) {
+            currentEmailInput.value = nextEmail;
+            currentEmailInput.defaultValue = nextEmail;
+        }
+        const profileEmail = document.getElementById('profileEmail');
+        if (profileEmail) {
+            profileEmail.textContent = nextEmail;
+        }
+        showFormMessage(form, 'Email updated successfully.', 'success');
+        form.reset();
+    } catch (error) {
+        console.error('[DeanPanel] Failed to update email.', error);
+        showFormMessage(form, error && error.message ? error.message : 'Failed to update email.', 'error');
+    }
 }
 
 /**
@@ -2632,13 +3082,6 @@ function handleChangeEmail() {
 function setupChangePasswordForm() {
     const form = document.getElementById('changePasswordForm');
     if (!form) return;
-    const currentPassword = document.getElementById('currentPassword');
-    const newPassword = document.getElementById('newPassword');
-    const confirmPassword = document.getElementById('confirmPassword');
-
-    if (currentPassword) currentPassword.disabled = true;
-    if (newPassword) newPassword.disabled = true;
-    if (confirmPassword) confirmPassword.disabled = true;
 
     form.addEventListener('submit', function (e) {
         e.preventDefault();
@@ -2647,12 +3090,37 @@ function setupChangePasswordForm() {
 }
 
 /**
- * Placeholder change password handler (SQL-ready)
+ * Change password handler
  */
 function handleChangePassword() {
     const form = document.getElementById('changePasswordForm');
     if (!form) return;
-    showFormMessage(form, 'Password update is not available yet in this panel.', 'error');
+
+    const currentPassword = String((document.getElementById('currentPassword') || {}).value || '').trim();
+    const newPassword = String((document.getElementById('newPassword') || {}).value || '').trim();
+    const confirmPassword = String((document.getElementById('confirmPassword') || {}).value || '').trim();
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+        showFormMessage(form, 'Please fill out all password fields.', 'error');
+        return;
+    }
+    if (newPassword !== confirmPassword) {
+        showFormMessage(form, 'New password and confirmation do not match.', 'error');
+        return;
+    }
+    if (!SharedData.changeOwnPassword) {
+        showFormMessage(form, 'Password update service is unavailable.', 'error');
+        return;
+    }
+
+    try {
+        SharedData.changeOwnPassword(currentPassword, newPassword);
+        showFormMessage(form, 'Password updated successfully.', 'success');
+        form.reset();
+    } catch (error) {
+        console.error('[DeanPanel] Failed to update password.', error);
+        showFormMessage(form, error && error.message ? error.message : 'Failed to update password.', 'error');
+    }
 }
 
 /**
@@ -2747,6 +3215,37 @@ function getDeanAssignedInstitutes(sessionOrUsername) {
     return department ? [department] : [];
 }
 
+function buildDeanPeerRequiredCountMap(semesterId) {
+    const requiredByProfessor = {};
+    if (!SharedData || typeof SharedData.listDeanPeerRoomsCurrent !== 'function') {
+        return requiredByProfessor;
+    }
+
+    const selectedSemester = resolveSelectedSemesterId(semesterId);
+    try {
+        const response = SharedData.listDeanPeerRoomsCurrent({});
+        const currentSemester = String(response && response.currentSemester || '').trim();
+        if (!currentSemester || (selectedSemester && currentSemester !== selectedSemester)) {
+            return requiredByProfessor;
+        }
+
+        const rooms = Array.isArray(response && response.rooms) ? response.rooms : [];
+        rooms.forEach(room => {
+            const members = Array.isArray(room && room.members) ? room.members : [];
+            const perMemberRequired = Math.max(members.length - 1, 0);
+            members.forEach(member => {
+                const professorUserId = normalizeUserIdToken(member && member.userId);
+                if (!professorUserId) return;
+                requiredByProfessor[professorUserId] = (requiredByProfessor[professorUserId] || 0) + perMemberRequired;
+            });
+        });
+    } catch (error) {
+        console.warn('[Dean] Unable to load peer room assignment counts for response table.', error);
+    }
+
+    return requiredByProfessor;
+}
+
 function buildDeanProfessorResultRows(query, typeOverride) {
     const context = buildDeanPanelContext();
     const evaluationType = getDeanEvaluationTypeMeta(typeOverride || (query && query.evaluationType) || 'student').id;
@@ -2765,6 +3264,11 @@ function buildDeanProfessorResultRows(query, typeOverride) {
     const evaluations = Array.isArray(context.evaluations) ? context.evaluations : [];
 
     const normalizedType = evaluationType;
+    const deanEvaluatorToken = normalizeRoleToken(query && query.deanId);
+    const peerRequiredByProfessor = normalizedType === 'professor'
+        ? buildDeanPeerRequiredCountMap(semesterId)
+        : {};
+    const hasPeerAssignmentMap = Object.keys(peerRequiredByProfessor).length > 0;
     const filteredByType = evaluations.filter(evaluation =>
         resolveEvaluationTypeToken(evaluation) === normalizedType &&
         isEvaluationInSemester(evaluation, semesterId)
@@ -2797,19 +3301,32 @@ function buildDeanProfessorResultRows(query, typeOverride) {
                 professorEvaluations.push(evaluation);
             });
         } else {
-            required = normalizedType === 'professor'
-                ? Math.max(scopedProfessors.length - 1, 0)
-                : getActiveSupervisorCount();
+            if (normalizedType === 'professor') {
+                const assignmentRequired = Number(peerRequiredByProfessor[professorUserId] || 0);
+                required = hasPeerAssignmentMap
+                    ? Math.max(assignmentRequired, 0)
+                    : Math.max(scopedProfessors.length - 1, 0);
+            } else {
+                required = 1;
+            }
 
             filteredByType.forEach(evaluation => {
                 const targetProfessorId = resolveDeanTargetProfessorId(evaluation, normalizedType, context);
-                if (targetProfessorId === professorUserId) {
-                    professorEvaluations.push(evaluation);
+                if (targetProfessorId !== professorUserId) return;
+                if (normalizedType === 'supervisor' && deanEvaluatorToken) {
+                    const evaluatorToken = normalizeRoleToken(
+                        evaluation && (evaluation.evaluatorId || evaluation.evaluatorUsername || evaluation.evaluatorEmail || evaluation.evaluatorName)
+                    );
+                    if (!evaluatorToken || evaluatorToken !== deanEvaluatorToken) return;
                 }
+                professorEvaluations.push(evaluation);
             });
         }
 
         const avgScore = computeAverageRatingFromEvaluations(professorEvaluations);
+        const receivedCount = normalizedType === 'supervisor'
+            ? Math.min(professorEvaluations.length, 1)
+            : professorEvaluations.length;
         const lastUpdated = professorEvaluations.reduce((latest, evaluation) => {
             const current = String(evaluation && (evaluation.submittedAt || evaluation.timestamp) || '').trim();
             if (!current) return latest;
@@ -2828,7 +3345,7 @@ function buildDeanProfessorResultRows(query, typeOverride) {
             employmentType: String(professor && professor.employmentType || '').trim() || 'N/A',
             position: String(professor && professor.position || '').trim() || 'N/A',
             required,
-            received: professorEvaluations.length,
+            received: receivedCount,
             avgScore,
             lastUpdated,
             status: statusText
@@ -2912,11 +3429,20 @@ function setupFacultyResponseView() {
     const commentsTitle = document.getElementById('facultyCommentsTitle');
     const commentsMeta = document.getElementById('facultyCommentsMeta');
     const commentsList = document.getElementById('facultyCommentsList');
+    const commentsAiBtn = document.getElementById('facultyCommentsAiSummarize');
+    const commentsAiSummary = document.getElementById('facultyCommentsAiSummary');
     const commentsClose = document.getElementById('facultyCommentsClose');
+    const trendStatus = document.getElementById('deanSemestralTrendStatus');
+    const trendDelta = document.getElementById('deanSemestralTrendDelta');
+    const trendTableBody = document.getElementById('deanSemestralTrendTableBody');
+    const trendChart = document.getElementById('deanSemestralTrendChart');
+    const trendSection = document.getElementById('deanSemestralTrendSection');
 
     if (
         !searchInput || !searchBtn || !resetBtn || !semesterFilter
-        || !resultEl || !table || !commentsPanel || !commentsTitle || !commentsMeta || !commentsList || !commentsClose
+        || !resultEl || !table || !commentsPanel || !commentsTitle || !commentsMeta
+        || !commentsList || !commentsAiBtn || !commentsAiSummary || !commentsClose
+        || !trendStatus || !trendDelta || !trendTableBody || !trendChart || !trendSection
     ) return;
 
     const session = getUserSession() || {};
@@ -2925,6 +3451,54 @@ function setupFacultyResponseView() {
     let sourceData = [];
     let currentView = 'student';
     let selectedSemesterId = resolveSelectedSemesterId(deanSummaryState.selectedSemesterId);
+    const feedbackState = deanFacultyFeedbackState;
+    feedbackState.selectedSourceView = currentView;
+    feedbackState.loadedComments = Array.isArray(feedbackState.loadedComments) ? feedbackState.loadedComments : [];
+    feedbackState.lastTrendRows = Array.isArray(feedbackState.lastTrendRows) ? feedbackState.lastTrendRows : [];
+
+    function getFeedbackViewLabel(view) {
+        if (view === 'peer') return 'Professor Evaluation';
+        if (view === 'supervisor') return 'Supervisor Evaluation';
+        return 'Student Evaluation';
+    }
+
+    function renderTaggedComments(comments) {
+        if (!Array.isArray(comments) || !comments.length) {
+            commentsList.innerHTML = '<li class="faculty-comments-empty">No comments available.</li>';
+            return;
+        }
+        const isStudentView = String(feedbackState.selectedSourceView || currentView).trim() === 'student';
+
+        commentsList.innerHTML = comments.map(comment => {
+            const classified = classifyDeanFeedbackCommentBiasByRules(comment && comment.text);
+            const label = String(classified && classified.label || 'Neutral');
+            const studentNumberMeta = isStudentView
+                ? '<div class="faculty-comment-meta">Student Number: ' + escapeHTML(resolveDeanCommentStudentNumber(comment)) + '</div>'
+                : '';
+            return '<li>' +
+                '<div class="faculty-comment-meta"><span class="faculty-comment-tag ' + getDeanCommentBiasTagClass(label) + '">' + escapeHTML(label) + '</span></div>' +
+                '<div class="faculty-comment-text">"' + escapeHTML(String(comment && comment.text || '')) + '"</div>' +
+                studentNumberMeta +
+                '<div class="faculty-comment-meta">' + escapeHTML(String(comment && comment.source || getFeedbackViewLabel(currentView))) + ' • ' + escapeHTML(formatDisplayDate(comment && comment.date)) + '</div>' +
+                '</li>';
+        }).join('');
+    }
+
+    function resetFeedbackPanelState(hidePanel = false) {
+        feedbackState.selectedProfessorUserId = '';
+        feedbackState.selectedProfessorId = '';
+        feedbackState.selectedProfessorName = '';
+        feedbackState.selectedSourceView = currentView;
+        feedbackState.loadedComments = [];
+        feedbackState.lastTrendRows = [];
+        commentsList.innerHTML = '<li class="faculty-comments-empty">No comments loaded yet.</li>';
+        setDeanCommentsAiSummary('Click AI Summarize after opening a professor comments list.', 'info');
+        resetDeanProfessorSemestralTrend();
+        setDeanSemestralTrendVisibility(false);
+        if (hidePanel) {
+            commentsPanel.classList.remove('active');
+        }
+    }
 
     function populateSemesterFilter(preferredSemesterId) {
         const context = buildDeanPanelContext();
@@ -3015,8 +3589,7 @@ function setupFacultyResponseView() {
         setToggleState(peerResultsBtn, currentView === 'peer');
         setToggleState(supervisorResultsBtn, currentView === 'supervisor');
 
-        if (commentsPanel) commentsPanel.classList.remove('active');
-        if (commentsList) commentsList.innerHTML = '<li class="faculty-comments-empty">No comments loaded yet.</li>';
+        resetFeedbackPanelState(true);
 
         fetchResults(currentView).then(results => {
             sourceData = Array.isArray(results) ? results : [];
@@ -3054,7 +3627,20 @@ function setupFacultyResponseView() {
     });
 
     commentsClose.addEventListener('click', function () {
-        commentsPanel.classList.remove('active');
+        resetFeedbackPanelState(true);
+    });
+
+    commentsAiBtn.addEventListener('click', function () {
+        if (!Array.isArray(feedbackState.loadedComments) || !feedbackState.loadedComments.length) {
+            setDeanCommentsAiSummary('No comments loaded for the selected professor. Open a professor comments list first.', 'warning');
+            return;
+        }
+
+        const viewLabel = getFeedbackViewLabel(feedbackState.selectedSourceView || currentView);
+        const summaryText = buildDeanFeedbackAiSummary(feedbackState.loadedComments, {
+            evaluationLabel: viewLabel
+        });
+        setDeanCommentsAiSummary(summaryText, 'info');
     });
 
     semesterFilter.addEventListener('change', function () {
@@ -3091,31 +3677,54 @@ function setupFacultyResponseView() {
         buttons.forEach(button => {
             button.addEventListener('click', function () {
                 const professorId = this.getAttribute('data-professor-id');
-                const professor = items.find(item => item.professorId === professorId);
+                const professorUserIdToken = normalizeUserIdToken(this.getAttribute('data-professor-user-id'));
+                const professor = items.find(item =>
+                    (professorUserIdToken && normalizeUserIdToken(item && item.professorUserId) === professorUserIdToken)
+                    || String(item && item.professorId || '') === String(professorId || '')
+                );
                 if (!professor) return;
 
                 commentsTitle.textContent = 'Comments for ' + professor.professorName;
-                commentsMeta.textContent = professor.professorId + ' | ' + professor.institute;
+                commentsMeta.textContent = professor.professorId + ' | ' + professor.institute + ' | ' + getFeedbackViewLabel(currentView);
+
+                let professorUserId = professorUserIdToken || normalizeUserIdToken(professor && professor.professorUserId);
+                if (!professorUserId) {
+                    const context = buildDeanPanelContext();
+                    const professorToken = normalizeRoleToken(professor && professor.professorId);
+                    const matchedProfessor = (context.scopedProfessors || []).find(item =>
+                        normalizeRoleToken(item && (item.employeeId || item.id)) === professorToken
+                    );
+                    professorUserId = normalizeUserIdToken(matchedProfessor && matchedProfessor.id);
+                }
+                feedbackState.selectedProfessorUserId = professorUserId;
+                feedbackState.selectedProfessorId = String(professor.professorId || '').trim();
+                feedbackState.selectedProfessorName = String(professor.professorName || '').trim();
+                feedbackState.selectedSourceView = currentView;
+                setDeanSemestralTrendVisibility(true);
 
                 fetchFacultyCommentsFromSql({
                     professorId: professor.professorId,
+                    professorUserId: professorUserId,
                     deanId,
                     semesterId: selectedSemesterId,
                     source: currentView
                 }).then(comments => {
-                    if (!comments.length) {
-                        commentsList.innerHTML = '<li class="faculty-comments-empty">No comments available.</li>';
+                    const normalized = Array.isArray(comments) ? comments : [];
+                    feedbackState.loadedComments = normalized;
+
+                    renderTaggedComments(normalized);
+                    renderDeanProfessorSemestralTrend(feedbackState.selectedProfessorUserId, selectedSemesterId);
+                    if (!normalized.length) {
+                        setDeanCommentsAiSummary('No comments available for this professor in the selected filters.', 'warning');
                     } else {
-                        commentsList.innerHTML = comments.map(comment =>
-                            '<li>' +
-                            '<div class="faculty-comment-text">"' + comment.text + '"</div>' +
-                            '<div class="faculty-comment-meta">' + comment.source + ' • ' + formatDisplayDate(comment.date) + '</div>' +
-                            '</li>'
-                        ).join('');
+                        setDeanCommentsAiSummary('Comments loaded. Click AI Summarize to summarize this professor comments.', 'info');
                     }
                     commentsPanel.classList.add('active');
                 }).catch(() => {
                     commentsList.innerHTML = '<li class="faculty-comments-empty">Unable to load comments.</li>';
+                    feedbackState.loadedComments = [];
+                    setDeanCommentsAiSummary('Unable to load comments for summarization.', 'error');
+                    renderDeanProfessorSemestralTrend(feedbackState.selectedProfessorUserId, selectedSemesterId);
                     commentsPanel.classList.add('active');
                 });
             });
@@ -3123,6 +3732,7 @@ function setupFacultyResponseView() {
     }
 
     populateSemesterFilter(selectedSemesterId);
+    resetFeedbackPanelState(true);
     setResultsView(currentView);
 }
 
@@ -3162,7 +3772,7 @@ function renderFacultyResponseTable(items) {
             '<td>' + responseRate + '%</td>' +
             '<td>' + item.avgScore.toFixed(1) + '</td>' +
             '<td><span class="dean-status-pill ' + statusClass + '">' + statusText + '</span></td>' +
-            '<td><button type="button" class="btn-submit faculty-comments-btn js-view-comments" data-professor-id="' + item.professorId + '">View</button></td>' +
+            '<td><button type="button" class="btn-submit faculty-comments-btn js-view-comments" data-professor-id="' + item.professorId + '" data-professor-user-id="' + (item.professorUserId || '') + '">View</button></td>' +
             '</tr>';
     }).join('');
 }
@@ -3178,21 +3788,37 @@ function fetchFacultyCommentsFromSql(query) {
             : 'student';
     const summary = getDeanSummaryForType(sourceType);
     const professorToken = normalizeRoleToken(query && query.professorId);
+    const professorUserToken = normalizeUserIdToken(query && query.professorUserId);
     const row = (summary.breakdownRows || []).find(item =>
         normalizeRoleToken(item && item.professorId) === professorToken
         || normalizeRoleToken(item && item.employeeId) === professorToken
     );
     if (row && row.rowKey && summary.commentBuckets && Array.isArray(summary.commentBuckets[row.rowKey])) {
-        return Promise.resolve(summary.commentBuckets[row.rowKey]);
+        const bucket = summary.commentBuckets[row.rowKey].map(item => ({
+            text: String(item && item.text || '').trim(),
+            source: String(item && item.source || '').trim(),
+            date: String(item && item.date || '').trim(),
+            evaluatorStudentNumber: String(item && item.evaluatorStudentNumber || '').trim(),
+            studentNumber: String(item && item.studentNumber || '').trim(),
+            studentId: String(item && item.studentId || '').trim(),
+            studentUserId: String(item && item.studentUserId || '').trim(),
+            evaluatorId: String(item && item.evaluatorId || '').trim(),
+            evaluatorUsername: String(item && item.evaluatorUsername || '').trim(),
+            evaluatorName: String(item && item.evaluatorName || '').trim()
+        })).filter(item => item.text);
+        return Promise.resolve(bucket);
     }
 
     const context = buildDeanPanelContext();
     const semesterId = resolveSelectedSemesterId(query && query.semesterId || deanSummaryState.selectedSemesterId || context.currentSemester);
-    const professorByEmployee = (context.scopedProfessors || []).find(professor =>
-        normalizeRoleToken(professor && professor.employeeId) === professorToken
-        || normalizeRoleToken(professor && professor.id) === professorToken
-    );
-    const targetProfessorId = professorByEmployee ? normalizeUserIdToken(professorByEmployee.id) : '';
+    let targetProfessorId = professorUserToken;
+    if (!targetProfessorId) {
+        const professorByEmployee = (context.scopedProfessors || []).find(professor =>
+            normalizeRoleToken(professor && professor.employeeId) === professorToken
+            || normalizeRoleToken(professor && professor.id) === professorToken
+        );
+        targetProfessorId = professorByEmployee ? normalizeUserIdToken(professorByEmployee.id) : '';
+    }
     if (!targetProfessorId) return Promise.resolve([]);
 
     const comments = [];
@@ -3201,11 +3827,11 @@ function fetchFacultyCommentsFromSql(query) {
         if (!isEvaluationInSemester(evaluation, semesterId)) return;
         if (resolveDeanTargetProfessorId(evaluation, sourceType, context) !== targetProfessorId) return;
         collectEvaluationComments(evaluation).forEach(text => {
-            comments.push({
+            comments.push(buildDeanCommentRecord(
+                evaluation,
                 text,
-                source: getDeanEvaluationTypeMeta(sourceType).label,
-                date: String(evaluation && (evaluation.submittedAt || evaluation.timestamp) || '').trim()
-            });
+                getDeanEvaluationTypeMeta(sourceType).label
+            ));
         });
     });
     return Promise.resolve(comments);

@@ -132,13 +132,14 @@ function buildProgramsSnapshot(PDO $pdo) {
     return $programs;
 }
 
-function buildUsersFromDatabase(PDO $pdo) {
-    $stmt = $pdo->query(
+function getUsersBaseSelectSql() {
+    return
         'SELECT
             u.id,
             u.name,
             u.email,
             u.password,
+            u.profile_image,
             u.status,
             r.code AS role_code,
             c.slug AS campus_slug,
@@ -148,7 +149,6 @@ function buildUsersFromDatabase(PDO $pdo) {
             sp.position,
             st.year_section,
             st.student_number,
-            pp.photo_data,
             COALESCE(sp_program.code, st_program.code) AS program_code,
             COALESCE(sp_program.name, st_program.name) AS program_name
          FROM users u
@@ -159,42 +159,95 @@ function buildUsersFromDatabase(PDO $pdo) {
          LEFT JOIN employment_types et ON et.id = sp.employment_type_id
          LEFT JOIN programs sp_program ON sp_program.id = sp.program_id
          LEFT JOIN student_profiles st ON st.user_id = u.id
-         LEFT JOIN programs st_program ON st_program.id = st.program_id
-         LEFT JOIN profile_photos pp ON pp.user_id = u.id
-         ORDER BY u.name ASC'
-    );
+         LEFT JOIN programs st_program ON st_program.id = st.program_id';
+}
+
+function buildUserSnapshotFromDatabaseRow(array $row, $includeSensitive = false) {
+    $department = $row['department_code'] ?: '';
+    $profileImagePath = normalizeStoredProfileImagePath($row['profile_image'] ?? '');
+    $profileImageUrl = resolveStoredProfileImageUrlForDisplay($profileImagePath);
+    $user = [
+        'id' => 'u' . $row['id'],
+        'name' => $row['name'],
+        'email' => $row['email'],
+        'role' => $row['role_code'],
+        'campus' => $row['campus_slug'],
+        'department' => $department,
+        'institute' => $department,
+        'employeeId' => $row['employee_id'] ?: '',
+        'employmentType' => $row['employment_type_label'] ?: '',
+        'position' => $row['position'] ?: '',
+        'yearSection' => $row['year_section'] ?: '',
+        'studentNumber' => $row['student_number'] ?: '',
+        'photoData' => $profileImageUrl,
+        'profileImage' => $profileImagePath,
+        'profileImageUrl' => $profileImageUrl,
+        'programCode' => $row['program_code'] ?: '',
+        'programName' => $row['program_name'] ?: '',
+        'status' => $row['status'],
+    ];
+
+    if ($includeSensitive) {
+        $user['password'] = $row['password'];
+    }
+
+    return $user;
+}
+
+function resolveStoredUserIdNumber($value) {
+    $raw = trim((string) $value);
+    if ($raw === '') {
+        return 0;
+    }
+    if (preg_match('/^u(\d+)$/i', $raw, $matches)) {
+        return (int) $matches[1];
+    }
+    if (preg_match('/^\d+$/', $raw)) {
+        return (int) $raw;
+    }
+    return 0;
+}
+
+function buildUsersFromDatabase(PDO $pdo, $includeSensitive = false) {
+    ensureUsersProfileImageColumn($pdo);
+    $stmt = $pdo->query(getUsersBaseSelectSql() . ' ORDER BY u.name ASC');
 
     $users = [];
     foreach ($stmt->fetchAll() as $row) {
-        $department = $row['department_code'] ?: '';
-        $user = [
-            'id' => 'u' . $row['id'],
-            'name' => $row['name'],
-            'email' => $row['email'],
-            'password' => $row['password'],
-            'role' => $row['role_code'],
-            'campus' => $row['campus_slug'],
-            'department' => $department,
-            'institute' => $department,
-            'employeeId' => $row['employee_id'] ?: '',
-            'employmentType' => $row['employment_type_label'] ?: '',
-            'position' => $row['position'] ?: '',
-            'yearSection' => $row['year_section'] ?: '',
-            'studentNumber' => $row['student_number'] ?: '',
-            'photoData' => $row['photo_data'] ?: '',
-            'programCode' => $row['program_code'] ?: '',
-            'programName' => $row['program_name'] ?: '',
-            'status' => $row['status'],
-        ];
-        $users[] = $user;
+        $users[] = buildUserSnapshotFromDatabaseRow($row, $includeSensitive);
     }
 
     return $users;
 }
 
-function buildUsersSnapshot(PDO $pdo) {
-    $snapshot = buildUsersFromDatabase($pdo);
-    setSettingJson($pdo, 'sharedUsersData', $snapshot);
+function buildUserSnapshotById(PDO $pdo, $userId, $includeSensitive = false) {
+    $numericUserId = resolveStoredUserIdNumber($userId);
+    if ($numericUserId <= 0) {
+        return null;
+    }
+
+    ensureUsersProfileImageColumn($pdo);
+    $stmt = $pdo->prepare(getUsersBaseSelectSql() . ' WHERE u.id = :id LIMIT 1');
+    $stmt->execute([':id' => $numericUserId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        return null;
+    }
+
+    return buildUserSnapshotFromDatabaseRow($row, $includeSensitive);
+}
+
+function buildAuthUsersSnapshot(PDO $pdo) {
+    runProfileImageMigrationsIfNeeded($pdo);
+    return buildUsersFromDatabase($pdo, true);
+}
+
+function buildUsersSnapshot(PDO $pdo, $persistLegacyCache = false) {
+    runProfileImageMigrationsIfNeeded($pdo);
+    $snapshot = buildUsersFromDatabase($pdo, false);
+    if ($persistLegacyCache) {
+        setSettingJson($pdo, 'sharedUsersData', $snapshot);
+    }
     return $snapshot;
 }
 
@@ -510,7 +563,136 @@ function resolveEmploymentTypeId(array $lookup, $value) {
     return $lookup[$normalized] ?? null;
 }
 
-function persistUsersSnapshot(PDO $pdo, array $users) {
+function buildExistingUserRecordMaps(PDO $pdo) {
+    $rows = $pdo->query(
+        'SELECT u.id, u.email, u.password, r.code AS role_code
+         FROM users u
+         JOIN roles r ON r.id = u.role_id'
+    )->fetchAll();
+
+    $byId = [];
+    $byEmail = [];
+    foreach ($rows as $row) {
+        $id = (int) ($row['id'] ?? 0);
+        $emailKey = normalizeLookupValue($row['email'] ?? '');
+        if ($id > 0) {
+            $byId[$id] = $row;
+        }
+        if ($emailKey !== '') {
+            $byEmail[$emailKey] = $row;
+        }
+    }
+
+    return [
+        'byId' => $byId,
+        'byEmail' => $byEmail,
+    ];
+}
+
+function resolveExistingUserRecordForPayload(array $maps, array $user) {
+    $byId = is_array($maps['byId'] ?? null) ? $maps['byId'] : [];
+    $byEmail = is_array($maps['byEmail'] ?? null) ? $maps['byEmail'] : [];
+
+    $userId = resolveStoredUserIdNumber($user['id'] ?? '');
+    if ($userId > 0 && isset($byId[$userId])) {
+        return $byId[$userId];
+    }
+
+    $emailKey = normalizeLookupValue($user['email'] ?? '');
+    if ($emailKey !== '' && isset($byEmail[$emailKey])) {
+        return $byEmail[$emailKey];
+    }
+
+    return null;
+}
+
+function validateManagedUserRoleScope(array $allowedRoles, array $user, $existingRoleCode = '') {
+    if (count($allowedRoles) === 0) {
+        return;
+    }
+
+    $targetRole = normalizeLookupValue($user['role'] ?? '');
+    if ($targetRole === '' || !in_array($targetRole, $allowedRoles, true)) {
+        throw new RuntimeException('Permission denied for role "' . ($user['role'] ?? '') . '".');
+    }
+
+    $storedRole = normalizeLookupValue($existingRoleCode);
+    if ($storedRole !== '' && !in_array($storedRole, $allowedRoles, true)) {
+        throw new RuntimeException('Permission denied for existing role "' . $existingRoleCode . '".');
+    }
+}
+
+function resolveManagedUserProgramId(array $programLookup, $campusSlug, $departmentCode, $programCode, $email) {
+    if ($programCode === '') {
+        return null;
+    }
+    if ($departmentCode === '') {
+        throw new RuntimeException('Invalid program for user "' . $email . '": department is required.');
+    }
+
+    $programKey = $campusSlug . '|' . $departmentCode . '|' . normalizeLookupValue($programCode);
+    if (!isset($programLookup[$programKey])) {
+        throw new RuntimeException('Invalid program "' . $programCode . '" for user "' . $email . '".');
+    }
+
+    return $programLookup[$programKey];
+}
+
+function persistManagedUserProfiles(
+    PDO $pdo,
+    $userId,
+    array $user,
+    $roleCode,
+    $programId,
+    array $employmentTypeLookup,
+    PDOStatement $deleteStaffProfile,
+    PDOStatement $deleteStudentProfile,
+    PDOStatement $upsertStaffProfile,
+    PDOStatement $upsertStudentProfile
+) {
+    if ($roleCode === 'student') {
+        $deleteStaffProfile->execute([':user_id' => $userId]);
+
+        $studentNumber = trim((string) ($user['studentNumber'] ?? ''));
+        $yearSectionRaw = trim((string) ($user['yearSection'] ?? ''));
+        $yearSection = normalizeYearSectionValue($yearSectionRaw);
+        if ($studentNumber !== '') {
+            if ($yearSection === '') {
+                throw new RuntimeException('Invalid yearSection format for student "' . ($user['email'] ?? '') . '". Expected Y-S (e.g., 3-1).');
+            }
+            $upsertStudentProfile->execute([
+                ':user_id' => $userId,
+                ':student_number' => $studentNumber,
+                ':program_id' => $programId,
+                ':year_section' => $yearSection,
+            ]);
+        } else {
+            $deleteStudentProfile->execute([':user_id' => $userId]);
+        }
+
+        return;
+    }
+
+    $deleteStudentProfile->execute([':user_id' => $userId]);
+
+    $employeeId = trim((string) ($user['employeeId'] ?? ''));
+    $position = trim((string) ($user['position'] ?? ''));
+    $employmentTypeId = resolveEmploymentTypeId($employmentTypeLookup, $user['employmentType'] ?? '');
+
+    if ($employeeId !== '') {
+        $upsertStaffProfile->execute([
+            ':user_id' => $userId,
+            ':employee_id' => $employeeId,
+            ':employment_type_id' => $employmentTypeId,
+            ':program_id' => $roleCode === 'professor' ? $programId : null,
+            ':position' => $position,
+        ]);
+    } else {
+        $deleteStaffProfile->execute([':user_id' => $userId]);
+    }
+}
+
+function persistUsersSnapshot(PDO $pdo, array $users, array $options = []) {
     ensureRoleLookupSeed($pdo);
     ensureEmploymentTypeLookupSeed($pdo);
     ensureCampusAndDepartmentLookupSeed($pdo, $users);
@@ -521,21 +703,26 @@ function persistUsersSnapshot(PDO $pdo, array $users) {
     $programLookup = buildProgramLookupMap($pdo);
     $employmentTypeLookup = buildEmploymentTypeLookupMap($pdo);
 
-    $existingUsers = $pdo->query('SELECT id, email FROM users')->fetchAll();
+    $existingMaps = buildExistingUserRecordMaps($pdo);
+    $allowedRoles = array_values(array_filter(array_map('normalizeLookupValue', $options['allowed_roles'] ?? [])));
+    $requireExisting = !empty($options['require_existing']);
+    $requireNew = !empty($options['require_new']);
 
-    $upsertUser = $pdo->prepare(
+    $insertUser = $pdo->prepare(
         'INSERT INTO users (role_id, campus_id, department_id, name, email, password, status)
-         VALUES (:role_id, :campus_id, :department_id, :name, :email, :password, :status)
-         ON DUPLICATE KEY UPDATE
-            id = LAST_INSERT_ID(id),
-            role_id = VALUES(role_id),
-            campus_id = VALUES(campus_id),
-            department_id = VALUES(department_id),
-            name = VALUES(name),
-            password = VALUES(password),
-            status = VALUES(status)'
+         VALUES (:role_id, :campus_id, :department_id, :name, :email, :password, :status)'
     );
-    $deleteUser = $pdo->prepare('DELETE FROM users WHERE email = :email');
+    $updateUser = $pdo->prepare(
+        'UPDATE users
+         SET role_id = :role_id,
+             campus_id = :campus_id,
+             department_id = :department_id,
+             name = :name,
+             email = :email,
+             password = :password,
+             status = :status
+         WHERE id = :id'
+    );
     $deleteStaffProfile = $pdo->prepare('DELETE FROM staff_profiles WHERE user_id = :user_id');
     $deleteStudentProfile = $pdo->prepare('DELETE FROM student_profiles WHERE user_id = :user_id');
     $upsertStaffProfile = $pdo->prepare(
@@ -555,8 +742,7 @@ function persistUsersSnapshot(PDO $pdo, array $users) {
             program_id = VALUES(program_id),
             year_section = VALUES(year_section)'
     );
-
-    $keptEmails = [];
+    $savedUserIds = [];
 
     $pdo->beginTransaction();
     try {
@@ -576,8 +762,17 @@ function persistUsersSnapshot(PDO $pdo, array $users) {
                 !isset($roleLookup[$roleCode]) ||
                 !isset($campusLookup[$campusSlug])
             ) {
-                continue;
+                throw new RuntimeException('User name, email, role, and campus are required.');
             }
+
+            $existingRecord = resolveExistingUserRecordForPayload($existingMaps, $user);
+            if (!$existingRecord && $requireExisting) {
+                throw new RuntimeException('User not found for update.');
+            }
+            if ($existingRecord && $requireNew) {
+                throw new RuntimeException('User already exists.');
+            }
+            validateManagedUserRoleScope($allowedRoles, $user, $existingRecord['role_code'] ?? '');
 
             $departmentCode = normalizeLookupValue($user['department'] ?? '');
             if ($departmentCode === '') {
@@ -592,79 +787,63 @@ function persistUsersSnapshot(PDO $pdo, array $users) {
                 $programCodeRaw = trim((string) ($user['program'] ?? ''));
             }
             $programCode = strtoupper($programCodeRaw);
-            $programId = null;
-            if ($programCode !== '') {
-                if ($departmentCode === '') {
-                    throw new RuntimeException('Invalid program for user "' . $email . '": department is required.');
-                }
-                $programKey = $campusSlug . '|' . $departmentCode . '|' . normalizeLookupValue($programCode);
-                if (!isset($programLookup[$programKey])) {
-                    throw new RuntimeException('Invalid program "' . $programCode . '" for user "' . $email . '".');
-                }
-                $programId = $programLookup[$programKey];
+            $programId = resolveManagedUserProgramId($programLookup, $campusSlug, $departmentCode, $programCode, $email);
+
+            $passwordValue = null;
+            if ($existingRecord) {
+                $passwordInput = array_key_exists('password', $user) ? (string) ($user['password'] ?? '') : null;
+                $passwordValue = ($passwordInput === null || $passwordInput === '')
+                    ? (string) ($existingRecord['password'] ?? '')
+                    : normalizePasswordForStorage($passwordInput);
+            } else {
+                $passwordValue = normalizePasswordForStorage($user['password'] ?? '');
             }
 
-            $upsertUser->execute([
+            $params = [
                 ':role_id' => $roleLookup[$roleCode],
                 ':campus_id' => $campusLookup[$campusSlug],
                 ':department_id' => $departmentId,
                 ':name' => $name,
                 ':email' => $email,
-                ':password' => normalizePasswordForStorage($user['password'] ?? ''),
+                ':password' => $passwordValue,
                 ':status' => normalizeUserStatusValue($user['status'] ?? 'active'),
-            ]);
+            ];
 
-            $userId = (int) $pdo->lastInsertId();
+            if ($existingRecord) {
+                $params[':id'] = (int) $existingRecord['id'];
+                $updateUser->execute($params);
+                $userId = (int) $existingRecord['id'];
+            } else {
+                $insertUser->execute($params);
+                $userId = (int) $pdo->lastInsertId();
+            }
+
             if ($userId <= 0) {
                 continue;
             }
-            $keptEmails[normalizeLookupValue($email)] = true;
 
-            if ($roleCode === 'student') {
-                $deleteStaffProfile->execute([':user_id' => $userId]);
+            persistManagedUserProfiles(
+                $pdo,
+                $userId,
+                $user,
+                $roleCode,
+                $programId,
+                $employmentTypeLookup,
+                $deleteStaffProfile,
+                $deleteStudentProfile,
+                $upsertStaffProfile,
+                $upsertStudentProfile
+            );
 
-                $studentNumber = trim((string) ($user['studentNumber'] ?? ''));
-                $yearSectionRaw = trim((string) ($user['yearSection'] ?? ''));
-                $yearSection = normalizeYearSectionValue($yearSectionRaw);
-                if ($studentNumber !== '') {
-                    if ($yearSection === '') {
-                        throw new RuntimeException('Invalid yearSection format for student "' . $email . '". Expected Y-S (e.g., 3-1).');
-                    }
-                    $upsertStudentProfile->execute([
-                        ':user_id' => $userId,
-                        ':student_number' => $studentNumber,
-                        ':program_id' => $programId,
-                        ':year_section' => $yearSection,
-                    ]);
-                } else {
-                    $deleteStudentProfile->execute([':user_id' => $userId]);
-                }
-            } else {
-                $deleteStudentProfile->execute([':user_id' => $userId]);
-
-                $employeeId = trim((string) ($user['employeeId'] ?? ''));
-                $position = trim((string) ($user['position'] ?? ''));
-                $employmentTypeId = resolveEmploymentTypeId($employmentTypeLookup, $user['employmentType'] ?? '');
-
-                if ($employeeId !== '') {
-                    $upsertStaffProfile->execute([
-                        ':user_id' => $userId,
-                        ':employee_id' => $employeeId,
-                        ':employment_type_id' => $employmentTypeId,
-                        ':program_id' => $roleCode === 'professor' ? $programId : null,
-                        ':position' => $position,
-                    ]);
-                } else {
-                    $deleteStaffProfile->execute([':user_id' => $userId]);
-                }
-            }
-        }
-
-        foreach ($existingUsers as $row) {
-            $emailKey = normalizeLookupValue($row['email'] ?? '');
-            if ($emailKey !== '' && !isset($keptEmails[$emailKey])) {
-                $deleteUser->execute([':email' => $row['email']]);
-            }
+            $savedUserIds[] = $userId;
+            $updatedRecord = [
+                'id' => $userId,
+                'email' => $email,
+                'password' => $passwordValue,
+                'role_code' => $roleCode,
+            ];
+            $existingMaps['byId'][$userId] = $updatedRecord;
+            $existingMaps['byEmail'][normalizeLookupValue($email)] = $updatedRecord;
         }
 
         $pdo->commit();
@@ -673,9 +852,95 @@ function persistUsersSnapshot(PDO $pdo, array $users) {
         throw $e;
     }
 
-    $snapshot = buildUsersFromDatabase($pdo);
-    setSettingJson($pdo, 'sharedUsersData', $snapshot);
-    return $snapshot;
+    return buildUsersSnapshot($pdo, true);
+}
+
+function bulkUpsertUsersSnapshot(PDO $pdo, array $users, array $options = []) {
+    return persistUsersSnapshot($pdo, $users, $options);
+}
+
+function listUsersSnapshot(PDO $pdo, array $filters = []) {
+    $users = buildUsersSnapshot($pdo);
+    $campus = normalizeLookupValue($filters['campus'] ?? '');
+    $search = normalizeLookupValue($filters['search'] ?? '');
+
+    return array_values(array_filter($users, function ($user) use ($campus, $search) {
+        if ($campus !== '' && $campus !== 'all' && normalizeLookupValue($user['campus'] ?? '') !== $campus) {
+            return false;
+        }
+
+        if ($search === '') {
+            return true;
+        }
+
+        $haystacks = [
+            normalizeLookupValue($user['name'] ?? ''),
+            normalizeLookupValue($user['email'] ?? ''),
+            normalizeLookupValue($user['role'] ?? ''),
+            normalizeLookupValue($user['department'] ?? ''),
+            normalizeLookupValue($user['employeeId'] ?? ''),
+            normalizeLookupValue($user['studentNumber'] ?? ''),
+        ];
+
+        foreach ($haystacks as $value) {
+            if ($value !== '' && strpos($value, $search) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }));
+}
+
+function createUserSnapshot(PDO $pdo, array $user, array $options = []) {
+    $snapshot = persistUsersSnapshot($pdo, [$user], array_merge($options, ['require_new' => true]));
+    $email = trim((string) ($user['email'] ?? ''));
+    if ($email === '') {
+        return null;
+    }
+
+    foreach ($snapshot as $item) {
+        if (normalizeLookupValue($item['email'] ?? '') === normalizeLookupValue($email)) {
+            return $item;
+        }
+    }
+
+    return null;
+}
+
+function updateUserSnapshot(PDO $pdo, $userId, array $user, array $options = []) {
+    $numericUserId = resolveStoredUserIdNumber($userId);
+    if ($numericUserId <= 0) {
+        throw new RuntimeException('User not found.');
+    }
+
+    $user['id'] = 'u' . $numericUserId;
+    persistUsersSnapshot($pdo, [$user], array_merge($options, ['require_existing' => true]));
+    return buildUserSnapshotById($pdo, $numericUserId, false);
+}
+
+function deleteUserSnapshot(PDO $pdo, $userId, array $options = []) {
+    $numericUserId = resolveStoredUserIdNumber($userId);
+    if ($numericUserId <= 0) {
+        throw new RuntimeException('User not found.');
+    }
+
+    $allowedRoles = array_values(array_filter(array_map('normalizeLookupValue', $options['allowed_roles'] ?? [])));
+    if (count($allowedRoles) > 0) {
+        $existing = buildUserSnapshotById($pdo, $numericUserId, false);
+        $existingRole = normalizeLookupValue($existing['role'] ?? '');
+        if (!$existing || !in_array($existingRole, $allowedRoles, true)) {
+            throw new RuntimeException('Permission denied.');
+        }
+    }
+
+    $stmt = $pdo->prepare('DELETE FROM users WHERE id = :id');
+    $stmt->execute([':id' => $numericUserId]);
+    if ($stmt->rowCount() === 0) {
+        throw new RuntimeException('User not found.');
+    }
+
+    return buildUsersSnapshot($pdo);
 }
 
 function buildSettingsSnapshot(PDO $pdo) {
@@ -898,7 +1163,21 @@ function extractQuestionRatingMax($question) {
     return 5;
 }
 
+function ensureQuestionnaireExceptionReportingSchema(PDO $pdo) {
+    if (!tableExistsInCurrentSchema($pdo, 'questions')) {
+        return;
+    }
+
+    if (!columnExistsInCurrentSchema($pdo, 'questions', 'is_exception_reporting')) {
+        $pdo->exec(
+            'ALTER TABLE questions
+             ADD COLUMN is_exception_reporting TINYINT(1) NOT NULL DEFAULT 0 AFTER is_required'
+        );
+    }
+}
+
 function buildQuestionnairesSnapshotFromTables(PDO $pdo) {
+    ensureQuestionnaireExceptionReportingSchema($pdo);
     $snapshot = [];
 
     $questionnaires = $pdo->query(
@@ -973,6 +1252,7 @@ function buildQuestionnairesSnapshotFromTables(PDO $pdo) {
             q.rating_max,
             q.max_length,
             q.is_required,
+            q.is_exception_reporting,
             q.sort_order
          FROM questions q
          JOIN question_types qt ON qt.id = q.question_type_id
@@ -991,6 +1271,7 @@ function buildQuestionnairesSnapshotFromTables(PDO $pdo) {
             'text' => $row['question_text'],
             'type' => $row['question_type_code'],
             'required' => (bool) $row['is_required'],
+            'exceptionReporting' => (bool) ($row['is_exception_reporting'] ?? 0),
             'sectionId' => $row['section_id'] !== null ? (int) $row['section_id'] : null,
             'order' => (int) $row['sort_order'],
         ];
@@ -1009,6 +1290,7 @@ function buildQuestionnairesSnapshotFromTables(PDO $pdo) {
 }
 
 function syncQuestionnairesSnapshotToTables(PDO $pdo, array $data) {
+    ensureQuestionnaireExceptionReportingSchema($pdo);
     $semesterLookup = [];
     foreach ($pdo->query('SELECT id, slug FROM semesters')->fetchAll() as $row) {
         $semesterLookup[$row['slug']] = (int) $row['id'];
@@ -1069,6 +1351,7 @@ function syncQuestionnairesSnapshotToTables(PDO $pdo, array $data) {
              rating_max = :rating_max,
              max_length = :max_length,
              is_required = :is_required,
+             is_exception_reporting = :is_exception_reporting,
              sort_order = :sort_order
          WHERE id = :id AND questionnaire_id = :questionnaire_id'
     );
@@ -1081,6 +1364,7 @@ function syncQuestionnairesSnapshotToTables(PDO $pdo, array $data) {
             rating_max,
             max_length,
             is_required,
+            is_exception_reporting,
             sort_order
          ) VALUES (
             :questionnaire_id,
@@ -1090,6 +1374,7 @@ function syncQuestionnairesSnapshotToTables(PDO $pdo, array $data) {
             :rating_max,
             :max_length,
             :is_required,
+            :is_exception_reporting,
             :sort_order
          )'
     );
@@ -1205,6 +1490,7 @@ function syncQuestionnairesSnapshotToTables(PDO $pdo, array $data) {
                     if ($questionTypeId === null) {
                         continue;
                     }
+                    $isExceptionReporting = ($questionTypeCode === 'qualitative' && !empty($question['exceptionReporting'])) ? 1 : 0;
 
                     $sectionId = null;
                     if (array_key_exists('sectionId', $question) && $question['sectionId'] !== null && $question['sectionId'] !== '') {
@@ -1221,7 +1507,8 @@ function syncQuestionnairesSnapshotToTables(PDO $pdo, array $data) {
                         ':max_length' => $questionTypeCode === 'qualitative'
                             ? max(50, (int) ($question['maxLength'] ?? 500))
                             : 500,
-                        ':is_required' => !empty($question['required']) ? 1 : 0,
+                        ':is_required' => $isExceptionReporting ? 0 : (!empty($question['required']) ? 1 : 0),
+                        ':is_exception_reporting' => $isExceptionReporting,
                         ':sort_order' => (int) ($question['order'] ?? ($index + 1)),
                     ];
 
@@ -1598,6 +1885,21 @@ function osaStudentClearanceIdentityMatches(array $row, $studentUserToken, $stud
     return false;
 }
 
+function findOsaStudentClearanceSnapshotRow(PDO $pdo, $studentUserId, $studentNumber, $semesterId) {
+    $rows = buildOsaStudentClearancesSnapshot($pdo);
+    $semesterToken = normalizeOsaStudentClearanceToken($semesterId);
+    $studentUserToken = normalizeOsaStudentClearanceToken($studentUserId);
+    $studentNumberToken = normalizeOsaStudentClearanceToken($studentNumber);
+
+    foreach ($rows as $row) {
+        if (osaStudentClearanceIdentityMatches($row, $studentUserToken, $studentNumberToken, $semesterToken)) {
+            return normalizeOsaStudentClearanceSnapshotRow($row);
+        }
+    }
+
+    return null;
+}
+
 function upsertOsaStudentClearanceSnapshot(PDO $pdo, array $record) {
     $row = normalizeOsaStudentClearanceSnapshotRow($record);
     if ($row['semesterId'] === '') {
@@ -1616,10 +1918,215 @@ function upsertOsaStudentClearanceSnapshot(PDO $pdo, array $record) {
     $studentNumberToken = normalizeOsaStudentClearanceToken($row['studentNumber']);
     $row['notedAt'] = date('c');
 
-    $matched = false;
-    foreach ($rows as $index => $existing) {
+    foreach ($rows as $existing) {
         if (!osaStudentClearanceIdentityMatches($existing, $studentUserToken, $studentNumberToken, $semesterToken)) {
             continue;
+        }
+        return normalizeOsaStudentClearanceSnapshotRow($existing);
+    }
+
+    $rows[] = $row;
+
+    persistOsaStudentClearancesSnapshot($pdo, $rows);
+    return $row;
+}
+
+function normalizeStudentEvaluationProofToken($value) {
+    $text = strtolower(trim((string) $value));
+    if ($text === '') {
+        return '';
+    }
+    return preg_replace('/\s+/', ' ', $text);
+}
+
+function normalizeStudentEvaluationProofStatus($value) {
+    $token = normalizeStudentEvaluationProofToken($value);
+    if ($token === 'approved' || $token === 'rejected' || $token === 'pending') {
+        return $token;
+    }
+    return 'pending';
+}
+
+function isValidStudentProofDriveLink($value) {
+    $url = trim((string) $value);
+    if ($url === '' || !filter_var($url, FILTER_VALIDATE_URL)) {
+        return false;
+    }
+
+    $parts = parse_url($url);
+    if (!$parts) {
+        return false;
+    }
+
+    $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+    if ($scheme !== 'http' && $scheme !== 'https') {
+        return false;
+    }
+
+    $host = strtolower((string) ($parts['host'] ?? ''));
+    if (strpos($host, 'www.') === 0) {
+        $host = substr($host, 4);
+    }
+
+    return $host === 'drive.google.com' || $host === 'docs.google.com';
+}
+
+function normalizeStudentEvaluationProofSnapshotRow(array $record) {
+    $reason = trim((string) ($record['reason'] ?? ''));
+    $driveLink = trim((string) ($record['proofDriveLink'] ?? $record['driveLink'] ?? ''));
+    $reviewNote = trim((string) ($record['reviewNote'] ?? ''));
+
+    if (strlen($reason) > 2000) {
+        $reason = substr($reason, 0, 2000);
+    }
+    if (strlen($driveLink) > 2000) {
+        $driveLink = substr($driveLink, 0, 2000);
+    }
+    if (strlen($reviewNote) > 2000) {
+        $reviewNote = substr($reviewNote, 0, 2000);
+    }
+
+    $row = [
+        'id' => trim((string) ($record['id'] ?? '')),
+        'studentUserId' => trim((string) ($record['studentUserId'] ?? '')),
+        'studentNumber' => trim((string) ($record['studentNumber'] ?? '')),
+        'semesterId' => trim((string) ($record['semesterId'] ?? '')),
+        'reason' => $reason,
+        'proofDriveLink' => $driveLink,
+        'status' => normalizeStudentEvaluationProofStatus($record['status'] ?? 'pending'),
+        'submittedAt' => trim((string) ($record['submittedAt'] ?? '')),
+        'submittedBy' => trim((string) ($record['submittedBy'] ?? '')),
+        'reviewedAt' => trim((string) ($record['reviewedAt'] ?? '')),
+        'reviewedBy' => trim((string) ($record['reviewedBy'] ?? '')),
+        'reviewNote' => $reviewNote,
+    ];
+
+    if ($row['id'] === '') {
+        $row['id'] = 'proof_' . time() . '_' . mt_rand(1000, 9999);
+    }
+    if ($row['submittedAt'] === '') {
+        $row['submittedAt'] = date('c');
+    }
+    if ($row['submittedBy'] === '') {
+        $row['submittedBy'] = 'Student';
+    }
+    if ($row['status'] === 'pending') {
+        $row['reviewedAt'] = '';
+        $row['reviewedBy'] = '';
+        $row['reviewNote'] = '';
+    }
+
+    return $row;
+}
+
+function buildStudentEvaluationProofRequestsSnapshot(PDO $pdo) {
+    $snapshot = getSettingJson($pdo, 'studentEvaluationProofRequests', []);
+    if (!is_array($snapshot)) {
+        return [];
+    }
+
+    $rows = [];
+    foreach ($snapshot as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        $row = normalizeStudentEvaluationProofSnapshotRow($item);
+        if ($row['semesterId'] === '') {
+            continue;
+        }
+        if ($row['studentUserId'] === '' && $row['studentNumber'] === '') {
+            continue;
+        }
+        if ($row['reason'] === '' || $row['proofDriveLink'] === '') {
+            continue;
+        }
+        $rows[] = $row;
+    }
+
+    usort($rows, function ($a, $b) {
+        $aTs = strtotime((string) ($a['submittedAt'] ?? '')) ?: 0;
+        $bTs = strtotime((string) ($b['submittedAt'] ?? '')) ?: 0;
+        return $aTs <=> $bTs;
+    });
+
+    return array_values($rows);
+}
+
+function persistStudentEvaluationProofRequestsSnapshot(PDO $pdo, array $rows) {
+    $normalizedRows = [];
+    foreach ($rows as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        $row = normalizeStudentEvaluationProofSnapshotRow($item);
+        if ($row['semesterId'] === '') {
+            continue;
+        }
+        if ($row['studentUserId'] === '' && $row['studentNumber'] === '') {
+            continue;
+        }
+        if ($row['reason'] === '' || $row['proofDriveLink'] === '') {
+            continue;
+        }
+        $normalizedRows[] = $row;
+    }
+
+    setSettingJson($pdo, 'studentEvaluationProofRequests', array_values($normalizedRows));
+}
+
+function studentEvaluationProofIdentityMatches(array $row, $studentUserToken, $studentNumberToken, $semesterToken) {
+    if ($semesterToken === '') return false;
+    if (normalizeStudentEvaluationProofToken($row['semesterId'] ?? '') !== $semesterToken) return false;
+
+    $rowStudentUserToken = normalizeStudentEvaluationProofToken($row['studentUserId'] ?? '');
+    if ($studentUserToken !== '' && $rowStudentUserToken !== '' && $rowStudentUserToken === $studentUserToken) {
+        return true;
+    }
+
+    $rowStudentNumberToken = normalizeStudentEvaluationProofToken($row['studentNumber'] ?? '');
+    if ($studentNumberToken !== '' && $rowStudentNumberToken !== '' && $rowStudentNumberToken === $studentNumberToken) {
+        return true;
+    }
+
+    return false;
+}
+
+function submitStudentEvaluationProofSnapshot(PDO $pdo, array $record) {
+    $row = normalizeStudentEvaluationProofSnapshotRow($record);
+    if ($row['semesterId'] === '') {
+        throw new RuntimeException('semesterId is required.');
+    }
+    if ($row['studentUserId'] === '' && $row['studentNumber'] === '') {
+        throw new RuntimeException('student identity is required.');
+    }
+    if ($row['reason'] === '') {
+        throw new RuntimeException('reason is required.');
+    }
+    if ($row['proofDriveLink'] === '') {
+        throw new RuntimeException('proofDriveLink is required.');
+    }
+    if (!isValidStudentProofDriveLink($row['proofDriveLink'])) {
+        throw new RuntimeException('A valid Google Drive proof link is required.');
+    }
+
+    $rows = buildStudentEvaluationProofRequestsSnapshot($pdo);
+    $semesterToken = normalizeStudentEvaluationProofToken($row['semesterId']);
+    $studentUserToken = normalizeStudentEvaluationProofToken($row['studentUserId']);
+    $studentNumberToken = normalizeStudentEvaluationProofToken($row['studentNumber']);
+    $row['status'] = 'pending';
+    $row['submittedAt'] = date('c');
+    $row['reviewedAt'] = '';
+    $row['reviewedBy'] = '';
+    $row['reviewNote'] = '';
+
+    $matched = false;
+    foreach ($rows as $index => $existing) {
+        if (!studentEvaluationProofIdentityMatches($existing, $studentUserToken, $studentNumberToken, $semesterToken)) {
+            continue;
+        }
+        $existingId = trim((string) ($existing['id'] ?? ''));
+        if ($existingId !== '') {
+            $row['id'] = $existingId;
         }
         $rows[$index] = $row;
         $matched = true;
@@ -1630,8 +2137,91 @@ function upsertOsaStudentClearanceSnapshot(PDO $pdo, array $record) {
         $rows[] = $row;
     }
 
-    persistOsaStudentClearancesSnapshot($pdo, $rows);
+    persistStudentEvaluationProofRequestsSnapshot($pdo, $rows);
     return $row;
+}
+
+function reviewStudentEvaluationProofSnapshot(PDO $pdo, array $payload) {
+    $decision = normalizeStudentEvaluationProofStatus($payload['decision'] ?? $payload['status'] ?? '');
+    if ($decision !== 'approved' && $decision !== 'rejected') {
+        throw new RuntimeException('decision must be either "approved" or "rejected".');
+    }
+
+    $proofId = trim((string) ($payload['proofId'] ?? $payload['id'] ?? ''));
+    $semesterToken = normalizeStudentEvaluationProofToken($payload['semesterId'] ?? '');
+    $studentUserToken = normalizeStudentEvaluationProofToken($payload['studentUserId'] ?? '');
+    $studentNumberToken = normalizeStudentEvaluationProofToken($payload['studentNumber'] ?? '');
+    $reviewNote = trim((string) ($payload['reviewNote'] ?? ''));
+    if ($decision === 'rejected' && $reviewNote === '') {
+        throw new RuntimeException('reviewNote is required when rejecting a proof request.');
+    }
+    if (strlen($reviewNote) > 2000) {
+        $reviewNote = substr($reviewNote, 0, 2000);
+    }
+
+    $rows = buildStudentEvaluationProofRequestsSnapshot($pdo);
+    $targetIndex = -1;
+
+    if ($proofId !== '') {
+        foreach ($rows as $index => $row) {
+            if (trim((string) ($row['id'] ?? '')) === $proofId) {
+                $targetIndex = $index;
+                break;
+            }
+        }
+    }
+
+    if ($targetIndex < 0) {
+        foreach ($rows as $index => $row) {
+            if (studentEvaluationProofIdentityMatches($row, $studentUserToken, $studentNumberToken, $semesterToken)) {
+                $targetIndex = $index;
+                break;
+            }
+        }
+    }
+
+    if ($targetIndex < 0) {
+        throw new RuntimeException('Proof request not found.');
+    }
+
+    $row = normalizeStudentEvaluationProofSnapshotRow($rows[$targetIndex]);
+    $row['status'] = $decision;
+    $row['reviewedAt'] = date('c');
+    $row['reviewedBy'] = trim((string) ($payload['reviewedBy'] ?? 'OSA'));
+    $row['reviewNote'] = $reviewNote;
+
+    $rows[$targetIndex] = $row;
+    persistStudentEvaluationProofRequestsSnapshot($pdo, $rows);
+
+    $clearance = null;
+    if ($decision === 'approved') {
+        $existingClearance = findOsaStudentClearanceSnapshotRow(
+            $pdo,
+            $row['studentUserId'],
+            $row['studentNumber'],
+            $row['semesterId']
+        );
+
+        if ($existingClearance !== null) {
+            $clearance = $existingClearance;
+        } else {
+            $clearance = upsertOsaStudentClearanceSnapshot($pdo, [
+                'studentUserId' => $row['studentUserId'],
+                'studentNumber' => $row['studentNumber'],
+                'semesterId' => $row['semesterId'],
+                'reason' => $row['reason'],
+                'notedAt' => $row['reviewedAt'],
+                'notedBy' => $row['reviewedBy'],
+                'status' => 'cleared',
+            ]);
+        }
+    }
+
+    return [
+        'record' => $row,
+        'clearance' => $clearance,
+        'studentEvaluationProofRequests' => buildStudentEvaluationProofRequestsSnapshot($pdo),
+    ];
 }
 
 function normalizeEntityId($value) {
@@ -4559,16 +5149,126 @@ function persistAnnouncementsSnapshot(PDO $pdo, array $items) {
     setSettingJson($pdo, 'sharedAnnouncements', $items);
 }
 
-function getCredentialDistributorRawConfig(PDO $pdo) {
-    $stored = getSettingJson($pdo, 'credentialDistributorConfig', []);
-    if (!is_array($stored)) {
-        $stored = [];
+function normalizeLoginSecurityUserKey($value) {
+    $raw = trim((string) $value);
+    if ($raw === '') {
+        return '';
     }
 
+    if (preg_match('/^u(\d+)$/i', $raw, $matches)) {
+        return 'u' . (string) ((int) $matches[1]);
+    }
+
+    if (preg_match('/^\d+$/', $raw)) {
+        return 'u' . (string) ((int) $raw);
+    }
+
+    return '';
+}
+
+function buildLoginSecurityStateSnapshot(PDO $pdo) {
+    $stored = getSettingJson($pdo, 'loginSecurityState', []);
+    if (!is_array($stored)) {
+        return [];
+    }
+
+    $normalized = [];
+    foreach ($stored as $key => $record) {
+        $userKey = normalizeLoginSecurityUserKey($key);
+        if ($userKey === '' || !is_array($record)) {
+            continue;
+        }
+        $normalized[$userKey] = $record;
+    }
+
+    return $normalized;
+}
+
+function persistLoginSecurityStateSnapshot(PDO $pdo, array $state) {
+    $normalized = [];
+    foreach ($state as $key => $record) {
+        $userKey = normalizeLoginSecurityUserKey($key);
+        if ($userKey === '' || !is_array($record)) {
+            continue;
+        }
+        $normalized[$userKey] = $record;
+    }
+    setSettingJson($pdo, 'loginSecurityState', $normalized);
+    return $normalized;
+}
+
+function getLoginSecurityRecordSnapshot(PDO $pdo, $userIdToken) {
+    $key = normalizeLoginSecurityUserKey($userIdToken);
+    if ($key === '') {
+        return [];
+    }
+
+    $state = buildLoginSecurityStateSnapshot($pdo);
+    $record = $state[$key] ?? [];
+    return is_array($record) ? $record : [];
+}
+
+function isLoginSecurityRecordEmpty(array $record) {
+    $failedPasswordCount = (int) ($record['failed_password_count'] ?? 0);
+    $lockUntil = trim((string) ($record['lock_until'] ?? ''));
+    $challenge = $record['otp_challenge'] ?? null;
+    $hasChallenge = is_array($challenge) && count($challenge) > 0;
+
+    return $failedPasswordCount <= 0 && $lockUntil === '' && !$hasChallenge;
+}
+
+function persistLoginSecurityRecordSnapshot(PDO $pdo, $userIdToken, array $record) {
+    $key = normalizeLoginSecurityUserKey($userIdToken);
+    if ($key === '') {
+        return [];
+    }
+
+    $state = buildLoginSecurityStateSnapshot($pdo);
+    if (isLoginSecurityRecordEmpty($record)) {
+        unset($state[$key]);
+    } else {
+        $state[$key] = $record;
+    }
+
+    persistLoginSecurityStateSnapshot($pdo, $state);
+    return $record;
+}
+
+function maskLoginSecurityEmail($email) {
+    $raw = trim((string) $email);
+    if ($raw === '' || strpos($raw, '@') === false) {
+        return '***@***';
+    }
+
+    [$local, $domain] = explode('@', $raw, 2);
+    $local = trim((string) $local);
+    $domain = trim((string) $domain);
+    if ($local === '' || $domain === '') {
+        return '***@***';
+    }
+
+    if (strlen($local) === 1) {
+        $maskedLocal = '*';
+    } elseif (strlen($local) === 2) {
+        $maskedLocal = substr($local, 0, 1) . '*';
+    } else {
+        $maskedLocal = substr($local, 0, 1) . str_repeat('*', max(1, strlen($local) - 2)) . substr($local, -1);
+    }
+
+    return $maskedLocal . '@' . $domain;
+}
+
+function getCredentialDistributorRawConfig(PDO $pdo) {
+    // Fixed SMTP configuration requested by system owner.
+    // Gmail app password is normalized by removing spaces.
+    $fixedSenderEmail = 'nationalacph@gmail.com';
+    $fixedSenderName = 'NAAP Evaluation System';
+    $fixedAppPassword = preg_replace('/\s+/', '', 'szbk oere oalb btiu');
+
     return [
-        'senderEmail' => trim((string) ($stored['senderEmail'] ?? '')),
-        'senderName' => trim((string) ($stored['senderName'] ?? '')),
-        'appPassword' => trim((string) ($stored['appPassword'] ?? '')),
+        'senderEmail' => $fixedSenderEmail,
+        'senderName' => $fixedSenderName,
+        'appPassword' => $fixedAppPassword,
     ];
 }
 
@@ -4809,20 +5509,1001 @@ function bulkDistributeCredentialsSnapshot(PDO $pdo, array $rows, array $actorUs
     ];
 }
 
-function getRoleProfileData(PDO $pdo, $role) {
+function sanitizeBulkNotificationText($value, $maxLength = 5000) {
+    $text = trim((string) $value);
+    if ($text === '') {
+        return '';
+    }
+
+    $text = str_replace(["\r\n", "\r"], "\n", $text);
+    if (strlen($text) > $maxLength) {
+        $text = substr($text, 0, $maxLength);
+    }
+
+    return trim($text);
+}
+
+function parseManilaDateYmd($value, DateTimeZone $timezone) {
+    $raw = trim((string) $value);
+    if ($raw === '') {
+        return null;
+    }
+
+    $date = DateTimeImmutable::createFromFormat('!Y-m-d', $raw, $timezone);
+    if (!$date || $date->format('Y-m-d') !== $raw) {
+        return null;
+    }
+
+    return $date;
+}
+
+function getCredentialDistributorSmtpConfigSnapshot(PDO $pdo) {
+    $config = getCredentialDistributorRawConfig($pdo);
+    if ($config['senderEmail'] === '' || $config['appPassword'] === '') {
+        throw new RuntimeException('Credential distributor SMTP is not fully configured.');
+    }
+    return $config;
+}
+
+function buildActiveEmailRecipientsSnapshot(PDO $pdo, $roleCode = '') {
+    $roleToken = strtolower(trim((string) $roleCode));
+    $sql = "SELECT u.email, u.name, r.code AS role_code
+            FROM users u
+            JOIN roles r ON r.id = u.role_id
+            WHERE LOWER(TRIM(COALESCE(u.status, 'active'))) = 'active'";
+    $params = [];
+
+    if ($roleToken !== '') {
+        $sql .= ' AND LOWER(r.code) = :role_code';
+        $params[':role_code'] = $roleToken;
+    }
+
+    $sql .= ' ORDER BY u.id ASC';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    $seen = [];
+    $recipients = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $email = strtolower(trim((string) ($row['email'] ?? '')));
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            continue;
+        }
+        if (isset($seen[$email])) {
+            continue;
+        }
+
+        $seen[$email] = true;
+        $recipients[] = [
+            'email' => $email,
+            'name' => trim((string) ($row['name'] ?? '')),
+            'role' => strtolower(trim((string) ($row['role_code'] ?? ''))),
+        ];
+    }
+
+    return $recipients;
+}
+
+function buildActiveEmailRecipientTargetsSnapshot(PDO $pdo, $roleCode = '') {
+    $roleToken = strtolower(trim((string) $roleCode));
+    $sql = "SELECT u.id, u.email, u.name, r.code AS role_code
+            FROM users u
+            JOIN roles r ON r.id = u.role_id
+            WHERE LOWER(TRIM(COALESCE(u.status, 'active'))) = 'active'";
+    $params = [];
+
+    if ($roleToken !== '') {
+        $sql .= ' AND LOWER(r.code) = :role_code';
+        $params[':role_code'] = $roleToken;
+    }
+
+    $sql .= ' ORDER BY u.id ASC';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    $seen = [];
+    $recipients = [];
+    $invalidFailures = [];
+    $totalActiveUsers = 0;
+
+    foreach ($stmt->fetchAll() as $row) {
+        $totalActiveUsers++;
+        $rawEmail = trim((string) ($row['email'] ?? ''));
+        $normalizedEmail = strtolower($rawEmail);
+        $name = trim((string) ($row['name'] ?? ''));
+
+        if ($normalizedEmail === '' || !filter_var($normalizedEmail, FILTER_VALIDATE_EMAIL)) {
+            $invalidFailures[] = [
+                'email' => $rawEmail,
+                'reason' => 'Email is missing or has invalid format.',
+            ];
+            continue;
+        }
+
+        if (isset($seen[$normalizedEmail])) {
+            continue;
+        }
+
+        $seen[$normalizedEmail] = true;
+        $recipients[] = [
+            'email' => $normalizedEmail,
+            'name' => $name,
+            'role' => strtolower(trim((string) ($row['role_code'] ?? ''))),
+        ];
+    }
+
+    return [
+        'recipients' => $recipients,
+        'invalidFailures' => $invalidFailures,
+        'totalActiveUsers' => $totalActiveUsers,
+    ];
+}
+
+function sendBulkTestGmailSnapshot(PDO $pdo, $subject, $message, array $actorUser = []) {
+    if (!function_exists('credentialMailerSendCustomMessageBatch')) {
+        throw new RuntimeException('Credential mailer helper is unavailable.');
+    }
+
+    $cleanSubject = sanitizeBulkNotificationText($subject, 150);
+    $cleanMessage = sanitizeBulkNotificationText($message, 6000);
+    if ($cleanSubject === '') {
+        throw new RuntimeException('Email subject is required.');
+    }
+    if ($cleanMessage === '') {
+        throw new RuntimeException('Email message is required.');
+    }
+
+    $targets = buildActiveEmailRecipientTargetsSnapshot($pdo, '');
+    $recipients = is_array($targets['recipients'] ?? null) ? $targets['recipients'] : [];
+    $invalidFailures = is_array($targets['invalidFailures'] ?? null) ? $targets['invalidFailures'] : [];
+    $summary = [
+        'total' => (int) ($targets['totalActiveUsers'] ?? count($recipients)),
+        'sent' => 0,
+        'failed' => 0,
+    ];
+    $failures = $invalidFailures;
+
+    try {
+        $config = getCredentialDistributorSmtpConfigSnapshot($pdo);
+    } catch (Throwable $error) {
+        $failures[] = [
+            'email' => '',
+            'reason' => $error->getMessage(),
+        ];
+        $summary['sent'] = 0;
+        $summary['failed'] = count($failures);
+
+        try {
+            addActivityLogEntrySnapshot($pdo, [
+                'action' => 'Bulk Test Gmail Broadcast',
+                'description' => sprintf(
+                    'Bulk test Gmail broadcast failed before send: total=%d, error=%s',
+                    $summary['total'],
+                    $error->getMessage()
+                ),
+                'type' => 'system',
+                'userId' => $actorUser['id'] ?? '',
+                'email' => $actorUser['email'] ?? '',
+            ]);
+        } catch (Throwable $loggingError) {
+            // Logging should not block primary response.
+        }
+
+        return [
+            'summary' => $summary,
+            'failures' => $failures,
+        ];
+    }
+
+    try {
+        $batchResult = credentialMailerSendCustomMessageBatch($config, [
+            'recipients' => $recipients,
+            'subject' => $cleanSubject,
+            'message' => $cleanMessage,
+            'intro' => 'This is a test broadcast message from the NAAP Evaluation System.',
+        ]);
+        $summary['sent'] = (int) ($batchResult['sent'] ?? 0);
+        $batchFailures = is_array($batchResult['failures'] ?? null) ? $batchResult['failures'] : [];
+        $failures = array_values(array_merge($failures, $batchFailures));
+    } catch (Throwable $error) {
+        $summary['sent'] = 0;
+        $failures[] = [
+            'email' => '',
+            'reason' => $error->getMessage(),
+        ];
+    }
+
+    $summary['failed'] = count($failures);
+
+    try {
+        addActivityLogEntrySnapshot($pdo, [
+            'action' => 'Bulk Test Gmail Broadcast',
+            'description' => sprintf(
+                'Bulk test Gmail broadcast finished: total=%d, sent=%d, failed=%d.',
+                $summary['total'],
+                $summary['sent'],
+                $summary['failed']
+            ),
+            'type' => 'system',
+            'userId' => $actorUser['id'] ?? '',
+            'email' => $actorUser['email'] ?? '',
+        ]);
+    } catch (Throwable $error) {
+        // Logging should not block primary response.
+    }
+
+    return [
+        'summary' => $summary,
+        'failures' => $failures,
+    ];
+}
+
+function runStudentEvaluationReminderJobSnapshot(PDO $pdo) {
+    $manilaTimezone = new DateTimeZone('Asia/Manila');
+    $now = new DateTimeImmutable('now', $manilaTimezone);
+    $today = $now->format('Y-m-d');
+
+    $state = getSettingJson($pdo, 'studentEvalReminderJobState', []);
+    if (!is_array($state)) {
+        $state = [];
+    }
+
+    if (($state['lastProcessedDate'] ?? '') === $today) {
+        try {
+            addActivityLogEntrySnapshot($pdo, [
+                'action' => 'Student Evaluation Reminder Job',
+                'description' => sprintf(
+                    'Reminder job skipped: already processed for date=%s.',
+                    $today
+                ),
+                'type' => 'system',
+            ]);
+        } catch (Throwable $loggingError) {
+            // Logging should not block primary response.
+        }
+
+        return [
+            'status' => 'skipped',
+            'reason' => 'Reminder job already processed for today.',
+            'summary' => [
+                'total' => 0,
+                'sent' => 0,
+                'failed' => 0,
+            ],
+            'failures' => [],
+        ];
+    }
+
+    $periods = buildEvalPeriodsSnapshot($pdo);
+    $studentPeriod = is_array($periods['student-professor'] ?? null)
+        ? $periods['student-professor']
+        : ['start' => '', 'end' => ''];
+
+    $periodStart = parseManilaDateYmd($studentPeriod['start'] ?? '', $manilaTimezone);
+    $periodEnd = parseManilaDateYmd($studentPeriod['end'] ?? '', $manilaTimezone);
+    $todayDate = parseManilaDateYmd($today, $manilaTimezone);
+
+    $isPeriodOpen = false;
+    if ($periodStart && $periodEnd && $todayDate && $periodStart <= $periodEnd) {
+        $isPeriodOpen = ($todayDate >= $periodStart && $todayDate <= $periodEnd);
+    }
+
+    if (!$isPeriodOpen) {
+        try {
+            addActivityLogEntrySnapshot($pdo, [
+                'action' => 'Student Evaluation Reminder Job',
+                'description' => sprintf(
+                    'Reminder job skipped: student evaluation period is closed for date=%s.',
+                    $today
+                ),
+                'type' => 'system',
+            ]);
+        } catch (Throwable $loggingError) {
+            // Logging should not block primary response.
+        }
+
+        return [
+            'status' => 'skipped',
+            'reason' => 'Student evaluation period is closed.',
+            'summary' => [
+                'total' => 0,
+                'sent' => 0,
+                'failed' => 0,
+            ],
+            'failures' => [],
+        ];
+    }
+
+    $recipients = buildActiveEmailRecipientsSnapshot($pdo, 'student');
+    $summary = [
+        'total' => count($recipients),
+        'sent' => 0,
+        'failed' => 0,
+    ];
+    $failures = [];
+
+    setSettingJson($pdo, 'studentEvalReminderJobState', [
+        'lastProcessedDate' => $today,
+        'lastRunAt' => $now->format('c'),
+        'status' => 'running',
+        'summary' => $summary,
+    ]);
+
+    try {
+        $config = getCredentialDistributorSmtpConfigSnapshot($pdo);
+        if (!function_exists('credentialMailerSendCustomMessageBatch')) {
+            throw new RuntimeException('Credential mailer helper is unavailable.');
+        }
+    } catch (Throwable $error) {
+        $summary['failed'] = $summary['total'];
+        $failures[] = [
+            'email' => '',
+            'reason' => $error->getMessage(),
+        ];
+
+        setSettingJson($pdo, 'studentEvalReminderJobState', [
+            'lastProcessedDate' => $today,
+            'lastRunAt' => $now->format('c'),
+            'status' => 'error',
+            'summary' => $summary,
+            'failureSample' => $failures,
+        ]);
+
+        try {
+            addActivityLogEntrySnapshot($pdo, [
+                'action' => 'Student Evaluation Reminder Job',
+                'description' => sprintf(
+                    'Reminder job failed before send: total=%d, error=%s',
+                    $summary['total'],
+                    $error->getMessage()
+                ),
+                'type' => 'system',
+            ]);
+        } catch (Throwable $loggingError) {
+            // Logging should not block primary response.
+        }
+
+        return [
+            'status' => 'error',
+            'reason' => $error->getMessage(),
+            'summary' => $summary,
+            'failures' => $failures,
+        ];
+    }
+
+    $subject = 'NAAP Evaluation Reminder: Please Complete Your Evaluation';
+    $message = "Please complete your evaluation while the student evaluation period is open.\n"
+        . "Log in to the NAAP Evaluation System and submit your pending evaluation today.";
+
+    try {
+        $batchResult = credentialMailerSendCustomMessageBatch($config, [
+            'recipients' => $recipients,
+            'subject' => $subject,
+            'message' => $message,
+            'intro' => 'This is an automated reminder from the NAAP Evaluation System.',
+        ]);
+        $summary['sent'] = (int) ($batchResult['sent'] ?? 0);
+        $failures = is_array($batchResult['failures'] ?? null) ? $batchResult['failures'] : [];
+    } catch (Throwable $error) {
+        $summary['sent'] = 0;
+        $failures[] = [
+            'email' => '',
+            'reason' => $error->getMessage(),
+        ];
+    }
+
+    $summary['failed'] = count($failures);
+    $status = $summary['failed'] > 0 ? 'completed_with_failures' : 'sent';
+
+    setSettingJson($pdo, 'studentEvalReminderJobState', [
+        'lastProcessedDate' => $today,
+        'lastRunAt' => $now->format('c'),
+        'status' => $status,
+        'summary' => $summary,
+        'failureSample' => array_slice($failures, 0, 20),
+    ]);
+
+    try {
+        addActivityLogEntrySnapshot($pdo, [
+            'action' => 'Student Evaluation Reminder Job',
+            'description' => sprintf(
+                'Student reminder email run finished: total=%d, sent=%d, failed=%d, date=%s.',
+                $summary['total'],
+                $summary['sent'],
+                $summary['failed'],
+                $today
+            ),
+            'type' => 'system',
+        ]);
+    } catch (Throwable $error) {
+        // Logging should not block primary response.
+    }
+
+    return [
+        'status' => $status,
+        'summary' => $summary,
+        'failures' => $failures,
+    ];
+}
+
+function getManagedProfileImageRelativeDirectory() {
+    return 'uploads/profiles';
+}
+
+function ensureUsersProfileImageColumn(PDO $pdo) {
+    if (columnExistsInCurrentSchema($pdo, 'users', 'profile_image')) {
+        return;
+    }
+
+    $pdo->exec(
+        'ALTER TABLE users
+         ADD COLUMN profile_image VARCHAR(255) NULL DEFAULT NULL
+         AFTER password'
+    );
+}
+
+function normalizeStoredProfileImagePath($value) {
+    $path = str_replace('\\', '/', trim((string) $value));
+    $path = preg_replace('#/+#', '/', $path);
+    $path = ltrim($path, '/');
+    if ($path === '') {
+        return '';
+    }
+
+    if (!preg_match('#^uploads/profiles/[A-Za-z0-9._-]+$#', $path)) {
+        return '';
+    }
+
+    return $path;
+}
+
+function getProjectRootAbsolutePath() {
+    return dirname(__DIR__);
+}
+
+function getManagedProfileImageAbsoluteDirectory() {
+    return getProjectRootAbsolutePath() . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'profiles';
+}
+
+function ensureManagedProfileImageDirectoryExists() {
+    $directory = getManagedProfileImageAbsoluteDirectory();
+    if (is_dir($directory)) {
+        return $directory;
+    }
+
+    if (!mkdir($directory, 0775, true) && !is_dir($directory)) {
+        throw new RuntimeException('Unable to create the profile upload directory.');
+    }
+
+    return $directory;
+}
+
+function buildApplicationBasePath() {
+    $projectRoot = realpath(getProjectRootAbsolutePath());
+    $documentRoot = isset($_SERVER['DOCUMENT_ROOT']) ? realpath((string) $_SERVER['DOCUMENT_ROOT']) : false;
+
+    if ($projectRoot !== false && $documentRoot !== false) {
+        $projectRootNormalized = str_replace('\\', '/', $projectRoot);
+        $documentRootNormalized = rtrim(str_replace('\\', '/', $documentRoot), '/');
+        if ($documentRootNormalized !== '' && stripos($projectRootNormalized, $documentRootNormalized) === 0) {
+            $relative = trim(substr($projectRootNormalized, strlen($documentRootNormalized)), '/');
+            return $relative === '' ? '' : '/' . $relative;
+        }
+    }
+
+    $scriptName = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? ''));
+    $scriptDirectory = str_replace('\\', '/', dirname($scriptName));
+    if (substr($scriptDirectory, -4) === '/api') {
+        $scriptDirectory = substr($scriptDirectory, 0, -4);
+    }
+    $scriptDirectory = trim($scriptDirectory, '/');
+
+    return $scriptDirectory === '' ? '' : '/' . $scriptDirectory;
+}
+
+function buildPublicProfileImageUrl($storedPath) {
+    $normalizedPath = normalizeStoredProfileImagePath($storedPath);
+    if ($normalizedPath === '') {
+        return '';
+    }
+
+    $basePath = rtrim(buildApplicationBasePath(), '/');
+    return ($basePath === '' ? '' : $basePath) . '/' . $normalizedPath;
+}
+
+function resolveManagedProfileImageAbsolutePath($storedPath) {
+    $normalizedPath = normalizeStoredProfileImagePath($storedPath);
+    if ($normalizedPath === '') {
+        return '';
+    }
+
+    return getProjectRootAbsolutePath() . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $normalizedPath);
+}
+
+function managedProfileImageFileExists($storedPath) {
+    $absolutePath = resolveManagedProfileImageAbsolutePath($storedPath);
+    return $absolutePath !== '' && is_file($absolutePath);
+}
+
+function resolveStoredProfileImageUrlForDisplay($storedPath) {
+    $normalizedPath = normalizeStoredProfileImagePath($storedPath);
+    if ($normalizedPath === '') {
+        return '';
+    }
+
+    if (!managedProfileImageFileExists($normalizedPath)) {
+        return '';
+    }
+
+    return buildPublicProfileImageUrl($normalizedPath);
+}
+
+function getUserProfileImagePath(PDO $pdo, $userId) {
+    ensureUsersProfileImageColumn($pdo);
+
+    $numericUserId = resolveStoredUserIdNumber($userId);
+    if ($numericUserId <= 0) {
+        return '';
+    }
+
+    $stmt = $pdo->prepare('SELECT profile_image FROM users WHERE id = :user_id LIMIT 1');
+    $stmt->execute([':user_id' => $numericUserId]);
+    $row = $stmt->fetch();
+
+    return $row ? normalizeStoredProfileImagePath($row['profile_image'] ?? '') : '';
+}
+
+function setUserProfileImagePath(PDO $pdo, $userId, $storedPath) {
+    ensureUsersProfileImageColumn($pdo);
+
+    $numericUserId = resolveStoredUserIdNumber($userId);
+    if ($numericUserId <= 0) {
+        throw new RuntimeException('Unable to resolve profile owner.');
+    }
+
+    $normalizedPath = normalizeStoredProfileImagePath($storedPath);
+    $stmt = $pdo->prepare(
+        'UPDATE users
+         SET profile_image = :profile_image
+         WHERE id = :user_id'
+    );
+    $stmt->execute([
+        ':profile_image' => $normalizedPath !== '' ? $normalizedPath : null,
+        ':user_id' => $numericUserId,
+    ]);
+
+    return $normalizedPath;
+}
+
+function deleteManagedProfileImageFile($storedPath) {
+    $absolutePath = resolveManagedProfileImageAbsolutePath($storedPath);
+    if ($absolutePath === '' || !is_file($absolutePath)) {
+        return;
+    }
+
+    @unlink($absolutePath);
+}
+
+function buildProfileImageSaveResult($storedPath) {
+    $normalizedPath = normalizeStoredProfileImagePath($storedPath);
+    $publicUrl = resolveStoredProfileImageUrlForDisplay($normalizedPath);
+
+    return [
+        'path' => $normalizedPath,
+        'url' => $publicUrl,
+        'photoData' => $publicUrl,
+    ];
+}
+
+function mapProfileImageMimeTypeToExtension($mimeType) {
+    $mime = strtolower(trim((string) $mimeType));
+    switch ($mime) {
+        case 'image/jpeg':
+            return 'jpg';
+        case 'image/png':
+            return 'png';
+        case 'image/webp':
+            return 'webp';
+        default:
+            return '';
+    }
+}
+
+function buildUniqueProfileImageFilename($userId, $extension) {
+    $numericUserId = max(0, (int) resolveStoredUserIdNumber($userId));
+    $safeExtension = strtolower(trim((string) $extension));
+    if ($safeExtension === '') {
+        throw new RuntimeException('Unable to resolve the image file extension.');
+    }
+
+    return sprintf(
+        'user_%d_%s_%s.%s',
+        $numericUserId,
+        date('YmdHis'),
+        bin2hex(random_bytes(8)),
+        $safeExtension
+    );
+}
+
+function clearUserProfileImage(PDO $pdo, $userId) {
+    $currentPath = getUserProfileImagePath($pdo, $userId);
+    setUserProfileImagePath($pdo, $userId, '');
+    if ($currentPath !== '') {
+        deleteManagedProfileImageFile($currentPath);
+    }
+
+    return buildProfileImageSaveResult('');
+}
+
+function persistUserProfileImageBinary(PDO $pdo, $userId, $binaryData, $extension) {
+    $numericUserId = resolveStoredUserIdNumber($userId);
+    if ($numericUserId <= 0) {
+        throw new RuntimeException('Unable to resolve profile owner.');
+    }
+
+    $imageBinary = (string) $binaryData;
+    if ($imageBinary === '') {
+        throw new RuntimeException('The uploaded image is empty.');
+    }
+
+    $directory = ensureManagedProfileImageDirectoryExists();
+    $previousPath = getUserProfileImagePath($pdo, $numericUserId);
+    $fileName = buildUniqueProfileImageFilename($numericUserId, $extension);
+    $relativePath = getManagedProfileImageRelativeDirectory() . '/' . $fileName;
+    $absolutePath = $directory . DIRECTORY_SEPARATOR . $fileName;
+
+    if (file_put_contents($absolutePath, $imageBinary) === false) {
+        throw new RuntimeException('Unable to save the uploaded profile image.');
+    }
+
+    try {
+        setUserProfileImagePath($pdo, $numericUserId, $relativePath);
+    } catch (Throwable $error) {
+        @unlink($absolutePath);
+        throw $error;
+    }
+
+    if ($previousPath !== '' && $previousPath !== $relativePath) {
+        deleteManagedProfileImageFile($previousPath);
+    }
+
+    return buildProfileImageSaveResult($relativePath);
+}
+
+function decodeLegacyProfileImagePayload($value) {
+    $raw = trim((string) $value);
+    if ($raw === '') {
+        return null;
+    }
+
+    $base64Data = $raw;
+    if (preg_match('/^data:([^;]+);base64,(.+)$/is', $raw, $matches)) {
+        $base64Data = $matches[2];
+    }
+
+    $decoded = base64_decode(preg_replace('/\s+/', '', $base64Data), true);
+    if ($decoded === false || $decoded === '') {
+        return null;
+    }
+
+    $imageInfo = @getimagesizefromstring($decoded);
+    if ($imageInfo === false) {
+        return null;
+    }
+
+    $mimeType = strtolower(trim((string) ($imageInfo['mime'] ?? '')));
+    $extension = mapProfileImageMimeTypeToExtension($mimeType);
+    if ($extension === '') {
+        return null;
+    }
+
+    return [
+        'binary' => $decoded,
+        'mime' => $mimeType,
+        'extension' => $extension,
+    ];
+}
+
+function saveUserProfileImageFromLegacyPayload(PDO $pdo, $userId, $value) {
+    $decoded = decodeLegacyProfileImagePayload($value);
+    if (!$decoded) {
+        throw new RuntimeException('Unable to decode the legacy profile image payload.');
+    }
+
+    return persistUserProfileImageBinary($pdo, $userId, $decoded['binary'], $decoded['extension']);
+}
+
+function validateUploadedProfileImageFile(array $file) {
+    $errorCode = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+    if ($errorCode !== UPLOAD_ERR_OK) {
+        switch ($errorCode) {
+            case UPLOAD_ERR_NO_FILE:
+                throw new RuntimeException('Please choose an image file to upload.');
+            case UPLOAD_ERR_INI_SIZE:
+            case UPLOAD_ERR_FORM_SIZE:
+                throw new RuntimeException('The selected image is larger than the 2MB limit.');
+            default:
+                throw new RuntimeException('The image upload failed. Please try again.');
+        }
+    }
+
+    $size = (int) ($file['size'] ?? 0);
+    if ($size <= 0) {
+        throw new RuntimeException('The uploaded image is empty.');
+    }
+    if ($size > (2 * 1024 * 1024)) {
+        throw new RuntimeException('The selected image is larger than the 2MB limit.');
+    }
+
+    $originalName = trim((string) ($file['name'] ?? ''));
+    $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+    if (!in_array($extension, ['jpg', 'jpeg', 'png', 'webp'], true)) {
+        throw new RuntimeException('Only JPG, JPEG, PNG, and WEBP images are allowed.');
+    }
+
+    $temporaryPath = trim((string) ($file['tmp_name'] ?? ''));
+    if ($temporaryPath === '' || !is_uploaded_file($temporaryPath)) {
+        throw new RuntimeException('The uploaded image could not be verified.');
+    }
+
+    $imageInfo = @getimagesize($temporaryPath);
+    if ($imageInfo === false) {
+        throw new RuntimeException('The uploaded file is not a valid image.');
+    }
+
+    $mimeType = strtolower(trim((string) ($imageInfo['mime'] ?? '')));
+    $normalizedExtension = mapProfileImageMimeTypeToExtension($mimeType);
+    if ($normalizedExtension === '') {
+        throw new RuntimeException('Only JPG, JPEG, PNG, and WEBP images are allowed.');
+    }
+
+    return [
+        'tmp_name' => $temporaryPath,
+        'extension' => $normalizedExtension,
+    ];
+}
+
+function saveUploadedUserProfileImage(PDO $pdo, $userId, array $file) {
+    $validated = validateUploadedProfileImageFile($file);
+
+    $numericUserId = resolveStoredUserIdNumber($userId);
+    if ($numericUserId <= 0) {
+        throw new RuntimeException('Unable to resolve profile owner.');
+    }
+
+    $directory = ensureManagedProfileImageDirectoryExists();
+    $previousPath = getUserProfileImagePath($pdo, $numericUserId);
+    $fileName = buildUniqueProfileImageFilename($numericUserId, $validated['extension']);
+    $relativePath = getManagedProfileImageRelativeDirectory() . '/' . $fileName;
+    $absolutePath = $directory . DIRECTORY_SEPARATOR . $fileName;
+
+    if (!move_uploaded_file($validated['tmp_name'], $absolutePath)) {
+        throw new RuntimeException('Unable to move the uploaded image into the profiles folder.');
+    }
+
+    try {
+        setUserProfileImagePath($pdo, $numericUserId, $relativePath);
+    } catch (Throwable $error) {
+        @unlink($absolutePath);
+        throw $error;
+    }
+
+    if ($previousPath !== '' && $previousPath !== $relativePath) {
+        deleteManagedProfileImageFile($previousPath);
+    }
+
+    return buildProfileImageSaveResult($relativePath);
+}
+
+function getLegacyRoleProfileData(PDO $pdo, $role) {
     return getSettingJson($pdo, 'profileData:' . $role, null);
 }
 
-function setRoleProfileData(PDO $pdo, $role, $data) {
-    setSettingJson($pdo, 'profileData:' . $role, $data);
-}
-
-function getRoleProfilePhoto(PDO $pdo, $role) {
+function getLegacyRoleProfilePhoto(PDO $pdo, $role) {
     return getSettingValue($pdo, 'profilePhoto:' . $role, null);
 }
 
-function setRoleProfilePhoto(PDO $pdo, $role, $photoData) {
-    setSettingValue($pdo, 'profilePhoto:' . $role, $photoData);
+function ensureUserProfileDataTable(PDO $pdo) {
+    if (tableExistsInCurrentSchema($pdo, 'user_profile_data')) {
+        return;
+    }
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS user_profile_data (
+            user_id BIGINT UNSIGNED NOT NULL,
+            profile_json LONGTEXT DEFAULT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id),
+            CONSTRAINT fk_user_profile_data_user
+                FOREIGN KEY (user_id) REFERENCES users (id)
+                ON UPDATE CASCADE
+                ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+}
+
+function getUserProfileData(PDO $pdo, $userId) {
+    ensureUserProfileDataTable($pdo);
+    $numericUserId = resolveStoredUserIdNumber($userId);
+    if ($numericUserId <= 0) {
+        return null;
+    }
+
+    $stmt = $pdo->prepare('SELECT profile_json FROM user_profile_data WHERE user_id = :user_id LIMIT 1');
+    $stmt->execute([':user_id' => $numericUserId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        return null;
+    }
+
+    $json = $row['profile_json'];
+    if ($json === null || $json === '') {
+        return null;
+    }
+
+    $decoded = json_decode($json, true);
+    return json_last_error() === JSON_ERROR_NONE ? $decoded : null;
+}
+
+function setUserProfileData(PDO $pdo, $userId, $data) {
+    ensureUserProfileDataTable($pdo);
+    $numericUserId = resolveStoredUserIdNumber($userId);
+    if ($numericUserId <= 0) {
+        throw new RuntimeException('Unable to resolve profile owner.');
+    }
+
+    $encoded = $data === null ? null : json_encode($data);
+    $stmt = $pdo->prepare(
+        'INSERT INTO user_profile_data (user_id, profile_json)
+         VALUES (:user_id, :profile_json)
+         ON DUPLICATE KEY UPDATE profile_json = VALUES(profile_json)'
+    );
+    $stmt->execute([
+        ':user_id' => $numericUserId,
+        ':profile_json' => $encoded,
+    ]);
+}
+
+function getUserProfilePhoto(PDO $pdo, $userId) {
+    return resolveStoredProfileImageUrlForDisplay(getUserProfileImagePath($pdo, $userId));
+}
+
+function setUserProfilePhoto(PDO $pdo, $userId, $photoData) {
+    $data = trim((string) $photoData);
+    if ($data === '') {
+        $result = clearUserProfileImage($pdo, $userId);
+        return $result['url'];
+    }
+
+    $result = saveUserProfileImageFromLegacyPayload($pdo, $userId, $data);
+    return $result['url'];
+}
+
+function migrateLegacyRoleProfilesIfNeeded(PDO $pdo) {
+    ensureUserProfileDataTable($pdo);
+    ensureUsersProfileImageColumn($pdo);
+
+    $completed = trim((string) getSettingValue($pdo, 'userProfileDataMigrationV2', ''));
+    if ($completed === 'done') {
+        return;
+    }
+
+    $roles = ['admin', 'hr', 'dean', 'professor', 'vpaa', 'osa', 'student'];
+    $users = buildUsersFromDatabase($pdo, false);
+    $activeUsersByRole = [];
+    foreach ($users as $user) {
+        $role = normalizeLookupValue($user['role'] ?? '');
+        $status = normalizeLookupValue($user['status'] ?? 'active');
+        if ($role === '' || $status === 'inactive') {
+            continue;
+        }
+        if (!isset($activeUsersByRole[$role])) {
+            $activeUsersByRole[$role] = [];
+        }
+        $activeUsersByRole[$role][] = $user;
+    }
+
+    foreach ($roles as $role) {
+        $legacyData = getLegacyRoleProfileData($pdo, $role);
+        $legacyPhoto = trim((string) getLegacyRoleProfilePhoto($pdo, $role));
+        $hasLegacyData = $legacyData !== null;
+        $hasLegacyPhoto = $legacyPhoto !== '';
+        if (!$hasLegacyData && !$hasLegacyPhoto) {
+            continue;
+        }
+
+        $matches = $activeUsersByRole[$role] ?? [];
+        if (count($matches) === 1) {
+            $userId = (string) ($matches[0]['id'] ?? '');
+
+            if ($hasLegacyData) {
+                $currentData = getUserProfileData($pdo, $userId);
+                if ($currentData === null) {
+                    setUserProfileData($pdo, $userId, $legacyData);
+                } else {
+                    setSettingJson($pdo, 'legacyRoleProfileData:' . $role, $legacyData);
+                }
+            }
+
+            if ($hasLegacyPhoto) {
+                $currentPhotoPath = getUserProfileImagePath($pdo, $userId);
+                if ($currentPhotoPath === '') {
+                    try {
+                        saveUserProfileImageFromLegacyPayload($pdo, $userId, $legacyPhoto);
+                    } catch (Throwable $error) {
+                        setSettingValue($pdo, 'legacyRoleProfilePhoto:' . $role, $legacyPhoto);
+                    }
+                } else {
+                    setSettingValue($pdo, 'legacyRoleProfilePhoto:' . $role, $legacyPhoto);
+                }
+            }
+        } else {
+            if ($hasLegacyData) {
+                setSettingJson($pdo, 'legacyRoleProfileData:' . $role, $legacyData);
+            }
+            if ($hasLegacyPhoto) {
+                setSettingValue($pdo, 'legacyRoleProfilePhoto:' . $role, $legacyPhoto);
+            }
+        }
+
+        setSettingValue($pdo, 'profileData:' . $role, null);
+        setSettingValue($pdo, 'profilePhoto:' . $role, null);
+    }
+
+    setSettingValue($pdo, 'userProfileDataMigrationV2', 'done');
+}
+
+function migrateLegacyDatabaseProfilePhotosToFilesystemIfNeeded(PDO $pdo) {
+    ensureUsersProfileImageColumn($pdo);
+
+    $completed = trim((string) getSettingValue($pdo, 'profileImageFilesystemMigrationV1', ''));
+    if ($completed === 'done') {
+        return;
+    }
+
+    if (!tableExistsInCurrentSchema($pdo, 'profile_photos')) {
+        setSettingValue($pdo, 'profileImageFilesystemMigrationV1', 'done');
+        return;
+    }
+
+    $stmt = $pdo->query(
+        'SELECT user_id, photo_data
+         FROM profile_photos
+         ORDER BY user_id ASC'
+    );
+
+    foreach ($stmt->fetchAll() as $row) {
+        $userId = (int) ($row['user_id'] ?? 0);
+        if ($userId <= 0) {
+            continue;
+        }
+
+        $currentPath = getUserProfileImagePath($pdo, $userId);
+        if ($currentPath !== '' && managedProfileImageFileExists($currentPath)) {
+            continue;
+        }
+
+        $legacyPhoto = trim((string) ($row['photo_data'] ?? ''));
+        if ($legacyPhoto === '') {
+            continue;
+        }
+
+        try {
+            saveUserProfileImageFromLegacyPayload($pdo, $userId, $legacyPhoto);
+        } catch (Throwable $error) {
+            // Leave the legacy DB photo in place and continue with other users.
+        }
+    }
+
+    setSettingValue($pdo, 'profileImageFilesystemMigrationV1', 'done');
+}
+
+function runProfileImageMigrationsIfNeeded(PDO $pdo) {
+    migrateLegacyRoleProfilesIfNeeded($pdo);
+    migrateLegacyDatabaseProfilePhotosToFilesystemIfNeeded($pdo);
 }
 
 function normalizeFacultyPaperSnapshotRow(array $paper) {
@@ -4897,13 +6578,15 @@ function persistFacultyAcknowledgementPapersSnapshot(PDO $pdo, array $papers) {
     setSettingJson($pdo, 'facultyAcknowledgementPapers', array_values($rows));
 }
 
-function buildBootstrapPayload(PDO $pdo) {
-    $profileRoles = ['admin', 'hr', 'dean', 'professor', 'vpaa', 'osa', 'student'];
-    $profileData = [];
-    $profilePhotos = [];
-    foreach ($profileRoles as $role) {
-        $profileData[$role] = getRoleProfileData($pdo, $role);
-        $profilePhotos[$role] = getRoleProfilePhoto($pdo, $role);
+function buildBootstrapPayload(PDO $pdo, $currentUserId = '') {
+    runProfileImageMigrationsIfNeeded($pdo);
+    $profileData = null;
+    $profilePhoto = '';
+    $profileImagePath = '';
+    if (resolveStoredUserIdNumber($currentUserId) > 0) {
+        $profileData = getUserProfileData($pdo, $currentUserId);
+        $profileImagePath = getUserProfileImagePath($pdo, $currentUserId);
+        $profilePhoto = getUserProfilePhoto($pdo, $currentUserId);
     }
 
     return [
@@ -4920,9 +6603,12 @@ function buildBootstrapPayload(PDO $pdo) {
         'evaluations' => buildEvaluationsSnapshot($pdo),
         'studentEvaluationDrafts' => buildStudentEvaluationDraftsSnapshot($pdo),
         'osaStudentClearances' => buildOsaStudentClearancesSnapshot($pdo),
+        'studentEvaluationProofRequests' => buildStudentEvaluationProofRequestsSnapshot($pdo),
         'subjectManagement' => buildSubjectManagementSnapshot($pdo),
         'facultyAcknowledgementPapers' => buildFacultyAcknowledgementPapersSnapshot($pdo),
-        'profileData' => $profileData,
-        'profilePhotos' => $profilePhotos,
+        'currentUserProfileData' => $profileData,
+        'currentUserProfileImage' => $profileImagePath,
+        'currentUserProfileImageUrl' => $profilePhoto,
+        'currentUserProfilePhoto' => $profilePhoto,
     ];
 }

@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/state_helpers.php';
 require_once __DIR__ . '/faculty_pdf_helper.php';
 
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('Pragma: no-cache');
 header('Expires: 0');
@@ -73,6 +73,22 @@ function normalizeRatingValue($value, string $fieldName): string
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     sendJsonError('Method not allowed', 405);
+}
+
+$session = requireNaapAuthenticatedSession();
+$sessionUser = buildUserSnapshotById($pdo, $session['userId'], false);
+if (!$sessionUser) {
+    destroyNaapSession();
+    sendJsonError('Authentication required.', 401);
+}
+if (strtolower(trim((string) ($sessionUser['status'] ?? 'active'))) === 'inactive') {
+    destroyNaapSession();
+    sendJsonError('Account is inactive.', 403);
+}
+
+$actorRole = strtolower(trim((string) ($sessionUser['role'] ?? '')));
+if ($actorRole !== 'professor' && $actorRole !== 'dean') {
+    sendJsonError('Permission denied.', 403);
 }
 
 $rawBody = file_get_contents('php://input');

@@ -400,6 +400,40 @@
         </main>
     </div>
 
+    <!-- Missed Evaluation Proof Modal -->
+    <div class="proof-modal" id="studentProofModal" aria-hidden="true">
+        <div class="proof-modal-content" role="dialog" aria-modal="true" aria-labelledby="studentProofModalTitle">
+            <div class="proof-modal-header">
+                <h3 id="studentProofModalTitle">Evaluation Proof Requirement</h3>
+                <button type="button" class="proof-modal-close" id="studentProofModalClose" aria-label="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <p class="proof-modal-lead" id="studentProofModalLead"></p>
+            <div class="proof-status-message" id="studentProofStatusMessage"></div>
+
+            <form id="studentProofForm" class="proof-form" novalidate>
+                <div class="form-group">
+                    <label for="studentProofReason">Reason for not completing evaluation</label>
+                    <textarea id="studentProofReason" rows="4" placeholder="Explain why you were unable to complete your evaluation." required></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="studentProofDriveLink">Google Drive Proof Link</label>
+                    <input type="url" id="studentProofDriveLink" placeholder="https://drive.google.com/..." required>
+                    <p class="form-hint">Submit a valid shareable Google Drive link as supporting proof.</p>
+                </div>
+                <div class="proof-form-actions">
+                    <button type="button" class="btn-cancel" id="studentProofLaterBtn">Later</button>
+                    <button type="submit" class="btn-submit" id="studentProofSubmitBtn">Submit Proof</button>
+                </div>
+            </form>
+
+            <div class="proof-pending-box" id="studentProofPendingBox" style="display: none;">
+                Your submitted proof is under OSA review. Please wait for the decision.
+            </div>
+        </div>
+    </div>
+
     <!-- History Modal -->
     <div class="history-modal" id="historyModal" aria-hidden="true">
         <div class="history-modal-content" role="dialog" aria-modal="true">
@@ -412,8 +446,8 @@
             <div class="history-modal-body" id="historyModalBody"></div>
         </div>
     </div>
-    <script src="../JsScrip/db-data.js"></script>
-    <script src="../JsScrip/studentpanel.js"></script>
+    <script src="../JsScrip/db-data.js?v=20260414d"></script>
+    <script src="../JsScrip/studentpanel.js?v=20260414d"></script>
 </body>
 
 </html>

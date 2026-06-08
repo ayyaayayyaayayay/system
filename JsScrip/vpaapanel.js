@@ -525,6 +525,11 @@ const elements = {
     departmentFilter: document.getElementById("departmentFilter"),
     sortFilter: document.getElementById("sortFilter"),
     resetFilters: document.getElementById("resetFilters"),
+    keyHighlightsGrid: document.getElementById("vpaaKeyHighlightsGrid"),
+    highlightsEmpty: document.getElementById("vpaaHighlightsEmpty"),
+    highlightTopRating: document.getElementById("vpaaHighlightTopRating"),
+    highlightMostComments: document.getElementById("vpaaHighlightMostComments"),
+    highlightNeedsAttention: document.getElementById("vpaaHighlightNeedsAttention"),
     professorGrid: document.getElementById("professorGrid"),
     reportModal: document.getElementById("vpaaReportModal"),
     reportModalClose: document.getElementById("vpaaReportModalClose"),
@@ -741,6 +746,21 @@ function applyFilters() {
     updateSummary(filtered);
     updateWordFrequency(filtered);
 
+    let highlightScope = scopeData.filter((prof) => {
+        const matchesDept = department === "all" || prof.department === department;
+        const matchesCampus = campus === "all" || normalizeVpaaToken(prof.campus) === normalizeVpaaToken(campus);
+        return matchesDept && matchesCampus;
+    });
+
+    if (hasSubmittedSearch && rawTerm) {
+        highlightScope = highlightScope.filter((prof) =>
+            prof.name.toLowerCase().includes(term) ||
+            prof.employeeId.toLowerCase().includes(term)
+        );
+    }
+
+    renderKeyHighlights(buildKeyHighlights(highlightScope));
+
     if (!hasSubmittedSearch || !rawTerm) {
         renderProfessors([], "Enter a professor name or employee ID, then click Search to view reports.");
         return;
@@ -770,6 +790,109 @@ function sortProfessors(list, mode) {
         sorted.sort((a, b) => a.name.localeCompare(b.name));
     }
     return sorted;
+}
+
+function countProfessorComments(prof) {
+    if (!prof || typeof prof !== "object") return 0;
+    const student = Array.isArray(prof.studentComments) ? prof.studentComments.length : 0;
+    const peer = Array.isArray(prof.peerComments) ? prof.peerComments.length : 0;
+    const supervisor = Array.isArray(prof.supervisorComments) ? prof.supervisorComments.length : 0;
+    return student + peer + supervisor;
+}
+
+function safeNumber(value, fallback) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function buildKeyHighlights(sourceList) {
+    const list = (Array.isArray(sourceList) ? sourceList : []).filter((prof) => prof && typeof prof === "object");
+    if (!list.length) {
+        return {
+            topRating: null,
+            mostComments: null,
+            needsAttention: null
+        };
+    }
+
+    const topRating = list.slice().sort((a, b) => {
+        const aOverall = safeNumber(a.overall, 0);
+        const bOverall = safeNumber(b.overall, 0);
+        if (bOverall !== aOverall) return bOverall - aOverall;
+        const aResponse = safeNumber(a.responseRate, 0);
+        const bResponse = safeNumber(b.responseRate, 0);
+        return bResponse - aResponse;
+    })[0] || null;
+
+    const mostComments = list.slice().sort((a, b) => {
+        const aComments = countProfessorComments(a);
+        const bComments = countProfessorComments(b);
+        if (bComments !== aComments) return bComments - aComments;
+        const aOverall = safeNumber(a.overall, 0);
+        const bOverall = safeNumber(b.overall, 0);
+        return bOverall - aOverall;
+    })[0] || null;
+
+    const needsAttention = list.slice().sort((a, b) => {
+        const aOverall = safeNumber(a.overall, 0);
+        const bOverall = safeNumber(b.overall, 0);
+        if (aOverall !== bOverall) return aOverall - bOverall;
+        const aResponse = safeNumber(a.responseRate, 0);
+        const bResponse = safeNumber(b.responseRate, 0);
+        return aResponse - bResponse;
+    })[0] || null;
+
+    return {
+        topRating: topRating,
+        mostComments: mostComments,
+        needsAttention: needsAttention
+    };
+}
+
+function renderHighlightCard(cardElement, cardData) {
+    if (!cardElement) return;
+
+    const nameEl = cardElement.querySelector(".vpaa-highlight-name");
+    const metricEl = cardElement.querySelector(".vpaa-highlight-metric");
+    if (!nameEl || !metricEl) return;
+
+    if (!cardData || !cardData.name) {
+        nameEl.textContent = "No data yet";
+        metricEl.textContent = "Waiting for evaluation data.";
+        return;
+    }
+
+    nameEl.textContent = cardData.name;
+    metricEl.textContent = cardData.metric;
+}
+
+function renderKeyHighlights(cards) {
+    const hasData = !!(cards && (cards.topRating || cards.mostComments || cards.needsAttention));
+    if (elements.keyHighlightsGrid) {
+        elements.keyHighlightsGrid.hidden = !hasData;
+    }
+    if (elements.highlightsEmpty) {
+        elements.highlightsEmpty.hidden = hasData;
+    }
+
+    const topRatingProf = cards && cards.topRating;
+    const mostCommentsProf = cards && cards.mostComments;
+    const needsAttentionProf = cards && cards.needsAttention;
+
+    renderHighlightCard(elements.highlightTopRating, topRatingProf ? {
+        name: String(topRatingProf.name || "Unknown Professor"),
+        metric: `${safeNumber(topRatingProf.overall, 0).toFixed(1)} rating`
+    } : null);
+
+    renderHighlightCard(elements.highlightMostComments, mostCommentsProf ? {
+        name: String(mostCommentsProf.name || "Unknown Professor"),
+        metric: `${countProfessorComments(mostCommentsProf)} comments logged`
+    } : null);
+
+    renderHighlightCard(elements.highlightNeedsAttention, needsAttentionProf ? {
+        name: String(needsAttentionProf.name || "Unknown Professor"),
+        metric: `${safeNumber(needsAttentionProf.overall, 0).toFixed(1)} rating | ${safeNumber(needsAttentionProf.responseRate, 0)}% response`
+    } : null);
 }
 
 function getVpaaActiveStudentCount() {
@@ -1131,20 +1254,61 @@ function setupProfilePhotoUpload() {
         const file = input.files && input.files[0];
         if (!file) return;
 
-        if (!file.type.startsWith("image/")) {
-            alert("Please select a valid image file.");
+        const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+        if (!allowedTypes.includes(String(file.type || "").toLowerCase())) {
+            alert("Please choose a JPG, JPEG, PNG, or WEBP image.");
             input.value = "";
             return;
         }
 
-        const reader = new FileReader();
-        reader.onload = function () {
-            preview.src = reader.result;
+        if (Number(file.size || 0) > (2 * 1024 * 1024)) {
+            alert("Please choose an image smaller than 2MB.");
+            input.value = "";
+            return;
+        }
+
+        const localPreviewUrl = URL.createObjectURL(file);
+        preview.src = localPreviewUrl;
+        preview.classList.add("active");
+        placeholder.style.display = "none";
+
+        if (typeof SharedData.uploadProfilePhoto !== "function") {
+            const reader = new FileReader();
+            reader.onload = function () {
+                preview.src = reader.result;
+                preview.classList.add("active");
+                placeholder.style.display = "none";
+                SharedData.setProfilePhoto('vpaa', reader.result);
+                URL.revokeObjectURL(localPreviewUrl);
+                input.value = "";
+            };
+            reader.readAsDataURL(file);
+            return;
+        }
+
+        try {
+            const savedPhoto = SharedData.uploadProfilePhoto(file);
+            if (savedPhoto) {
+                preview.src = savedPhoto;
+            }
             preview.classList.add("active");
             placeholder.style.display = "none";
-            SharedData.setProfilePhoto('vpaa', reader.result);
-        };
-        reader.readAsDataURL(file);
+        } catch (error) {
+            alert(error && error.message ? error.message : "Failed to upload the profile image.");
+            const storedPhoto = SharedData.getProfilePhoto('vpaa');
+            if (storedPhoto) {
+                preview.src = storedPhoto;
+                preview.classList.add("active");
+                placeholder.style.display = "none";
+            } else {
+                preview.removeAttribute("src");
+                preview.classList.remove("active");
+                placeholder.style.display = "";
+            }
+        } finally {
+            URL.revokeObjectURL(localPreviewUrl);
+            input.value = "";
+        }
     });
 }
 
@@ -1236,21 +1400,27 @@ function handleChangeEmail() {
         return;
     }
 
-    const payload = {
-        username: "",
-        currentEmail,
-        newEmail
-    };
+    if (!SharedData.changeOwnEmail) {
+        alert("Email update service is unavailable.");
+        return;
+    }
 
-    console.log("Ready for SQL integration: /api/vpaa/change-email", payload);
-    alert("Email update request ready for SQL connection.");
+    try {
+        const result = SharedData.changeOwnEmail(currentEmail, newEmail);
+        const nextEmail = String(result && result.email || newEmail).trim();
+        alert("Email updated successfully.");
 
-    const profileEmail = document.getElementById("profileEmail");
-    if (profileEmail) profileEmail.textContent = newEmail;
-    const currentEmailInput = document.getElementById("currentEmail");
-    if (currentEmailInput) {
-        currentEmailInput.value = newEmail;
-        currentEmailInput.defaultValue = newEmail;
+        const profileEmail = document.getElementById("profileEmail");
+        if (profileEmail) profileEmail.textContent = nextEmail;
+        const currentEmailInput = document.getElementById("currentEmail");
+        if (currentEmailInput) {
+            currentEmailInput.value = nextEmail;
+            currentEmailInput.defaultValue = nextEmail;
+        }
+    } catch (error) {
+        console.error("[VPAA] Failed to update email.", error);
+        alert(error && error.message ? error.message : "Failed to update email.");
+        return;
     }
 
     const form = document.getElementById("changeEmailForm");
@@ -1282,14 +1452,19 @@ function handleChangePassword() {
         return;
     }
 
-    const payload = {
-        username: "",
-        currentPassword,
-        newPassword
-    };
+    if (!SharedData.changeOwnPassword) {
+        alert("Password update service is unavailable.");
+        return;
+    }
 
-    console.log("Ready for SQL integration: /api/vpaa/change-password", payload);
-    alert("Password update request ready for SQL connection.");
+    try {
+        SharedData.changeOwnPassword(currentPassword, newPassword);
+        alert("Password updated successfully.");
+    } catch (error) {
+        console.error("[VPAA] Failed to update password.", error);
+        alert(error && error.message ? error.message : "Failed to update password.");
+        return;
+    }
 
     const form = document.getElementById("changePasswordForm");
     if (form) form.reset();
@@ -1420,11 +1595,11 @@ function buildProfessorReportDetailsHtml(prof) {
             </div>
             <div class="vpaa-section comments-header">
                 <div class="vpaa-section-title">Comments (${combinedComments.length})</div>
-                <button class="btn-summary" data-prof-id="${escapeAttr(prof.id)}" aria-label="Summarise all comments for ${escapeAttr(prof.name)}">
-                    Summarise
+                <button class="btn-summary btn-ai-analytics" data-prof-id="${escapeAttr(prof.id)}" aria-label="Run AI analytics for ${escapeAttr(prof.name)}">
+                    AI Analytics
                 </button>
             </div>
-            <div class="vpaa-summary" data-summary-output aria-live="polite"></div>
+            <div class="vpaa-ai-insights" data-ai-insight-output aria-live="polite"></div>
             <div class="vpaa-comments-card">
                 <ul class="vpaa-comment-list vpaa-comment-list-combined">${combinedCommentsHtml}</ul>
             </div>
@@ -1538,12 +1713,12 @@ function setupReportModalEvents() {
     });
 
     elements.reportModalBody.addEventListener("click", (event) => {
-        const summaryBtn = event.target.closest(".btn-summary[data-prof-id]");
-        if (!summaryBtn) return;
-        const profId = String(summaryBtn.getAttribute("data-prof-id") || "");
-        const scope = summaryBtn.closest(".vpaa-report-details");
-        const summaryEl = scope ? scope.querySelector("[data-summary-output]") : null;
-        handleCommentSummary(profId, summaryEl);
+        const analyticsBtn = event.target.closest(".btn-ai-analytics[data-prof-id]");
+        if (!analyticsBtn) return;
+        const profId = String(analyticsBtn.getAttribute("data-prof-id") || "");
+        const scope = analyticsBtn.closest(".vpaa-report-details");
+        const outputEl = scope ? scope.querySelector("[data-ai-insight-output]") : null;
+        runAiAnalyticsForProfessor(profId, outputEl, analyticsBtn);
     });
 
     elements.reportModalBody.addEventListener("change", (event) => {
@@ -1623,37 +1798,543 @@ function renderComments(list) {
     return list.map((comment) => `<li>${escapeHtml(comment)}</li>`).join("");
 }
 
-function handleCommentSummary(profId, summaryEl) {
-    const prof = allProfessorData.find((p) => String(p.id) === String(profId));
-    if (!prof) return;
-
-    const summaryText = generateCommentSummary(prof);
-
-    if (summaryEl) {
-        summaryEl.textContent = summaryText;
-        summaryEl.classList.add("visible");
-    } else {
-        alert(summaryText);
-    }
+function sanitizeAiAnalyticsText(value, maxLength = 260) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (!text) return "";
+    const safeLimit = Number(maxLength) > 0 ? Number(maxLength) : 260;
+    return text.length > safeLimit ? text.slice(0, safeLimit) : text;
 }
 
-function generateCommentSummary(prof) {
-    const student = prof.studentComments || [];
-    const peer = prof.peerComments || [];
-    const supervisor = prof.supervisorComments || [];
-    const all = [...student, ...peer, ...supervisor].filter(Boolean);
+function normalizeAiAnalyticsTone(value) {
+    const token = String(value || "").trim().toLowerCase();
+    if (token === "positive") return "positive";
+    if (token === "negative") return "negative";
+    return "neutral";
+}
 
-    if (!all.length) {
-        return "No comments available to summarise yet.";
+function normalizeAiAnalyticsJudgmentLabel(value) {
+    const token = String(value || "").trim().toLowerCase();
+    if (token === "excellent") return "Excellent";
+    if (token === "good") return "Good";
+    if (token === "critical concern" || token === "critical" || token === "critical_concern") return "Critical Concern";
+    return "Needs Improvement";
+}
+
+function normalizeAiAnalyticsSourceLabel(value) {
+    const token = String(value || "").trim().toLowerCase();
+    if (!token) return "General";
+    if (token.includes("student")) return "Student to Professor";
+    if (token.includes("peer") || token.includes("professor")) return "Professor to Professor";
+    if (token.includes("supervisor") || token.includes("dean") || token.includes("vpaa") || token.includes("hr")) return "Supervisor to Professor";
+    return "General";
+}
+
+function getAiAnalyticsActorIdentity() {
+    const session = SharedData.getSession ? SharedData.getSession() : null;
+    return {
+        userId: session && session.userId ? session.userId : "",
+        email: session && session.email ? session.email : "",
+        username: session && session.username ? session.username : "",
+        employeeId: session && session.employeeId ? session.employeeId : "",
+        role: session && session.role ? session.role : "",
+        fullName: session && session.fullName ? session.fullName : (session && session.username ? session.username : ""),
+    };
+}
+
+function computeAiAverageFromDistribution(distribution) {
+    const dist = distribution && typeof distribution === "object" ? distribution : {};
+    let weighted = 0;
+    let total = 0;
+    [1, 2, 3, 4, 5].forEach((score) => {
+        const count = Number(dist[score] || 0);
+        if (!Number.isFinite(count) || count <= 0) return;
+        weighted += score * count;
+        total += count;
+    });
+    if (total <= 0) return null;
+    return Number((weighted / total).toFixed(2));
+}
+
+function buildProfessorAiAnalyticsMetrics(prof) {
+    const byType = prof && typeof prof.analyticsByType === "object" ? prof.analyticsByType : {};
+    const averagesBySource = {
+        student: computeAiAverageFromDistribution(byType.student && byType.student.ratingDistribution),
+        professor: computeAiAverageFromDistribution(byType.professor && byType.professor.ratingDistribution),
+        supervisor: computeAiAverageFromDistribution(byType.supervisor && byType.supervisor.ratingDistribution),
+    };
+
+    const available = Object.values(averagesBySource).filter((value) => Number.isFinite(Number(value))).map(Number);
+    const combinedAverage = available.length
+        ? Number((available.reduce((sum, value) => sum + value, 0) / available.length).toFixed(2))
+        : (Number.isFinite(Number(prof && prof.overall)) ? Number(prof.overall) : null);
+
+    return {
+        overallRating: Number.isFinite(Number(prof && prof.overall)) ? Number(prof.overall) : null,
+        combinedAverage: Number.isFinite(Number(combinedAverage)) ? Number(combinedAverage) : null,
+        responseRate: Number.isFinite(Number(prof && prof.responseRate)) ? Number(prof.responseRate) : null,
+        totalEvaluations: Number.isFinite(Number(prof && prof.evaluations)) ? Number(prof.evaluations) : 0,
+        averagesBySource: averagesBySource,
+        countsBySource: {
+            student: Array.isArray(prof && prof.studentComments) ? prof.studentComments.length : 0,
+            professor: Array.isArray(prof && prof.peerComments) ? prof.peerComments.length : 0,
+            supervisor: Array.isArray(prof && prof.supervisorComments) ? prof.supervisorComments.length : 0,
+        },
+    };
+}
+
+function buildProfessorAiAnalyticsPayload(prof) {
+    const combined = buildCombinedCommentEntries(prof)
+        .map((item, index) => ({
+            id: `${String(prof && prof.id || "prof")}_${index + 1}`,
+            source: normalizeAiAnalyticsSourceLabel(item && item.source),
+            text: sanitizeAiAnalyticsText(item && item.text, 700),
+        }))
+        .filter((item) => item.text)
+        .slice(0, 240);
+
+    return {
+        professor: {
+            id: sanitizeAiAnalyticsText(prof && prof.id, 80),
+            name: sanitizeAiAnalyticsText(prof && prof.name, 160),
+            semester: sanitizeAiAnalyticsText(prof && prof.semester, 120),
+        },
+        comments: combined,
+        metrics: buildProfessorAiAnalyticsMetrics(prof),
+    };
+}
+
+function buildLocalAiKeywordRows(comments) {
+    const texts = (Array.isArray(comments) ? comments : []).map((item) => String(item && item.text || "").trim()).filter(Boolean);
+    const base = computeTopWordFrequency(texts, 12);
+    const positive = new Set(["excellent", "great", "good", "clear", "helpful", "organized", "engaging", "respectful", "supportive", "effective", "fair"]);
+    const negative = new Set(["hate", "terror", "worst", "bad", "poor", "unclear", "confusing", "boring", "late", "rude", "unfair", "strict", "difficult", "awful"]);
+    return base.map((item) => {
+        const term = sanitizeAiAnalyticsText(item && item.label, 40).toLowerCase();
+        let tone = "neutral";
+        if (positive.has(term)) tone = "positive";
+        if (negative.has(term)) tone = "negative";
+        return {
+            term: sanitizeAiAnalyticsText(item && item.label, 40),
+            count: Math.max(1, Number(item && item.count || 1)),
+            tone: tone,
+        };
+    });
+}
+
+function buildLocalAiClusters(comments) {
+    const rows = Array.isArray(comments) ? comments : [];
+    const themes = {
+        "Teaching Clarity": ["explain", "explains", "clear", "clarity", "understand", "confusing", "discussion", "lecture"],
+        "Engagement & Delivery": ["engaging", "interactive", "boring", "enthusiasm", "pace", "energy", "participation"],
+        "Assessment & Fairness": ["exam", "quiz", "grade", "grading", "fair", "rubric", "assignment", "assessment"],
+        "Professionalism & Conduct": ["respectful", "rude", "late", "punctual", "attitude", "professional", "behavior", "approachable"],
+        "Learning Support": ["examples", "consultation", "feedback", "materials", "resources", "guidance", "support", "helpful"],
+    };
+
+    const buckets = {};
+    rows.forEach((row) => {
+        const text = String(row && row.text || "").toLowerCase();
+        const source = normalizeAiAnalyticsSourceLabel(row && row.source);
+        let bestTheme = "General Feedback";
+        let bestHits = 0;
+
+        Object.keys(themes).forEach((theme) => {
+            const hits = themes[theme].reduce((sum, keyword) => {
+                return sum + (text.includes(keyword) ? 1 : 0);
+            }, 0);
+            if (hits > bestHits) {
+                bestHits = hits;
+                bestTheme = theme;
+            }
+        });
+
+        if (!buckets[bestTheme]) {
+            buckets[bestTheme] = {
+                theme: bestTheme,
+                count: 0,
+                sources: new Set(),
+                sampleComments: [],
+            };
+        }
+        buckets[bestTheme].count += 1;
+        buckets[bestTheme].sources.add(source);
+        if (buckets[bestTheme].sampleComments.length < 2) {
+            buckets[bestTheme].sampleComments.push(sanitizeAiAnalyticsText(row && row.text, 220));
+        }
+    });
+
+    return Object.values(buckets)
+        .sort((a, b) => b.count - a.count || String(a.theme).localeCompare(String(b.theme)))
+        .slice(0, 5)
+        .map((item) => ({
+            theme: sanitizeAiAnalyticsText(item.theme, 90),
+            count: Math.max(1, Number(item.count || 1)),
+            sources: Array.from(item.sources),
+            sampleComments: item.sampleComments.filter(Boolean),
+        }));
+}
+
+function buildLocalAiJudgment(payload, keywords) {
+    const metrics = payload && payload.metrics ? payload.metrics : {};
+    const comments = Array.isArray(payload && payload.comments) ? payload.comments : [];
+    const combinedAverage = Number.isFinite(Number(metrics.combinedAverage)) ? Number(metrics.combinedAverage) : null;
+    const responseRate = Number.isFinite(Number(metrics.responseRate)) ? Number(metrics.responseRate) : null;
+    const totalComments = comments.length;
+
+    let positiveWeight = 0;
+    let negativeWeight = 0;
+    let neutralWeight = 0;
+    (Array.isArray(keywords) ? keywords : []).forEach((row) => {
+        const count = Math.max(1, Number(row && row.count || 1));
+        const tone = normalizeAiAnalyticsTone(row && row.tone);
+        if (tone === "positive") positiveWeight += count;
+        else if (tone === "negative") negativeWeight += count;
+        else neutralWeight += count;
+    });
+
+    const toneTotal = Math.max(1, positiveWeight + negativeWeight + neutralWeight);
+    const toneBalance = ((positiveWeight * 1.0) - (negativeWeight * 1.2)) / toneTotal;
+
+    let score = 50;
+    if (Number.isFinite(combinedAverage)) {
+        score += (combinedAverage - 3) * 18;
+    }
+    score += Math.max(-20, Math.min(20, toneBalance * 24));
+    if (Number.isFinite(responseRate)) {
+        score += ((responseRate - 50) / 50) * 10;
+    }
+    if (totalComments <= 3) score -= 8;
+    else if (totalComments >= 20) score += 4;
+    score = Math.round(Math.max(0, Math.min(100, score)));
+
+    let label = "Needs Improvement";
+    if (score >= 85) label = "Excellent";
+    else if (score >= 70) label = "Good";
+    else if (score < 50) label = "Critical Concern";
+
+    let confidence = 45 + Math.min(35, totalComments * 2);
+    if (Number.isFinite(responseRate)) confidence += Math.min(10, responseRate / 10);
+    if (Number.isFinite(combinedAverage)) confidence += 10;
+    if (totalComments < 3) confidence -= 10;
+    confidence = Math.round(Math.max(25, Math.min(98, confidence)));
+
+    let rationale = "Mixed sentiment and performance indicators suggest improvements are needed.";
+    if (label === "Excellent") rationale = "Consistent positive feedback and strong rating indicators across available sources.";
+    if (label === "Good") rationale = "Feedback is generally positive with limited critical concerns.";
+    if (label === "Critical Concern") rationale = "Negative patterns and lower performance indicators suggest urgent review.";
+    if (!Number.isFinite(combinedAverage)) rationale += " Overall rating context is limited.";
+
+    return {
+        label,
+        rationale,
+        confidence,
+        score,
+    };
+}
+
+function buildLocalAiReasoning(payload, keywords, clusters, judgment) {
+    const sourceCounts = payload && payload.metrics && payload.metrics.countsBySource ? payload.metrics.countsBySource : {};
+    const lines = [];
+    lines.push(
+        `Analyzed ${Array.isArray(payload && payload.comments) ? payload.comments.length : 0} comments from Student (${Number(sourceCounts.student || 0)}), Professor (${Number(sourceCounts.professor || 0)}), and Supervisor (${Number(sourceCounts.supervisor || 0)}) sources.`
+    );
+
+    if (payload && payload.metrics && Number.isFinite(Number(payload.metrics.combinedAverage))) {
+        lines.push(`Combined rating context is ${Number(payload.metrics.combinedAverage).toFixed(2)} / 5.00 based on available evaluation data.`);
+    } else {
+        lines.push("Combined rating context is limited, so conclusions rely more on textual feedback patterns.");
     }
 
-    const snippets = [];
-    if (student.length) snippets.push(`Students: ${student[0]}`);
-    if (peer.length) snippets.push(`Professors: ${peer[0]}`);
-    if (supervisor.length) snippets.push(`Supervisors: ${supervisor[0]}`);
+    const positiveTerms = (Array.isArray(keywords) ? keywords : []).filter((row) => normalizeAiAnalyticsTone(row && row.tone) === "positive").slice(0, 2).map((row) => row.term);
+    const negativeTerms = (Array.isArray(keywords) ? keywords : []).filter((row) => normalizeAiAnalyticsTone(row && row.tone) === "negative").slice(0, 2).map((row) => row.term);
+    if (positiveTerms.length || negativeTerms.length) {
+        lines.push(`Detected positive markers (${positiveTerms.length ? positiveTerms.join(", ") : "none"}) and negative markers (${negativeTerms.length ? negativeTerms.join(", ") : "none"}).`);
+    }
 
-    const counts = `Students (${student.length}), Professors (${peer.length}), Supervisors (${supervisor.length})`;
-    return `${counts}. Summary: ${snippets.join(" | ")}`;
+    if (Array.isArray(clusters) && clusters.length) {
+        const dominant = clusters[0];
+        lines.push(`Most comments cluster around "${sanitizeAiAnalyticsText(dominant && dominant.theme, 90)}" (${Number(dominant && dominant.count || 0)} comments).`);
+    }
+
+    lines.push(`Final judgment: ${normalizeAiAnalyticsJudgmentLabel(judgment && judgment.label)} (confidence ${Math.round(Number(judgment && judgment.confidence || 0))}%).`);
+    return lines.slice(0, 5);
+}
+
+function buildLocalAiExplainabilityInsight(payload) {
+    const comments = Array.isArray(payload && payload.comments) ? payload.comments : [];
+    const keywords = buildLocalAiKeywordRows(comments);
+    const clusters = buildLocalAiClusters(comments);
+    const judgment = buildLocalAiJudgment(payload, keywords);
+    const reasoning = buildLocalAiReasoning(payload, keywords, clusters, judgment);
+    return {
+        keywords,
+        clusters,
+        reasoning,
+        judgment: {
+            label: normalizeAiAnalyticsJudgmentLabel(judgment.label),
+            rationale: sanitizeAiAnalyticsText(judgment.rationale, 320),
+            confidence: Math.max(0, Math.min(100, Number(judgment.confidence || 0))),
+        },
+        stats: {
+            totalComments: comments.length,
+            sourceCounts: payload && payload.metrics && payload.metrics.countsBySource ? payload.metrics.countsBySource : { student: 0, professor: 0, supervisor: 0 },
+            combinedAverage: payload && payload.metrics ? payload.metrics.combinedAverage : null,
+            responseRate: payload && payload.metrics ? payload.metrics.responseRate : null,
+            totalEvaluations: payload && payload.metrics ? payload.metrics.totalEvaluations : 0,
+        },
+    };
+}
+
+function normalizeAiInsightData(rawInsight, fallbackInsight) {
+    const fallback = fallbackInsight && typeof fallbackInsight === "object" ? fallbackInsight : buildLocalAiExplainabilityInsight({ comments: [], metrics: {} });
+    const insight = rawInsight && typeof rawInsight === "object" ? rawInsight : {};
+
+    const keywords = Array.isArray(insight.keywords) && insight.keywords.length
+        ? insight.keywords.map((row) => ({
+            term: sanitizeAiAnalyticsText(row && row.term, 40),
+            count: Math.max(1, Number(row && row.count || 1)),
+            tone: normalizeAiAnalyticsTone(row && row.tone),
+        })).filter((row) => row.term)
+        : fallback.keywords;
+
+    const clusters = Array.isArray(insight.clusters) && insight.clusters.length
+        ? insight.clusters.map((row) => ({
+            theme: sanitizeAiAnalyticsText(row && row.theme, 90) || "General Feedback",
+            count: Math.max(1, Number(row && row.count || 1)),
+            sources: Array.isArray(row && row.sources) ? row.sources.map((source) => normalizeAiAnalyticsSourceLabel(source)).slice(0, 4) : [],
+            sampleComments: Array.isArray(row && row.sampleComments) ? row.sampleComments.map((item) => sanitizeAiAnalyticsText(item, 220)).filter(Boolean).slice(0, 2) : [],
+        }))
+        : fallback.clusters;
+
+    const reasoning = Array.isArray(insight.reasoning) && insight.reasoning.length
+        ? insight.reasoning.map((line) => sanitizeAiAnalyticsText(line, 260)).filter(Boolean).slice(0, 8)
+        : fallback.reasoning;
+
+    const rawJudgment = insight.judgment && typeof insight.judgment === "object" ? insight.judgment : {};
+    const fallbackJudgment = fallback.judgment || {};
+    const label = normalizeAiAnalyticsJudgmentLabel(rawJudgment.label || fallbackJudgment.label);
+    const rationale = sanitizeAiAnalyticsText(rawJudgment.rationale, 320) || sanitizeAiAnalyticsText(fallbackJudgment.rationale, 320);
+    let confidence = Number(rawJudgment.confidence);
+    if (!Number.isFinite(confidence) || confidence <= 0) confidence = Number(fallbackJudgment.confidence || 0);
+    if (confidence > 0 && confidence <= 1) confidence *= 100;
+    confidence = Math.round(Math.max(0, Math.min(100, confidence)));
+
+    const sourceCounts = insight.stats && insight.stats.sourceCounts && typeof insight.stats.sourceCounts === "object"
+        ? insight.stats.sourceCounts
+        : (fallback.stats && fallback.stats.sourceCounts ? fallback.stats.sourceCounts : { student: 0, professor: 0, supervisor: 0 });
+    const stats = {
+        totalComments: Number(insight.stats && insight.stats.totalComments),
+        sourceCounts: {
+            student: Number(sourceCounts.student || 0),
+            professor: Number(sourceCounts.professor || 0),
+            supervisor: Number(sourceCounts.supervisor || 0),
+        },
+        combinedAverage: Number.isFinite(Number(insight.stats && insight.stats.combinedAverage))
+            ? Number(insight.stats.combinedAverage)
+            : (fallback.stats ? fallback.stats.combinedAverage : null),
+        responseRate: Number.isFinite(Number(insight.stats && insight.stats.responseRate))
+            ? Number(insight.stats.responseRate)
+            : (fallback.stats ? fallback.stats.responseRate : null),
+        totalEvaluations: Number.isFinite(Number(insight.stats && insight.stats.totalEvaluations))
+            ? Number(insight.stats.totalEvaluations)
+            : (fallback.stats ? fallback.stats.totalEvaluations : 0),
+    };
+    if (!Number.isFinite(stats.totalComments)) {
+        stats.totalComments = fallback.stats && Number.isFinite(Number(fallback.stats.totalComments))
+            ? Number(fallback.stats.totalComments)
+            : 0;
+    }
+
+    return {
+        keywords,
+        clusters,
+        reasoning,
+        judgment: {
+            label,
+            rationale: rationale || "No detailed rationale available.",
+            confidence,
+        },
+        stats,
+    };
+}
+
+function formatAiInsightSource(source) {
+    const token = String(source || "rule").trim().toLowerCase();
+    if (token === "gemini") return "Gemini";
+    if (token === "gemini+rule") return "Gemini + Rule fallback";
+    return "Rule fallback";
+}
+
+function getAiJudgmentClass(label) {
+    const normalized = normalizeAiAnalyticsJudgmentLabel(label);
+    if (normalized === "Excellent") return "excellent";
+    if (normalized === "Good") return "good";
+    if (normalized === "Critical Concern") return "critical";
+    return "needs-improvement";
+}
+
+function renderAiInsightState(outputEl, stateType, message) {
+    if (!outputEl) return;
+    const type = String(stateType || "info").toLowerCase();
+    outputEl.classList.add("visible");
+    outputEl.innerHTML = `
+        <div class="vpaa-ai-note">AI Analytics uses all comment sources (student, peer, supervisor).</div>
+        <div class="vpaa-ai-state ${escapeAttr(type)}">${escapeHtml(message || "No data available.")}</div>
+    `;
+}
+
+function renderAiInsightResult(outputEl, insightData, source, noticeText) {
+    if (!outputEl) return;
+    const insight = insightData && typeof insightData === "object" ? insightData : {};
+    const keywords = Array.isArray(insight.keywords) ? insight.keywords : [];
+    const clusters = Array.isArray(insight.clusters) ? insight.clusters : [];
+    const reasoning = Array.isArray(insight.reasoning) ? insight.reasoning : [];
+    const judgment = insight.judgment && typeof insight.judgment === "object" ? insight.judgment : {};
+    const stats = insight.stats && typeof insight.stats === "object" ? insight.stats : {};
+    const sourceLabel = formatAiInsightSource(source);
+    const judgmentLabel = normalizeAiAnalyticsJudgmentLabel(judgment.label);
+    const judgmentClass = getAiJudgmentClass(judgmentLabel);
+    const confidence = Math.round(Math.max(0, Math.min(100, Number(judgment.confidence || 0))));
+
+    const keywordHtml = keywords.length
+        ? keywords.map((row) => `
+            <span class="vpaa-ai-keyword-chip tone-${escapeAttr(normalizeAiAnalyticsTone(row.tone))}">
+                <span class="vpaa-ai-keyword-term">${escapeHtml(row.term || "keyword")}</span>
+                <span class="vpaa-ai-keyword-count">${Math.max(1, Number(row.count || 1))}x</span>
+            </span>
+        `).join("")
+        : '<div class="vpaa-ai-empty">No keywords detected.</div>';
+
+    const clusterHtml = clusters.length
+        ? clusters.map((cluster) => {
+            const sources = Array.isArray(cluster.sources) && cluster.sources.length
+                ? cluster.sources.map((sourceName) => `<span class="vpaa-ai-source-chip">${escapeHtml(normalizeAiAnalyticsSourceLabel(sourceName))}</span>`).join("")
+                : '<span class="vpaa-ai-empty-inline">No source tags</span>';
+            const samples = Array.isArray(cluster.sampleComments) && cluster.sampleComments.length
+                ? `<ul class="vpaa-ai-sample-list">${cluster.sampleComments.map((sample) => `<li>${escapeHtml(sample)}</li>`).join("")}</ul>`
+                : '<div class="vpaa-ai-empty-inline">No sample comments.</div>';
+            return `
+                <div class="vpaa-ai-cluster-card">
+                    <div class="vpaa-ai-cluster-header">
+                        <strong>${escapeHtml(cluster.theme || "General Feedback")}</strong>
+                        <span>${Math.max(1, Number(cluster.count || 1))} comments</span>
+                    </div>
+                    <div class="vpaa-ai-cluster-sources">${sources}</div>
+                    ${samples}
+                </div>
+            `;
+        }).join("")
+        : '<div class="vpaa-ai-empty">No comment clusters detected.</div>';
+
+    const reasoningHtml = reasoning.length
+        ? `<ul class="vpaa-ai-reasoning-list">${reasoning.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
+        : '<div class="vpaa-ai-empty">No reasoning details available.</div>';
+
+    const noticeHtml = noticeText
+        ? `<div class="vpaa-ai-alert">${escapeHtml(noticeText)}</div>`
+        : "";
+
+    outputEl.classList.add("visible");
+    outputEl.innerHTML = `
+        <div class="vpaa-ai-note">AI Analytics uses all comment sources (student, peer, supervisor).</div>
+        ${noticeHtml}
+        <div class="vpaa-ai-meta">
+            <span class="vpaa-ai-meta-pill">Source: ${escapeHtml(sourceLabel)}</span>
+            <span class="vpaa-ai-meta-pill">Comments analyzed: ${Math.max(0, Number(stats.totalComments || 0))}</span>
+        </div>
+        <div class="vpaa-ai-section">
+            <div class="vpaa-ai-section-title">Detected Keywords</div>
+            <div class="vpaa-ai-keywords">${keywordHtml}</div>
+        </div>
+        <div class="vpaa-ai-section">
+            <div class="vpaa-ai-section-title">Comment Clusters</div>
+            <div class="vpaa-ai-clusters">${clusterHtml}</div>
+        </div>
+        <div class="vpaa-ai-section">
+            <div class="vpaa-ai-section-title">AI Reasoning</div>
+            ${reasoningHtml}
+        </div>
+        <div class="vpaa-ai-judgment-card ${escapeAttr(judgmentClass)}">
+            <div class="vpaa-ai-judgment-head">
+                <span class="vpaa-ai-judgment-label">${escapeHtml(judgmentLabel)}</span>
+                <span class="vpaa-ai-judgment-confidence">${confidence}% confidence</span>
+            </div>
+            <p class="vpaa-ai-judgment-rationale">${escapeHtml(judgment.rationale || "No rationale available.")}</p>
+        </div>
+    `;
+}
+
+function runAiAnalyticsForProfessor(profId, outputEl, btnEl) {
+    const prof = allProfessorData.find((p) => String(p.id) === String(profId));
+    if (!prof) {
+        renderAiInsightState(outputEl, "error", "Unable to load professor data for AI analytics.");
+        return;
+    }
+
+    const payload = buildProfessorAiAnalyticsPayload(prof);
+    if (!Array.isArray(payload.comments) || payload.comments.length === 0) {
+        renderAiInsightState(outputEl, "empty", "No comments available for AI analytics.");
+        return;
+    }
+
+    const fallbackInsight = buildLocalAiExplainabilityInsight(payload);
+    renderAiInsightState(outputEl, "loading", "Analyzing comments with AI...");
+
+    const originalText = btnEl ? btnEl.textContent : "";
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.textContent = "Analyzing...";
+    }
+
+    const executeAnalysis = () => {
+        try {
+            let response = null;
+            if (typeof SharedData.analyzeEvaluationExplainability === "function") {
+                response = SharedData.analyzeEvaluationExplainability(payload, getAiAnalyticsActorIdentity());
+            } else {
+                throw new Error("SharedData.analyzeEvaluationExplainability is unavailable.");
+            }
+
+            const insight = normalizeAiInsightData(response && response.insight, fallbackInsight);
+            const source = response && response.source ? response.source : "rule";
+            const notice = source === "gemini"
+                ? ""
+                : "Gemini is unavailable or partial; showing rule-based fallback insights.";
+            renderAiInsightResult(outputEl, insight, source, notice);
+        } catch (error) {
+            console.error("[VPAA] AI analytics failed, using local fallback.", error);
+            renderAiInsightResult(
+                outputEl,
+                fallbackInsight,
+                "rule",
+                "Gemini is unavailable right now. Showing rule-based fallback analytics."
+            );
+        } finally {
+            if (btnEl) {
+                btnEl.disabled = false;
+                btnEl.textContent = originalText || "AI Analytics";
+            }
+        }
+    };
+
+    const loadingOverlay = window.AppLoadingOverlay;
+    const canUseOverlay = loadingOverlay
+        && typeof loadingOverlay.show === "function"
+        && typeof loadingOverlay.hide === "function";
+
+    if (!canUseOverlay) {
+        executeAnalysis();
+        return;
+    }
+
+    loadingOverlay.show("Analyzing comments with AI...");
+    setTimeout(() => {
+        try {
+            executeAnalysis();
+        } finally {
+            loadingOverlay.hide();
+        }
+    }, 0);
 }
 
 function sanitizePhotoSource(value) {
@@ -1663,6 +2344,9 @@ function sanitizePhotoSource(value) {
         return photo;
     }
     if (/^https?:\/\//i.test(photo)) {
+        return photo;
+    }
+    if (/^(\/|\.{1,2}\/|uploads\/)/i.test(photo)) {
         return photo;
     }
     return "";
@@ -1697,7 +2381,7 @@ function getInitials(name) {
  * @returns {boolean} - True if user is authenticated as VPAA
  */
 function checkAuthentication() {
-    const session = SharedData.getSession();
+    const session = SharedData.requireSession('vpaa');
     if (!session) {
         return false;
     }

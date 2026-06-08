@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Panel - National Aviation Academy of the Philippines</title>
     <link rel="stylesheet" href="../css/hrpanel.css?v=20260322a">
-    <link rel="stylesheet" href="../css/adminpanel.css?v=20260322a">
+    <link rel="stylesheet" href="../css/adminpanel.css?v=20260414e">
     <link rel="stylesheet" href="../css/panel-theme.css?v=20260322a">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -733,6 +733,31 @@
                                 id="credential-download-failures-btn" type="button" style="display:none;">
                                 <i class="fas fa-download"></i> Download Failed Rows CSV
                             </button>
+
+                            <div class="credential-test-mail-box">
+                                <h4><i class="fas fa-flask"></i> Test Gmail Broadcast (All Active Users)</h4>
+                                <p class="credential-distributor-description">
+                                    Testing only. This sends the custom message below to all active user emails.
+                                </p>
+                                <div class="credential-distributor-field">
+                                    <label for="credential-test-gmail-subject">Email Subject</label>
+                                    <input type="text" id="credential-test-gmail-subject"
+                                        placeholder="Test Reminder: Please complete your evaluation">
+                                </div>
+                                <div class="credential-distributor-field">
+                                    <label for="credential-test-gmail-message">Email Message</label>
+                                    <textarea id="credential-test-gmail-message" rows="5"
+                                        placeholder="This is a test message from the admin panel. Please complete your evaluation within the evaluation period."></textarea>
+                                </div>
+                                <div class="credential-distributor-actions">
+                                    <button class="btn-save credential-send-btn" id="credential-test-gmail-send-btn"
+                                        type="button">
+                                        <i class="fas fa-paper-plane"></i> Send Test Gmail to Everyone
+                                    </button>
+                                </div>
+                                <div class="credential-distributor-feedback" id="credential-test-gmail-feedback"
+                                    aria-live="polite"></div>
+                            </div>
                         </div>
                         <div class="settings-group">
                             <h3>Activity Log</h3>
@@ -1759,6 +1784,8 @@
                     <div class="checkbox-row">
                         <input type="checkbox" id="question-required" name="required">
                         <label for="question-required">Required Question</label>
+                        <input type="checkbox" id="question-exception-reporting" name="exceptionReporting" style="display: none;">
+                        <label for="question-exception-reporting" id="question-exception-reporting-label" style="display: none;">Exception Reporting</label>
                     </div>
                 </div>
                 <div class="modal-actions">
@@ -1787,9 +1814,9 @@
     </div>
 
 
-    <script src="../JsScrip/db-data.js?v=20260322a"></script>
+    <script src="../JsScrip/db-data.js?v=20260414d"></script>
     <script src="../JsScrip/vendor/xlsx.full.min.js?v=20260323a"></script>
-    <script src="../JsScrip/adminpanel.js?v=20260326a"></script>
+    <script src="../JsScrip/adminpanel.js?v=20260414e"></script>
 </body>
 
 </html>

@@ -3,12 +3,10 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/state_helpers.php';
 require_once __DIR__ . '/faculty_pdf_helper.php';
 
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('Pragma: no-cache');
 header('Expires: 0');
@@ -33,9 +31,24 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') {
     sendFileJsonError('Method not allowed', 405);
 }
 
+$session = requireNaapAuthenticatedSession();
+$sessionUser = buildUserSnapshotById($pdo, $session['userId'], false);
+if (!$sessionUser) {
+    destroyNaapSession();
+    sendFileJsonError('Authentication required.', 401);
+}
+if (strtolower(trim((string) ($sessionUser['status'] ?? 'active'))) === 'inactive') {
+    destroyNaapSession();
+    sendFileJsonError('Account is inactive.', 403);
+}
+
+$actorRole = strtolower(trim((string) ($sessionUser['role'] ?? '')));
+$actorUserId = trim((string) ($sessionUser['id'] ?? ''));
+if ($actorRole !== 'professor' && $actorRole !== 'dean') {
+    sendFileJsonError('Permission denied.', 403);
+}
+
 $paperId = trim((string) ($_GET['paper_id'] ?? ''));
-$actorRole = (string) ($_GET['actor_role'] ?? '');
-$actorUserId = (string) ($_GET['actor_user_id'] ?? '');
 $versionNo = null;
 if (isset($_GET['version_no']) && $_GET['version_no'] !== '') {
     $versionNo = (int) $_GET['version_no'];
@@ -44,8 +57,8 @@ if (isset($_GET['version_no']) && $_GET['version_no'] !== '') {
     }
 }
 
-if ($paperId === '' || $actorRole === '' || $actorUserId === '') {
-    sendFileJsonError('paper_id, actor_role, and actor_user_id are required.', 400);
+if ($paperId === '') {
+    sendFileJsonError('paper_id is required.', 400);
 }
 
 $papers = buildFacultyAcknowledgementPapersSnapshot($pdo);

@@ -23,9 +23,10 @@ let osaProfile = null;
 let currentSearchKeyword = "";
 let latestAnalyticsSnapshot = null;
 let selectedAnalyticsDepartment = "";
+let manualClearModalContext = null;
 
 function checkAuthentication() {
-    return SharedData.isAuthenticated() && SharedData.getRole() === "osa";
+    return !!SharedData.requireSession("osa");
 }
 
 function redirectToLogin() {
@@ -40,7 +41,7 @@ function loadUserInfo() {
         (osaProfile && osaProfile.fullName) ||
         (session.username ? `${capitalizeFirstLetter(session.username)} OSA` : "OSA User");
 
-    ["profileName", "profileNameDuplicate", "profileNameStatus"].forEach(function (id) {
+    ["profileName", "profileNameDuplicate", "profileNameStatus", "profileNameProof"].forEach(function (id) {
         const element = document.getElementById(id);
         if (element) {
             element.textContent = displayName;
@@ -60,6 +61,7 @@ function setupLogout() {
 }
 
 function initializeStatusMonitoring() {
+    setupManualClearModal();
     setupSearch();
     setupStatusActions();
     setupAnalyticsInteractions();
@@ -75,7 +77,8 @@ function setupDataSubscriptions() {
             key === SharedData.KEYS.SUBJECT_MANAGEMENT ||
             key === SharedData.KEYS.CURRENT_SEMESTER ||
             key === SharedData.KEYS.USERS ||
-            key === SharedData.KEYS.OSA_STUDENT_CLEARANCES
+            key === SharedData.KEYS.OSA_STUDENT_CLEARANCES ||
+            key === SharedData.KEYS.STUDENT_EVAL_PROOF_REQUESTS
         ) {
             refreshStatusAndAnalytics();
         }
@@ -189,7 +192,7 @@ function getEvaluationPeriodState() {
         return {
             isClosed: false,
             hasEndDate: false,
-            note: "Mark Cleared is unavailable because the Student-to-Professor period end date is not configured.",
+            note: "Proof review is unavailable because the Student-to-Professor period end date is not configured.",
         };
     }
 
@@ -200,8 +203,8 @@ function getEvaluationPeriodState() {
         isClosed: isClosed,
         hasEndDate: true,
         note: isClosed
-            ? `Evaluation period ended on ${endRaw}. Mark Cleared is enabled for non-completed students with valid reasons.`
-            : `Mark Cleared becomes available after the evaluation period ends on ${endRaw}.`,
+            ? `Evaluation period ended on ${endRaw}. OSA can now review submitted student proof requests.`
+            : `Proof review becomes available after the evaluation period ends on ${endRaw}.`,
     };
 }
 
@@ -308,6 +311,37 @@ function buildStatusRows() {
         if (studentNumber) clearanceByNumberAndSemester.set(`${studentNumber}|${sem}`, row);
     });
 
+    const proofRows = SharedData.getStudentEvaluationProofRequests
+        ? SharedData.getStudentEvaluationProofRequests()
+        : [];
+    const proofByUserAndSemester = new Map();
+    const proofByNumberAndSemester = new Map();
+
+    function upsertLatestProof(map, key, row) {
+        if (!key) return;
+        const existing = map.get(key);
+        if (!existing) {
+            map.set(key, row);
+            return;
+        }
+        const existingTs = Date.parse(String(existing.submittedAt || existing.reviewedAt || "")) || 0;
+        const candidateTs = Date.parse(String(row.submittedAt || row.reviewedAt || "")) || 0;
+        if (candidateTs >= existingTs) {
+            map.set(key, row);
+        }
+    }
+
+    proofRows.forEach(function (row) {
+        if (!row) return;
+        const sem = String(row.semesterId || "").trim();
+        if (!sem || (semesterId && sem !== semesterId)) return;
+
+        const userId = normalizeUserId(row.studentUserId);
+        const studentNumber = normalizeTextToken(row.studentNumber);
+        if (userId) upsertLatestProof(proofByUserAndSemester, `${userId}|${sem}`, row);
+        if (studentNumber) upsertLatestProof(proofByNumberAndSemester, `${studentNumber}|${sem}`, row);
+    });
+
     const rows = [];
     expectedByStudent.forEach(function (expectedSet, studentUserId) {
         const meta = studentMetaById.get(studentUserId) || directoryByUserId.get(studentUserId) || {
@@ -330,6 +364,11 @@ function buildStatusRows() {
         }
 
         const cleared = Boolean(clearance);
+        const proof = proofByUserAndSemester.get(`${studentUserId}|${semesterId}`)
+            || proofByNumberAndSemester.get(`${normalizeTextToken(meta.studentNumber)}|${semesterId}`)
+            || null;
+        const proofStatus = normalizeTextToken(proof && proof.status || "");
+
         rows.push({
             studentUserId,
             studentNumber: meta.studentNumber || "",
@@ -343,7 +382,14 @@ function buildStatusRows() {
             cleared,
             clearanceReason: cleared ? String(clearance.reason || "").trim() : "",
             clearanceNotedAt: cleared ? String(clearance.notedAt || "").trim() : "",
-            canMarkCleared: !evaluated && periodState.isClosed,
+            canReviewProof: !evaluated && !cleared && periodState.isClosed && proofStatus === "pending",
+            proofId: proof ? String(proof.id || "").trim() : "",
+            proofStatus: proofStatus,
+            proofReason: proof ? String(proof.reason || "").trim() : "",
+            proofDriveLink: proof ? String(proof.proofDriveLink || "").trim() : "",
+            proofSubmittedAt: proof ? String(proof.submittedAt || "").trim() : "",
+            proofReviewedAt: proof ? String(proof.reviewedAt || "").trim() : "",
+            proofReviewNote: proof ? String(proof.reviewNote || "").trim() : "",
         });
     });
 
@@ -427,6 +473,7 @@ function refreshStatusAndAnalytics() {
 
     renderStatusPeriodNote(snapshot.periodState);
     renderStatusTable(filteredStudents, snapshot.periodState);
+    renderProofReviewTable(snapshot.periodState);
     renderDashboardAnalytics(snapshot);
 }
 
@@ -532,6 +579,7 @@ function renderStatusTable(students, periodState) {
     if (!tbody || !emptyState) return;
 
     const showActionColumn = Boolean(periodState && periodState.isClosed);
+    const activeSemesterId = getActiveSemesterId();
     if (actionHeader) {
         actionHeader.style.display = showActionColumn ? "" : "none";
     }
@@ -544,13 +592,40 @@ function renderStatusTable(students, periodState) {
 
     emptyState.style.display = "none";
     tbody.innerHTML = students.map(function (student) {
-        const statusClass = student.evaluated ? "done" : (student.cleared ? "cleared" : "not-done");
-        const statusText = student.evaluated ? "Done" : (student.cleared ? "Cleared" : "Not Done");
-        const icon = student.evaluated ? "fa-circle-check" : (student.cleared ? "fa-file-circle-check" : "fa-circle-xmark");
+        const proofStatus = normalizeTextToken(student.proofStatus);
+        let statusClass = "not-done";
+        let statusText = "Not Done";
+        let icon = "fa-circle-xmark";
+        if (student.evaluated) {
+            statusClass = "done";
+            statusText = "Done";
+            icon = "fa-circle-check";
+        } else if (student.cleared) {
+            statusClass = "cleared";
+            statusText = "Cleared";
+            icon = "fa-file-circle-check";
+        } else if (proofStatus === "pending") {
+            statusClass = "pending-review";
+            statusText = "Pending Review";
+            icon = "fa-hourglass-half";
+        } else if (proofStatus === "rejected") {
+            statusClass = "rejected";
+            statusText = "Rejected";
+            icon = "fa-triangle-exclamation";
+        }
         const progressText = `${student.completedCount}/${student.expectedCount}`;
 
-        const reasonBlock = student.cleared && student.clearanceReason
-            ? `<div class="status-reason">Reason: ${escapeHtml(student.clearanceReason)}${student.clearanceNotedAt ? ` (${escapeHtml(formatNotedAt(student.clearanceNotedAt))})` : ""}</div>`
+        const clearedReasonBlock = student.cleared && student.clearanceReason
+            ? `<div class="status-reason">Cleared Reason: ${escapeHtml(student.clearanceReason)}${student.clearanceNotedAt ? ` (${escapeHtml(formatNotedAt(student.clearanceNotedAt))})` : ""}</div>`
+            : "";
+        const proofReasonBlock = !student.evaluated && proofStatus
+            ? `<div class="status-reason">Proof Reason: ${escapeHtml(student.proofReason || "N/A")}${student.proofSubmittedAt ? ` (${escapeHtml(formatNotedAt(student.proofSubmittedAt))})` : ""}</div>`
+            : "";
+        const proofLinkBlock = !student.evaluated && proofStatus && student.proofDriveLink
+            ? `<div class="status-reason">Drive Link: <a class="status-proof-link" href="${escapeHtml(student.proofDriveLink)}" target="_blank" rel="noopener noreferrer">Open proof</a></div>`
+            : "";
+        const reviewNoteBlock = !student.evaluated && proofStatus === "rejected" && student.proofReviewNote
+            ? `<div class="status-reason">OSA Review Note: ${escapeHtml(student.proofReviewNote)}${student.proofReviewedAt ? ` (${escapeHtml(formatNotedAt(student.proofReviewedAt))})` : ""}</div>`
             : "";
 
         let actionCell = "";
@@ -558,9 +633,37 @@ function renderStatusTable(students, periodState) {
             let actionHtml = "";
             if (student.evaluated) {
                 actionHtml = `<span class="status-progress">Completed</span>`;
-            } else if (student.canMarkCleared) {
-                const actionLabel = student.cleared ? "Update Reason" : "Mark Cleared";
-                actionHtml = `<button type="button" class="status-action-btn" data-student-user-id="${escapeHtml(student.studentUserId)}" data-student-number="${escapeHtml(student.studentNumber)}">${actionLabel}</button>`;
+            } else if (student.cleared) {
+                actionHtml = `<span class="status-progress">Cleared (Locked)</span>`;
+            } else if (student.canReviewProof) {
+                actionHtml = `
+                    <div class="status-review-actions">
+                        <button type="button" class="status-action-btn approve" data-review-action="approve" data-proof-id="${escapeHtml(student.proofId)}" data-student-user-id="${escapeHtml(student.studentUserId)}" data-student-number="${escapeHtml(student.studentNumber)}" data-semester-id="${escapeHtml(activeSemesterId)}">Approve</button>
+                        <button type="button" class="status-action-btn reject" data-review-action="reject" data-proof-id="${escapeHtml(student.proofId)}" data-student-user-id="${escapeHtml(student.studentUserId)}" data-student-number="${escapeHtml(student.studentNumber)}" data-semester-id="${escapeHtml(activeSemesterId)}">Reject</button>
+                        <button type="button" class="status-action-btn manual" data-review-action="manual-clear" data-student-user-id="${escapeHtml(student.studentUserId)}" data-student-number="${escapeHtml(student.studentNumber)}" data-student-name="${escapeHtml(student.fullName)}" data-semester-id="${escapeHtml(activeSemesterId)}">Mark Cleared</button>
+                    </div>
+                `;
+            } else if (proofStatus === "rejected") {
+                actionHtml = `
+                    <div class="status-review-actions">
+                        <button type="button" class="status-action-btn manual" data-review-action="manual-clear" data-student-user-id="${escapeHtml(student.studentUserId)}" data-student-number="${escapeHtml(student.studentNumber)}" data-student-name="${escapeHtml(student.fullName)}" data-semester-id="${escapeHtml(activeSemesterId)}">Mark Cleared</button>
+                    </div>
+                    <div class="status-reason">Awaiting student resubmission</div>
+                `;
+            } else if (proofStatus === "pending") {
+                actionHtml = `
+                    <div class="status-review-actions">
+                        <button type="button" class="status-action-btn manual" data-review-action="manual-clear" data-student-user-id="${escapeHtml(student.studentUserId)}" data-student-number="${escapeHtml(student.studentNumber)}" data-student-name="${escapeHtml(student.fullName)}" data-semester-id="${escapeHtml(activeSemesterId)}">Mark Cleared</button>
+                    </div>
+                    <div class="status-reason">Pending OSA decision</div>
+                `;
+            } else if (periodState && periodState.isClosed) {
+                actionHtml = `
+                    <div class="status-review-actions">
+                        <button type="button" class="status-action-btn manual" data-review-action="manual-clear" data-student-user-id="${escapeHtml(student.studentUserId)}" data-student-number="${escapeHtml(student.studentNumber)}" data-student-name="${escapeHtml(student.fullName)}" data-semester-id="${escapeHtml(activeSemesterId)}">Mark Cleared</button>
+                    </div>
+                    <div class="status-reason">Awaiting student proof submission</div>
+                `;
             } else {
                 const note = periodState && periodState.hasEndDate
                     ? "Available after evaluation period ends"
@@ -584,10 +687,202 @@ function renderStatusTable(students, periodState) {
                             <i class="fas ${icon}"></i>
                             ${statusText}
                         </span>
-                        ${reasonBlock}
+                        ${clearedReasonBlock}
+                        ${proofReasonBlock}
+                        ${proofLinkBlock}
+                        ${reviewNoteBlock}
                     </div>
                 </td>
                 ${actionCell}
+            </tr>
+        `;
+    }).join("");
+}
+
+function buildProofReviewRows() {
+    const semesterId = getActiveSemesterId();
+    const proofRows = SharedData.getStudentEvaluationProofRequests
+        ? SharedData.getStudentEvaluationProofRequests()
+        : [];
+    if (!proofRows.length) return [];
+
+    const directory = buildStudentDirectory();
+    const directoryByUserId = directory.directoryByUserId;
+    const userIdByStudentNumber = directory.userIdByStudentNumber;
+    const latestByStudentSemester = new Map();
+    const clearanceRows = SharedData.getOsaStudentClearances ? SharedData.getOsaStudentClearances() : [];
+    const clearanceByUserAndSemester = new Map();
+    const clearanceByNumberAndSemester = new Map();
+
+    clearanceRows.forEach(function (row) {
+        if (!row || normalizeTextToken(row.status || "cleared") !== "cleared") return;
+        const sem = String(row.semesterId || "").trim();
+        if (!sem || (semesterId && sem !== semesterId)) return;
+
+        const userId = normalizeUserId(row.studentUserId);
+        const studentNumber = normalizeTextToken(row.studentNumber);
+        if (userId) clearanceByUserAndSemester.set(`${userId}|${sem}`, row);
+        if (studentNumber) clearanceByNumberAndSemester.set(`${studentNumber}|${sem}`, row);
+    });
+
+    function upsertLatest(map, key, row) {
+        if (!key) return;
+        const existing = map.get(key);
+        if (!existing) {
+            map.set(key, row);
+            return;
+        }
+        const existingTs = Date.parse(String(existing.submittedAt || existing.reviewedAt || "")) || 0;
+        const candidateTs = Date.parse(String(row.submittedAt || row.reviewedAt || "")) || 0;
+        if (candidateTs >= existingTs) {
+            map.set(key, row);
+        }
+    }
+
+    proofRows.forEach(function (row) {
+        if (!row) return;
+        const rowSemesterId = String(row.semesterId || "").trim();
+        if (!rowSemesterId) return;
+        if (semesterId && rowSemesterId !== semesterId) return;
+
+        let studentUserId = normalizeUserId(row.studentUserId);
+        const studentNumber = String(row.studentNumber || "").trim();
+        if (!studentUserId && studentNumber) {
+            studentUserId = userIdByStudentNumber.get(normalizeTextToken(studentNumber)) || "";
+        }
+
+        const keyIdentity = studentUserId || normalizeTextToken(studentNumber);
+        if (!keyIdentity) return;
+
+        upsertLatest(latestByStudentSemester, `${keyIdentity}|${rowSemesterId}`, {
+            proofId: String(row.id || "").trim(),
+            studentUserId: studentUserId,
+            studentNumber: studentNumber,
+            semesterId: rowSemesterId,
+            status: normalizeTextToken(row.status),
+            reason: String(row.reason || "").trim(),
+            proofDriveLink: String(row.proofDriveLink || "").trim(),
+            submittedAt: String(row.submittedAt || "").trim(),
+            reviewNote: String(row.reviewNote || "").trim(),
+            reviewedAt: String(row.reviewedAt || "").trim(),
+        });
+    });
+
+    const list = Array.from(latestByStudentSemester.values()).map(function (row) {
+        const resolvedUserId = row.studentUserId
+            || userIdByStudentNumber.get(normalizeTextToken(row.studentNumber))
+            || "";
+        const baseMeta = directoryByUserId.get(resolvedUserId);
+        const cleared = Boolean(
+            clearanceByUserAndSemester.get(`${resolvedUserId}|${row.semesterId}`)
+            || clearanceByNumberAndSemester.get(`${normalizeTextToken(row.studentNumber)}|${row.semesterId}`)
+        );
+        return {
+            proofId: row.proofId,
+            studentUserId: resolvedUserId,
+            studentNumber: row.studentNumber || (baseMeta && baseMeta.studentNumber) || "",
+            fullName: (baseMeta && baseMeta.fullName) || "Unknown Student",
+            semesterId: row.semesterId,
+            cleared: cleared,
+            status: row.status,
+            reason: row.reason,
+            proofDriveLink: row.proofDriveLink,
+            submittedAt: row.submittedAt,
+            reviewNote: row.reviewNote,
+            reviewedAt: row.reviewedAt,
+        };
+    });
+
+    list.sort(function (a, b) {
+        const aTs = Date.parse(String(a.submittedAt || "")) || 0;
+        const bTs = Date.parse(String(b.submittedAt || "")) || 0;
+        if (bTs !== aTs) return bTs - aTs;
+        return String(a.fullName || "").localeCompare(String(b.fullName || ""));
+    });
+    return list;
+}
+
+function renderProofReviewTable(periodState) {
+    const tbody = document.getElementById("proofReviewTableBody");
+    const emptyState = document.getElementById("proofReviewEmptyState");
+    const noteEl = document.getElementById("proofReviewPeriodNote");
+    if (!tbody || !emptyState || !noteEl) return;
+
+    noteEl.textContent = periodState && periodState.note ? periodState.note : "";
+    const rows = buildProofReviewRows();
+    if (!rows.length) {
+        tbody.innerHTML = "";
+        emptyState.style.display = "block";
+        return;
+    }
+
+    emptyState.style.display = "none";
+    tbody.innerHTML = rows.map(function (row) {
+        let statusClass = "not-done";
+        let statusText = "Submitted";
+        let icon = "fa-file-lines";
+        if (row.cleared) {
+            statusClass = "cleared";
+            statusText = "Cleared";
+            icon = "fa-file-circle-check";
+        } else if (row.status === "pending") {
+            statusClass = "pending-review";
+            statusText = "Pending Review";
+            icon = "fa-hourglass-half";
+        } else if (row.status === "approved") {
+            statusClass = "cleared";
+            statusText = "Approved";
+            icon = "fa-file-circle-check";
+        } else if (row.status === "rejected") {
+            statusClass = "rejected";
+            statusText = "Rejected";
+            icon = "fa-triangle-exclamation";
+        }
+
+        let actionHtml = `<span class="status-progress">Reviewed</span>`;
+        if (row.cleared || row.status === "approved") {
+            actionHtml = `<span class="status-progress">Cleared (Locked)</span>`;
+        } else if (row.status === "pending") {
+            if (periodState && periodState.isClosed) {
+                actionHtml = `
+                    <div class="status-review-actions">
+                        <button type="button" class="status-action-btn approve" data-review-action="approve" data-proof-id="${escapeHtml(row.proofId)}" data-student-user-id="${escapeHtml(row.studentUserId)}" data-student-number="${escapeHtml(row.studentNumber)}" data-semester-id="${escapeHtml(row.semesterId)}">Approve</button>
+                        <button type="button" class="status-action-btn reject" data-review-action="reject" data-proof-id="${escapeHtml(row.proofId)}" data-student-user-id="${escapeHtml(row.studentUserId)}" data-student-number="${escapeHtml(row.studentNumber)}" data-semester-id="${escapeHtml(row.semesterId)}">Reject</button>
+                    </div>
+                `;
+            } else {
+                actionHtml = `<span class="status-progress">Available after evaluation period ends</span>`;
+            }
+        } else if (row.status === "rejected") {
+            actionHtml = `<span class="status-progress">Rejected</span>`;
+        }
+
+        const linkHtml = row.proofDriveLink
+            ? `<a class="status-proof-link" href="${escapeHtml(row.proofDriveLink)}" target="_blank" rel="noopener noreferrer">Open proof</a>`
+            : `<span class="status-progress">No link</span>`;
+
+        const reviewNote = row.reviewNote
+            ? `${escapeHtml(row.reviewNote)}${row.reviewedAt ? ` (${escapeHtml(formatNotedAt(row.reviewedAt))})` : ""}`
+            : `<span class="status-progress">N/A</span>`;
+
+        return `
+            <tr>
+                <td>${escapeHtml(row.studentNumber)}</td>
+                <td>${escapeHtml(row.fullName)}</td>
+                <td>${escapeHtml(row.semesterId)}</td>
+                <td>
+                    <span class="status-pill ${statusClass}">
+                        <i class="fas ${icon}"></i>
+                        ${statusText}
+                    </span>
+                </td>
+                <td class="proof-reason-cell">
+                    ${escapeHtml(row.reason || "N/A")}
+                    ${row.submittedAt ? `<div class="status-reason">Submitted: ${escapeHtml(formatNotedAt(row.submittedAt))}</div>` : ""}
+                </td>
+                <td>${linkHtml}</td>
+                <td class="proof-note-cell">${reviewNote}</td>
+                <td>${actionHtml}</td>
             </tr>
         `;
     }).join("");
@@ -640,66 +935,244 @@ function applySearchFilter(rows, keyword) {
 }
 
 function setupStatusActions() {
-    const tbody = document.getElementById("statusTableBody");
-    if (!tbody) return;
+    const actionContainers = [
+        document.getElementById("statusTableBody"),
+        document.getElementById("proofReviewTableBody"),
+    ].filter(Boolean);
+    if (!actionContainers.length) return;
 
-    tbody.addEventListener("click", function (event) {
-        const button = event.target.closest(".status-action-btn");
-        if (!button) return;
+    actionContainers.forEach(function (container) {
+        container.addEventListener("click", handleProofReviewActionClick);
+    });
+}
 
-        const periodState = getEvaluationPeriodState();
-        if (!periodState.isClosed) {
-            alert("Mark Cleared is only available after the Student-to-Professor evaluation period ends.");
+function setupManualClearModal() {
+    const modal = document.getElementById("manualClearModal");
+    const form = document.getElementById("manualClearForm");
+    const cancelBtn = document.getElementById("manualClearCancelBtn");
+    const closeBtn = document.getElementById("manualClearCloseBtn");
+    if (!modal || !form || !cancelBtn || !closeBtn) return;
+
+    cancelBtn.addEventListener("click", closeManualClearModal);
+    closeBtn.addEventListener("click", closeManualClearModal);
+    modal.addEventListener("click", function (event) {
+        if (event.target === modal) {
+            closeManualClearModal();
+        }
+    });
+    document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && modal.classList.contains("active")) {
+            closeManualClearModal();
+        }
+    });
+    form.addEventListener("submit", handleManualClearFormSubmit);
+}
+
+function setManualClearModalMessage(type, text) {
+    const messageEl = document.getElementById("manualClearMessage");
+    if (!messageEl) return;
+
+    messageEl.classList.toggle("error", type === "error");
+    messageEl.textContent = String(text || "");
+}
+
+function setManualClearModalBusy(isBusy) {
+    const reasonInput = document.getElementById("manualClearReasonInput");
+    const saveBtn = document.getElementById("manualClearSaveBtn");
+    const cancelBtn = document.getElementById("manualClearCancelBtn");
+    const closeBtn = document.getElementById("manualClearCloseBtn");
+
+    [reasonInput, saveBtn, cancelBtn, closeBtn].forEach(function (element) {
+        if (element) {
+            element.disabled = Boolean(isBusy);
+        }
+    });
+}
+
+function openManualClearModal(context) {
+    const modal = document.getElementById("manualClearModal");
+    const leadEl = document.getElementById("manualClearLead");
+    const reasonInput = document.getElementById("manualClearReasonInput");
+    if (!modal || !leadEl || !reasonInput) return;
+
+    manualClearModalContext = context || null;
+    const studentName = String(context && context.studentName || "").trim();
+    const studentNumber = String(context && context.studentNumber || "").trim();
+    const studentLabel = studentName && studentNumber
+        ? `${studentName} (${studentNumber})`
+        : (studentName || studentNumber || "this student");
+    leadEl.textContent = `Enter reason for manually marking ${studentLabel} as cleared.`;
+
+    reasonInput.value = "";
+    setManualClearModalMessage("", "");
+    setManualClearModalBusy(false);
+
+    modal.classList.add("active");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("manual-clear-modal-open");
+
+    requestAnimationFrame(function () {
+        reasonInput.focus();
+    });
+}
+
+function closeManualClearModal() {
+    const modal = document.getElementById("manualClearModal");
+    const reasonInput = document.getElementById("manualClearReasonInput");
+    if (!modal) return;
+
+    modal.classList.remove("active");
+    modal.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("manual-clear-modal-open");
+    setManualClearModalMessage("", "");
+
+    if (reasonInput) {
+        reasonInput.value = "";
+    }
+    manualClearModalContext = null;
+}
+
+function persistManualClearRequest(context, manualReason) {
+    if (!SharedData.upsertOsaStudentClearance) {
+        throw new Error("Clearance persistence is unavailable.");
+    }
+
+    const response = SharedData.upsertOsaStudentClearance({
+        studentUserId: context.studentUserId,
+        studentNumber: context.studentNumber,
+        semesterId: context.semesterId,
+        reason: manualReason,
+        status: "cleared",
+    });
+
+    if (!response || response.success !== true) {
+        throw new Error((response && response.error) || "Failed to save clearance.");
+    }
+
+    const saved = response.record || {};
+    const savedReason = String(saved.reason || "").trim();
+    return {
+        alreadyLocked: Boolean(savedReason && savedReason !== manualReason),
+    };
+}
+
+function handleManualClearFormSubmit(event) {
+    event.preventDefault();
+    if (!manualClearModalContext) return;
+
+    const reasonInput = document.getElementById("manualClearReasonInput");
+    const manualReason = String(reasonInput && reasonInput.value || "").trim();
+    if (!manualReason) {
+        setManualClearModalMessage("error", "Reason is required.");
+        if (reasonInput) {
+            reasonInput.focus();
+        }
+        return;
+    }
+
+    try {
+        setManualClearModalBusy(true);
+        const result = persistManualClearRequest(manualClearModalContext, manualReason);
+        closeManualClearModal();
+        refreshStatusAndAnalytics();
+
+        if (result.alreadyLocked) {
+            alert("Student is already marked as cleared. Existing clearance cannot be edited.");
             return;
         }
+        alert("Student marked as cleared. This clearance is now locked.");
+    } catch (error) {
+        console.error("[OSA] Failed to save manual clearance:", error);
+        setManualClearModalMessage("error", error && error.message ? error.message : "Failed to mark student as cleared.");
+    } finally {
+        setManualClearModalBusy(false);
+    }
+}
 
-        const studentUserId = String(button.dataset.studentUserId || "").trim();
-        const studentNumber = String(button.dataset.studentNumber || "").trim();
-        if (!studentUserId && !studentNumber) return;
+function handleProofReviewActionClick(event) {
+    const button = event.target.closest(".status-action-btn");
+    if (!button) return;
 
-        const reasonInput = prompt("Enter the student's reason for not completing the evaluation:");
-        if (reasonInput === null) return;
-        const reason = String(reasonInput || "").trim();
-        if (!reason) {
-            alert("Reason is required.");
-            return;
-        }
+    const periodState = getEvaluationPeriodState();
+    if (!periodState.isClosed) {
+        alert("Proof review is only available after the Student-to-Professor evaluation period ends.");
+        return;
+    }
 
-        const semesterId = getActiveSemesterId();
-        if (!semesterId) {
+    const action = String(button.dataset.reviewAction || "").trim().toLowerCase();
+    if (action !== "approve" && action !== "reject" && action !== "manual-clear") {
+        return;
+    }
+
+    const proofId = String(button.dataset.proofId || "").trim();
+    const studentUserId = String(button.dataset.studentUserId || "").trim();
+    const studentNumber = String(button.dataset.studentNumber || "").trim();
+    const studentName = String(button.dataset.studentName || "").trim();
+    if (action !== "manual-clear" && !proofId && !studentUserId && !studentNumber) return;
+    if (action === "manual-clear" && !studentUserId && !studentNumber) return;
+
+    if (action === "manual-clear") {
+        const manualSemesterId = String(button.dataset.semesterId || "").trim() || getActiveSemesterId();
+        if (!manualSemesterId) {
             alert("Current semester is not configured.");
             return;
         }
 
-        const session = getUserSession();
-        const notedBy = (session && (session.fullName || session.username)) || "OSA";
+        openManualClearModal({
+            studentUserId: studentUserId,
+            studentNumber: studentNumber,
+            studentName: studentName,
+            semesterId: manualSemesterId,
+        });
+        return;
+    }
 
-        try {
-            if (!SharedData.upsertOsaStudentClearance) {
-                throw new Error("Clearance persistence is unavailable.");
-            }
-
-            const response = SharedData.upsertOsaStudentClearance({
-                studentUserId: studentUserId,
-                studentNumber: studentNumber,
-                semesterId: semesterId,
-                reason: reason,
-                notedAt: new Date().toISOString(),
-                notedBy: notedBy,
-                status: "cleared",
-            });
-
-            if (!response || response.success !== true) {
-                throw new Error((response && response.error) || "Failed to save clearance.");
-            }
-
-            refreshStatusAndAnalytics();
-            alert("Student marked as cleared with reason.");
-        } catch (error) {
-            console.error("[OSA] Failed to save clearance:", error);
-            alert(error && error.message ? error.message : "Failed to mark student as cleared.");
+    let reviewNote = "";
+    if (action === "reject") {
+        const noteInput = prompt("Enter rejection note for the student proof request:");
+        if (noteInput === null) return;
+        reviewNote = String(noteInput || "").trim();
+        if (!reviewNote) {
+            alert("Rejection note is required.");
+            return;
         }
-    });
+    } else {
+        const proceed = confirm("Approve this student's submitted proof request?");
+        if (!proceed) return;
+    }
+
+    const semesterId = String(button.dataset.semesterId || "").trim() || getActiveSemesterId();
+    if (!semesterId) {
+        alert("Current semester is not configured.");
+        return;
+    }
+
+    try {
+        if (!SharedData.reviewStudentEvaluationProof) {
+            throw new Error("Proof review persistence is unavailable.");
+        }
+
+        const response = SharedData.reviewStudentEvaluationProof({
+            proofId: proofId,
+            studentUserId: studentUserId,
+            studentNumber: studentNumber,
+            semesterId: semesterId,
+            decision: action === "approve" ? "approved" : "rejected",
+            reviewNote: reviewNote,
+        });
+
+        if (!response || response.success !== true) {
+            throw new Error((response && response.error) || "Failed to review proof request.");
+        }
+
+        refreshStatusAndAnalytics();
+        alert(action === "approve"
+            ? "Proof approved and student marked as cleared."
+            : "Proof rejected successfully.");
+    } catch (error) {
+        console.error("[OSA] Failed to review proof request:", error);
+        alert(error && error.message ? error.message : "Failed to review proof request.");
+    }
 }
 
 function setText(id, value) {
@@ -735,20 +1208,61 @@ function setupProfilePhotoUpload() {
         const file = input.files && input.files[0];
         if (!file) return;
 
-        if (!file.type.startsWith("image/")) {
-            alert("Please select a valid image file.");
+        const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+        if (!allowedTypes.includes(String(file.type || "").toLowerCase())) {
+            alert("Please choose a JPG, JPEG, PNG, or WEBP image.");
             input.value = "";
             return;
         }
 
-        const reader = new FileReader();
-        reader.onload = function () {
-            preview.src = reader.result;
+        if (Number(file.size || 0) > (2 * 1024 * 1024)) {
+            alert("Please choose an image smaller than 2MB.");
+            input.value = "";
+            return;
+        }
+
+        const localPreviewUrl = URL.createObjectURL(file);
+        preview.src = localPreviewUrl;
+        preview.classList.add("active");
+        placeholder.style.display = "none";
+
+        if (typeof SharedData.uploadProfilePhoto !== "function") {
+            const reader = new FileReader();
+            reader.onload = function () {
+                preview.src = reader.result;
+                preview.classList.add("active");
+                placeholder.style.display = "none";
+                SharedData.setProfilePhoto('osa', reader.result);
+                URL.revokeObjectURL(localPreviewUrl);
+                input.value = "";
+            };
+            reader.readAsDataURL(file);
+            return;
+        }
+
+        try {
+            const savedPhoto = SharedData.uploadProfilePhoto(file);
+            if (savedPhoto) {
+                preview.src = savedPhoto;
+            }
             preview.classList.add("active");
             placeholder.style.display = "none";
-            SharedData.setProfilePhoto('osa', reader.result);
-        };
-        reader.readAsDataURL(file);
+        } catch (error) {
+            alert(error && error.message ? error.message : "Failed to upload the profile image.");
+            const storedPhoto = SharedData.getProfilePhoto('osa');
+            if (storedPhoto) {
+                preview.src = storedPhoto;
+                preview.classList.add("active");
+                placeholder.style.display = "none";
+            } else {
+                preview.removeAttribute("src");
+                preview.classList.remove("active");
+                placeholder.style.display = "";
+            }
+        } finally {
+            URL.revokeObjectURL(localPreviewUrl);
+            input.value = "";
+        }
     });
 }
 
@@ -863,6 +1377,7 @@ function setupProfileForms() {
             e.preventDefault();
             if (!osaProfile) osaProfile = getProfileData();
 
+            const currentEmail = String((document.getElementById("currentEmail") || {}).value || "").trim().toLowerCase();
             const newEmail = (newEmailInput ? newEmailInput.value.trim() : "").toLowerCase();
             const confirmEmail = (confirmEmailInput ? confirmEmailInput.value.trim() : "").toLowerCase();
 
@@ -876,10 +1391,27 @@ function setupProfileForms() {
                 return;
             }
 
-            osaProfile.email = newEmail;
-            saveProfileData(osaProfile);
-            renderProfileDetails();
-            showFormMessage(gmailMessage, "Gmail updated locally.", "success");
+            if (!SharedData.changeOwnEmail) {
+                showFormMessage(gmailMessage, "Email update service is unavailable.", "error");
+                return;
+            }
+
+            try {
+                const result = SharedData.changeOwnEmail(currentEmail, newEmail);
+                const nextEmail = String(result && result.email || newEmail).trim().toLowerCase();
+                osaProfile.email = nextEmail;
+                saveProfileData(osaProfile);
+                renderProfileDetails();
+                showFormMessage(gmailMessage, "Gmail updated successfully.", "success");
+            } catch (error) {
+                console.error("[OSAPanel] Failed to update email.", error);
+                showFormMessage(
+                    gmailMessage,
+                    error && error.message ? error.message : "Failed to update Gmail.",
+                    "error"
+                );
+                return;
+            }
 
             if (newEmailInput) newEmailInput.value = "";
             if (confirmEmailInput) confirmEmailInput.value = "";
@@ -890,7 +1422,6 @@ function setupProfileForms() {
     if (passwordForm) {
         passwordForm.addEventListener("submit", function (e) {
             e.preventDefault();
-            if (!osaProfile) osaProfile = getProfileData();
 
             const currentPassword = currentPasswordInput ? currentPasswordInput.value : "";
             const newPassword = newPasswordInput ? newPasswordInput.value : "";
@@ -898,11 +1429,6 @@ function setupProfileForms() {
 
             if (!currentPassword) {
                 showFormMessage(passwordMessage, "Enter your current password.", "error");
-                return;
-            }
-
-            if (simpleHash(currentPassword) !== osaProfile.passwordHash) {
-                showFormMessage(passwordMessage, "Current password is incorrect.", "error");
                 return;
             }
 
@@ -920,9 +1446,23 @@ function setupProfileForms() {
                 return;
             }
 
-            osaProfile.passwordHash = simpleHash(newPassword);
-            saveProfileData(osaProfile);
-            showFormMessage(passwordMessage, "Password updated locally.", "success");
+            if (!SharedData.changeOwnPassword) {
+                showFormMessage(passwordMessage, "Password update service is unavailable.", "error");
+                return;
+            }
+
+            try {
+                SharedData.changeOwnPassword(currentPassword, newPassword);
+                showFormMessage(passwordMessage, "Password updated successfully.", "success");
+            } catch (error) {
+                console.error("[OSAPanel] Failed to update password.", error);
+                showFormMessage(
+                    passwordMessage,
+                    error && error.message ? error.message : "Failed to update password.",
+                    "error"
+                );
+                return;
+            }
 
             if (currentPasswordInput) currentPasswordInput.value = "";
             if (newPasswordInput) newPasswordInput.value = "";

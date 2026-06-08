@@ -383,6 +383,16 @@ body {
     color: #0f766e;
 }
 
+.status-pill.pending-review {
+    background: rgba(59, 130, 246, 0.16);
+    color: #1d4ed8;
+}
+
+.status-pill.rejected {
+    background: rgba(239, 68, 68, 0.14);
+    color: #b91c1c;
+}
+
 .status-cell {
     display: flex;
     align-items: center;
@@ -407,9 +417,48 @@ body {
     border-color: #a5b4fc;
 }
 
+.status-action-btn.approve {
+    border-color: #bbf7d0;
+    background: #ecfdf5;
+    color: #166534;
+}
+
+.status-action-btn.approve:hover {
+    border-color: #86efac;
+    background: #dcfce7;
+}
+
+.status-action-btn.reject {
+    border-color: #fecaca;
+    background: #fef2f2;
+    color: #b91c1c;
+}
+
+.status-action-btn.reject:hover {
+    border-color: #fca5a5;
+    background: #fee2e2;
+}
+
+.status-action-btn.manual {
+    border-color: #fde68a;
+    background: #fffbeb;
+    color: #92400e;
+}
+
+.status-action-btn.manual:hover {
+    border-color: #fcd34d;
+    background: #fef3c7;
+}
+
 .status-action-btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+}
+
+.status-review-actions {
+    display: inline-flex;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .status-progress {
@@ -422,6 +471,24 @@ body {
     margin-top: 4px;
     font-size: 11px;
     color: #475569;
+}
+
+.status-proof-link {
+    color: #1d4ed8;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.status-proof-link:hover {
+    text-decoration: underline;
+}
+
+.proof-reason-cell,
+.proof-note-cell {
+    min-width: 220px;
+    max-width: 360px;
+    white-space: normal;
+    vertical-align: top;
 }
 
 .analytics-section .api-info-box {
@@ -819,6 +886,134 @@ body {
     font-size: 14px;
 }
 
+body.manual-clear-modal-open {
+    overflow: hidden;
+}
+
+.manual-clear-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(15, 23, 42, 0.45);
+}
+
+.manual-clear-modal.active {
+    display: flex;
+}
+
+.manual-clear-dialog {
+    width: min(560px, 100%);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 22px;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+}
+
+.manual-clear-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.manual-clear-header h3 {
+    font-size: 19px;
+    font-weight: 700;
+    color: #1f2937;
+}
+
+.manual-clear-close {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: #6b7280;
+    border-radius: 8px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.manual-clear-close:hover {
+    background: #f9fafb;
+    color: #374151;
+}
+
+.manual-clear-lead {
+    margin-bottom: 12px;
+    color: #4b5563;
+    font-size: 13px;
+}
+
+.manual-clear-form {
+    display: grid;
+    gap: 10px;
+}
+
+.manual-clear-form label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #1f2937;
+}
+
+.manual-clear-form textarea {
+    width: 100%;
+    min-height: 120px;
+    resize: vertical;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 13px;
+    color: #1f2937;
+    background: var(--bg-secondary);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.manual-clear-form textarea:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+}
+
+.manual-clear-message {
+    min-height: 18px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #4b5563;
+}
+
+.manual-clear-message.error {
+    color: #b91c1c;
+}
+
+.manual-clear-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 2px;
+}
+
+.manual-clear-actions .btn-submit,
+.manual-clear-actions .btn-cancel {
+    padding: 10px 18px;
+    font-size: 13px;
+}
+
+.manual-clear-actions .btn-submit:disabled,
+.manual-clear-actions .btn-cancel:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
 @media (max-width: 1024px) {
     .summary-cards {
         grid-template-columns: 1fr;
@@ -852,6 +1047,21 @@ body {
     .profile-photo-block {
         flex-direction: column;
         align-items: flex-start;
+    }
+
+    .manual-clear-dialog {
+        width: 100%;
+        padding: 16px;
+    }
+
+    .manual-clear-actions {
+        flex-direction: column-reverse;
+        align-items: stretch;
+    }
+
+    .manual-clear-actions .btn-submit,
+    .manual-clear-actions .btn-cancel {
+        width: 100%;
     }
 }
 

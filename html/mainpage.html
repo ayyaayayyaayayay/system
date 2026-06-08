@@ -77,7 +77,33 @@
       </div>
     </div>
 
-    <script src="../JsScrip/db-data.js"></script>
-    <script src="../JsScrip/mainpage.js"></script>
+    <!-- OTP Verification Modal -->
+    <div id="otpVerificationModal" class="modal">
+      <div class="modal-content main-card">
+        <span class="close-modal" id="closeOtpModal">&times;</span>
+        <h2>OTP Verification</h2>
+        <p id="otpMetaText">
+          Enter the 6-digit verification code sent to your Gmail.
+        </p>
+        <div class="form-group">
+          <label for="otpCodeInput">OTP Code</label>
+          <input
+            type="text"
+            id="otpCodeInput"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            maxlength="6"
+            placeholder="Enter 6-digit OTP"
+          />
+        </div>
+        <p id="otpInlineMessage" style="display: none"></p>
+        <button id="verifyOtpBtn" class="login-button">
+          <span>Verify OTP</span>
+        </button>
+      </div>
+    </div>
+
+    <script src="../JsScrip/db-data.js?v=20260414d"></script>
+    <script src="../JsScrip/mainpage.js?v=20260414d"></script>
   </body>
 </html>

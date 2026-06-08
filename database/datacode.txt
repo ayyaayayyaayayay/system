@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     `name` VARCHAR(150) NOT NULL,
     `email` VARCHAR(190) NOT NULL,
     `password` VARCHAR(255) NOT NULL DEFAULT '',
+    `profile_image` VARCHAR(255) DEFAULT NULL,
     `status` ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -208,6 +209,18 @@ CREATE TABLE IF NOT EXISTS `profile_photos` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uq_profile_photos_user` (`user_id`),
     CONSTRAINT `fk_profile_photos_user`
+        FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `user_profile_data` (
+    `user_id` BIGINT UNSIGNED NOT NULL,
+    `profile_json` LONGTEXT DEFAULT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`user_id`),
+    CONSTRAINT `fk_user_profile_data_user`
         FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
         ON UPDATE CASCADE
         ON DELETE CASCADE
