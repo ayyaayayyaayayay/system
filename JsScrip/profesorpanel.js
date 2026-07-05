@@ -21,6 +21,10 @@ let peerSectionFlow = {
     activeIndex: 0
 };
 
+let professorMobileDrawerBound = false;
+let professorViewportRefreshBound = false;
+let professorViewportRefreshTimer = 0;
+
 const PROFESSOR_PANEL_EMPTY_SUMMARY = {
     criteriaAverages: [],
     breakdownRows: [],
@@ -547,10 +551,13 @@ function redirectToLogin() {
 function initializeDashboard() {
     setupNavigation();
     setupLogout();
+    setupMobileDrawer();
+    setupProfessorViewportRefresh();
     setupHeaderPanels();
     applyReportBlackout();
     setupReportGateSync();
     setupActionButtons();
+    setupProfessorHeroActions();
     setupTableActions();
     setupSemesterFilter();
     setupProfessorSubjectComments();
@@ -956,6 +963,7 @@ function setupNavigation() {
             // Handle navigation (for future implementation)
             if (view) {
                 handleNavigation(view);
+                closeMobileDrawer();
             }
         });
     });
@@ -992,6 +1000,7 @@ function handleNavigation(section) {
  * @param {string} viewName - Name of the view to show ('dashboard' or 'reports')
  */
 function switchView(viewName) {
+    closeMobileDrawer();
     const dashboardView = document.getElementById('dashboardView');
     const peerEvaluationView = document.getElementById('peerEvaluationView');
     const reportsView = document.getElementById('reportsView');
@@ -1037,6 +1046,7 @@ function switchView(viewName) {
         // Scroll to top
         window.scrollTo(0, 0);
         closeAllPanels();
+        scheduleProfessorReportViewportRefresh(120);
     } else if (viewName === 'facultyPaper') {
         const facultyPaperGate = resolveFacultyPaperGateState();
         if (facultyPaperGate.locked) {
@@ -1067,6 +1077,57 @@ function switchView(viewName) {
         window.scrollTo(0, 0);
         closeAllPanels();
     }
+}
+
+function isProfessorReportsViewActive() {
+    const reportsView = document.getElementById('reportsView');
+    return !!(reportsView && reportsView.style.display === 'block');
+}
+
+function refreshProfessorReportViewportLayout() {
+    if (!isProfessorReportsViewActive()) return;
+
+    const selection = professorPanelState.currentSelection || {};
+    const semesterId = String(selection.semesterId || '').trim();
+    initializeReports();
+    renderSemestralEvaluationTrend(semesterId);
+}
+
+function scheduleProfessorReportViewportRefresh(delayMs) {
+    if (professorViewportRefreshTimer) {
+        clearTimeout(professorViewportRefreshTimer);
+    }
+
+    const wait = Number.isFinite(delayMs) ? delayMs : 180;
+    professorViewportRefreshTimer = window.setTimeout(function () {
+        professorViewportRefreshTimer = 0;
+        if (!isProfessorReportsViewActive()) return;
+
+        const runRefresh = function () {
+            refreshProfessorReportViewportLayout();
+        };
+
+        if (typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(function () {
+                window.requestAnimationFrame(runRefresh);
+            });
+            return;
+        }
+
+        runRefresh();
+    }, wait);
+}
+
+function setupProfessorViewportRefresh() {
+    if (professorViewportRefreshBound) return;
+
+    const handleViewportChange = function () {
+        scheduleProfessorReportViewportRefresh(180);
+    };
+
+    window.addEventListener('resize', handleViewportChange);
+    window.addEventListener('orientationchange', handleViewportChange);
+    professorViewportRefreshBound = true;
 }
 
 /**
@@ -1275,18 +1336,18 @@ function renderSemestralEvaluationTrend(semesterId) {
     if (!rows.length) {
         statusEl.textContent = 'No semestral trend data available.';
         deltaEl.textContent = 'No evaluation records found for trend computation.';
-        tableBody.innerHTML = '<tr><td colspan="5">No data available.</td></tr>';
+        tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="5">No data available.</td></tr>';
         renderSemestralTrendChart([]);
         return;
     }
 
     tableBody.innerHTML = rows.map(item => `
         <tr>
-            <td>${escapeHTML(item.semesterLabel || item.semesterId)}</td>
-            <td class="avg-score">${Number(item.overallAverage || 0).toFixed(2)}</td>
-            <td>${Number(item.studentAverage || 0).toFixed(2)}</td>
-            <td>${Number(item.peerAverage || 0).toFixed(2)}</td>
-            <td>${Number(item.supervisorAverage || 0).toFixed(2)}</td>
+            <td data-label="Semester">${escapeHTML(item.semesterLabel || item.semesterId)}</td>
+            <td data-label="Overall Avg"><span class="avg-score">${Number(item.overallAverage || 0).toFixed(2)}</span></td>
+            <td data-label="Student">${Number(item.studentAverage || 0).toFixed(2)}</td>
+            <td data-label="Peer">${Number(item.peerAverage || 0).toFixed(2)}</td>
+            <td data-label="Supervisor">${Number(item.supervisorAverage || 0).toFixed(2)}</td>
         </tr>
     `).join('');
 
@@ -1332,7 +1393,7 @@ function initializePieChart() {
  * Setup logout functionality
  */
 function setupLogout() {
-    const logoutLink = document.querySelector('.nav-link.logout');
+    const logoutLink = document.getElementById('professorLogoutBtn');
 
     if (logoutLink) {
         logoutLink.addEventListener('click', function (e) {
@@ -1370,6 +1431,75 @@ function clearUserSession() {
  */
 function showLogoutMessage() {
     console.log('Logging out...');
+}
+
+function setupMobileDrawer() {
+    if (professorMobileDrawerBound) return;
+
+    const toggleButtons = document.querySelectorAll('.mobile-nav-toggle');
+    const backdrop = document.getElementById('sidebarBackdrop');
+    if (!toggleButtons.length || !backdrop) return;
+
+    toggleButtons.forEach(button => {
+        button.addEventListener('click', function () {
+            const isOpen = document.body.classList.contains('professor-sidebar-open');
+            if (isOpen) {
+                closeMobileDrawer();
+            } else {
+                openMobileDrawer();
+            }
+        });
+    });
+
+    backdrop.addEventListener('click', closeMobileDrawer);
+    window.addEventListener('resize', function () {
+        if (window.innerWidth > 1000) {
+            closeMobileDrawer();
+        }
+    });
+
+    professorMobileDrawerBound = true;
+}
+
+function openMobileDrawer() {
+    document.body.classList.add('professor-sidebar-open');
+    document.querySelectorAll('.mobile-nav-toggle').forEach(button => {
+        button.setAttribute('aria-expanded', 'true');
+    });
+}
+
+function closeMobileDrawer() {
+    document.body.classList.remove('professor-sidebar-open');
+    document.querySelectorAll('.mobile-nav-toggle').forEach(button => {
+        button.setAttribute('aria-expanded', 'false');
+    });
+}
+
+function setupProfessorHeroActions() {
+    const peerButton = document.getElementById('heroOpenPeerEvaluationBtn');
+    const reportsButton = document.getElementById('heroOpenReportsBtn');
+    const facultyPaperButton = document.getElementById('heroOpenFacultyPaperBtn');
+
+    if (peerButton) {
+        peerButton.addEventListener('click', function () {
+            switchView('peerEvaluation');
+            updateNavigation('peerEvaluation');
+        });
+    }
+
+    if (reportsButton) {
+        reportsButton.addEventListener('click', function () {
+            switchView('reports');
+            updateNavigation('reports');
+        });
+    }
+
+    if (facultyPaperButton) {
+        facultyPaperButton.addEventListener('click', function () {
+            switchView('facultyPaper');
+            updateNavigation('facultyPaper');
+        });
+    }
 }
 
 /**
@@ -1976,14 +2106,14 @@ function renderProfessorFacultyPaperDetail(paper) {
     if (actionPlanInput) actionPlanInput.value = String(paper.section_c_action_plan || '');
 
     const draftStatus = normalizeToken(paper.status) === 'draft';
-    const archivedStatus = normalizeToken(paper.status) === 'archived';
-    if (areasInput) areasInput.disabled = archivedStatus;
-    if (activitiesInput) activitiesInput.disabled = archivedStatus;
-    if (actionPlanInput) actionPlanInput.disabled = archivedStatus;
-    if (saveSectionCBtn) saveSectionCBtn.disabled = archivedStatus;
+    const sectionCReadOnly = !draftStatus;
+    if (areasInput) areasInput.disabled = sectionCReadOnly;
+    if (activitiesInput) activitiesInput.disabled = sectionCReadOnly;
+    if (actionPlanInput) actionPlanInput.disabled = sectionCReadOnly;
+    if (saveSectionCBtn) saveSectionCBtn.disabled = sectionCReadOnly;
     if (sendBtn) sendBtn.disabled = !draftStatus;
     if (archiveBtn) archiveBtn.disabled = !draftStatus;
-    if (aiRecommendBtn) aiRecommendBtn.disabled = archivedStatus;
+    if (aiRecommendBtn) aiRecommendBtn.disabled = sectionCReadOnly;
     setFacultyPaperAiFeedback('', '');
 
     if (previewBtn) {
@@ -2112,14 +2242,14 @@ async function renderProfessorFacultyPaperList() {
 
     const gate = resolveFacultyPaperGateState();
     if (gate.locked) {
-        tableBody.innerHTML = `<tr><td colspan="6">${escapeHTML(getFacultyPaperGateMessage())}</td></tr>`;
+        tableBody.innerHTML = `<tr class="mobile-card-empty-row"><td colspan="6">${escapeHTML(getFacultyPaperGateMessage())}</td></tr>`;
         if (detailCard) detailCard.style.display = 'none';
         return;
     }
 
     const actor = getProfessorPaperActor();
     if (!actor.context || !actor.context.linked || !actor.actorUserId) {
-        tableBody.innerHTML = '<tr><td colspan="6">Your login is not linked to an active professor account.</td></tr>';
+        tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="6">Your login is not linked to an active professor account.</td></tr>';
         if (detailCard) detailCard.style.display = 'none';
         return;
     }
@@ -2128,7 +2258,7 @@ async function renderProfessorFacultyPaperList() {
     try {
         records = SharedData.listFacultyPapers(actor.role, actor.actorUserId);
     } catch (error) {
-        tableBody.innerHTML = '<tr><td colspan="6">Failed to load faculty papers.</td></tr>';
+        tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="6">Failed to load faculty papers.</td></tr>';
         if (detailCard) detailCard.style.display = 'none';
         return;
     }
@@ -2138,7 +2268,7 @@ async function renderProfessorFacultyPaperList() {
     professorPanelState.facultyPaper.records = records;
 
     if (!visible.length) {
-        tableBody.innerHTML = `<tr><td colspan="6">No ${filter === 'archive' ? 'archived' : 'active'} faculty papers.</td></tr>`;
+        tableBody.innerHTML = `<tr class="mobile-card-empty-row"><td colspan="6">No ${filter === 'archive' ? 'archived' : 'active'} faculty papers.</td></tr>`;
         professorPanelState.facultyPaper.selectedId = '';
         renderProfessorFacultyPaperDetail(null);
         return;
@@ -2155,12 +2285,12 @@ async function renderProfessorFacultyPaperList() {
         const recipientText = recipient || '-';
         return `
             <tr data-paper-id="${escapeHTML(String(paper.id || ''))}" class="${isSelected ? 'faculty-paper-row-active' : ''}">
-                <td>${escapeHTML(String(paper.id || 'N/A'))}</td>
-                <td>${escapeHTML(String(paper.semester_label || 'N/A'))}</td>
-                <td>${escapeHTML(statusLabel)}</td>
-                <td>${escapeHTML(recipientText)}</td>
-                <td>${escapeHTML(normalizePaperTimestamp(paper.updated_at))}</td>
-                <td><button type="button" class="btn-submit faculty-paper-open-btn" data-paper-open="${escapeHTML(String(paper.id || ''))}">Open</button></td>
+                <td data-label="Paper ID">${escapeHTML(String(paper.id || 'N/A'))}</td>
+                <td data-label="Semester">${escapeHTML(String(paper.semester_label || 'N/A'))}</td>
+                <td data-label="Status">${escapeHTML(statusLabel)}</td>
+                <td data-label="Recipient Dean">${escapeHTML(recipientText)}</td>
+                <td data-label="Updated">${escapeHTML(normalizePaperTimestamp(paper.updated_at))}</td>
+                <td data-label="Actions"><button type="button" class="btn-submit faculty-paper-open-btn" data-paper-open="${escapeHTML(String(paper.id || ''))}">Open</button></td>
             </tr>
         `;
     }).join('');
@@ -2950,32 +3080,26 @@ function handlePeerEvaluation() {
  * Show a form message
  */
 function showFormMessage(form, message, type) {
-    const existing = form.querySelector('.form-message');
-    if (existing) existing.remove();
+    if (!form) return;
+    clearFormMessage(form);
 
     const messageDiv = document.createElement('div');
-    messageDiv.className = `form-message ${type}`;
+    const tone = type === 'error' ? 'error' : (type === 'success' ? 'success' : 'info');
+    messageDiv.className = `form-message ui-message ui-message--${tone}`;
     messageDiv.textContent = message;
-    messageDiv.style.cssText = `
-        background-color: ${type === 'error' ? '#fee2e2' : '#d1fae5'};
-        color: ${type === 'error' ? '#991b1b' : '#065f46'};
-        padding: 14px 18px;
-        border-radius: 12px;
-        margin-bottom: 20px;
-        text-align: center;
-        font-weight: 600;
-        border: 1px solid ${type === 'error' ? '#ef4444' : '#10b981'};
-        animation: fadeIn 0.3s ease;
-    `;
-
     form.insertBefore(messageDiv, form.firstChild);
 
     setTimeout(() => {
         if (messageDiv.parentNode) {
-            messageDiv.style.animation = 'fadeOut 0.3s ease';
-            setTimeout(() => messageDiv.remove(), 300);
+            messageDiv.remove();
         }
     }, 4000);
+}
+
+function clearFormMessage(form) {
+    if (!form) return;
+    const existing = form.querySelector('.form-message');
+    if (existing) existing.remove();
 }
 
 /**
@@ -3026,6 +3150,7 @@ function loadFacultySummary(selection = {}) {
     updateSummaryCards(activeSummary.totals);
     resetProfessorSubjectCommentsPanel();
     renderSemestralEvaluationTrend(semesterId);
+    scheduleProfessorReportViewportRefresh(90);
 }
 
 /**
@@ -3498,7 +3623,7 @@ function renderBreakdownTable(rows, evaluationType = 'student') {
     const colCount = evaluationType === 'student' ? 5 : 2;
 
     if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="${colCount}">No evaluation data available.</td></tr>`;
+        tbody.innerHTML = `<tr class="mobile-card-empty-row"><td colspan="${colCount}">No evaluation data available.</td></tr>`;
         return;
     }
 
@@ -3508,19 +3633,19 @@ function renderBreakdownTable(rows, evaluationType = 'student') {
         if (evaluationType !== 'student') {
             return `
                 <tr data-required="${item.required || 0}" data-received="${item.received || 0}" data-avg="${item.avgRating}" data-comment-key="${item.rowKey || ''}">
-                    <td>${item.employeeId}</td>
-                    <td>${item.avgRating.toFixed(1)}</td>
+                    <td data-label="Employee Number">${escapeHTML(String(item.employeeId || 'N/A'))}</td>
+                    <td data-label="Avg Rating">${item.avgRating.toFixed(1)}</td>
                 </tr>
             `;
         }
 
         return `
             <tr data-required="${item.required}" data-received="${item.received}" data-avg="${item.avgRating}" data-comment-key="${item.rowKey || ''}">
-                <td>${item.subject}</td>
-                <td>${Number(item.sectionCount || 0)}</td>
-                <td><span class="count-pill">${item.received}/${item.required}</span></td>
-                <td>${responseRate}%</td>
-                <td>${item.avgRating.toFixed(1)}</td>
+                <td data-label="Subject">${escapeHTML(String(item.subject || 'N/A'))}</td>
+                <td data-label="Section Count">${Number(item.sectionCount || 0)}</td>
+                <td data-label="Evaluations Received"><span class="count-pill">${item.received}/${item.required}</span></td>
+                <td data-label="Response Rate">${responseRate}%</td>
+                <td data-label="Avg Rating">${item.avgRating.toFixed(1)}</td>
             </tr>
         `;
     }).join('');
@@ -3862,20 +3987,20 @@ function renderDetailedSummaryTable(rows, evaluationType) {
 
     const data = Array.isArray(rows) ? rows : [];
     if (!data.length) {
-        tbody.innerHTML = '<tr><td colspan="8">No data available.</td></tr>';
+        tbody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="8">No data available.</td></tr>';
         return;
     }
 
     tbody.innerHTML = data.map(item => `
         <tr>
-            <td>${escapeHTML(item.category)}</td>
-            <td><span class="avg-score">${Number(item.avgScore || 0).toFixed(1)}</span></td>
-            <td>${Number(item.responses || 0)}</td>
-            <td><span class="count excellent">${Number(item.excellent || 0)}</span></td>
-            <td><span class="count good">${Number(item.good || 0)}</span></td>
-            <td><span class="count fair">${Number(item.fair || 0)}</span></td>
-            <td><span class="count poor">${Number(item.poor || 0)}</span></td>
-            <td><span class="count very-poor">${Number(item.veryPoor || 0)}</span></td>
+            <td data-label="Category">${escapeHTML(item.category)}</td>
+            <td data-label="Avg Score"><span class="avg-score">${Number(item.avgScore || 0).toFixed(1)}</span></td>
+            <td data-label="Responses">${Number(item.responses || 0)}</td>
+            <td data-label="Excellent (5)"><span class="count excellent">${Number(item.excellent || 0)}</span></td>
+            <td data-label="Good (4)"><span class="count good">${Number(item.good || 0)}</span></td>
+            <td data-label="Fair (3)"><span class="count fair">${Number(item.fair || 0)}</span></td>
+            <td data-label="Poor (2)"><span class="count poor">${Number(item.poor || 0)}</span></td>
+            <td data-label="Very Poor (1)"><span class="count very-poor">${Number(item.veryPoor || 0)}</span></td>
         </tr>
     `).join('');
 }
@@ -3896,7 +4021,8 @@ function setupProfileActions() {
             const targetCard = document.getElementById(targetId);
             if (targetCard) {
                 targetCard.style.display = 'block';
-                targetCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                targetCard.scrollIntoView({ behavior: prefersReducedMotion ? 'auto' : 'smooth', block: 'start' });
             }
         });
     });
@@ -3907,7 +4033,10 @@ function setupProfileActions() {
             const targetCard = targetId ? document.getElementById(targetId) : null;
             if (targetCard) {
                 const form = targetCard.querySelector('form');
-                if (form) form.reset();
+                if (form) {
+                    form.reset();
+                    clearFormMessage(form);
+                }
                 targetCard.style.display = 'none';
             }
         });
@@ -3916,6 +4045,8 @@ function setupProfileActions() {
 
 function hideAccountActionCards() {
     document.querySelectorAll('.account-action-card').forEach(card => {
+        const form = card.querySelector('form');
+        if (form) clearFormMessage(form);
         card.style.display = 'none';
     });
 }
@@ -3937,34 +4068,34 @@ function setupChangeEmailForm() {
  * Placeholder change email handler (SQL-ready)
  */
 function handleChangeEmail() {
+    const form = document.getElementById('changeEmailForm');
     const currentEmail = document.getElementById('currentEmail').value.trim();
     const newEmail = document.getElementById('newEmail').value.trim();
     const confirmEmail = document.getElementById('confirmEmail').value.trim();
 
     if (!newEmail || !confirmEmail) {
-        alert('Please fill out all email fields.');
+        showFormMessage(form, 'Please fill out all email fields.', 'error');
         return;
     }
 
     if (newEmail !== confirmEmail) {
-        alert('New email and confirmation do not match.');
+        showFormMessage(form, 'New email and confirmation do not match.', 'error');
         return;
     }
 
     if (currentEmail && newEmail.toLowerCase() === currentEmail.toLowerCase()) {
-        alert('New email must be different from the current email.');
+        showFormMessage(form, 'New email must be different from the current email.', 'error');
         return;
     }
 
     if (!SharedData.changeOwnEmail) {
-        alert('Email update service is unavailable.');
+        showFormMessage(form, 'Email update service is unavailable.', 'error');
         return;
     }
 
     try {
         const result = SharedData.changeOwnEmail(currentEmail, newEmail);
         const nextEmail = String(result && result.email || newEmail).trim();
-        alert('Email updated successfully.');
 
         const profileEmail = document.getElementById('profileEmail');
         if (profileEmail) profileEmail.textContent = nextEmail;
@@ -3976,12 +4107,14 @@ function handleChangeEmail() {
         }
     } catch (error) {
         console.error('[ProfessorPanel] Failed to update email.', error);
-        alert(error && error.message ? error.message : 'Failed to update email.');
+        showFormMessage(form, error && error.message ? error.message : 'Failed to update email.', 'error');
         return;
     }
 
-    const form = document.getElementById('changeEmailForm');
-    if (form) form.reset();
+    if (form) {
+        form.reset();
+        showFormMessage(form, 'Email updated successfully.', 'success');
+    }
 }
 
 /**
@@ -4001,36 +4134,38 @@ function setupChangePasswordForm() {
  * Placeholder change password handler (SQL-ready)
  */
 function handleChangePassword() {
+    const form = document.getElementById('changePasswordForm');
     const currentPassword = document.getElementById('currentPassword').value.trim();
     const newPassword = document.getElementById('newPassword').value.trim();
     const confirmPassword = document.getElementById('confirmPassword').value.trim();
 
     if (!currentPassword || !newPassword || !confirmPassword) {
-        alert('Please fill out all password fields.');
+        showFormMessage(form, 'Please fill out all password fields.', 'error');
         return;
     }
 
     if (newPassword !== confirmPassword) {
-        alert('New password and confirmation do not match.');
+        showFormMessage(form, 'New password and confirmation do not match.', 'error');
         return;
     }
 
     if (!SharedData.changeOwnPassword) {
-        alert('Password update service is unavailable.');
+        showFormMessage(form, 'Password update service is unavailable.', 'error');
         return;
     }
 
     try {
         SharedData.changeOwnPassword(currentPassword, newPassword);
-        alert('Password updated successfully.');
     } catch (error) {
         console.error('[ProfessorPanel] Failed to update password.', error);
-        alert(error && error.message ? error.message : 'Failed to update password.');
+        showFormMessage(form, error && error.message ? error.message : 'Failed to update password.', 'error');
         return;
     }
 
-    const form = document.getElementById('changePasswordForm');
-    if (form) form.reset();
+    if (form) {
+        form.reset();
+        showFormMessage(form, 'Password updated successfully.', 'success');
+    }
 }
 
 /**

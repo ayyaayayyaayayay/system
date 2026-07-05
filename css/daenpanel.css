@@ -2324,4 +2324,937 @@ body {
     }
 }
 
+/* Phase 2 dean panel modernization */
+.dean-panel {
+    min-height: 100vh;
+    background:
+        radial-gradient(circle at top right, rgba(99, 102, 241, 0.1), transparent 28%),
+        linear-gradient(180deg, #f6f8fc 0%, #eef3f9 100%);
+    color: #0f172a;
+}
+
+.dean-panel .dashboard-container {
+    position: relative;
+}
+
+.dean-panel .sidebar {
+    width: 280px;
+    padding: 18px 16px;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+    border-right: 1px solid rgba(203, 213, 225, 0.9);
+}
+
+.dean-panel .sidebar-header,
+.dean-panel .sidebar-footer {
+    border: none;
+    padding: 10px 4px;
+}
+
+.dean-panel .logo-container {
+    align-items: flex-start;
+    gap: 14px;
+}
+
+.dean-panel .logo-shield {
+    width: 58px;
+    height: 58px;
+    border-radius: 18px;
+}
+
+.dean-panel .logo-text {
+    font-size: 14px;
+    text-align: left;
+    line-height: 1.5;
+    max-width: 160px;
+}
+
+.dean-panel .sidebar-nav {
+    padding: 18px 0;
+    gap: 10px;
+}
+
+.dean-panel .nav-link {
+    min-height: 52px;
+    padding: 14px 16px;
+    border-radius: 16px;
+    font-weight: 600;
+    transition: background-color var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast), border-color var(--motion-fast);
+}
+
+.dean-panel .nav-link.active {
+    box-shadow: 0 12px 24px rgba(91, 103, 232, 0.22);
+}
+
+.dean-panel .sidebar-backdrop {
+    display: none;
+}
+
+.dean-panel .main-content {
+    margin-left: 280px;
+    padding: 28px 28px 36px;
+}
+
+.dean-panel .top-header {
+    margin-bottom: 24px;
+    padding: 20px 24px;
+    gap: 16px;
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    border-radius: 24px;
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+    background: rgba(255, 255, 255, 0.9);
+}
+
+.dean-header-main {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+    flex: 1;
+}
+
+.page-title-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.dean-panel .page-title {
+    margin: 0;
+    font-size: 30px;
+    letter-spacing: -0.04em;
+}
+
+.page-context {
+    margin: 0;
+    font-size: 13px;
+    color: #64748b;
+}
+
+.mobile-nav-toggle {
+    display: none;
+    width: 42px;
+    height: 42px;
+    border: 1px solid #dbe3ee;
+    border-radius: 14px;
+    background: #ffffff;
+    color: #334155;
+    cursor: pointer;
+    transition: background-color var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
+}
+
+.dean-panel .user-info {
+    gap: 12px;
+}
+
+.dean-panel .user-action-btn,
+.dean-panel .user-profile,
+.dean-panel .btn-submit,
+.dean-panel .btn-cancel,
+.dean-panel .btn-eval-nav,
+.dean-panel .response-toggle-btn,
+.dean-panel .rating-option,
+.dean-panel .form-select,
+.dean-panel .form-input,
+.dean-panel .summary-table,
+.dean-panel .nav-link {
+    transition: background-color var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.dean-panel .dropdown-panel {
+    width: min(360px, calc(100vw - 40px));
+    border-radius: 18px;
+    border: 1px solid #dbe5ee;
+    box-shadow: 0 20px 40px rgba(15, 23, 42, 0.12);
+    padding: 18px;
+}
+
+.dean-panel .dropdown-panel.active,
+.dean-panel .content-view,
+.dean-panel .form-message.ui-message {
+    animation: none;
+}
+
+.dean-panel .dashboard-hero-card {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    align-items: center;
+    padding: 26px 28px;
+    margin-bottom: 22px;
+    border-radius: 24px;
+    background:
+        linear-gradient(135deg, rgba(47, 62, 156, 0.94) 0%, rgba(96, 69, 181, 0.92) 100%),
+        #4f46e5;
+    color: #ffffff;
+    box-shadow: 0 18px 36px rgba(79, 70, 229, 0.24);
+}
+
+.dashboard-hero-copy {
+    max-width: 620px;
+}
+
+.dashboard-hero-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 30px;
+    padding: 0 12px;
+    margin-bottom: 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.14);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.dashboard-hero-copy h2 {
+    margin: 0 0 10px;
+    font-size: 30px;
+    line-height: 1.08;
+    letter-spacing: -0.04em;
+}
+
+.dashboard-hero-copy p {
+    margin: 0;
+    max-width: 60ch;
+    color: rgba(255, 255, 255, 0.86);
+    line-height: 1.7;
+    font-size: 14px;
+}
+
+.dashboard-hero-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 220px;
+}
+
+.hero-action-btn {
+    min-height: 46px;
+    border-radius: 14px;
+    border: none;
+    padding: 0 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.hero-action-btn--primary {
+    background: #ffffff;
+    color: #312e81;
+    box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
+}
+
+.hero-action-btn--secondary {
+    background: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.dean-panel .summary-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 22px;
+}
+
+.dean-panel .summary-card,
+.dean-panel .faculty-summary-section,
+.dean-panel .analytics-section,
+.dean-panel .summary-table-section,
+.dean-panel .detail-report-section,
+.dean-panel .form-card,
+.dean-panel .chart-card,
+.dean-panel .faculty-comments-panel,
+.dean-panel .dean-semestral-trend-panel,
+.dean-panel .dean-semestral-trend-chart-card,
+.dean-panel .peer-mgmt-card,
+.dean-panel .peer-mgmt-ops-card {
+    border-radius: 24px;
+    border: 1px solid rgba(226, 232, 240, 0.92);
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+    background: rgba(255, 255, 255, 0.94);
+}
+
+.dean-panel .summary-card {
+    padding: 20px 22px;
+}
+
+.dean-panel .summary-card:hover,
+.dean-panel .btn-submit:hover,
+.dean-panel .btn-cancel:hover,
+.dean-panel .btn-eval-nav:hover,
+.dean-panel .response-toggle-btn:hover,
+.dean-panel .rating-option:hover {
+    transform: none;
+}
+
+.dean-panel .card-caption {
+    display: block;
+    margin-top: 6px;
+    font-size: 12px;
+    color: #64748b;
+}
+
+.dean-panel .faculty-summary-section,
+.dean-panel .analytics-section,
+.dean-panel .summary-table-section,
+.dean-panel .detail-report-section,
+.dean-panel .form-card,
+.dean-panel .chart-card {
+    padding: 24px;
+}
+
+.dean-panel .form-header,
+.dean-panel .section-header,
+.dean-panel .chart-header {
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.dean-panel .section-title h2,
+.dean-panel .form-header h2,
+.dean-panel .chart-header h3 {
+    letter-spacing: -0.03em;
+}
+
+.dean-panel .questionnaire-loading-state {
+    padding: 24px 12px;
+    border: 1px dashed #cbd5e1;
+    border-radius: 16px;
+    background: #f8fafc;
+    text-align: center;
+    color: #475569;
+}
+
+.dean-panel .questionnaire-loading-state i {
+    display: block;
+    margin: 0 0 10px;
+    font-size: 30px;
+    color: #94a3b8;
+}
+
+.dean-panel .questionnaire-loading-state p {
+    margin: 0;
+}
+
+.dean-panel .form-message {
+    margin-bottom: 20px;
+}
+
+.dean-panel .rating-scale input[type="radio"]:checked + .rating-option {
+    transform: none;
+    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.12);
+}
+
+.dean-panel .table-container,
+.dean-panel .profile-grid,
+.dean-panel .peer-mgmt-grid,
+.dean-panel .dean-semestral-trend-grid {
+    gap: 16px;
+}
+
+@media (max-width: 1180px) {
+    .dean-panel .summary-cards {
+        grid-template-columns: 1fr;
+    }
+
+    .dean-panel .dashboard-hero-card {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .dashboard-hero-actions {
+        width: 100%;
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+}
+
+@media (max-width: 1000px) {
+    .dean-panel .main-content {
+        margin-left: 0 !important;
+        padding: 16px 16px 28px;
+    }
+
+    .dean-panel .sidebar {
+        width: 280px !important;
+        transform: translateX(-100%);
+        transition: transform var(--motion-normal);
+        z-index: 260;
+    }
+
+    .dean-panel .sidebar .logo-text,
+    .dean-panel .sidebar .nav-link span {
+        display: inline !important;
+    }
+
+    .dean-panel .sidebar-header {
+        padding: 10px 4px !important;
+        justify-content: flex-start !important;
+    }
+
+    .dean-panel .nav-link {
+        justify-content: flex-start !important;
+        padding: 14px 16px !important;
+    }
+
+    .dean-panel.dean-sidebar-open .sidebar {
+        transform: translateX(0);
+    }
+
+    .dean-panel .sidebar-backdrop {
+        position: fixed;
+        inset: 0;
+        display: block;
+        border: none;
+        background: rgba(15, 23, 42, 0.42);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--motion-normal);
+        z-index: 250;
+    }
+
+    .dean-panel.dean-sidebar-open .sidebar-backdrop {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .mobile-nav-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .dean-panel .top-header {
+        padding: 18px 16px;
+        border-radius: 20px;
+    }
+
+    .dean-panel .page-title {
+        font-size: 24px;
+    }
+
+    .dean-panel .user-profile span {
+        display: none;
+    }
+}
+
+@media (max-width: 640px) {
+    .dean-panel .top-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .dean-panel .user-info {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    .dean-panel .dashboard-hero-card,
+    .dean-panel .summary-card,
+    .dean-panel .faculty-summary-section,
+    .dean-panel .analytics-section,
+    .dean-panel .summary-table-section,
+    .dean-panel .detail-report-section,
+    .dean-panel .form-card,
+    .dean-panel .chart-card,
+    .dean-panel .faculty-comments-panel,
+    .dean-panel .dean-semestral-trend-panel,
+    .dean-panel .dean-semestral-trend-chart-card,
+    .dean-panel .peer-mgmt-card,
+    .dean-panel .peer-mgmt-ops-card {
+        border-radius: 20px;
+    }
+
+    .dean-panel .dashboard-hero-card {
+        padding: 20px;
+    }
+
+    .dashboard-hero-copy h2 {
+        font-size: 24px;
+    }
+
+    .dashboard-hero-actions {
+        flex-direction: column;
+    }
+
+    .hero-action-btn {
+        width: 100%;
+    }
+
+    .dean-panel .form-card,
+    .dean-panel .detail-report-section,
+    .dean-panel .faculty-summary-section,
+    .dean-panel .summary-table-section,
+    .dean-panel .chart-card {
+        padding: 24px 18px;
+    }
+}
+
+.dean-panel .faculty-paper-table-wrap .summary-table {
+    min-width: 760px;
+}
+
+.dean-panel .dean-trend-table-wrap .summary-table {
+    min-width: 620px;
+}
+
+.dean-panel .faculty-paper-detail-card {
+    overflow: hidden;
+}
+
+.dean-panel .dean-faculty-paper-actions {
+    flex-wrap: wrap;
+    align-items: stretch;
+}
+
+.dean-panel .peer-mgmt-ops-card .form-group:last-of-type {
+    margin-bottom: 0;
+}
+
+.dean-panel .peer-mgmt-ops-actions {
+    gap: 12px;
+    margin-top: 8px;
+    margin-bottom: 16px;
+}
+
+.dean-panel .peer-mgmt-members-table-container {
+    margin-top: 16px;
+}
+
+@media (max-width: 1000px) {
+    .dean-panel .dashboard-hero-card {
+        padding: 22px;
+    }
+
+    .dean-panel .dashboard-hero-actions {
+        gap: 12px;
+    }
+
+    .dean-panel .chart-container {
+        height: 270px;
+    }
+
+    .dean-panel .faculty-response-controls {
+        align-items: stretch;
+    }
+
+    .dean-panel .faculty-response-controls .form-group {
+        min-width: 0;
+        flex: 1 1 100%;
+    }
+
+    .dean-panel .faculty-response-actions,
+    .dean-panel .faculty-response-toggle,
+    .dean-panel .faculty-comments-actions,
+    .dean-panel .dean-faculty-paper-actions {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .dean-panel .faculty-response-actions > *,
+    .dean-panel .faculty-comments-actions > *,
+    .dean-panel .dean-faculty-paper-actions > * {
+        flex: 1 1 180px;
+    }
+
+    .dean-panel .faculty-response-toggle .response-toggle-btn {
+        flex: 1 1 220px;
+        min-width: 0;
+    }
+
+    .dean-panel .faculty-comments-header,
+    .dean-panel .dean-semestral-trend-grid {
+        grid-template-columns: 1fr;
+        display: grid;
+    }
+
+    .dean-panel .dean-faculty-paper-meta-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .dean-panel .peer-mgmt-card,
+    .dean-panel .peer-mgmt-ops-card {
+        padding: 18px;
+    }
+
+    .dean-panel .peer-mgmt-row-actions,
+    .dean-panel .peer-mgmt-member-actions {
+        justify-content: flex-start;
+    }
+}
+
+@media (max-width: 640px) {
+    .dean-panel {
+        overflow-x: hidden;
+    }
+
+    .dean-panel .main-content {
+        padding: 14px 14px 24px;
+        overflow-x: hidden;
+    }
+
+    .dean-panel .top-header {
+        gap: 12px;
+        padding: 16px 14px;
+    }
+
+    .dean-panel .page-title {
+        font-size: 20px;
+    }
+
+    .dean-panel .page-context {
+        font-size: 12px;
+        line-height: 1.5;
+    }
+
+    .dean-panel .dashboard-hero-card {
+        padding: 18px;
+        width: 100%;
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    .dean-panel .dashboard-hero-copy,
+    .dean-panel .dashboard-hero-actions,
+    .dean-panel .summary-cards,
+    .dean-panel .summary-card {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .dean-panel .dashboard-hero-copy h2 {
+        font-size: 22px;
+        line-height: 1.12;
+        overflow-wrap: anywhere;
+    }
+
+    .dean-panel .dashboard-hero-copy p {
+        font-size: 13px;
+        line-height: 1.6;
+        max-width: 100%;
+        overflow-wrap: anywhere;
+    }
+
+    .dean-panel .dashboard-hero-actions {
+        gap: 10px;
+        min-width: 0;
+    }
+
+    .dean-panel .hero-action-btn {
+        display: flex;
+        width: 100%;
+        min-width: 0;
+        padding: 12px 16px;
+    }
+
+    .dean-panel .summary-card {
+        padding: 18px;
+    }
+
+    .dean-panel .summary-cards,
+    .dean-panel .summary-grid,
+    .dean-panel .charts-section {
+        gap: 14px;
+    }
+
+    .dean-panel .summary-cards,
+    .dean-panel .summary-grid,
+    .dean-panel .charts-section {
+        grid-template-columns: 1fr;
+    }
+
+    .dean-panel .faculty-summary-section,
+    .dean-panel .analytics-section,
+    .dean-panel .detail-report-section,
+    .dean-panel .form-card,
+    .dean-panel .chart-card {
+        padding: 20px 14px;
+    }
+
+    .dean-panel .section-header,
+    .dean-panel .chart-header,
+    .dean-panel .form-header {
+        margin-bottom: 18px;
+        padding-bottom: 14px;
+    }
+
+    .dean-panel .section-title h2,
+    .dean-panel .form-header h2,
+    .dean-panel .chart-header h3 {
+        font-size: 20px;
+    }
+
+    .dean-panel .summary-block {
+        padding: 16px;
+    }
+
+    .dean-panel .criteria-list li {
+        padding: 9px 10px;
+        font-size: 12px;
+    }
+
+    .dean-panel .chart-container,
+    .dean-panel .dean-semestral-trend-chart-container {
+        height: 220px;
+    }
+
+    .dean-panel .faculty-response-controls,
+    .dean-panel .faculty-response-actions,
+    .dean-panel .faculty-response-toggle,
+    .dean-panel .faculty-comments-actions,
+    .dean-panel .dean-faculty-paper-actions,
+    .dean-panel .peer-mgmt-ops-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .dean-panel .faculty-response-actions > *,
+    .dean-panel .faculty-response-toggle > *,
+    .dean-panel .faculty-comments-actions > *,
+    .dean-panel .dean-faculty-paper-actions > *,
+    .dean-panel .peer-mgmt-ops-actions > * {
+        width: 100%;
+        min-width: 0;
+        flex: none !important;
+        height: auto;
+        min-height: 0;
+    }
+
+    .dean-panel .faculty-response-actions .btn-submit,
+    .dean-panel .faculty-response-actions .btn-cancel,
+    .dean-panel .faculty-response-toggle .response-toggle-btn,
+    .dean-panel .dean-faculty-paper-actions .btn-submit,
+    .dean-panel .dean-faculty-paper-actions .btn-cancel,
+    .dean-panel .peer-mgmt-ops-actions .btn-submit,
+    .dean-panel .peer-mgmt-ops-actions .btn-cancel {
+        display: block;
+        width: 100%;
+        flex: none !important;
+        height: auto;
+        min-height: 46px;
+        padding: 12px 16px;
+    }
+
+    .dean-panel .faculty-comments-panel,
+    .dean-panel .dean-semestral-trend-panel,
+    .dean-panel .dean-semestral-trend-chart-card,
+    .dean-panel .peer-mgmt-card,
+    .dean-panel .peer-mgmt-ops-card {
+        padding: 18px 16px;
+    }
+
+    .dean-panel .faculty-comments-header {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .dean-panel .dean-faculty-paper-meta-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    .dean-panel .faculty-paper-table-wrap,
+    .dean-panel .faculty-response-table-container,
+    .dean-panel .dean-trend-table-wrap {
+        overflow: visible;
+        max-height: none;
+        border: none;
+        border-radius: 0;
+        background: transparent;
+    }
+
+    .dean-panel .faculty-paper-table-wrap .summary-table,
+    .dean-panel .faculty-response-table-container .summary-table,
+    .dean-panel .dean-trend-table-wrap .summary-table {
+        min-width: 0;
+    }
+
+    .dean-panel .mobile-card-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+
+    .dean-panel .mobile-card-table thead {
+        display: none;
+    }
+
+    .dean-panel .mobile-card-table tbody {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .dean-panel .mobile-card-table tbody tr {
+        display: block;
+        border: 1px solid rgba(226, 232, 240, 0.92);
+        border-radius: 16px;
+        background: #ffffff;
+        overflow: hidden;
+    }
+
+    .dean-panel .mobile-card-table--faculty-paper tbody tr.faculty-paper-row-active {
+        background: #eef2ff;
+        border-color: #c7d2fe;
+    }
+
+    .dean-panel .mobile-card-table tbody td {
+        display: grid;
+        grid-template-columns: minmax(0, 112px) minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+        width: 100%;
+        padding: 10px 14px;
+        border-bottom: 1px solid #e2e8f0;
+        font-size: 13px;
+        text-align: left;
+        word-break: break-word;
+    }
+
+    .dean-panel .mobile-card-table tbody td::before {
+        content: attr(data-label);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #64748b;
+    }
+
+    .dean-panel .mobile-card-table tbody td:last-child {
+        border-bottom: none;
+    }
+
+    .dean-panel .mobile-card-table tbody tr.mobile-card-empty-row {
+        border: none;
+        border-radius: 0;
+        background: transparent;
+    }
+
+    .dean-panel .mobile-card-table tbody tr.mobile-card-empty-row td {
+        display: block;
+        padding: 0;
+        border: none;
+    }
+
+    .dean-panel .mobile-card-table tbody tr.mobile-card-empty-row td::before {
+        content: none;
+    }
+
+    .dean-panel .mobile-card-table .dean-paper-open-btn,
+    .dean-panel .mobile-card-table .faculty-comments-btn,
+    .dean-panel .mobile-card-table tbody td[data-label="Actions"] .btn-submit,
+    .dean-panel .mobile-card-table tbody td[data-label="Actions"] .btn-cancel,
+    .dean-panel .mobile-card-table tbody td[data-label="Comments"] .btn-submit,
+    .dean-panel .mobile-card-table tbody td[data-label="Comments"] .btn-cancel {
+        width: 100%;
+    }
+}
+
+@media (max-width: 1000px) and (orientation: landscape) {
+    .dean-panel .faculty-paper-table-wrap,
+    .dean-panel .faculty-response-table-container,
+    .dean-panel .dean-trend-table-wrap {
+        overflow: visible;
+        max-height: none;
+        border: none;
+        border-radius: 0;
+        background: transparent;
+    }
+
+    .dean-panel .faculty-paper-table-wrap .summary-table,
+    .dean-panel .faculty-response-table-container .summary-table,
+    .dean-panel .dean-trend-table-wrap .summary-table {
+        min-width: 0;
+    }
+
+    .dean-panel .mobile-card-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+
+    .dean-panel .mobile-card-table thead {
+        display: none;
+    }
+
+    .dean-panel .mobile-card-table tbody {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .dean-panel .mobile-card-table tbody tr {
+        display: block;
+        border: 1px solid rgba(226, 232, 240, 0.92);
+        border-radius: 16px;
+        background: #ffffff;
+        overflow: hidden;
+    }
+
+    .dean-panel .mobile-card-table--faculty-paper tbody tr.faculty-paper-row-active {
+        background: #eef2ff;
+        border-color: #c7d2fe;
+    }
+
+    .dean-panel .mobile-card-table tbody td {
+        display: grid;
+        grid-template-columns: minmax(0, 112px) minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+        width: 100%;
+        padding: 10px 14px;
+        border-bottom: 1px solid #e2e8f0;
+        font-size: 13px;
+        text-align: left;
+        word-break: break-word;
+    }
+
+    .dean-panel .mobile-card-table tbody td::before {
+        content: attr(data-label);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #64748b;
+    }
+
+    .dean-panel .mobile-card-table tbody td:last-child {
+        border-bottom: none;
+    }
+
+    .dean-panel .mobile-card-table tbody tr.mobile-card-empty-row {
+        border: none;
+        border-radius: 0;
+        background: transparent;
+    }
+
+    .dean-panel .mobile-card-table tbody tr.mobile-card-empty-row td {
+        display: block;
+        padding: 0;
+        border: none;
+    }
+
+    .dean-panel .mobile-card-table tbody tr.mobile-card-empty-row td::before {
+        content: none;
+    }
+
+    .dean-panel .mobile-card-table .dean-paper-open-btn,
+    .dean-panel .mobile-card-table .faculty-comments-btn,
+    .dean-panel .mobile-card-table tbody td[data-label="Actions"] .btn-submit,
+    .dean-panel .mobile-card-table tbody td[data-label="Actions"] .btn-cancel,
+    .dean-panel .mobile-card-table tbody td[data-label="Comments"] .btn-submit,
+    .dean-panel .mobile-card-table tbody td[data-label="Comments"] .btn-cancel {
+        width: 100%;
+    }
+}
+
 

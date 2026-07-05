@@ -15,6 +15,7 @@ let vpaaChartDataByType = {
     professor: createEmptyChartData(),
     supervisor: createEmptyChartData()
 };
+let vpaaMobileDrawerBound = false;
 
 function createEmptyChartData(categoriesInput) {
     const categories = Array.isArray(categoriesInput) && categoriesInput.length
@@ -550,6 +551,9 @@ function init() {
     }
     loadDashboardDataFromDb();
     setupNavigation();
+    setupLogout();
+    setupMobileDrawer();
+    setupDashboardHeroActions();
     populateDepartments();
     populateSemesters();
     populateCampuses();
@@ -581,12 +585,105 @@ function setupNavigation() {
 
             navLinks.forEach((nav) => nav.classList.remove("active"));
             link.classList.add("active");
+            closeMobileDrawer();
 
             if (targetId !== "reports-view") {
                 closeReportModal();
             }
         });
     });
+}
+
+function setupLogout() {
+    const logoutBtn = document.getElementById("vpaaLogoutBtn");
+    if (!logoutBtn) return;
+
+    logoutBtn.addEventListener("click", function (event) {
+        event.preventDefault();
+        SharedData.clearSession();
+        window.location.href = "mainpage.html";
+    });
+}
+
+function setupMobileDrawer() {
+    if (vpaaMobileDrawerBound) return;
+
+    const toggleButtons = document.querySelectorAll(".mobile-nav-toggle");
+    const backdrop = document.getElementById("sidebarBackdrop");
+    if (!toggleButtons.length || !backdrop) return;
+
+    toggleButtons.forEach((button) => {
+        button.addEventListener("click", function () {
+            const isOpen = document.body.classList.contains("vpaa-sidebar-open");
+            if (isOpen) {
+                closeMobileDrawer();
+            } else {
+                openMobileDrawer();
+            }
+        });
+    });
+
+    backdrop.addEventListener("click", closeMobileDrawer);
+    window.addEventListener("resize", function () {
+        if (window.innerWidth > 1000) {
+            closeMobileDrawer();
+        }
+    });
+
+    vpaaMobileDrawerBound = true;
+}
+
+function openMobileDrawer() {
+    document.body.classList.add("vpaa-sidebar-open");
+    document.querySelectorAll(".mobile-nav-toggle").forEach((button) => {
+        button.setAttribute("aria-expanded", "true");
+    });
+}
+
+function closeMobileDrawer() {
+    document.body.classList.remove("vpaa-sidebar-open");
+    document.querySelectorAll(".mobile-nav-toggle").forEach((button) => {
+        button.setAttribute("aria-expanded", "false");
+    });
+}
+
+function setupDashboardHeroActions() {
+    const reportsBtn = document.getElementById("heroOpenReportsBtn");
+    const highlightsBtn = document.getElementById("heroScrollHighlightsBtn");
+    const navLinks = document.querySelectorAll(".sidebar-nav .nav-link[data-view]");
+    const contentViews = document.querySelectorAll(".content-view");
+
+    function activateView(viewId) {
+        contentViews.forEach((view) => {
+            view.classList.toggle("active", view.id === viewId);
+        });
+
+        navLinks.forEach((nav) => {
+            nav.classList.toggle("active", nav.dataset.view === viewId);
+        });
+
+        if (viewId !== "reports-view") {
+            closeReportModal();
+        }
+        closeMobileDrawer();
+    }
+
+    if (reportsBtn) {
+        reportsBtn.addEventListener("click", function () {
+            activateView("reports-view");
+        });
+    }
+
+    if (highlightsBtn) {
+        highlightsBtn.addEventListener("click", function () {
+            activateView("reports-view");
+            const highlights = document.querySelector(".vpaa-key-highlights-section");
+            if (highlights) {
+                const prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+                highlights.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" });
+            }
+        });
+    }
 }
 
 function populateDepartments() {
@@ -1346,7 +1443,8 @@ function setupProfileActions() {
             const targetCard = document.getElementById(targetId);
             if (targetCard) {
                 targetCard.style.display = "block";
-                targetCard.scrollIntoView({ behavior: "smooth", block: "start" });
+                const prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+                targetCard.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" });
             }
         });
     });
@@ -1357,7 +1455,10 @@ function setupProfileActions() {
             const targetCard = targetId ? document.getElementById(targetId) : null;
             if (targetCard) {
                 const form = targetCard.querySelector("form");
-                if (form) form.reset();
+                if (form) {
+                    form.reset();
+                    clearFormMessage(form);
+                }
                 targetCard.style.display = "none";
             }
         });
@@ -1366,8 +1467,33 @@ function setupProfileActions() {
 
 function hideAccountActionCards() {
     document.querySelectorAll(".account-action-card").forEach((card) => {
+        const form = card.querySelector("form");
+        if (form) clearFormMessage(form);
         card.style.display = "none";
     });
+}
+
+function showFormMessage(form, message, type) {
+    if (!form) return;
+    clearFormMessage(form);
+
+    const messageDiv = document.createElement("div");
+    const tone = type === "error" ? "error" : (type === "success" ? "success" : "info");
+    messageDiv.className = `form-message ui-message ui-message--${tone}`;
+    messageDiv.textContent = message;
+    form.insertBefore(messageDiv, form.firstChild);
+
+    setTimeout(() => {
+        if (messageDiv.parentNode) {
+            messageDiv.remove();
+        }
+    }, 4000);
+}
+
+function clearFormMessage(form) {
+    if (!form) return;
+    const existing = form.querySelector(".form-message");
+    if (existing) existing.remove();
 }
 
 function setupChangeEmailForm() {
@@ -1381,34 +1507,34 @@ function setupChangeEmailForm() {
 }
 
 function handleChangeEmail() {
+    const form = document.getElementById("changeEmailForm");
     const currentEmail = document.getElementById("currentEmail").value.trim();
     const newEmail = document.getElementById("newEmail").value.trim();
     const confirmEmail = document.getElementById("confirmEmail").value.trim();
 
     if (!newEmail || !confirmEmail) {
-        alert("Please fill out all email fields.");
+        showFormMessage(form, "Please fill out all email fields.", "error");
         return;
     }
 
     if (newEmail !== confirmEmail) {
-        alert("New email and confirmation do not match.");
+        showFormMessage(form, "New email and confirmation do not match.", "error");
         return;
     }
 
     if (currentEmail && newEmail.toLowerCase() === currentEmail.toLowerCase()) {
-        alert("New email must be different from the current email.");
+        showFormMessage(form, "New email must be different from the current email.", "error");
         return;
     }
 
     if (!SharedData.changeOwnEmail) {
-        alert("Email update service is unavailable.");
+        showFormMessage(form, "Email update service is unavailable.", "error");
         return;
     }
 
     try {
         const result = SharedData.changeOwnEmail(currentEmail, newEmail);
         const nextEmail = String(result && result.email || newEmail).trim();
-        alert("Email updated successfully.");
 
         const profileEmail = document.getElementById("profileEmail");
         if (profileEmail) profileEmail.textContent = nextEmail;
@@ -1419,12 +1545,14 @@ function handleChangeEmail() {
         }
     } catch (error) {
         console.error("[VPAA] Failed to update email.", error);
-        alert(error && error.message ? error.message : "Failed to update email.");
+        showFormMessage(form, error && error.message ? error.message : "Failed to update email.", "error");
         return;
     }
 
-    const form = document.getElementById("changeEmailForm");
-    if (form) form.reset();
+    if (form) {
+        form.reset();
+        showFormMessage(form, "Email updated successfully.", "success");
+    }
 }
 
 function setupChangePasswordForm() {
@@ -1438,36 +1566,38 @@ function setupChangePasswordForm() {
 }
 
 function handleChangePassword() {
+    const form = document.getElementById("changePasswordForm");
     const currentPassword = document.getElementById("currentPassword").value.trim();
     const newPassword = document.getElementById("newPassword").value.trim();
     const confirmPassword = document.getElementById("confirmPassword").value.trim();
 
     if (!currentPassword || !newPassword || !confirmPassword) {
-        alert("Please fill out all password fields.");
+        showFormMessage(form, "Please fill out all password fields.", "error");
         return;
     }
 
     if (newPassword !== confirmPassword) {
-        alert("New password and confirmation do not match.");
+        showFormMessage(form, "New password and confirmation do not match.", "error");
         return;
     }
 
     if (!SharedData.changeOwnPassword) {
-        alert("Password update service is unavailable.");
+        showFormMessage(form, "Password update service is unavailable.", "error");
         return;
     }
 
     try {
         SharedData.changeOwnPassword(currentPassword, newPassword);
-        alert("Password updated successfully.");
     } catch (error) {
         console.error("[VPAA] Failed to update password.", error);
-        alert(error && error.message ? error.message : "Failed to update password.");
+        showFormMessage(form, error && error.message ? error.message : "Failed to update password.", "error");
         return;
     }
 
-    const form = document.getElementById("changePasswordForm");
-    if (form) form.reset();
+    if (form) {
+        form.reset();
+        showFormMessage(form, "Password updated successfully.", "success");
+    }
 }
 
 function setupPasswordToggles() {

@@ -5,8 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VPAA Evaluation Overview - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/vpaapanel.css">
     <link rel="stylesheet" href="../css/panel-theme.css">
+    <link rel="stylesheet" href="../css/vpaapanel.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
@@ -14,9 +14,10 @@
 
 <body class="vpaa-panel">
     <div class="dashboard-container">
+        <button class="sidebar-backdrop" id="sidebarBackdrop" type="button" aria-label="Close navigation"></button>
         <div class="main-wrapper">
             <!-- Left Sidebar -->
-            <aside class="sidebar">
+            <aside class="sidebar" id="vpaaSidebar">
                 <div class="sidebar-header">
                     <div class="logo-container">
                         <div class="logo-shield">
@@ -42,8 +43,7 @@
                 </nav>
 
                 <div class="sidebar-footer">
-                    <a href="#" class="nav-link logout"
-                        onclick="SharedData.clearSession(); window.location.href='mainpage.html';">
+                    <a href="#" class="nav-link logout" id="vpaaLogoutBtn">
                         <i class="fas fa-sign-out-alt"></i>
                         <span>Logout</span>
                     </a>
@@ -54,7 +54,16 @@
             <main class="main-content">
                 <div id="dashboard-view" class="content-view active">
                     <header class="top-header">
-                        <h1 class="page-title">VPAA Evaluation Overview</h1>
+                        <div class="vpaa-header-main">
+                            <button class="mobile-nav-toggle" id="vpaaMenuToggle" type="button"
+                                aria-label="Open navigation" aria-controls="vpaaSidebar" aria-expanded="false">
+                                <i class="fas fa-bars"></i>
+                            </button>
+                            <div class="page-title-block">
+                                <h1 class="page-title">VPAA Evaluation Overview</h1>
+                                <p class="page-context">Review institution-wide evaluation trends, performance signals, and report details from one workspace.</p>
+                            </div>
+                        </div>
                         <div class="header-right">
                             <div class="user-profile">
                                 <i class="fas fa-user-circle"></i>
@@ -62,6 +71,24 @@
                             </div>
                         </div>
                     </header>
+
+                    <section class="vpaa-hero-card">
+                        <div class="vpaa-hero-copy">
+                            <span class="vpaa-hero-badge">VPAA workspace</span>
+                            <h2>Track academic evaluation outcomes and drill into professor performance quickly.</h2>
+                            <p>Use the overview for current metrics, then jump into detailed reports to filter by semester, campus, and department without losing context.</p>
+                        </div>
+                        <div class="vpaa-hero-actions">
+                            <button type="button" class="hero-action-btn hero-action-btn--primary" id="heroOpenReportsBtn">
+                                <i class="fas fa-clipboard-check"></i>
+                                <span>Open Reports</span>
+                            </button>
+                            <button type="button" class="hero-action-btn hero-action-btn--secondary" id="heroScrollHighlightsBtn">
+                                <i class="fas fa-chart-line"></i>
+                                <span>View Highlights</span>
+                            </button>
+                        </div>
+                    </section>
 
                     <div class="overview-cards">
                         <div class="overview-card users">
@@ -71,6 +98,7 @@
                             <div class="card-content">
                                 <h3>Total Students</h3>
                                 <p class="card-number" id="totalStudents">0</p>
+                                <span class="card-caption">Active student population in the current scope</span>
                             </div>
                         </div>
 
@@ -81,6 +109,7 @@
                             <div class="card-content">
                                 <h3>Completion Rate</h3>
                                 <p class="card-number" id="completionRate">0%</p>
+                                <span class="card-caption">Completed versus expected evaluations</span>
                             </div>
                         </div>
 
@@ -91,6 +120,7 @@
                             <div class="card-content">
                                 <h3>Pending Evaluations</h3>
                                 <p class="card-number" id="pendingEvaluations">0</p>
+                                <span class="card-caption">Evaluations still waiting for submission</span>
                             </div>
                         </div>
 
@@ -101,6 +131,7 @@
                             <div class="card-content">
                                 <h3>Active Professors</h3>
                                 <p class="card-number" id="activeProfessors">0</p>
+                                <span class="card-caption">Faculty included in the selected scope</span>
                             </div>
                         </div>
 
@@ -219,7 +250,16 @@
 
                 <div id="reports-view" class="content-view">
                     <header class="top-header">
-                        <h1 class="page-title">Reports & Insights</h1>
+                        <div class="vpaa-header-main">
+                            <button class="mobile-nav-toggle" type="button" aria-label="Open navigation"
+                                aria-controls="vpaaSidebar" aria-expanded="false" data-mobile-nav-toggle>
+                                <i class="fas fa-bars"></i>
+                            </button>
+                            <div class="page-title-block">
+                                <h1 class="page-title">Reports & Insights</h1>
+                                <p class="page-context">Filter institution reports, inspect trends, and review professor-level evaluation detail.</p>
+                            </div>
+                        </div>
                         <div class="header-right">
                             <div class="user-profile">
                                 <i class="fas fa-user-circle"></i>
@@ -339,7 +379,16 @@
 
                 <div id="profile-view" class="content-view">
                     <header class="top-header">
-                        <h1 class="page-title">VPAA Profile</h1>
+                        <div class="vpaa-header-main">
+                            <button class="mobile-nav-toggle" type="button" aria-label="Open navigation"
+                                aria-controls="vpaaSidebar" aria-expanded="false" data-mobile-nav-toggle>
+                                <i class="fas fa-bars"></i>
+                            </button>
+                            <div class="page-title-block">
+                                <h1 class="page-title">VPAA Profile</h1>
+                                <p class="page-context">Review office profile details and manage Gmail or password updates.</p>
+                            </div>
+                        </div>
                         <div class="header-right">
                             <div class="user-profile">
                                 <i class="fas fa-user-circle"></i>

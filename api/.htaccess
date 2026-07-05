@@ -1,0 +1,6 @@
+<IfModule mod_rewrite.c>
+RewriteEngine On
+
+# Only callable endpoints should stay public.
+RewriteRule "^(?:auth|db|faculty_pdf_helper|mailer_helper|scheduled_student_eval_reminder|setup_db|state_helpers)\\.php$" - [F,L,NC]
+</IfModule>

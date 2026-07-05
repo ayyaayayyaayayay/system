@@ -1346,4 +1346,638 @@ body.vpaa-panel .form-input {
     }
 }
 
+/* Phase 2 VPAA panel modernization */
+body.vpaa-panel {
+    min-height: 100vh;
+    background:
+        radial-gradient(circle at top right, rgba(99, 102, 241, 0.1), transparent 28%),
+        linear-gradient(180deg, #f6f8fc 0%, #eef3f9 100%);
+    color: #0f172a;
+}
+
+body.vpaa-panel .dashboard-container,
+body.vpaa-panel .main-wrapper {
+    position: relative;
+}
+
+body.vpaa-panel .sidebar {
+    width: 280px;
+    padding: 18px 16px;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+    border-right: 1px solid rgba(203, 213, 225, 0.9);
+}
+
+body.vpaa-panel .sidebar-header,
+body.vpaa-panel .sidebar-footer {
+    border: none;
+    padding: 10px 4px;
+}
+
+body.vpaa-panel .logo-container {
+    align-items: flex-start;
+    gap: 14px;
+}
+
+body.vpaa-panel .logo-shield {
+    width: 58px;
+    height: 58px;
+    border-radius: 18px;
+}
+
+body.vpaa-panel .logo-text {
+    font-size: 14px;
+    text-align: left;
+    line-height: 1.5;
+    max-width: 160px;
+}
+
+body.vpaa-panel .sidebar-nav {
+    padding: 18px 0;
+    gap: 10px;
+}
+
+body.vpaa-panel .sidebar .nav-link {
+    min-height: 52px;
+    padding: 14px 16px;
+    border-radius: 16px;
+    font-weight: 600;
+    transition: background-color var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast), border-color var(--motion-fast);
+}
+
+body.vpaa-panel .sidebar .nav-link.active {
+    box-shadow: 0 12px 24px rgba(91, 103, 232, 0.22);
+}
+
+body.vpaa-panel .sidebar-backdrop {
+    display: none;
+}
+
+body.vpaa-panel .main-content {
+    margin-left: 280px;
+    padding: 28px 28px 36px;
+}
+
+body.vpaa-panel .top-header {
+    margin-bottom: 24px;
+    padding: 20px 24px;
+    gap: 16px;
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    border-radius: 24px;
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+    background: rgba(255, 255, 255, 0.9);
+}
+
+.vpaa-header-main {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+    flex: 1;
+}
+
+.page-title-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+body.vpaa-panel .page-title {
+    margin: 0;
+    font-size: 30px;
+    letter-spacing: -0.04em;
+}
+
+.page-context {
+    margin: 0;
+    font-size: 13px;
+    color: #64748b;
+}
+
+.mobile-nav-toggle {
+    display: none;
+    width: 42px;
+    height: 42px;
+    border: 1px solid #dbe3ee;
+    border-radius: 14px;
+    background: #ffffff;
+    color: #334155;
+    cursor: pointer;
+    transition: background-color var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
+}
+
+body.vpaa-panel .user-profile,
+body.vpaa-panel .btn-add-professor,
+body.vpaa-panel .btn-submit,
+body.vpaa-panel .btn-cancel,
+body.vpaa-panel input,
+body.vpaa-panel select,
+body.vpaa-panel .sidebar .nav-link {
+    transition: background-color var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.vpaa-hero-card {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    align-items: center;
+    padding: 26px 28px;
+    margin-bottom: 22px;
+    border-radius: 24px;
+    background:
+        linear-gradient(135deg, rgba(47, 62, 156, 0.94) 0%, rgba(96, 69, 181, 0.92) 100%),
+        #4f46e5;
+    color: #ffffff;
+    box-shadow: 0 18px 36px rgba(79, 70, 229, 0.24);
+}
+
+.vpaa-hero-copy {
+    max-width: 620px;
+}
+
+.vpaa-hero-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 30px;
+    padding: 0 12px;
+    margin-bottom: 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.14);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.vpaa-hero-copy h2 {
+    margin: 0 0 10px;
+    font-size: 30px;
+    line-height: 1.08;
+    letter-spacing: -0.04em;
+}
+
+.vpaa-hero-copy p {
+    margin: 0;
+    max-width: 60ch;
+    color: rgba(255, 255, 255, 0.86);
+    line-height: 1.7;
+    font-size: 14px;
+}
+
+.vpaa-hero-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 220px;
+}
+
+.hero-action-btn {
+    min-height: 46px;
+    border-radius: 14px;
+    border: none;
+    padding: 0 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.hero-action-btn--primary {
+    background: #ffffff;
+    color: #312e81;
+    box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
+}
+
+.hero-action-btn--secondary {
+    background: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+body.vpaa-panel .overview-cards {
+    gap: 16px;
+    margin-bottom: 22px;
+}
+
+body.vpaa-panel .overview-card,
+body.vpaa-panel .section-card,
+body.vpaa-panel .admin-section,
+body.vpaa-panel .form-card,
+body.vpaa-panel .vpaa-report-modal-dialog {
+    border-radius: 24px;
+    border: 1px solid rgba(226, 232, 240, 0.92);
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+}
+
+body.vpaa-panel .overview-card:hover,
+body.vpaa-panel .btn-add-professor:hover,
+body.vpaa-panel .btn-submit:hover,
+body.vpaa-panel .btn-cancel:hover {
+    transform: none;
+}
+
+.card-caption {
+    display: block;
+    margin-top: 6px;
+    font-size: 12px;
+    color: #64748b;
+}
+
+body.vpaa-panel .form-message {
+    margin-bottom: 20px;
+}
+
+@media (max-width: 1180px) {
+    .vpaa-hero-card {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .vpaa-hero-actions {
+        width: 100%;
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+}
+
+@media (max-width: 1000px) {
+    body.vpaa-panel .main-content {
+        margin-left: 0 !important;
+        padding: 16px 16px 28px;
+    }
+
+    body.vpaa-panel .sidebar {
+        width: 280px !important;
+        transform: translateX(-100%);
+        transition: transform var(--motion-normal);
+        z-index: 260;
+        position: fixed;
+        left: 0;
+        top: 0;
+        height: 100vh;
+    }
+
+    body.vpaa-panel .sidebar .logo-text,
+    body.vpaa-panel .sidebar .nav-link span {
+        display: inline !important;
+    }
+
+    body.vpaa-panel .sidebar-header {
+        padding: 10px 4px !important;
+        justify-content: flex-start !important;
+    }
+
+    body.vpaa-panel .sidebar .nav-link {
+        justify-content: flex-start !important;
+        padding: 14px 16px !important;
+        flex: none;
+    }
+
+    body.vpaa-panel.vpaa-sidebar-open .sidebar {
+        transform: translateX(0);
+    }
+
+    body.vpaa-panel .sidebar-backdrop {
+        position: fixed;
+        inset: 0;
+        display: block;
+        border: none;
+        background: rgba(15, 23, 42, 0.42);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--motion-normal);
+        z-index: 250;
+    }
+
+    body.vpaa-panel.vpaa-sidebar-open .sidebar-backdrop {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .mobile-nav-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    body.vpaa-panel .page-title {
+        font-size: 24px;
+    }
+
+    body.vpaa-panel .user-profile span {
+        display: none;
+    }
+}
+
+@media (max-width: 640px) {
+    body.vpaa-panel .top-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    body.vpaa-panel .header-right {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    .vpaa-hero-card,
+    body.vpaa-panel .overview-card,
+    body.vpaa-panel .section-card,
+    body.vpaa-panel .admin-section,
+    body.vpaa-panel .form-card,
+    body.vpaa-panel .vpaa-report-modal-dialog {
+        border-radius: 20px;
+    }
+
+    .vpaa-hero-card {
+        padding: 20px;
+    }
+
+    .vpaa-hero-copy h2 {
+        font-size: 24px;
+    }
+
+    .vpaa-hero-actions {
+        flex-direction: column;
+    }
+
+    .hero-action-btn {
+        width: 100%;
+    }
+}
+
+@media (max-width: 1000px) {
+    body.vpaa-panel {
+        overflow-x: hidden;
+    }
+
+    body.vpaa-panel .main-wrapper,
+    body.vpaa-panel .main-content {
+        min-width: 0;
+    }
+
+    body.vpaa-panel .main-content {
+        overflow-x: hidden;
+    }
+
+    body.vpaa-panel .sidebar {
+        width: min(272px, calc(100vw - 64px)) !important;
+        min-width: 0 !important;
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+    }
+
+    body.vpaa-panel .sidebar-nav {
+        display: flex;
+        flex-direction: column;
+        flex-wrap: nowrap;
+        align-items: stretch;
+        gap: 10px;
+        padding: 18px 0;
+    }
+
+    body.vpaa-panel .sidebar .nav-link {
+        width: 100%;
+        min-width: 0;
+        flex: none !important;
+    }
+
+    body.vpaa-panel .sidebar-footer {
+        margin-top: auto;
+    }
+
+    body.vpaa-panel .overview-cards,
+    body.vpaa-panel .charts-grid {
+        grid-template-columns: 1fr;
+    }
+
+    body.vpaa-panel .vpaa-search-row,
+    body.vpaa-panel .vpaa-key-highlights-grid {
+        grid-template-columns: 1fr;
+    }
+
+    body.vpaa-panel .vpaa-filter-actions,
+    body.vpaa-panel .stats-summary {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    body.vpaa-panel .vpaa-filter-actions > *,
+    body.vpaa-panel .stats-summary > * {
+        width: 100%;
+    }
+
+    body.vpaa-panel .professors-list {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 640px) {
+    body.vpaa-panel {
+        overflow-x: hidden;
+    }
+
+    body.vpaa-panel .main-content {
+        padding: 14px 14px 24px;
+        overflow-x: hidden;
+    }
+
+    body.vpaa-panel .top-header {
+        gap: 12px;
+        padding: 16px 14px;
+        margin-bottom: 18px;
+    }
+
+    body.vpaa-panel .page-title {
+        font-size: 21px;
+        line-height: 1.15;
+        overflow-wrap: anywhere;
+    }
+
+    .page-context {
+        font-size: 12px;
+        line-height: 1.5;
+        max-width: 100%;
+        overflow-wrap: anywhere;
+    }
+
+    body.vpaa-panel .header-right {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    body.vpaa-panel .user-profile {
+        min-width: 0;
+    }
+
+    .vpaa-hero-card {
+        width: 100%;
+        min-width: 0;
+        padding: 18px;
+        overflow: hidden;
+    }
+
+    .vpaa-hero-copy,
+    .vpaa-hero-actions,
+    body.vpaa-panel .overview-cards,
+    body.vpaa-panel .overview-card,
+    body.vpaa-panel .section-card,
+    body.vpaa-panel .admin-section,
+    body.vpaa-panel .form-card {
+        min-width: 0;
+    }
+
+    .vpaa-hero-copy h2 {
+        font-size: 22px;
+        line-height: 1.12;
+        overflow-wrap: anywhere;
+    }
+
+    .vpaa-hero-copy p {
+        font-size: 13px;
+        line-height: 1.6;
+        max-width: 100%;
+        overflow-wrap: anywhere;
+    }
+
+    .vpaa-hero-actions {
+        width: 100%;
+        min-width: 0;
+        gap: 10px;
+    }
+
+    .hero-action-btn {
+        display: flex;
+        width: 100%;
+        min-width: 0;
+        padding: 12px 16px;
+    }
+
+    body.vpaa-panel .overview-cards {
+        grid-template-columns: 1fr;
+        gap: 14px;
+        margin-bottom: 18px;
+    }
+
+    body.vpaa-panel .overview-card,
+    body.vpaa-panel .section-card,
+    body.vpaa-panel .admin-section,
+    body.vpaa-panel .form-card {
+        padding: 18px 16px;
+        border-radius: 20px;
+    }
+
+    body.vpaa-panel .section-card-title {
+        font-size: 20px;
+        line-height: 1.2;
+    }
+
+    body.vpaa-panel .charts-grid {
+        grid-template-columns: 1fr;
+        gap: 14px;
+    }
+
+    body.vpaa-panel .chart-container {
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    body.vpaa-panel .chart-container canvas {
+        max-width: 100%;
+    }
+
+    body.vpaa-panel .stats-summary {
+        gap: 12px;
+    }
+
+    body.vpaa-panel .stat-item {
+        width: 100%;
+        min-width: 0;
+    }
+
+    body.vpaa-panel .analytics-filters {
+        gap: 14px;
+    }
+
+    body.vpaa-panel .analytics-filter,
+    body.vpaa-panel .vpaa-search-group {
+        min-width: 0;
+        width: 100%;
+    }
+
+    body.vpaa-panel .vpaa-search-row {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    body.vpaa-panel .vpaa-filter-actions {
+        gap: 10px;
+    }
+
+    body.vpaa-panel .btn-add-professor,
+    body.vpaa-panel .btn-submit,
+    body.vpaa-panel .btn-cancel,
+    body.vpaa-panel .btn-summary {
+        width: 100%;
+        justify-content: center;
+        padding: 12px 16px;
+    }
+
+    body.vpaa-panel .vpaa-key-highlights-section {
+        padding-top: 18px;
+        padding-bottom: 18px;
+    }
+
+    body.vpaa-panel .vpaa-key-highlights-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    body.vpaa-panel .vpaa-highlight-card {
+        min-width: 0;
+    }
+
+    body.vpaa-panel .professors-list-container {
+        max-height: none;
+        overflow: visible;
+    }
+
+    body.vpaa-panel .professors-list {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    body.vpaa-panel .professor-card,
+    body.vpaa-panel .professor-card.professor-card-compact {
+        min-width: 0;
+    }
+
+    body.vpaa-panel .profile-grid.profile-grid-wide {
+        grid-template-columns: 1fr;
+    }
+
+    body.vpaa-panel .sidebar {
+        width: min(272px, calc(100vw - 56px)) !important;
+        padding: 16px 14px 20px;
+    }
+
+    body.vpaa-panel .sidebar-header,
+    body.vpaa-panel .sidebar-footer {
+        padding-left: 2px;
+        padding-right: 2px;
+    }
+
+    body.vpaa-panel .sidebar .nav-link {
+        padding: 13px 14px !important;
+        border-radius: 14px;
+    }
+}
+
 

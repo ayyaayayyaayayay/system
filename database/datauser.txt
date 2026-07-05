@@ -81,7 +81,7 @@ INSERT IGNORE INTO `semesters` (
         ('systemName', 'NAAP Evaluation System'),
         ('academicYear', '2025-2026'),
         ('evaluationPeriodOpen', 'false'),
-        ('credentialDistributorConfig', '{"senderEmail":"nationalacph@gmail.com","senderName":"NAAP Evaluation System","appPassword":"szbkoereoalbbtiu"}');
+        ('credentialDistributorConfig', '{"senderEmail":"","senderName":"NAAP Evaluation System","appPassword":""}');
 
 INSERT IGNORE INTO `evaluation_periods` (`semester_id`, `evaluation_type_id`, `start_date`, `end_date`)
 SELECT s.id, et.id, src.start_date, src.end_date

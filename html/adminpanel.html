@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Panel - National Aviation Academy of the Philippines</title>
     <link rel="stylesheet" href="../css/hrpanel.css?v=20260322a">
-    <link rel="stylesheet" href="../css/adminpanel.css?v=20260414e">
     <link rel="stylesheet" href="../css/panel-theme.css?v=20260322a">
+    <link rel="stylesheet" href="../css/adminpanel.css?v=20260627e">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -15,14 +15,15 @@
 <body class="admin-panel">
     <div class="dashboard-container">
         <div class="main-wrapper">
+            <button class="sidebar-backdrop" id="sidebarBackdrop" type="button" aria-label="Close navigation"></button>
             <!-- Left Sidebar -->
-            <aside class="sidebar">
+            <aside class="sidebar" id="adminSidebar">
                 <div class="sidebar-header">
                     <div class="logo-container">
                         <div class="logo-shield">
                             <i class="fas fa-shield-alt"></i>
                         </div>
-                        <h2 class="logo-text">Admin Panel</h2>
+                        <h2 class="logo-text">NAAP Evaluation System</h2>
                     </div>
                 </div>
 
@@ -62,8 +63,7 @@
                 </nav>
 
                 <div class="sidebar-footer">
-                    <a href="#" class="nav-link logout" id="logout-btn"
-                        onclick="SharedData.clearSession(); window.location.href='mainpage.html';">
+                    <a href="#" class="nav-link logout" id="logout-btn">
                         <i class="fas fa-sign-out-alt"></i>
                         <span>Logout</span>
                     </a>
@@ -75,7 +75,15 @@
                 <!-- Dashboard View (Default) -->
                 <div id="dashboard-view" class="content-view">
                     <header class="top-header">
-                        <h1 class="page-title">Admin Dashboard</h1>
+                        <div class="admin-header-main">
+                            <button class="mobile-nav-toggle" id="adminMenuToggle" type="button" aria-label="Open navigation">
+                                <i class="fas fa-bars"></i>
+                            </button>
+                            <div class="page-title-block">
+                                <h1 class="page-title">Admin Dashboard</h1>
+                                <p class="page-context">System oversight, user operations, and evaluation controls.</p>
+                            </div>
+                        </div>
                         <div class="header-right">
                             <div class="user-profile">
                                 <i class="fas fa-user-shield"></i>
@@ -84,16 +92,23 @@
                         </div>
                     </header>
 
-                    <!-- Welcome Banner -->
-                    <div class="welcome-banner">
-                        <div class="welcome-content">
-                            <h1>Welcome to Admin Panel</h1>
-                            <p>National Aviation Academy of the Philippines - Student Professor Evaluation System</p>
+                    <section class="admin-hero-card">
+                        <div class="admin-hero-copy">
+                            <span class="hero-eyebrow">Control Center</span>
+                            <h2>Keep users, settings, and evaluations aligned.</h2>
+                            <p>Use the shortcuts below for the most common admin tasks without digging through every panel.</p>
                         </div>
-                        <div class="welcome-icon">
-                            <i class="fas fa-plane"></i>
+                        <div class="admin-hero-actions">
+                            <button type="button" class="hero-action-btn hero-action-btn--primary" id="heroOpenUsersBtn">
+                                <i class="fas fa-users"></i>
+                                <span>Open User Management</span>
+                            </button>
+                            <button type="button" class="hero-action-btn hero-action-btn--secondary" id="heroOpenSettingsBtn">
+                                <i class="fas fa-sliders-h"></i>
+                                <span>Review Settings</span>
+                            </button>
                         </div>
-                    </div>
+                    </section>
 
                     <!-- Overview Cards -->
                     <div class="overview-cards">
@@ -105,6 +120,7 @@
                                 <h3>Professors</h3>
                                 <p class="card-number" id="total-professors">0</p>
                                 <span class="card-label">Active faculty</span>
+                                <span class="card-caption">Teaching staff in active records</span>
                             </div>
                         </div>
 
@@ -116,6 +132,7 @@
                                 <h3>Students</h3>
                                 <p class="card-number" id="total-students">0</p>
                                 <span class="card-label">Enrolled students</span>
+                                <span class="card-caption">Student accounts currently tracked</span>
                             </div>
                         </div>
 
@@ -127,6 +144,7 @@
                                 <h3>Completion Rate</h3>
                                 <p class="card-number" id="completion-rate-overview">0%</p>
                                 <span class="card-label">Overall completion</span>
+                                <span class="card-caption">Submission progress across roles</span>
                             </div>
                         </div>
 
@@ -138,6 +156,7 @@
                                 <h3>Pending Evaluations</h3>
                                 <p class="card-number" id="pending-evaluations">0</p>
                                 <span class="card-label">Awaiting completion</span>
+                                <span class="card-caption">Items still waiting for action</span>
                             </div>
                         </div>
                     </div>
@@ -181,6 +200,27 @@
                                     <i class="fas fa-cog"></i>
                                     <span>Settings</span>
                                 </button>
+                            </div>
+                        </section>
+
+                        <section class="admin-section dashboard-activity-section">
+                            <div class="section-header">
+                                <div class="section-title">
+                                    <h2><i class="fas fa-clock-rotate-left"></i> Recent Activity</h2>
+                                    <p>Latest admin actions and evaluation events.</p>
+                                </div>
+                                <button type="button" class="btn-cancel js-open-activity-log">View Activity Log</button>
+                            </div>
+                            <div class="activity-list" id="activity-list" aria-live="polite">
+                                <div class="activity-item">
+                                    <div class="activity-icon login">
+                                        <i class="fas fa-spinner fa-spin"></i>
+                                    </div>
+                                    <div class="activity-content">
+                                        <p>Loading recent activity...</p>
+                                        <span>Please wait</span>
+                                    </div>
+                                </div>
                             </div>
                         </section>
                     </div>
@@ -338,7 +378,15 @@
                 <!-- User Management View -->
                 <div id="users-view" class="content-view" style="display: none;">
                     <header class="top-header">
-                        <h1 class="page-title">User Management</h1>
+                        <div class="admin-header-main">
+                            <button class="mobile-nav-toggle" type="button" aria-label="Open navigation">
+                                <i class="fas fa-bars"></i>
+                            </button>
+                            <div class="page-title-block">
+                                <h1 class="page-title">User Management</h1>
+                                <p class="page-context">Manage accounts, campuses, and organization assignments.</p>
+                            </div>
+                        </div>
                         <div class="header-right">
                             <div class="user-profile">
                                 <i class="fas fa-user-shield"></i>
@@ -488,7 +536,15 @@
                 <!-- Profile View -->
                 <div id="profile-view" class="content-view" style="display: none;">
                     <header class="top-header">
-                        <h1 class="page-title">Admin Profile</h1>
+                        <div class="admin-header-main">
+                            <button class="mobile-nav-toggle" type="button" aria-label="Open navigation">
+                                <i class="fas fa-bars"></i>
+                            </button>
+                            <div class="page-title-block">
+                                <h1 class="page-title">Admin Profile</h1>
+                                <p class="page-context">Review your account details and update credentials.</p>
+                            </div>
+                        </div>
                         <div class="header-right">
                             <div class="user-profile">
                                 <i class="fas fa-user-shield"></i>
@@ -659,7 +715,15 @@
                 <!-- System Settings View -->
                 <div id="system-view" class="content-view" style="display: none;">
                     <header class="top-header">
-                        <h1 class="page-title">System Settings</h1>
+                        <div class="admin-header-main">
+                            <button class="mobile-nav-toggle" type="button" aria-label="Open navigation">
+                                <i class="fas fa-bars"></i>
+                            </button>
+                            <div class="page-title-block">
+                                <h1 class="page-title">System Settings</h1>
+                                <p class="page-context">Configure platform-wide email, security, and operational settings.</p>
+                            </div>
+                        </div>
                         <div class="header-right">
                             <div class="user-profile">
                                 <i class="fas fa-user-shield"></i>
@@ -778,7 +842,15 @@
                 <!-- Activity Log View -->
                 <div id="activity-log-view" class="content-view" style="display: none;">
                     <header class="top-header">
-                        <h1 class="page-title">Activity Log</h1>
+                        <div class="admin-header-main">
+                            <button class="mobile-nav-toggle" type="button" aria-label="Open navigation">
+                                <i class="fas fa-bars"></i>
+                            </button>
+                            <div class="page-title-block">
+                                <h1 class="page-title">Activity Log</h1>
+                                <p class="page-context">Trace platform events, logins, and operational changes.</p>
+                            </div>
+                        </div>
                         <div class="header-right">
                             <div class="user-profile">
                                 <i class="fas fa-user-shield"></i>
@@ -839,7 +911,15 @@
                 <!-- HR Evaluation Settings View -->
                 <div id="hr-evaluation-settings-view" class="content-view" style="display: none;">
                     <header class="top-header">
-                        <h1 class="page-title">Evaluation Settings</h1>
+                        <div class="admin-header-main">
+                            <button class="mobile-nav-toggle" type="button" aria-label="Open navigation">
+                                <i class="fas fa-bars"></i>
+                            </button>
+                            <div class="page-title-block">
+                                <h1 class="page-title">Evaluation Settings</h1>
+                                <p class="page-context">Control evaluation windows, questionnaire access, and periods.</p>
+                            </div>
+                        </div>
                         <div class="header-right">
                             <div class="user-profile">
                                 <i class="fas fa-user-shield"></i>
@@ -1029,7 +1109,15 @@
                 <!-- HR Professor Management View -->
                 <div id="hr-professors-view" class="content-view" style="display: none;">
                     <header class="top-header">
-                        <h1 class="page-title">Professor Management</h1>
+                        <div class="admin-header-main">
+                            <button class="mobile-nav-toggle" type="button" aria-label="Open navigation">
+                                <i class="fas fa-bars"></i>
+                            </button>
+                            <div class="page-title-block">
+                                <h1 class="page-title">Professor Management</h1>
+                                <p class="page-context">Review professor records, departments, and performance groupings.</p>
+                            </div>
+                        </div>
                         <div class="header-right">
                             <div class="user-profile">
                                 <i class="fas fa-user-shield"></i>
@@ -1087,7 +1175,15 @@
                 <!-- Subject Management View -->
                 <div id="subject-management-view" class="content-view" style="display: none;">
                     <header class="top-header">
-                        <h1 class="page-title">Subject Management</h1>
+                        <div class="admin-header-main">
+                            <button class="mobile-nav-toggle" type="button" aria-label="Open navigation">
+                                <i class="fas fa-bars"></i>
+                            </button>
+                            <div class="page-title-block">
+                                <h1 class="page-title">Subject Management</h1>
+                                <p class="page-context">Maintain subjects, offerings, and semester assignments.</p>
+                            </div>
+                        </div>
                         <div class="header-right">
                             <div class="user-profile">
                                 <i class="fas fa-user-shield"></i>
@@ -1194,7 +1290,15 @@
                 <!-- HR Questionnaire View -->
                 <div id="hr-questionnaire-view" class="content-view" style="display: none;">
                     <header class="top-header">
-                        <h1 class="page-title">Questionnaire</h1>
+                        <div class="admin-header-main">
+                            <button class="mobile-nav-toggle" type="button" aria-label="Open navigation">
+                                <i class="fas fa-bars"></i>
+                            </button>
+                            <div class="page-title-block">
+                                <h1 class="page-title">Questionnaire</h1>
+                                <p class="page-context">Manage evaluation forms and semester-specific question sets.</p>
+                            </div>
+                        </div>
                         <div class="header-right">
                             <div class="user-profile">
                                 <i class="fas fa-user-shield"></i>
@@ -1815,8 +1919,8 @@
 
 
     <script src="../JsScrip/db-data.js?v=20260414d"></script>
-    <script src="../JsScrip/vendor/xlsx.full.min.js?v=20260323a"></script>
-    <script src="../JsScrip/adminpanel.js?v=20260414e"></script>
+    <script src="../JsScrip/vendor/xlsx.full.min.js?v=20260701a"></script>
+    <script src="../JsScrip/adminpanel.js?v=20260701b"></script>
 </body>
 
 </html>

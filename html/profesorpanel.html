@@ -5,16 +5,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Professor Dashboard - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/profesorpanel.css">
     <link rel="stylesheet" href="../css/panel-theme.css">
+    <link rel="stylesheet" href="../css/profesorpanel.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
 </head>
 
-<body>
+<body class="professor-panel">
     <div class="dashboard-container">
+        <button class="sidebar-backdrop" id="sidebarBackdrop" type="button" aria-label="Close navigation"></button>
         <!-- Left Sidebar -->
-        <aside class="sidebar">
+        <aside class="sidebar" id="professorSidebar">
             <div class="sidebar-header">
                 <div class="logo-container">
                     <div class="logo-shield">
@@ -48,8 +49,7 @@
             </nav>
 
             <div class="sidebar-footer">
-                <a href="#" class="nav-link logout"
-                    onclick="SharedData.clearSession(); window.location.href='mainpage.html';">
+                <a href="#" class="nav-link logout" id="professorLogoutBtn">
                     <i class="fas fa-sign-out-alt"></i>
                     <span>Logout</span>
                 </a>
@@ -62,7 +62,16 @@
             <div id="dashboardView" class="content-view">
                 <!-- Top Header -->
                 <header class="top-header">
-                    <h1 class="page-title">Professor Dashboard</h1>
+                    <div class="professor-header-main">
+                        <button class="mobile-nav-toggle" id="professorMenuToggle" type="button"
+                            aria-label="Open navigation" aria-controls="professorSidebar" aria-expanded="false">
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <div class="page-title-block">
+                            <h1 class="page-title">Professor Dashboard</h1>
+                            <p class="page-context">Review feedback trends, monitor deadlines, and manage faculty workflows.</p>
+                        </div>
+                    </div>
                     <div class="user-info">
                         <button class="user-action-btn js-notification-btn" aria-label="View announcements">
                             <i class="fas fa-bell"></i>
@@ -122,6 +131,28 @@
                     </div>
                 </header>
 
+                <section class="dashboard-hero-card">
+                    <div class="dashboard-hero-copy">
+                        <span class="dashboard-hero-badge">Faculty workspace</span>
+                        <h2>Track evaluation status and faculty actions in one place.</h2>
+                        <p>Use the dashboard to review current-semester results, submit peer evaluations, and continue your faculty paper workflow without switching context.</p>
+                    </div>
+                    <div class="dashboard-hero-actions">
+                        <button type="button" class="hero-action-btn hero-action-btn--primary" id="heroOpenPeerEvaluationBtn">
+                            <i class="fas fa-people-group"></i>
+                            <span>Open Peer Evaluation</span>
+                        </button>
+                        <button type="button" class="hero-action-btn hero-action-btn--secondary" id="heroOpenReportsBtn">
+                            <i class="fas fa-chart-column"></i>
+                            <span>View Reports</span>
+                        </button>
+                        <button type="button" class="hero-action-btn hero-action-btn--secondary" id="heroOpenFacultyPaperBtn">
+                            <i class="fas fa-file-signature"></i>
+                            <span>Open Faculty Paper</span>
+                        </button>
+                    </div>
+                </section>
+
                 <!-- Summary Cards -->
                 <div class="summary-cards">
                     <div class="summary-card evaluations">
@@ -131,6 +162,7 @@
                         <div class="card-content">
                             <h3>Evaluations Received</h3>
                             <p class="card-number">0/0</p>
+                            <span class="card-caption">Received versus expected submissions</span>
                         </div>
                     </div>
 
@@ -141,6 +173,7 @@
                         <div class="card-content">
                             <h3>Average Score</h3>
                             <p class="card-number score-text">0.0/5.0</p>
+                            <span class="card-caption">Current selected evaluation type</span>
                         </div>
                     </div>
 
@@ -151,6 +184,7 @@
                         <div class="card-content">
                             <h3>Response Rate</h3>
                             <p class="card-number">0%</p>
+                            <span class="card-caption">Participation for the selected semester</span>
                         </div>
                     </div>
                 </div>
@@ -195,7 +229,16 @@
             <!-- Peer Evaluation View -->
             <div id="peerEvaluationView" class="content-view" style="display: none;">
                 <header class="top-header">
-                    <h1 class="page-title">Peer-to-Peer Evaluation</h1>
+                    <div class="professor-header-main">
+                        <button class="mobile-nav-toggle" type="button" aria-label="Open navigation"
+                            aria-controls="professorSidebar" aria-expanded="false" data-mobile-nav-toggle>
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <div class="page-title-block">
+                            <h1 class="page-title">Peer-to-Peer Evaluation</h1>
+                            <p class="page-context">Complete colleague evaluations with clearer section flow and feedback states.</p>
+                        </div>
+                    </div>
                     <div class="user-info">
                         <button class="user-action-btn js-notification-btn" aria-label="View announcements">
                             <i class="fas fa-bell"></i>
@@ -256,9 +299,8 @@
                         </div>
 
                         <div id="dynamic-peer-questions-container">
-                            <div class="empty-state" style="text-align: center; padding: 3rem 1rem;">
-                                <i class="fas fa-spinner fa-spin"
-                                    style="font-size: 3rem; color: #cbd5e1; margin-bottom: 1rem;"></i>
+                            <div class="questionnaire-loading-state">
+                                <i class="fas fa-spinner fa-spin"></i>
                                 <p>Loading peer evaluation form...</p>
                             </div>
                         </div>
@@ -274,7 +316,16 @@
             <!-- Reports View -->
             <div id="reportsView" class="content-view" style="display: none;">
                 <header class="top-header">
-                    <h1 class="page-title">Evaluation Reports</h1>
+                    <div class="professor-header-main">
+                        <button class="mobile-nav-toggle" type="button" aria-label="Open navigation"
+                            aria-controls="professorSidebar" aria-expanded="false" data-mobile-nav-toggle>
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <div class="page-title-block">
+                            <h1 class="page-title">Evaluation Reports</h1>
+                            <p class="page-context">Compare semester performance, response rates, and comment summaries.</p>
+                        </div>
+                    </div>
                     <div class="user-info">
                         <button class="user-action-btn js-notification-btn" aria-label="View announcements">
                             <i class="fas fa-bell"></i>
@@ -356,8 +407,8 @@
                             </div>
                         </div>
 
-                        <div class="table-container faculty-breakdown-table-wrap">
-                            <table class="faculty-breakdown-table" id="facultyBreakdownTable">
+                        <div class="table-container faculty-breakdown-table-wrap reports-breakdown-table-wrap">
+                            <table class="faculty-breakdown-table mobile-card-table mobile-card-table--reports" id="facultyBreakdownTable">
                                 <thead>
                                     <tr>
                                         <th>Subject</th>
@@ -445,8 +496,8 @@
                             <div class="semestral-trend-panel">
                                 <div class="semestral-trend-status" id="semestralTrendStatus">No semestral trend data available.</div>
                                 <p class="semestral-trend-delta" id="semestralTrendDelta">Select a semester to load trend comparison.</p>
-                                <div class="table-container">
-                                    <table class="summary-table">
+                                <div class="table-container report-trend-table-wrap">
+                                    <table class="summary-table mobile-card-table mobile-card-table--trend">
                                         <thead>
                                             <tr>
                                                 <th>Semester</th>
@@ -554,8 +605,8 @@
                             </div>
                         </div>
 
-                        <div class="table-container">
-                            <table class="summary-table">
+                        <div class="table-container report-detail-table-wrap">
+                            <table class="summary-table mobile-card-table mobile-card-table--detail">
                                 <thead>
                                     <tr>
                                         <th>Category</th>
@@ -585,7 +636,16 @@
             <!-- Faculty Paper View -->
             <div id="facultyPaperView" class="content-view" style="display: none;">
                 <header class="top-header">
-                    <h1 class="page-title">Faculty Paper Workflow</h1>
+                    <div class="professor-header-main">
+                        <button class="mobile-nav-toggle" type="button" aria-label="Open navigation"
+                            aria-controls="professorSidebar" aria-expanded="false" data-mobile-nav-toggle>
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <div class="page-title-block">
+                            <h1 class="page-title">Faculty Paper Workflow</h1>
+                            <p class="page-context">Manage draft papers, review Section C updates, and route to your dean.</p>
+                        </div>
+                    </div>
                     <div class="user-info">
                         <button class="user-action-btn js-notification-btn" aria-label="View announcements">
                             <i class="fas fa-bell"></i>
@@ -644,8 +704,8 @@
                         <button type="button" class="btn-cancel faculty-paper-tab" id="facultyPaperTabArchive">Archive</button>
                     </div>
 
-                    <div class="table-container">
-                        <table class="summary-table" id="facultyPaperTable">
+                    <div class="table-container faculty-paper-table-wrap">
+                        <table class="summary-table mobile-card-table mobile-card-table--faculty-paper" id="facultyPaperTable">
                             <thead>
                                 <tr>
                                     <th>Paper ID</th>
@@ -671,7 +731,7 @@
                         <p id="facultyPaperDetailMeta">Select a paper from the table.</p>
                     </div>
 
-                    <div class="profile-grid profile-grid-wide">
+                    <div class="profile-grid profile-grid-wide faculty-paper-meta-grid">
                         <div class="profile-item"><span class="profile-label">Paper ID</span><span class="profile-value" id="fpDetailId">N/A</span></div>
                         <div class="profile-item"><span class="profile-label">Status</span><span class="profile-value" id="fpDetailStatus">N/A</span></div>
                         <div class="profile-item"><span class="profile-label">Faculty Name</span><span class="profile-value" id="fpDetailFacultyName">N/A</span></div>
@@ -702,7 +762,7 @@
                         </div>
                     </div>
 
-                    <div class="form-actions">
+                    <div class="form-actions faculty-paper-detail-actions">
                         <button type="button" class="btn-submit" id="fpDetailPreviewBtn">Preview PDF</button>
                         <button type="button" class="btn-submit" id="fpDetailSaveSectionCBtn">Save Section C</button>
                         <button type="button" class="btn-submit" id="fpDetailSendBtn">Send to Dean</button>
@@ -714,7 +774,16 @@
             <!-- Profile View -->
             <div id="profileView" class="content-view" style="display: none;">
                 <header class="top-header">
-                    <h1 class="page-title">Profile</h1>
+                    <div class="professor-header-main">
+                        <button class="mobile-nav-toggle" type="button" aria-label="Open navigation"
+                            aria-controls="professorSidebar" aria-expanded="false" data-mobile-nav-toggle>
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <div class="page-title-block">
+                            <h1 class="page-title">Profile</h1>
+                            <p class="page-context">Review faculty details and update your account information.</p>
+                        </div>
+                    </div>
                     <div class="user-info">
                         <button class="user-action-btn js-notification-btn" aria-label="View announcements">
                             <i class="fas fa-bell"></i>

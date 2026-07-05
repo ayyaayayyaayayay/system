@@ -1,0 +1,13 @@
+Options -Indexes
+DirectoryIndex index.php
+
+<IfModule mod_rewrite.c>
+RewriteEngine On
+
+# Allow the bundled browser Excel parser asset under JsScrip/vendor.
+RewriteRule "^JsScrip/vendor/xlsx\.full\.min\.js$" - [L,NC]
+
+# Block direct web access to sensitive project internals.
+RewriteRule "(^|/)(?:database|vendor|\\.git|\\.vs)(?:/|$)" - [F,L,NC]
+RewriteRule "(^|/)(?:README\\.md|composer\\.json|composer\\.lock|composer\\.phar|composer-setup\\.php)$" - [F,L,NC]
+</IfModule>

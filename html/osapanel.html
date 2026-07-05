@@ -5,14 +5,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OSA Dashboard - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/osapanel.css">
     <link rel="stylesheet" href="../css/panel-theme.css">
+    <link rel="stylesheet" href="../css/osapanel.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 
-<body>
+<body class="osa-panel">
     <div class="dashboard-container">
-        <aside class="sidebar">
+        <button class="sidebar-backdrop" id="sidebarBackdrop" type="button" aria-label="Close navigation"></button>
+        <aside class="sidebar" id="osaSidebar">
             <div class="sidebar-header">
                 <div class="logo-container">
                     <div class="logo-shield">
@@ -42,8 +43,7 @@
             </nav>
 
             <div class="sidebar-footer">
-                <a href="#" class="nav-link logout" id="logoutBtn"
-                    onclick="SharedData.clearSession(); window.location.href='mainpage.html';">
+                <a href="#" class="nav-link logout" id="logoutBtn">
                     <i class="fas fa-sign-out-alt"></i>
                     <span>Logout</span>
                 </a>
@@ -53,12 +53,39 @@
         <main class="main-content">
             <div id="dashboardView" class="content-view active">
                 <header class="top-header">
-                    <h1 class="page-title">OSA Evaluation Monitoring</h1>
+                    <div class="osa-header-main">
+                        <button class="mobile-nav-toggle" id="osaMenuToggle" type="button"
+                            aria-label="Open navigation" aria-controls="osaSidebar" aria-expanded="false">
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <div class="page-title-block">
+                            <h1 class="page-title">OSA Evaluation Monitoring</h1>
+                            <p class="page-context">Track student completion, review proof requests, and keep clearance decisions organized.</p>
+                        </div>
+                    </div>
                     <div class="user-profile">
                         <i class="fas fa-user-circle"></i>
                         <span id="profileName">OSA User</span>
                     </div>
                 </header>
+
+                <section class="osa-hero-card">
+                    <div class="osa-hero-copy">
+                        <span class="osa-hero-badge">OSA workspace</span>
+                        <h2>Monitor student evaluation completion and proof reviews from one panel.</h2>
+                        <p>Use this dashboard to inspect completion analytics, check student evaluation status, and review proof submissions for the active semester.</p>
+                    </div>
+                    <div class="osa-hero-actions">
+                        <button type="button" class="hero-action-btn hero-action-btn--primary" id="heroOpenStatusBtn">
+                            <i class="fas fa-list-check"></i>
+                            <span>Open Status List</span>
+                        </button>
+                        <button type="button" class="hero-action-btn hero-action-btn--secondary" id="heroOpenProofReviewBtn">
+                            <i class="fas fa-file-signature"></i>
+                            <span>Open Proof Reviews</span>
+                        </button>
+                    </div>
+                </section>
 
                 <section class="summary-cards">
                     <div class="summary-card total">
@@ -66,6 +93,7 @@
                         <div class="card-content">
                             <h3>Assigned Students</h3>
                             <p class="card-number" id="assignedCount">0</p>
+                            <span class="card-caption">Students assigned for active-semester monitoring</span>
                         </div>
                     </div>
                     <div class="summary-card done">
@@ -73,6 +101,7 @@
                         <div class="card-content">
                             <h3>Evaluated</h3>
                             <p class="card-number" id="evaluatedCountAnalytics">0</p>
+                            <span class="card-caption">Completed student evaluations</span>
                         </div>
                     </div>
                     <div class="summary-card not-done">
@@ -80,6 +109,7 @@
                         <div class="card-content">
                             <h3>Not Evaluated</h3>
                             <p class="card-number" id="notEvaluatedCountAnalytics">0</p>
+                            <span class="card-caption">Students still pending evaluation</span>
                         </div>
                     </div>
                     <div class="summary-card rate">
@@ -87,6 +117,7 @@
                         <div class="card-content">
                             <h3>Completion Rate</h3>
                             <p class="card-number" id="completionRateCount">0%</p>
+                            <span class="card-caption">Overall completion percentage</span>
                         </div>
                     </div>
                 </section>
@@ -147,7 +178,16 @@
 
             <div id="studentStatusView" class="content-view">
                 <header class="top-header">
-                    <h1 class="page-title">Student Evaluation Status</h1>
+                    <div class="osa-header-main">
+                        <button class="mobile-nav-toggle" type="button" aria-label="Open navigation"
+                            aria-controls="osaSidebar" aria-expanded="false" data-mobile-nav-toggle>
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <div class="page-title-block">
+                            <h1 class="page-title">Student Evaluation Status</h1>
+                            <p class="page-context">Search students quickly and review completion or manual clearance status.</p>
+                        </div>
+                    </div>
                     <div class="user-profile">
                         <i class="fas fa-user-circle"></i>
                         <span id="profileNameStatus">OSA User</span>
@@ -215,7 +255,16 @@
 
             <div id="proofReviewView" class="content-view">
                 <header class="top-header">
-                    <h1 class="page-title">Submitted Proof Reasons</h1>
+                    <div class="osa-header-main">
+                        <button class="mobile-nav-toggle" type="button" aria-label="Open navigation"
+                            aria-controls="osaSidebar" aria-expanded="false" data-mobile-nav-toggle>
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <div class="page-title-block">
+                            <h1 class="page-title">Submitted Proof Reasons</h1>
+                            <p class="page-context">Review submitted reasons, inspect links, and approve or reject pending requests.</p>
+                        </div>
+                    </div>
                     <div class="user-profile">
                         <i class="fas fa-user-circle"></i>
                         <span id="profileNameProof">OSA User</span>
@@ -263,7 +312,16 @@
 
             <div id="profileView" class="content-view">
                 <header class="top-header">
-                    <h1 class="page-title">OSA Profile</h1>
+                    <div class="osa-header-main">
+                        <button class="mobile-nav-toggle" type="button" aria-label="Open navigation"
+                            aria-controls="osaSidebar" aria-expanded="false" data-mobile-nav-toggle>
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <div class="page-title-block">
+                            <h1 class="page-title">OSA Profile</h1>
+                            <p class="page-context">Review OSA account information and update Gmail or password details.</p>
+                        </div>
+                    </div>
                     <div class="user-profile">
                         <i class="fas fa-user-circle"></i>
                         <span id="profileNameDuplicate">OSA User</span>

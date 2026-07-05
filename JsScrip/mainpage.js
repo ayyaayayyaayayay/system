@@ -3,6 +3,7 @@
 const loginFlowState = {
   pendingOtp: null,
 };
+const MOBILE_AUTH_BREAKPOINT = 640;
 
 // Wait for DOM to be fully loaded
 document.addEventListener("DOMContentLoaded", function () {
@@ -14,37 +15,111 @@ document.addEventListener("DOMContentLoaded", function () {
  */
 function initializeLoginPage() {
   checkExistingSession();
+  setupMobileAuthView();
   setupLoginForm();
   setupOtpVerification();
   setupForgotPassword();
+}
+
+function isMobileAuthLayout() {
+  return window.innerWidth <= MOBILE_AUTH_BREAKPOINT;
+}
+
+function setMobileAuthView(viewName) {
+  const body = document.body;
+  const loginView = document.getElementById("authLoginView");
+  const aboutView = document.getElementById("authAboutView");
+  const aboutToggle = document.getElementById("mobileAboutToggle");
+  const signInToggle = document.getElementById("mobileSignInToggle");
+  const showAbout = isMobileAuthLayout() && String(viewName || "").toLowerCase() === "about";
+
+  if (!body || !loginView || !aboutView) return;
+
+  body.classList.toggle("auth-mobile-about-active", showAbout);
+  loginView.hidden = showAbout;
+  aboutView.hidden = !showAbout;
+
+  if (aboutToggle) {
+    aboutToggle.setAttribute("aria-expanded", showAbout ? "true" : "false");
+  }
+
+  if (signInToggle) {
+    signInToggle.setAttribute("aria-expanded", showAbout ? "false" : "true");
+  }
+}
+
+function setupMobileAuthView() {
+  const aboutToggle = document.getElementById("mobileAboutToggle");
+  const signInToggle = document.getElementById("mobileSignInToggle");
+
+  setMobileAuthView("login");
+
+  if (aboutToggle) {
+    aboutToggle.addEventListener("click", function () {
+      if (!isMobileAuthLayout()) return;
+      setMobileAuthView("about");
+    });
+  }
+
+  if (signInToggle) {
+    signInToggle.addEventListener("click", function () {
+      setMobileAuthView("login");
+    });
+  }
+
+  window.addEventListener("resize", function () {
+    setMobileAuthView("login");
+  });
+}
+
+function setInlineStateMessage(element, message, type) {
+  if (!element) return;
+  const tone = String(type || "error").toLowerCase();
+  element.classList.remove("is-success", "is-error");
+  if (!message) {
+    element.hidden = true;
+    element.textContent = "";
+    return;
+  }
+  element.hidden = false;
+  element.textContent = String(message);
+  element.classList.add(tone === "success" ? "is-success" : "is-error");
+}
+
+function setFeedbackMessage(targetId, message, tone) {
+  const host = document.getElementById(targetId);
+  if (!host) return;
+  host.innerHTML = "";
+  if (!message) {
+    host.hidden = true;
+    return;
+  }
+
+  const box = document.createElement("div");
+  const state = String(tone || "error").toLowerCase();
+  box.className = `ui-message ${state === "success" ? "ui-message--success" : state === "info" ? "ui-message--info" : "ui-message--error"}`;
+  box.textContent = String(message);
+  host.appendChild(box);
+  host.hidden = false;
+}
+
+function clearFeedbackMessage(targetId) {
+  setFeedbackMessage(targetId, "", "info");
 }
 
 /**
  * Setup login form submission
  */
 function setupLoginForm() {
+  const loginForm = document.getElementById("loginForm");
   const loginBtn = document.getElementById("loginBtn");
   const usernameInput = document.getElementById("username");
   const passwordInput = document.getElementById("password");
-  if (!loginBtn || !usernameInput || !passwordInput) return;
+  if (!loginBtn || !usernameInput || !passwordInput || !loginForm) return;
 
-  loginBtn.addEventListener("click", function (e) {
+  loginForm.addEventListener("submit", function (e) {
     e.preventDefault();
     handleLogin();
-  });
-
-  usernameInput.addEventListener("keypress", function (e) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      handleLogin();
-    }
-  });
-
-  passwordInput.addEventListener("keypress", function (e) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      handleLogin();
-    }
   });
 }
 
@@ -79,20 +154,7 @@ function formatLockMessage(lockUntil) {
 function setOtpInlineMessage(message, type) {
   const el = document.getElementById("otpInlineMessage");
   if (!el) return;
-  const tone = String(type || "error").toLowerCase();
-  const isSuccess = tone === "success";
-  if (!message) {
-    el.style.display = "none";
-    el.textContent = "";
-    return;
-  }
-  el.style.display = "block";
-  el.textContent = String(message);
-  el.style.marginTop = "8px";
-  el.style.marginBottom = "14px";
-  el.style.fontSize = "13px";
-  el.style.fontWeight = "600";
-  el.style.color = isSuccess ? "#166534" : "#b91c1c";
+  setInlineStateMessage(el, message, type);
 }
 
 function updateOtpMetaText() {
@@ -121,9 +183,8 @@ function openOtpModal() {
   if (!modal) return;
   updateOtpMetaText();
   setOtpInlineMessage("", "error");
-  modal.style.display = "flex";
-  modal.style.opacity = "1";
   modal.classList.add("show");
+  modal.setAttribute("aria-hidden", "false");
   if (input) {
     input.value = "";
     input.focus();
@@ -134,14 +195,14 @@ function closeOtpModal() {
   const modal = document.getElementById("otpVerificationModal");
   if (!modal) return;
   modal.classList.remove("show");
-  modal.style.display = "";
-  modal.style.opacity = "";
+  modal.setAttribute("aria-hidden", "true");
 }
 
 /**
  * Handle login process — calls PHP backend API
  */
 function handleLogin() {
+  clearFeedbackMessage("loginFeedback");
   const username = document.getElementById("username").value.trim();
   const password = document.getElementById("password").value.trim();
 
@@ -415,32 +476,7 @@ function redirectToDashboard(role) {
  * @param {string} message - Error message to display
  */
 function showError(message) {
-  const existingError = document.querySelector(".error-message");
-  if (existingError) {
-    existingError.remove();
-  }
-
-  const errorDiv = document.createElement("div");
-  errorDiv.className = "error-message";
-  errorDiv.textContent = message;
-  errorDiv.style.cssText = `
-        background-color: #fee2e2;
-        color: #dc2626;
-        padding: 12px 16px;
-        border-radius: 8px;
-        margin-bottom: 20px;
-        text-align: center;
-        font-weight: 500;
-        animation: fadeIn 0.3s ease;
-    `;
-
-  const loginForm = document.querySelector(".login-form");
-  loginForm.parentNode.insertBefore(errorDiv, loginForm);
-
-  setTimeout(() => {
-    errorDiv.style.animation = "fadeOut 0.3s ease";
-    setTimeout(() => errorDiv.remove(), 300);
-  }, 5000);
+  setFeedbackMessage("loginFeedback", message, "error");
 }
 
 /**
@@ -472,17 +508,21 @@ function setupForgotPassword() {
   forgotPasswordLink.addEventListener("click", function (e) {
     e.preventDefault();
     modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
     resetEmailInput.value = "";
+    clearFeedbackMessage("forgotPasswordFeedback");
     resetEmailInput.focus();
   });
 
   closeModal.addEventListener("click", function () {
     modal.classList.remove("show");
+    modal.setAttribute("aria-hidden", "true");
   });
 
   window.addEventListener("click", function (e) {
     if (e.target === modal) {
       modal.classList.remove("show");
+      modal.setAttribute("aria-hidden", "true");
     }
   });
 
@@ -508,6 +548,7 @@ function setupForgotPassword() {
         `A reset password link has been sent to ${email}!\n\n(This is a simulation. No database is connected yet.)`,
       );
       modal.classList.remove("show");
+      modal.setAttribute("aria-hidden", "true");
       sendResetBtn.querySelector("span").textContent = originalText;
       sendResetBtn.disabled = false;
     }, 1500);
@@ -519,35 +560,7 @@ function setupForgotPassword() {
  * @param {string} message - Error message to display
  */
 function showErrorInModal(message) {
-  const modalContent = document.querySelector("#forgotPasswordModal .modal-content");
-  if (!modalContent) return;
-
-  const existingError = modalContent.querySelector(".error-message");
-  if (existingError) existingError.remove();
-
-  const errorDiv = document.createElement("div");
-  errorDiv.className = "error-message";
-  errorDiv.textContent = message;
-  errorDiv.style.cssText = `
-        background-color: #fee2e2;
-        color: #dc2626;
-        padding: 10px;
-        border-radius: 8px;
-        margin-bottom: 16px;
-        font-size: 14px;
-        text-align: center;
-        animation: fadeIn 0.3s ease;
-    `;
-
-  const formGroup = modalContent.querySelector(".form-group");
-  modalContent.insertBefore(errorDiv, formGroup);
-
-  setTimeout(() => {
-    if (errorDiv.parentNode) {
-      errorDiv.style.animation = "fadeOut 0.3s ease";
-      setTimeout(() => errorDiv.remove(), 300);
-    }
-  }, 4000);
+  setFeedbackMessage("forgotPasswordFeedback", message, "error");
 }
 
 if (typeof module !== "undefined" && module.exports) {

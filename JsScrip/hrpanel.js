@@ -22,7 +22,51 @@ let hrEvaluationOverviewChartInstance = null;
 let hrSemestralPerformanceChartInstance = null;
 let hrAiInsightsReady = false;
 let hrBehaviorAnalysisHasRun = false;
+let hrMobileDrawerBound = false;
+let hrProfessorViewportBound = false;
+let hrProfessorMobileMode = null;
 const HR_USERS_REFRESH_INTERVAL_MS = 30000;
+const HR_DRAWER_BREAKPOINT = 1000;
+const HR_PHONE_BREAKPOINT = 640;
+
+const HR_VIEW_META = {
+    dashboard: {
+        title: 'HR Dashboard',
+        context: 'Monitor evaluation operations, manage records, and keep the current semester aligned.',
+    },
+    users: {
+        title: 'User Management',
+        context: 'Manage account records, professor assignments, and role-based access in one place.',
+    },
+    'activity-log': {
+        title: 'Activity Log',
+        context: 'Review recent system events and audit key evaluation workflow changes.',
+    },
+    settings: {
+        title: 'Evaluation Settings',
+        context: 'Configure semester, evaluation periods, and operational rules for the active cycle.',
+    },
+    reports: {
+        title: 'Reports',
+        context: 'Inspect evaluation trends, performance summaries, and completion analytics.',
+    },
+    questionnaire: {
+        title: 'Questionnaire',
+        context: 'Maintain current-semester questionnaire sets and reuse previous configurations safely.',
+    },
+    'ai-insights': {
+        title: 'AI Insights',
+        context: 'Review AI-assisted summaries and behavior analysis using the current dataset.',
+    },
+    profile: {
+        title: 'Profile',
+        context: 'Review HR account details and manage email or password updates.',
+    },
+    'change-password': {
+        title: 'Change Password',
+        context: 'Update account credentials and keep your session secure.',
+    }
+};
 
 /**
  * Fetch users from PHP API, with SharedData fallback
@@ -77,6 +121,10 @@ function refreshHrUsersInBackground(force = false) {
     return hrUsersRefreshPromise;
 }
 
+function isHrPhoneViewport() {
+    return window.innerWidth <= HR_PHONE_BREAKPOINT;
+}
+
 /**
  * Check if user is authenticated and is an admin
  * @returns {boolean} - True if user is authenticated as admin
@@ -115,7 +163,9 @@ function initializeDashboard() {
     loadUserInfo();
     setupNavigation();
     setupLogout();
+    setupMobileDrawer();
     setupNotifications();
+    setupHrHeroActions();
     renderHrSystemNotifications();
     setupHrAnnouncementComposer();
     setupProfilePhotoUpload();
@@ -158,8 +208,10 @@ function initializeDashboard() {
     updateOverviewCards();
     renderHrDashboardTopCharts();
     loadReports();
+    setupChangeEmailForm();
     setupChangePasswordForm();
     setupPasswordToggles();
+    setHrPageHeader('dashboard');
 }
 
 /**
@@ -275,6 +327,7 @@ function setupNavigation() {
 
             const viewId = this.getAttribute('data-view') || 'dashboard';
             handleNavigation(viewId);
+            closeMobileDrawer();
         });
     });
 }
@@ -315,30 +368,15 @@ function handleNavigation(section) {
                                     (lower === 'change-password' || lower === 'change password') ? 'change-password' :
                                         'dashboard'
     );
-    const pageTitleMap = {
-        'dashboard': 'Dashboard',
-        'users': 'User Management',
-        'activity-log': 'Activity Log',
-        'settings': 'Evaluation Settings',
-        'reports': 'Reports',
-        'questionnaire': 'Questionnaire',
-        'ai-insights': 'AI Insights',
-        'profile': 'Profile',
-        'change-password': 'Change Password',
-    };
-
     // Hide all views first to ensure only one is visible
     hideAllViews();
+    closeMobileDrawer();
 
     const dashboardView = document.getElementById('dashboard-view');
     const userManagementView = document.getElementById('user-management-view');
     const settingsView = document.getElementById('settings-view');
     const reportsView = document.getElementById('reports-view');
-    const pageTitle = document.getElementById('mainPageTitle');
-
-    if (pageTitle) {
-        pageTitle.textContent = pageTitleMap[viewId] || 'Dashboard';
-    }
+    setHrPageHeader(viewId);
 
     switch (viewId) {
         case 'dashboard':
@@ -393,6 +431,9 @@ function handleNavigation(section) {
                 aiInsightsView.style.display = 'block';
                 hrBehaviorAnalysisHasRun = false;
                 resetAiInsightsBehaviorAnalysisPrompt();
+                syncHrExistingPromptRow(document.getElementById('hr-ai-bias-body'), 5);
+                syncHrExistingPromptRow(document.getElementById('hr-ai-discrepancy-body'), 6);
+                syncHrExistingPromptRow(document.getElementById('hr-ai-credibility-body'), 9);
             }
             break;
         case 'change-password':
@@ -406,11 +447,17 @@ function handleNavigation(section) {
             if (dashboardView) {
                 dashboardView.style.display = 'block';
             }
-            if (pageTitle) {
-                pageTitle.textContent = 'HR Dashboard';
-            }
+            setHrPageHeader('dashboard');
             break;
     }
+}
+
+function setHrPageHeader(viewId) {
+    const meta = HR_VIEW_META[viewId] || HR_VIEW_META.dashboard;
+    const pageTitle = document.getElementById('mainPageTitle');
+    const pageContext = document.getElementById('pageContextText');
+    if (pageTitle) pageTitle.textContent = meta.title;
+    if (pageContext) pageContext.textContent = meta.context;
 }
 
 function setupAiInsightsView() {
@@ -485,16 +532,8 @@ function resetAiInsightsBehaviorAnalysisPrompt() {
     if (!feedbackEl || !studentBody || !submissionBody) return;
 
     feedbackEl.textContent = 'Click "Run Behavior Analysis" to load behavior score results.';
-    studentBody.innerHTML = `
-        <tr>
-            <td colspan="4" style="text-align:center; padding:18px;">Run analysis to view student aggregate scores.</td>
-        </tr>
-    `;
-    submissionBody.innerHTML = `
-        <tr>
-            <td colspan="6" style="text-align:center; padding:18px;">No submission analysis yet.</td>
-        </tr>
-    `;
+    renderHrResponsiveTablePrompt(studentBody, 4, 'Run analysis to view student aggregate scores.', 'hr-mobile-card-empty--center');
+    renderHrResponsiveTablePrompt(submissionBody, 6, 'No submission analysis yet.', 'hr-mobile-card-empty--center');
 }
 
 function populateAiInsightsSemesterFilters() {
@@ -562,15 +601,21 @@ function renderAiInsightsBehaviorAnalysis(options) {
     }
 
     if (analysis.studentRows.length === 0) {
-        studentBody.innerHTML = `
-            <tr>
-                <td colspan="4" style="text-align:center; padding:18px;">No student aggregate results available.</td>
-            </tr>
-        `;
+        renderHrResponsiveTablePrompt(studentBody, 4, 'No student aggregate results available.', 'hr-mobile-card-empty--center');
     } else {
-        studentBody.innerHTML = analysis.studentRows.map(function (row) {
+        const studentRowsHtml = analysis.studentRows.map(function (row) {
             const level = getBehaviorRiskLevel(row.averageScore);
             const badgeClass = level === 'High' ? 'high' : (level === 'Medium' ? 'medium' : 'low');
+            if (isHrPhoneViewport()) {
+                return `
+                    <article class="hr-mobile-data-card">
+                        <div class="hr-mobile-card-title">${escapeHrHtml(row.studentNumber)}</div>
+                        ${buildHrMobileDataField('Forms Analyzed', row.formsAnalyzed)}
+                        ${buildHrMobileDataField('Avg Behavior Score', row.averageScore)}
+                        ${buildHrMobileDataField('Assessment Level', `<span class="ai-insights-tag ${badgeClass}">${level}</span>`)}
+                    </article>
+                `;
+            }
             return `
                 <tr>
                     <td>${escapeHrHtml(row.studentNumber)}</td>
@@ -580,17 +625,26 @@ function renderAiInsightsBehaviorAnalysis(options) {
                 </tr>
             `;
         }).join('');
+        renderHrResponsiveTableCards(studentBody, 4, studentRowsHtml);
     }
 
     if (analysis.records.length === 0) {
-        submissionBody.innerHTML = `
-            <tr>
-                <td colspan="6" style="text-align:center; padding:18px;">No submission analysis yet.</td>
-            </tr>
-        `;
+        renderHrResponsiveTablePrompt(submissionBody, 6, 'No submission analysis yet.', 'hr-mobile-card-empty--center');
     } else {
-        submissionBody.innerHTML = analysis.records.map(function (record) {
+        const submissionRowsHtml = analysis.records.map(function (record) {
             const fastFlagText = record.timingAvailable ? (record.fastFlag ? 'Yes' : 'No') : 'N/A';
+            if (isHrPhoneViewport()) {
+                return `
+                    <article class="hr-mobile-data-card">
+                        <div class="hr-mobile-card-title">${escapeHrHtml(record.submissionId)}</div>
+                        ${buildHrMobileDataField('Student Number', escapeHrHtml(record.studentNumber))}
+                        ${buildHrMobileDataField('Score', record.behaviorScore)}
+                        ${buildHrMobileDataField('Fast Flag', fastFlagText)}
+                        ${buildHrMobileDataField('Uniform Flag', record.uniformFlag ? 'Yes' : 'No')}
+                        ${buildHrMobileDataField('Repetitive Flag', record.repetitiveFlag ? 'Yes' : 'No')}
+                    </article>
+                `;
+            }
             return `
                 <tr>
                     <td>${escapeHrHtml(record.submissionId)}</td>
@@ -602,6 +656,7 @@ function renderAiInsightsBehaviorAnalysis(options) {
                 </tr>
             `;
         }).join('');
+        renderHrResponsiveTableCards(submissionBody, 6, submissionRowsHtml);
     }
 
     if (!cfg.silent) {
@@ -1171,16 +1226,24 @@ function runAiBiasDetection() {
             feedbackEl.style.display = 'none';
 
             if (items.length === 0) {
-                bodyEl.innerHTML = `
-                    <tr>
-                        <td colspan="5" style="text-align:center; padding:18px;">No comments to classify.</td>
-                    </tr>
-                `;
+                renderHrResponsiveTablePrompt(bodyEl, 5, 'No comments to classify.', 'hr-mobile-card-empty--center');
             } else {
-                bodyEl.innerHTML = items.map(function (item) {
+                const rowsHtml = items.map(function (item) {
                     const label = String(item.label || 'Neutral').trim() || 'Neutral';
                     const badgeClass = label === 'Biased' ? 'high' : (label === 'Neutral' ? 'medium' : 'low');
                     const dateText = formatAiInsightsDate(item.date || item.submittedAt || item.timestamp || '');
+                    if (isHrPhoneViewport()) {
+                        return `
+                            <article class="hr-mobile-data-card">
+                                <div class="hr-mobile-card-title">Bias Detection Result</div>
+                                ${buildHrMobileDataField('Label', `<span class="ai-insights-tag ${badgeClass}">${escapeHrHtml(label)}</span>`)}
+                                ${buildHrMobileDataField('Comment', escapeHrHtml(String(item.comment || '').trim()))}
+                                ${buildHrMobileDataField('Reason', escapeHrHtml(String(item.reason || '').trim() || 'No reason provided'))}
+                                ${buildHrMobileDataField('Source', escapeHrHtml(String(item.source || source)))}
+                                ${buildHrMobileDataField('Date', escapeHrHtml(dateText))}
+                            </article>
+                        `;
+                    }
                     return `
                         <tr>
                             <td>${escapeHrHtml(String(item.comment || '').trim())}</td>
@@ -1191,6 +1254,7 @@ function runAiBiasDetection() {
                         </tr>
                     `;
                 }).join('');
+                renderHrResponsiveTableCards(bodyEl, 5, rowsHtml);
             }
         } catch (error) {
             console.error('[HRPanel] Bias detection failed.', error);
@@ -1242,18 +1306,26 @@ function runAiDiscrepancyCheck() {
         }
 
         if (!displayRows.length) {
-            bodyEl.innerHTML = `
-                <tr>
-                    <td colspan="6" style="text-align:center; padding:18px;">No discrepancies found.</td>
-                </tr>
-            `;
+            renderHrResponsiveTablePrompt(bodyEl, 6, 'No discrepancies found.', 'hr-mobile-card-empty--center');
             return;
         }
 
-        bodyEl.innerHTML = displayRows.map(function (row) {
+        const rowsHtml = displayRows.map(function (row) {
             const severityClass = row.severity === 'High'
                 ? 'high'
                 : (row.severity === 'Medium' ? 'medium' : 'low');
+            if (isHrPhoneViewport()) {
+                return `
+                    <article class="hr-mobile-data-card">
+                        <div class="hr-mobile-card-title">${escapeHrHtml(row.professorName)}</div>
+                        ${buildHrMobileDataField('Student Avg', escapeHrHtml(formatAiDiscrepancyAverage(row.studentAvg)))}
+                        ${buildHrMobileDataField('Supervisor Avg', escapeHrHtml(formatAiDiscrepancyAverage(row.supervisorAvg)))}
+                        ${buildHrMobileDataField('Difference', escapeHrHtml(formatAiDiscrepancyDiff(row.supervisorDiff)))}
+                        ${buildHrMobileDataField('Flag Reason', escapeHrHtml(row.flagReason))}
+                        ${buildHrMobileDataField('Severity', `<span class="ai-insights-tag ${severityClass}">${escapeHrHtml(row.severity)}</span>`)}
+                    </article>
+                `;
+            }
             return `
                 <tr>
                     <td>${escapeHrHtml(row.professorName)}</td>
@@ -1265,6 +1337,7 @@ function runAiDiscrepancyCheck() {
                 </tr>
             `;
         }).join('');
+        renderHrResponsiveTableCards(bodyEl, 6, rowsHtml);
     } catch (error) {
         console.error('[HRPanel] Discrepancy check failed.', error);
         feedbackEl.textContent = error && error.message ? error.message : 'Discrepancy check failed.';
@@ -1304,16 +1377,27 @@ function runAiCredibilityAnalysis() {
             }
 
             if (!analysis.rows.length) {
-                bodyEl.innerHTML = `
-                    <tr>
-                        <td colspan="9" style="text-align:center; padding:18px;">No evaluations to analyze.</td>
-                    </tr>
-                `;
+                renderHrResponsiveTablePrompt(bodyEl, 9, 'No evaluations to analyze.', 'hr-mobile-card-empty--center');
                 return;
             }
 
-            bodyEl.innerHTML = analysis.rows.map(function (row) {
+            const rowsHtml = analysis.rows.map(function (row) {
                 const categoryClass = getAiCredibilityCategoryBadgeClass(row.category);
+                if (isHrPhoneViewport()) {
+                    return `
+                        <article class="hr-mobile-data-card">
+                            <div class="hr-mobile-card-title">${escapeHrHtml(row.professorName)}</div>
+                            ${buildHrMobileDataField('Evaluation ID', escapeHrHtml(row.evaluationId))}
+                            ${buildHrMobileDataField('Student Number', escapeHrHtml(row.studentNumber))}
+                            ${buildHrMobileDataField('Behavior Score', escapeHrHtml(formatAiCredibilityComponentValue(row.behaviorScore)))}
+                            ${buildHrMobileDataField('Bias Label', escapeHrHtml(row.biasLabel))}
+                            ${buildHrMobileDataField('Cross-Source Status', escapeHrHtml(row.crossStatus))}
+                            ${buildHrMobileDataField('Credibility Score', row.credibilityScore)}
+                            ${buildHrMobileDataField('Category', `<span class="ai-insights-tag ${categoryClass}">${escapeHrHtml(row.category)}</span>`)}
+                            ${buildHrMobileDataField('Reliability Summary', escapeHrHtml(row.reliabilitySummary))}
+                        </article>
+                    `;
+                }
                 return `
                     <tr>
                         <td>${escapeHrHtml(row.evaluationId)}</td>
@@ -1328,6 +1412,7 @@ function runAiCredibilityAnalysis() {
                     </tr>
                 `;
             }).join('');
+            renderHrResponsiveTableCards(bodyEl, 9, rowsHtml);
         } catch (error) {
             console.error('[HRPanel] Credibility analysis failed.', error);
             feedbackEl.textContent = error && error.message ? error.message : 'Credibility analysis failed.';
@@ -1910,6 +1995,81 @@ function formatAiInsightsDate(value) {
     return parsed.toLocaleString();
 }
 
+function setHrResponsiveTableMode(bodyEl, useCards) {
+    if (!bodyEl) return;
+    const table = bodyEl.closest('table');
+    const wrap = bodyEl.closest('.activity-log-table');
+    if (table) table.classList.toggle('hr-mobile-card-table', !!useCards);
+    if (wrap) wrap.classList.toggle('hr-mobile-card-wrap', !!useCards);
+}
+
+function renderHrResponsiveTablePrompt(bodyEl, colCount, message, emptyClassName) {
+    if (!bodyEl) return;
+    const useCards = isHrPhoneViewport();
+    setHrResponsiveTableMode(bodyEl, useCards);
+    if (useCards) {
+        bodyEl.innerHTML = `
+            <tr class="hr-mobile-card-row hr-mobile-card-row--prompt">
+                <td colspan="${colCount}">
+                    <div class="hr-mobile-card-empty${emptyClassName ? ` ${emptyClassName}` : ''}">${message}</div>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    bodyEl.innerHTML = `
+        <tr>
+            <td colspan="${colCount}" style="text-align:center; padding:18px;">${message}</td>
+        </tr>
+    `;
+}
+
+function renderHrResponsiveTableCards(bodyEl, colCount, cardsHtml) {
+    if (!bodyEl) return;
+    const useCards = isHrPhoneViewport();
+    setHrResponsiveTableMode(bodyEl, useCards);
+    if (useCards) {
+        bodyEl.innerHTML = `
+            <tr class="hr-mobile-card-row">
+                <td colspan="${colCount}">
+                    <div class="hr-mobile-card-list">
+                        ${cardsHtml}
+                    </div>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    bodyEl.innerHTML = cardsHtml;
+}
+
+function buildHrMobileDataField(label, valueHtml) {
+    return `
+        <div class="hr-mobile-card-field">
+            <span class="hr-mobile-card-label">${label}</span>
+            <span class="hr-mobile-card-value">${valueHtml}</span>
+        </div>
+    `;
+}
+
+function syncHrExistingPromptRow(bodyEl, colCount) {
+    if (!bodyEl) return;
+    const useCards = isHrPhoneViewport();
+    setHrResponsiveTableMode(bodyEl, useCards);
+    if (!useCards) return;
+
+    const firstRow = bodyEl.querySelector('tr');
+    if (!firstRow) return;
+    const firstCell = firstRow.querySelector('td');
+    if (!firstCell || firstRow.children.length !== 1) return;
+
+    const message = String(firstCell.textContent || '').trim();
+    if (!message) return;
+    renderHrResponsiveTablePrompt(bodyEl, colCount, message, 'hr-mobile-card-empty--center');
+}
+
 /**
  * Load HR activity log from database-backed SharedData
  */
@@ -1943,11 +2103,7 @@ function loadHrActivityLog() {
         return parsed ? parsed.toLocaleString() : String(value || '-');
     };
     const renderPrompt = message => {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="7" style="text-align:center; padding:18px;">${escapeHtml(message)}</td>
-            </tr>
-        `;
+        renderHrResponsiveTablePrompt(tbody, 7, escapeHtml(message), 'hr-mobile-card-empty--center');
     };
 
     const renderRows = (rows) => {
@@ -1955,7 +2111,24 @@ function loadHrActivityLog() {
             renderPrompt('No activity records found.');
             return;
         }
-        tbody.innerHTML = rows.map(row => `
+
+        if (isHrPhoneViewport()) {
+            renderHrResponsiveTableCards(tbody, 7, rows.map(row => `
+                <article class="hr-mobile-data-card">
+                    <div class="hr-mobile-card-title">Activity Record</div>
+                    ${buildHrMobileDataField('Action', escapeHtml(row.action || '-'))}
+                    ${buildHrMobileDataField('Description', escapeHtml(row.description || '-'))}
+                    ${buildHrMobileDataField('Timestamp', escapeHtml(formatTimestamp(row.timestamp)))}
+                    ${buildHrMobileDataField('Role', escapeHtml(row.role || '-'))}
+                    ${buildHrMobileDataField('User ID', escapeHtml(row.user_id || '-'))}
+                    ${buildHrMobileDataField('IP Address', escapeHtml(row.ip_address || '-'))}
+                    ${buildHrMobileDataField('Log ID', escapeHtml(row.log_id || row.id || '-'))}
+                </article>
+            `).join(''));
+            return;
+        }
+
+        renderHrResponsiveTableCards(tbody, 7, rows.map(row => `
             <tr>
                 <td>${escapeHtml(row.ip_address || '-')}</td>
                 <td>${escapeHtml(formatTimestamp(row.timestamp))}</td>
@@ -1965,7 +2138,7 @@ function loadHrActivityLog() {
                 <td>${escapeHtml(row.user_id || '-')}</td>
                 <td>${escapeHtml(row.log_id || row.id || '-')}</td>
             </tr>
-        `).join('');
+        `).join(''));
     };
 
     const runSearch = () => {
@@ -1997,7 +2170,7 @@ function loadHrActivityLog() {
  * Setup logout functionality
  */
 function setupLogout() {
-    const logoutLink = document.querySelector('.nav-link.logout');
+    const logoutLink = document.getElementById('hrLogoutBtn');
 
     if (logoutLink) {
         logoutLink.addEventListener('click', function (e) {
@@ -2546,7 +2719,8 @@ function setupProfileActions() {
             const targetCard = document.getElementById(targetId);
             if (targetCard) {
                 targetCard.style.display = 'block';
-                targetCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                targetCard.scrollIntoView({ behavior: prefersReducedMotion ? 'auto' : 'smooth', block: 'start' });
             }
         });
     });
@@ -2557,7 +2731,10 @@ function setupProfileActions() {
             const targetCard = targetId ? document.getElementById(targetId) : null;
             if (targetCard) {
                 const form = targetCard.querySelector('form');
-                if (form) form.reset();
+                if (form) {
+                    form.reset();
+                    clearFormMessage(form);
+                }
                 targetCard.style.display = 'none';
             }
         });
@@ -2566,8 +2743,33 @@ function setupProfileActions() {
 
 function hideAccountActionCards() {
     document.querySelectorAll('.account-action-card').forEach(card => {
+        const form = card.querySelector('form');
+        if (form) clearFormMessage(form);
         card.style.display = 'none';
     });
+}
+
+function showFormMessage(form, message, type) {
+    if (!form) return;
+    clearFormMessage(form);
+
+    const messageDiv = document.createElement('div');
+    const tone = type === 'error' ? 'error' : (type === 'success' ? 'success' : 'info');
+    messageDiv.className = `form-message ui-message ui-message--${tone}`;
+    messageDiv.textContent = message;
+    form.insertBefore(messageDiv, form.firstChild);
+
+    setTimeout(() => {
+        if (messageDiv.parentNode) {
+            messageDiv.remove();
+        }
+    }, 4000);
+}
+
+function clearFormMessage(form) {
+    if (!form) return;
+    const existing = form.querySelector('.form-message');
+    if (existing) existing.remove();
 }
 
 /**
@@ -2587,34 +2789,34 @@ function setupChangeEmailForm() {
  * Placeholder change email handler (SQL-ready)
  */
 function handleChangeEmail() {
+    const form = document.getElementById('changeEmailForm');
     const currentEmail = document.getElementById('currentEmail').value.trim();
     const newEmail = document.getElementById('newEmail').value.trim();
     const confirmEmail = document.getElementById('confirmEmail').value.trim();
 
     if (!newEmail || !confirmEmail) {
-        alert('Please fill out all email fields.');
+        showFormMessage(form, 'Please fill out all email fields.', 'error');
         return;
     }
 
     if (newEmail !== confirmEmail) {
-        alert('New email and confirmation do not match.');
+        showFormMessage(form, 'New email and confirmation do not match.', 'error');
         return;
     }
 
     if (currentEmail && newEmail.toLowerCase() === currentEmail.toLowerCase()) {
-        alert('New email must be different from the current email.');
+        showFormMessage(form, 'New email must be different from the current email.', 'error');
         return;
     }
 
     if (!SharedData.changeOwnEmail) {
-        alert('Email update service is unavailable.');
+        showFormMessage(form, 'Email update service is unavailable.', 'error');
         return;
     }
 
     try {
         const result = SharedData.changeOwnEmail(currentEmail, newEmail);
         const nextEmail = String(result && result.email || newEmail).trim();
-        alert('Email updated successfully.');
 
         const profileEmail = document.getElementById('profileEmail');
         if (profileEmail) profileEmail.textContent = nextEmail;
@@ -2625,12 +2827,14 @@ function handleChangeEmail() {
         }
     } catch (error) {
         console.error('[HRPanel] Failed to update email.', error);
-        alert(error && error.message ? error.message : 'Failed to update email.');
+        showFormMessage(form, error && error.message ? error.message : 'Failed to update email.', 'error');
         return;
     }
 
-    const form = document.getElementById('changeEmailForm');
-    if (form) form.reset();
+    if (form) {
+        form.reset();
+        showFormMessage(form, 'Email updated successfully.', 'success');
+    }
 }
 
 /**
@@ -2663,6 +2867,76 @@ function showLogoutMessage() {
     console.log('Logging out...');
 }
 
+function setupMobileDrawer() {
+    if (hrMobileDrawerBound) return;
+
+    const toggleBtn = document.getElementById('hrMenuToggle');
+    const backdrop = document.getElementById('sidebarBackdrop');
+    if (!toggleBtn || !backdrop) return;
+
+    toggleBtn.addEventListener('click', function () {
+        const isOpen = document.body.classList.contains('hr-sidebar-open');
+        if (isOpen) {
+            closeMobileDrawer();
+        } else {
+            openMobileDrawer();
+        }
+    });
+
+    backdrop.addEventListener('click', closeMobileDrawer);
+    window.addEventListener('resize', function () {
+        if (window.innerWidth > HR_DRAWER_BREAKPOINT) {
+            closeMobileDrawer();
+        }
+    });
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && document.body.classList.contains('hr-sidebar-open')) {
+            closeMobileDrawer();
+        }
+    });
+
+    hrMobileDrawerBound = true;
+}
+
+function openMobileDrawer() {
+    document.body.classList.add('hr-sidebar-open');
+    const toggleBtn = document.getElementById('hrMenuToggle');
+    if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'true');
+}
+
+function closeMobileDrawer() {
+    document.body.classList.remove('hr-sidebar-open');
+    const toggleBtn = document.getElementById('hrMenuToggle');
+    if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
+}
+
+function setupHrHeroActions() {
+    const usersBtn = document.getElementById('heroOpenUsersBtn');
+    const questionnaireBtn = document.getElementById('heroOpenQuestionnaireBtn');
+    const aiInsightsBtn = document.getElementById('heroOpenAiInsightsBtn');
+
+    if (usersBtn) {
+        usersBtn.addEventListener('click', function () {
+            handleNavigation('users');
+            updateNavigation('users');
+        });
+    }
+
+    if (questionnaireBtn) {
+        questionnaireBtn.addEventListener('click', function () {
+            handleNavigation('questionnaire');
+            updateNavigation('questionnaire');
+        });
+    }
+
+    if (aiInsightsBtn) {
+        aiInsightsBtn.addEventListener('click', function () {
+            handleNavigation('ai-insights');
+            updateNavigation('ai-insights');
+        });
+    }
+}
+
 /**
  * Setup change password form functionality
  */
@@ -2680,36 +2954,38 @@ function setupChangePasswordForm() {
  * Placeholder change password handler (SQL-ready)
  */
 function handleChangePassword() {
+    const form = document.getElementById('changePasswordForm');
     const currentPassword = document.getElementById('currentPassword').value.trim();
     const newPassword = document.getElementById('newPassword').value.trim();
     const confirmPassword = document.getElementById('confirmPassword').value.trim();
 
     if (!currentPassword || !newPassword || !confirmPassword) {
-        alert('Please fill out all password fields.');
+        showFormMessage(form, 'Please fill out all password fields.', 'error');
         return;
     }
 
     if (newPassword !== confirmPassword) {
-        alert('New password and confirmation do not match.');
+        showFormMessage(form, 'New password and confirmation do not match.', 'error');
         return;
     }
 
     if (!SharedData.changeOwnPassword) {
-        alert('Password update service is unavailable.');
+        showFormMessage(form, 'Password update service is unavailable.', 'error');
         return;
     }
 
     try {
         SharedData.changeOwnPassword(currentPassword, newPassword);
-        alert('Password updated successfully.');
     } catch (error) {
         console.error('[HRPanel] Failed to update password.', error);
-        alert(error && error.message ? error.message : 'Failed to update password.');
+        showFormMessage(form, error && error.message ? error.message : 'Failed to update password.', 'error');
         return;
     }
 
-    const form = document.getElementById('changePasswordForm');
-    if (form) form.reset();
+    if (form) {
+        form.reset();
+        showFormMessage(form, 'Password updated successfully.', 'success');
+    }
 }
 
 /**
@@ -2741,10 +3017,11 @@ function setupPasswordToggles() {
  */
 function updateNavigation(viewName) {
     const navLinks = document.querySelectorAll('.nav-link:not(.logout)');
+    const normalizedView = String(viewName || '').trim().toLowerCase();
     navLinks.forEach(link => {
         link.classList.remove('active');
-        const text = link.querySelector('span') ? link.querySelector('span').textContent.trim() : '';
-        if (text === viewName) {
+        const dataView = String(link.getAttribute('data-view') || '').trim().toLowerCase();
+        if (dataView === normalizedView) {
             link.classList.add('active');
         }
     });
@@ -4454,6 +4731,7 @@ function getRankingIcon(rank) {
 function setupProfessorManagement() {
     // Load professor data from SharedData
     loadProfessorsData();
+    hrProfessorMobileMode = isHrPhoneViewport();
 
     // Department tabs
     const deptTabs = document.querySelectorAll('.dept-tab');
@@ -4475,6 +4753,17 @@ function setupProfessorManagement() {
     const searchInput = document.getElementById('professor-search');
     if (searchInput) {
         searchInput.addEventListener('input', renderProfessors);
+    }
+
+    if (!hrProfessorViewportBound) {
+        window.addEventListener('resize', function () {
+            const nextMode = isHrPhoneViewport();
+            if (nextMode !== hrProfessorMobileMode) {
+                hrProfessorMobileMode = nextMode;
+                renderProfessors();
+            }
+        });
+        hrProfessorViewportBound = true;
     }
 
     // Modal close buttons
@@ -4580,6 +4869,7 @@ function renderProfessors() {
         });
 
     if (filteredProfessors.length === 0) {
+        professorsList.classList.remove('is-mobile-cards');
         const emptyMessage = searchTerm
             ? 'No professors match your search'
             : 'No professors found in this department';
@@ -4592,7 +4882,26 @@ function renderProfessors() {
         return;
     }
 
-    professorsList.innerHTML = `
+    const phoneLayout = isHrPhoneViewport();
+    professorsList.classList.toggle('is-mobile-cards', phoneLayout);
+    professorsList.innerHTML = phoneLayout
+        ? buildProfessorCardsMarkup(filteredProfessors, studentsEvaluatedCountMap)
+        : buildProfessorTableMarkup(filteredProfessors, studentsEvaluatedCountMap);
+
+    bindProfessorActionButtons(professorsList);
+}
+
+function getProfessorStudentsEvaluated(professor, studentsEvaluatedCountMap) {
+    const professorToken = normalizeHrUserIdToken(professor.id);
+    return Number(
+        studentsEvaluatedCountMap[professorToken]
+        ?? professor.evaluatedCount
+        ?? professor.evaluationsCount
+    ) || 0;
+}
+
+function buildProfessorTableMarkup(filteredProfessors, studentsEvaluatedCountMap) {
+    return `
         <div class="professor-table-wrap">
             <table class="professor-table">
                 <thead>
@@ -4610,61 +4919,107 @@ function renderProfessors() {
                 </thead>
                 <tbody>
                     ${filteredProfessors.map(professor => {
-                        const professorToken = normalizeHrUserIdToken(professor.id);
-                        const studentsEvaluated = Number(
-                            studentsEvaluatedCountMap[professorToken]
-                            ?? professor.evaluatedCount
-                            ?? professor.evaluationsCount
-                        ) || 0;
+                        const studentsEvaluated = getProfessorStudentsEvaluated(professor, studentsEvaluatedCountMap);
                         return `
-                        <tr class="${professor.isActive === false ? 'inactive' : ''}" data-id="${professor.id}">
-                            <td>
-                                <div class="professor-table-name">
-                                    <i class="fas fa-user-tie"></i>
-                                    <span>${professor.name || 'N/A'}</span>
-                                </div>
-                            </td>
-                            <td>${professor.email || 'N/A'}</td>
-                            <td>${professor.employeeId || 'N/A'}</td>
-                            <td><span class="dept-badge dept-${professor.department}">${professor.department || 'N/A'}</span></td>
-                            <td>${professor.position || 'Professor'}</td>
-                            <td>${formatEmploymentType(professor.employmentType)}</td>
-                            <td>${studentsEvaluated}</td>
-                            <td>
-                                <span class="status-pill ${professor.isActive ? 'active' : 'inactive'}">
-                                    ${professor.isActive ? 'Active' : 'Inactive'}
-                                </span>
-                            </td>
-                            <td>
-                                <div class="professor-actions">
-                                    <button class="action-btn view" data-action="view" data-professor-id="${professor.id}" title="View Details">
-                                        <i class="fas fa-eye"></i>
-                                    </button>
-                                    <button class="action-btn analytics" data-action="analytics" data-professor-id="${professor.id}" title="Analytics">
-                                        <i class="fas fa-chart-line"></i>
-                                    </button>
-                                    <button class="action-btn edit" data-action="edit" data-professor-id="${professor.id}" title="Edit">
-                                        <i class="fas fa-edit"></i>
-                                    </button>
-                                </div>
-                            </td>
-                        </tr>
-                    `;
+                            <tr class="${professor.isActive === false ? 'inactive' : ''}" data-id="${professor.id}">
+                                <td>
+                                    <div class="professor-table-name">
+                                        <i class="fas fa-user-tie"></i>
+                                        <span>${professor.name || 'N/A'}</span>
+                                    </div>
+                                </td>
+                                <td>${professor.email || 'N/A'}</td>
+                                <td>${professor.employeeId || 'N/A'}</td>
+                                <td><span class="dept-badge dept-${professor.department}">${professor.department || 'N/A'}</span></td>
+                                <td>${professor.position || 'Professor'}</td>
+                                <td>${formatEmploymentType(professor.employmentType)}</td>
+                                <td>${studentsEvaluated}</td>
+                                <td>
+                                    <span class="status-pill ${professor.isActive ? 'active' : 'inactive'}">
+                                        ${professor.isActive ? 'Active' : 'Inactive'}
+                                    </span>
+                                </td>
+                                <td>
+                                    <div class="professor-actions">
+                                        <button class="action-btn view" data-action="view" data-professor-id="${professor.id}" title="View Details">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                        <button class="action-btn analytics" data-action="analytics" data-professor-id="${professor.id}" title="Analytics">
+                                            <i class="fas fa-chart-line"></i>
+                                        </button>
+                                        <button class="action-btn edit" data-action="edit" data-professor-id="${professor.id}" title="Edit">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        `;
                     }).join('')}
                 </tbody>
             </table>
         </div>
     `;
+}
 
-    // Add event listeners to action buttons
-    const actionButtons = professorsList.querySelectorAll('.action-btn');
+function buildProfessorCardsMarkup(filteredProfessors, studentsEvaluatedCountMap) {
+    return filteredProfessors.map(professor => {
+        const studentsEvaluated = getProfessorStudentsEvaluated(professor, studentsEvaluatedCountMap);
+        const employmentType = formatEmploymentType(professor.employmentType);
+        const employmentClass = String(employmentType || '').toLowerCase().includes('temp') ? 'temporary' : 'regular';
+
+        return `
+            <article class="professor-card ${professor.isActive === false ? 'inactive' : ''}" data-id="${professor.id}">
+                <div class="professor-info">
+                    <div class="professor-avatar">
+                        <i class="fas fa-user-tie"></i>
+                    </div>
+                    <div class="professor-details">
+                        <div class="professor-name-row">
+                            <h3>${professor.name || 'N/A'}</h3>
+                            <span class="dept-badge dept-${professor.department}">${professor.department || 'N/A'}</span>
+                        </div>
+                        <div class="professor-email">${professor.email || 'N/A'}</div>
+                        <div class="professor-employee">Employee ID: ${professor.employeeId || 'N/A'}</div>
+                        <div class="professor-position">${professor.position || 'Professor'}</div>
+                        <div class="professor-status-row">
+                            <span class="employment-pill ${employmentClass}">${employmentType}</span>
+                            <span class="status-pill ${professor.isActive ? 'active' : 'inactive'}">
+                                ${professor.isActive ? 'Active' : 'Inactive'}
+                            </span>
+                        </div>
+                        <div class="professor-stats">
+                            <div class="stat-item">
+                                <i class="fas fa-chalkboard-user"></i>
+                                <span>Students Evaluated: <strong>${studentsEvaluated}</strong></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="professor-actions">
+                    <button class="action-btn view" data-action="view" data-professor-id="${professor.id}" title="View Details">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                    <button class="action-btn analytics" data-action="analytics" data-professor-id="${professor.id}" title="Analytics">
+                        <i class="fas fa-chart-line"></i>
+                    </button>
+                    <button class="action-btn edit" data-action="edit" data-professor-id="${professor.id}" title="Edit">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                </div>
+            </article>
+        `;
+    }).join('');
+}
+
+function bindProfessorActionButtons(root) {
+    const actionButtons = root.querySelectorAll('.action-btn');
     actionButtons.forEach(button => {
         button.addEventListener('click', function (e) {
             e.preventDefault();
             e.stopPropagation();
 
             const professorIdStr = this.getAttribute('data-professor-id');
-            const professorId = professorIdStr; // IDs can be alphanumeric
+            const professorId = professorIdStr;
             const action = this.getAttribute('data-action');
 
             console.log('Button clicked - Action:', action, 'professor ID:', professorId);
@@ -6545,6 +6900,11 @@ let currentEditingQuestionId = null;
 let currentEditingSectionId = null;
 let currentQuestionnaireType = 'student-to-professor';
 let activeSemester = null;
+const QUESTIONNAIRE_TYPE_LABELS = {
+    'student-to-professor': 'Student to Professor',
+    'professor-to-professor': 'Professor to Professor',
+    'supervisor-to-professor': 'Supervisor to Professor'
+};
 const DEFAULT_QUESTIONNAIRE_HEADERS = {
     'student-to-professor': {
         title: 'Student Evaluation Form',
@@ -6566,6 +6926,7 @@ const DEFAULT_QUESTIONNAIRE_HEADERS = {
 function setupQuestionnaire() {
     loadQuestionsData();
     setupSemesterPicker();
+    setupCopyQuestionnaireControls();
 
     // Questionnaire type selector
     const questionnaireTypeSelect = document.getElementById('questionnaire-type-select');
@@ -6608,6 +6969,8 @@ function setupQuestionnaire() {
     const cancelQuestionForm = document.getElementById('cancel-question-form');
     const closeSectionModalBtn = document.getElementById('close-section-modal');
     const cancelSectionForm = document.getElementById('cancel-section-form');
+    const closeCopyModalBtn = document.getElementById('close-copy-questionnaire-modal');
+    const cancelCopyFormBtn = document.getElementById('cancel-copy-questionnaire-btn');
 
     if (closeQuestionModalBtn) {
         closeQuestionModalBtn.addEventListener('click', closeQuestionModal);
@@ -6621,6 +6984,12 @@ function setupQuestionnaire() {
     if (cancelSectionForm) {
         cancelSectionForm.addEventListener('click', closeSectionModal);
     }
+    if (closeCopyModalBtn) {
+        closeCopyModalBtn.addEventListener('click', closeCopyQuestionnaireModal);
+    }
+    if (cancelCopyFormBtn) {
+        cancelCopyFormBtn.addEventListener('click', closeCopyQuestionnaireModal);
+    }
 
     // Form submission
     const questionForm = document.getElementById('question-form');
@@ -6632,6 +7001,10 @@ function setupQuestionnaire() {
     if (sectionForm) {
         sectionForm.addEventListener('submit', handleSectionFormSubmit);
     }
+    const copyQuestionnaireForm = document.getElementById('copy-questionnaire-form');
+    if (copyQuestionnaireForm) {
+        copyQuestionnaireForm.addEventListener('submit', handleCopyQuestionnaireSubmit);
+    }
 
     // Save questionnaire button
     const saveQuestionnaireBtn = document.getElementById('save-questionnaire-btn');
@@ -6642,6 +7015,7 @@ function setupQuestionnaire() {
     // Close modal on outside click
     const questionModal = document.getElementById('question-modal');
     const sectionModal = document.getElementById('section-modal');
+    const copyQuestionnaireModal = document.getElementById('copy-questionnaire-modal');
     if (questionModal) {
         questionModal.addEventListener('click', function (e) {
             if (e.target === questionModal) {
@@ -6656,6 +7030,13 @@ function setupQuestionnaire() {
             }
         });
     }
+    if (copyQuestionnaireModal) {
+        copyQuestionnaireModal.addEventListener('click', function (e) {
+            if (e.target === copyQuestionnaireModal) {
+                closeCopyQuestionnaireModal();
+            }
+        });
+    }
 
     // Also close modals on Escape key
     document.addEventListener('keydown', function (e) {
@@ -6665,6 +7046,9 @@ function setupQuestionnaire() {
             }
             if (sectionModal && sectionModal.style.display === 'flex') {
                 closeSectionModal();
+            }
+            if (copyQuestionnaireModal && copyQuestionnaireModal.style.display === 'flex') {
+                closeCopyQuestionnaireModal();
             }
         }
     });
@@ -7019,9 +7403,11 @@ function applyQuestionnaireEditMode(editable) {
         container.classList.toggle('read-only', !editable);
     }
 
+    const copyQuestionnaireBtn = document.getElementById('copy-questionnaire-btn');
     const addSectionBtn = document.getElementById('add-section-btn');
     const addQuestionBtn = document.getElementById('add-question-btn');
     const saveQuestionnaireBtn = document.getElementById('save-questionnaire-btn');
+    if (copyQuestionnaireBtn) copyQuestionnaireBtn.disabled = !editable;
     if (addSectionBtn) addSectionBtn.disabled = !editable;
     if (addQuestionBtn) addQuestionBtn.disabled = !editable;
     if (saveQuestionnaireBtn) saveQuestionnaireBtn.disabled = !editable;
@@ -7030,6 +7416,8 @@ function applyQuestionnaireEditMode(editable) {
     const descEl = document.getElementById('form-description-preview');
     if (titleEl) titleEl.setAttribute('contenteditable', editable ? 'true' : 'false');
     if (descEl) descEl.setAttribute('contenteditable', editable ? 'true' : 'false');
+
+    refreshCopyQuestionnaireAvailability();
 }
 
 function persistQuestionsData() {
@@ -7168,6 +7556,7 @@ function handleQuestionnaireTypeChange() {
         currentQuestionnaireType = select.value;
         updateFormHeader(currentQuestionnaireType);
         renderQuestions();
+        syncCopyQuestionnaireModalState();
     }
 }
 
@@ -7199,6 +7588,328 @@ function saveQuestionnaireHeader(type, updates) {
     const existingHeader = getQuestionnaireHeader(type);
     currentData.header = { ...existingHeader, ...updates };
     questionsData[type] = currentData;
+}
+
+function setupCopyQuestionnaireControls() {
+    const copyQuestionnaireBtn = document.getElementById('copy-questionnaire-btn');
+    const sourceSemesterSelect = document.getElementById('copy-source-semester');
+    const scopeCheckboxes = document.querySelectorAll('.copy-scope-checkbox');
+
+    if (copyQuestionnaireBtn) {
+        copyQuestionnaireBtn.addEventListener('click', openCopyQuestionnaireModal);
+    }
+    if (sourceSemesterSelect) {
+        sourceSemesterSelect.addEventListener('change', updateCopyQuestionnaireSummary);
+    }
+    scopeCheckboxes.forEach(function (checkbox) {
+        checkbox.addEventListener('change', function () {
+            syncCopyScopeOptionStyles();
+            syncCopyQuestionnaireModalState();
+        });
+    });
+
+    syncCopyScopeOptionStyles();
+    syncCopyQuestionnaireModalState();
+    refreshCopyQuestionnaireAvailability();
+}
+
+function getQuestionnaireTypeLabel(type) {
+    return QUESTIONNAIRE_TYPE_LABELS[type] || 'Questionnaire';
+}
+
+function getSemesterLabelFromValue(value) {
+    const targetValue = String(value || '').trim();
+    if (!targetValue) return 'No semester selected';
+
+    const match = (SharedData.getSemesterList ? SharedData.getSemesterList() : []).find(function (item) {
+        return String(item && item.value || '').trim() === targetValue;
+    });
+    return String(match && match.label || targetValue).trim() || targetValue;
+}
+
+function cloneQuestionnaireData(data) {
+    if (!data) return null;
+    return JSON.parse(JSON.stringify(data));
+}
+
+function getCopyScopeCheckboxes() {
+    return Array.from(document.querySelectorAll('.copy-scope-checkbox'));
+}
+
+function syncCopyScopeOptionStyles() {
+    getCopyScopeCheckboxes().forEach(function (checkbox) {
+        const option = checkbox.closest('.copy-scope-option');
+        if (!option) return;
+        option.classList.toggle('is-selected', !!checkbox.checked);
+    });
+}
+
+function getSelectedCopyQuestionnaireTypes() {
+    return getCopyScopeCheckboxes()
+        .filter(function (checkbox) { return !!checkbox.checked; })
+        .map(function (checkbox) { return String(checkbox.value || '').trim(); })
+        .filter(function (value) { return value !== ''; });
+}
+
+function ensureCopyQuestionnaireDefaultSelection() {
+    const checkboxes = getCopyScopeCheckboxes();
+    if (checkboxes.length === 0) return;
+    const hasChecked = checkboxes.some(function (checkbox) { return checkbox.checked; });
+    if (hasChecked) return;
+
+    const preferred = checkboxes.find(function (checkbox) {
+        return String(checkbox.value || '').trim() === currentQuestionnaireType;
+    });
+    if (preferred) {
+        preferred.checked = true;
+        syncCopyScopeOptionStyles();
+        return;
+    }
+    checkboxes[0].checked = true;
+    syncCopyScopeOptionStyles();
+}
+
+function formatQuestionnaireTypeList(typeKeys) {
+    const labels = (Array.isArray(typeKeys) ? typeKeys : [])
+        .map(getQuestionnaireTypeLabel)
+        .filter(function (label) { return String(label || '').trim() !== ''; });
+
+    if (labels.length === 0) return 'No questionnaire types selected';
+    if (labels.length === 1) return labels[0];
+    if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+    return `${labels.slice(0, -1).join(', ')}, and ${labels[labels.length - 1]}`;
+}
+
+function isQuestionnaireTypeEntryEmpty(entry) {
+    const currentEntry = entry || {};
+    const sections = Array.isArray(currentEntry.sections) ? currentEntry.sections : [];
+    const questions = Array.isArray(currentEntry.questions) ? currentEntry.questions : [];
+    const header = currentEntry.header || {};
+    return sections.length === 0 && questions.length === 0 && !header.title && !header.description;
+}
+
+function getSourceQuestionnaireSemesters(selectedTypesInput) {
+    const currentSemester = String(getCurrentSemesterValue() || '').trim();
+    const selectedTypes = Array.isArray(selectedTypesInput) ? selectedTypesInput.filter(Boolean) : [];
+    return Object.keys(questionnairesBySemester)
+        .filter(function (semester) {
+            if (!semester || semester === currentSemester) return false;
+            const normalized = normalizeQuestionsData(questionnairesBySemester[semester]);
+            if (selectedTypes.length > 0) {
+                return selectedTypes.every(function (typeKey) {
+                    return !isQuestionnaireTypeEntryEmpty(normalized[typeKey]);
+                });
+            }
+            return !isQuestionsDataEmpty(normalized);
+        })
+        .sort(function (left, right) {
+            return getSemesterLabelFromValue(right).localeCompare(getSemesterLabelFromValue(left));
+        });
+}
+
+function populateCopySourceSemesterOptions(selectedTypesInput) {
+    const sourceSemesterSelect = document.getElementById('copy-source-semester');
+    if (!sourceSemesterSelect) return [];
+
+    const previousValue = String(sourceSemesterSelect.value || '').trim();
+    const semesters = getSourceQuestionnaireSemesters(selectedTypesInput);
+    sourceSemesterSelect.innerHTML = '';
+
+    if (semesters.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No previous questionnaire sets available';
+        option.disabled = true;
+        option.selected = true;
+        sourceSemesterSelect.appendChild(option);
+        return semesters;
+    }
+
+    semesters.forEach(function (semester, index) {
+        const option = document.createElement('option');
+        option.value = semester;
+        option.textContent = getSemesterLabelFromValue(semester);
+        if (semester === previousValue || (!previousValue && index === 0)) option.selected = true;
+        sourceSemesterSelect.appendChild(option);
+    });
+
+    if (!sourceSemesterSelect.value && semesters[0]) {
+        sourceSemesterSelect.value = semesters[0];
+    }
+
+    return semesters;
+}
+
+function syncCopyQuestionnaireModalState() {
+    const selectedTypes = getSelectedCopyQuestionnaireTypes();
+    populateCopySourceSemesterOptions(selectedTypes);
+    refreshCopyQuestionnaireAvailability();
+}
+
+function updateCopyQuestionnaireSummary() {
+    const sourceSemesterSelect = document.getElementById('copy-source-semester');
+    const destinationSemesterEl = document.getElementById('copy-destination-semester');
+    const destinationTypeEl = document.getElementById('copy-destination-type');
+    const destinationTypeRow = document.getElementById('copy-destination-type-row');
+    const noteEl = document.getElementById('copy-questionnaire-note');
+    const feedbackEl = document.getElementById('copy-questionnaire-feedback');
+
+    const currentSemester = String(getCurrentSemesterValue() || '').trim();
+    const selectedSource = String(sourceSemesterSelect && sourceSemesterSelect.value || '').trim();
+    const selectedTypes = getSelectedCopyQuestionnaireTypes();
+    const selectedTypeLabel = formatQuestionnaireTypeList(selectedTypes);
+
+    if (destinationSemesterEl) {
+        destinationSemesterEl.textContent = getSemesterLabelFromValue(currentSemester);
+    }
+    if (destinationTypeEl) {
+        destinationTypeEl.textContent = selectedTypeLabel;
+    }
+    if (destinationTypeRow) destinationTypeRow.style.display = 'flex';
+    if (noteEl) {
+        const sourceLabel = selectedSource ? getSemesterLabelFromValue(selectedSource) : 'the selected previous semester';
+        noteEl.textContent = selectedTypes.length === 0
+            ? 'Choose at least one questionnaire type to copy into the current semester.'
+            : `${sourceLabel} will replace ${selectedTypeLabel} in the current semester after confirmation.`;
+    }
+    if (feedbackEl) {
+        if (selectedTypes.length === 0) {
+            feedbackEl.textContent = 'Select at least one questionnaire type to continue.';
+            feedbackEl.classList.add('is-empty');
+        } else if (!selectedSource) {
+            feedbackEl.textContent = `No previous semester has saved data for ${selectedTypeLabel}.`;
+            feedbackEl.classList.add('is-empty');
+        } else {
+            feedbackEl.textContent = '';
+            feedbackEl.classList.remove('is-empty');
+        }
+    }
+}
+
+function refreshCopyQuestionnaireAvailability() {
+    const copyQuestionnaireBtn = document.getElementById('copy-questionnaire-btn');
+    const confirmCopyBtn = document.getElementById('confirm-copy-questionnaire-btn');
+    const selectedTypes = getSelectedCopyQuestionnaireTypes();
+    const hasSources = getSourceQuestionnaireSemesters([]).length > 0;
+    const hasScopedSources = selectedTypes.length > 0 && getSourceQuestionnaireSemesters(selectedTypes).length > 0;
+    const editable = isQuestionnaireEditable();
+
+    if (copyQuestionnaireBtn) {
+        copyQuestionnaireBtn.disabled = !editable || !hasSources;
+        copyQuestionnaireBtn.title = !editable
+            ? 'Select the current semester to copy a questionnaire into it.'
+            : (!hasSources ? 'No previous questionnaire sets are available.' : '');
+    }
+
+    if (confirmCopyBtn) {
+        confirmCopyBtn.disabled = !editable || !hasScopedSources;
+    }
+
+    updateCopyQuestionnaireSummary();
+}
+
+function openCopyQuestionnaireModal() {
+    if (!ensureQuestionnaireEditable()) return;
+
+    const modal = document.getElementById('copy-questionnaire-modal');
+    ensureCopyQuestionnaireDefaultSelection();
+    const sourceSemesters = populateCopySourceSemesterOptions(getSelectedCopyQuestionnaireTypes());
+
+    if (!modal) return;
+
+    refreshCopyQuestionnaireAvailability();
+    modal.style.display = 'flex';
+
+    if (sourceSemesters.length > 0) {
+        const sourceSelect = document.getElementById('copy-source-semester');
+        if (sourceSelect) sourceSelect.focus();
+    }
+}
+
+function closeCopyQuestionnaireModal() {
+    const modal = document.getElementById('copy-questionnaire-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function getNormalizedQuestionnaireBucket(semester) {
+    return normalizeQuestionsData(questionnairesBySemester[semester]);
+}
+
+function getNormalizedQuestionnaireTypeEntry(bucket, type) {
+    const normalizedBucket = normalizeQuestionsData(bucket);
+    const entry = normalizedBucket[type] || { sections: [], questions: [] };
+    return {
+        sections: Array.isArray(entry.sections) ? entry.sections : [],
+        questions: Array.isArray(entry.questions) ? entry.questions : [],
+        header: entry.header ? { ...entry.header } : undefined
+    };
+}
+
+function handleCopyQuestionnaireSubmit(event) {
+    event.preventDefault();
+    if (!ensureQuestionnaireEditable()) return;
+
+    const sourceSemesterSelect = document.getElementById('copy-source-semester');
+    const sourceSemester = String(sourceSemesterSelect && sourceSemesterSelect.value || '').trim();
+    const selectedTypes = getSelectedCopyQuestionnaireTypes();
+    const destinationSemester = String(getCurrentSemesterValue() || '').trim();
+
+    if (!sourceSemester || selectedTypes.length === 0) {
+        updateCopyQuestionnaireSummary();
+        return;
+    }
+
+    const sourceBucket = getNormalizedQuestionnaireBucket(sourceSemester);
+    const destinationBucket = normalizeQuestionsData(questionnairesBySemester[destinationSemester] || buildEmptyQuestionsData());
+    const sourceLabel = getSemesterLabelFromValue(sourceSemester);
+    const destinationLabel = getSemesterLabelFromValue(destinationSemester);
+    const typeLabel = formatQuestionnaireTypeList(selectedTypes);
+
+    const confirmationMessage = `Copy ${typeLabel} from "${sourceLabel}" into "${destinationLabel}"?\n\nThis will replace the selected questionnaire types in the current semester immediately.`;
+
+    if (!confirm(confirmationMessage)) {
+        return;
+    }
+
+    const nextBucket = cloneQuestionnaireData(destinationBucket) || buildEmptyQuestionsData();
+    selectedTypes.forEach(function (typeKey) {
+        nextBucket[typeKey] = cloneQuestionnaireData(
+            getNormalizedQuestionnaireTypeEntry(sourceBucket, typeKey)
+        );
+    });
+
+    questionnairesBySemester[destinationSemester] = normalizeQuestionsData(nextBucket);
+
+    if (destinationSemester === activeSemester) {
+        questionsData = questionnairesBySemester[destinationSemester];
+    }
+
+    const savedQuestionnaires = SharedData.setQuestionnaires(questionnairesBySemester);
+    if (!savedQuestionnaires) {
+        alert('Questionnaire copy failed. Check Apache/MySQL, then try again.');
+        return;
+    }
+
+    questionnairesBySemester = savedQuestionnaires;
+    Object.keys(questionnairesBySemester).forEach(function (semester) {
+        questionnairesBySemester[semester] = normalizeQuestionsData(questionnairesBySemester[semester]);
+    });
+    questionsData = questionnairesBySemester[destinationSemester] || buildEmptyQuestionsData();
+    activeSemester = destinationSemester;
+
+    const semesterSelect = document.getElementById('semester-select');
+    if (semesterSelect) {
+        semesterSelect.value = destinationSemester;
+    }
+
+    updateFormHeader(currentQuestionnaireType);
+    renderQuestions();
+    applyQuestionnaireEditMode(isQuestionnaireEditable());
+    closeCopyQuestionnaireModal();
+
+    alert(`Copied ${typeLabel} from ${sourceLabel} to ${destinationLabel}.`);
 }
 
 function setupFormHeaderEditing() {

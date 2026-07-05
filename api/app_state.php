@@ -4225,8 +4225,8 @@ try {
                     if ($ownerId === '' || $ownerId !== $actorUserId) {
                         sendJson(['success' => false, 'error' => 'Permission denied for this paper.'], 403);
                     }
-                    if ($status === 'archived') {
-                        sendJson(['success' => false, 'error' => 'Archived papers cannot be updated.'], 400);
+                    if ($status !== 'draft') {
+                        sendJson(['success' => false, 'error' => 'Section C can only be edited while the paper is in draft.'], 400);
                     }
                 }
 

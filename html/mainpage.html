@@ -9,66 +9,161 @@
     </title>
     <link rel="stylesheet" href="../css/panel-theme.css" />
     <link rel="stylesheet" href="../css/mainpage.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   </head>
 
-  <body>
-    <div class="container">
-      <div class="main-card">
-        <!-- Header Section -->
-        <div class="header">
-          <h1 class="institution-name">
-            National Aviation Academy of the Philippines
-          </h1>
-          <p class="system-title">Student Professor Evaluation System</p>
-        </div>
-
-        <!-- Login Form -->
-        <div class="login-form">
-          <div class="form-group">
-            <label for="username">Student Number / Employee ID</label>
-            <input
-              type="text"
-              id="username"
-              name="username"
-              placeholder="Enter Student Number or Employee ID"
-            />
-          </div>
-          <div class="form-group">
-            <label for="password">Password</label>
-            <input
-              type="password"
-              id="password"
-              name="password"
-              placeholder="Enter your password"
-            />
-          </div>
-          <button type="submit" class="login-button" id="loginBtn">
-            <span>Login</span>
-          </button>
-          <div class="forgot-password-container">
-            <a href="#" id="forgotPasswordLink" class="forgot-password-link"
-              >Forgot Password?</a
-            >
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Forgot Password Modal -->
-    <div id="forgotPasswordModal" class="modal">
-      <div class="modal-content main-card">
-        <span class="close-modal">&times;</span>
-        <h2>Reset Password</h2>
-        <p>
-          Enter your Gmail address and we'll send you a link to reset your
-          password.
+  <body class="auth-page">
+    <main class="auth-shell">
+      <section class="auth-brand-panel" aria-label="System overview">
+        <div class="auth-brand-badge">NAAP Evaluation System</div>
+        <h1 class="institution-name">
+          National Aviation Academy of the Philippines
+        </h1>
+        <p class="system-title">
+          Secure student and faculty evaluation workflows with one consistent
+          academic portal.
         </p>
+
+        <div class="brand-highlights">
+          <article class="brand-highlight-card">
+            <h2>Role-based access</h2>
+            <p>Student, professor, dean, HR, OSA, VPAA, and admin access in one system.</p>
+          </article>
+          <article class="brand-highlight-card">
+            <h2>Semestral readiness</h2>
+            <p>OTP login, evaluation periods, and structured questionnaire delivery.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="auth-panel" aria-label="Login form">
+        <div class="auth-panel-view auth-panel-view--login" id="authLoginView">
+          <div class="auth-panel-header">
+            <p class="auth-eyebrow">Sign in</p>
+            <h2>Access your dashboard</h2>
+            <p>
+              Use your student number or employee ID to continue to the evaluation
+              portal.
+            </p>
+          </div>
+
+          <div
+            id="loginFeedback"
+            class="auth-feedback"
+            aria-live="polite"
+            hidden
+          ></div>
+
+          <form class="login-form" id="loginForm" novalidate>
+            <div class="form-group">
+              <label for="username">Student Number / Employee ID</label>
+              <input
+                type="text"
+                id="username"
+                name="username"
+                placeholder="Enter student number or employee ID"
+                autocomplete="username"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="password">Password</label>
+              <input
+                type="password"
+                id="password"
+                name="password"
+                placeholder="Enter your password"
+                autocomplete="current-password"
+              />
+            </div>
+
+            <button type="submit" class="login-button" id="loginBtn">
+              <span>Login</span>
+            </button>
+
+            <div class="auth-actions">
+              <a href="#" id="forgotPasswordLink" class="forgot-password-link"
+                >Forgot Password?</a
+              >
+              <button
+                type="button"
+                id="mobileAboutToggle"
+                class="auth-toggle-link"
+                aria-controls="authAboutView"
+                aria-expanded="false"
+              >
+                About
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div
+          class="auth-panel-view auth-panel-view--about"
+          id="authAboutView"
+          hidden
+        >
+          <div class="auth-brand-badge">NAAP Evaluation System</div>
+          <h2 class="institution-name">
+            National Aviation Academy of the Philippines
+          </h2>
+          <p class="system-title">
+            Secure student and faculty evaluation workflows with one consistent
+            academic portal.
+          </p>
+
+          <div class="brand-highlights">
+            <article class="brand-highlight-card">
+              <h2>Role-based access</h2>
+              <p>Student, professor, dean, HR, OSA, VPAA, and admin access in one system.</p>
+            </article>
+            <article class="brand-highlight-card">
+              <h2>Semestral readiness</h2>
+              <p>OTP login, evaluation periods, and structured questionnaire delivery.</p>
+            </article>
+          </div>
+
+          <div class="auth-actions auth-actions--about">
+            <button
+              type="button"
+              id="mobileSignInToggle"
+              class="auth-toggle-link auth-toggle-link--primary"
+              aria-controls="authLoginView"
+              aria-expanded="true"
+            >
+              Sign in
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div id="forgotPasswordModal" class="modal auth-modal" aria-hidden="true">
+      <div class="modal-content auth-modal-card auth-modal-card--forgot">
+        <button type="button" class="close-modal" aria-label="Close reset password modal">
+          <i class="fas fa-times"></i>
+        </button>
+        <div class="auth-modal-header">
+          <p class="auth-eyebrow">Account recovery</p>
+          <h2>Reset Password</h2>
+          <p>
+            Enter your Gmail address and the system will prepare a password reset
+            link.
+          </p>
+        </div>
+        <div
+          id="forgotPasswordFeedback"
+          class="auth-feedback auth-feedback--compact"
+          aria-live="polite"
+          hidden
+        ></div>
         <div class="form-group">
           <label for="resetEmail">Gmail Address</label>
           <input
             type="email"
             id="resetEmail"
             placeholder="e.g., yourname@gmail.com"
+            autocomplete="email"
           />
         </div>
         <button id="sendResetLinkBtn" class="login-button">
@@ -77,14 +172,23 @@
       </div>
     </div>
 
-    <!-- OTP Verification Modal -->
-    <div id="otpVerificationModal" class="modal">
-      <div class="modal-content main-card">
-        <span class="close-modal" id="closeOtpModal">&times;</span>
-        <h2>OTP Verification</h2>
-        <p id="otpMetaText">
-          Enter the 6-digit verification code sent to your Gmail.
-        </p>
+    <div id="otpVerificationModal" class="modal auth-modal" aria-hidden="true">
+      <div class="modal-content auth-modal-card">
+        <button
+          type="button"
+          class="close-modal"
+          id="closeOtpModal"
+          aria-label="Close OTP verification modal"
+        >
+          <i class="fas fa-times"></i>
+        </button>
+        <div class="auth-modal-header">
+          <p class="auth-eyebrow">Verification</p>
+          <h2>OTP Verification</h2>
+          <p id="otpMetaText">
+            Enter the 6-digit verification code sent to your Gmail.
+          </p>
+        </div>
         <div class="form-group">
           <label for="otpCodeInput">OTP Code</label>
           <input
@@ -96,7 +200,7 @@
             placeholder="Enter 6-digit OTP"
           />
         </div>
-        <p id="otpInlineMessage" style="display: none"></p>
+        <p id="otpInlineMessage" class="otp-inline-message" hidden></p>
         <button id="verifyOtpBtn" class="login-button">
           <span>Verify OTP</span>
         </button>

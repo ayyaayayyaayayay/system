@@ -1065,4 +1065,378 @@ body.manual-clear-modal-open {
     }
 }
 
+/* Phase 2 OSA panel modernization */
+.osa-panel {
+    min-height: 100vh;
+    background:
+        radial-gradient(circle at top right, rgba(99, 102, 241, 0.1), transparent 28%),
+        linear-gradient(180deg, #f6f8fc 0%, #eef3f9 100%);
+    color: #0f172a;
+}
+
+.osa-panel .dashboard-container {
+    position: relative;
+}
+
+.osa-panel .sidebar {
+    width: 280px;
+    padding: 18px 16px;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+    border-right: 1px solid rgba(203, 213, 225, 0.9);
+}
+
+.osa-panel .sidebar-header,
+.osa-panel .sidebar-footer {
+    border: none;
+    padding: 10px 4px;
+}
+
+.osa-panel .logo-container {
+    align-items: flex-start;
+    gap: 14px;
+}
+
+.osa-panel .logo-shield {
+    width: 58px;
+    height: 58px;
+    border-radius: 18px;
+}
+
+.osa-panel .logo-text {
+    font-size: 14px;
+    text-align: left;
+    line-height: 1.5;
+    max-width: 160px;
+}
+
+.osa-panel .sidebar-nav {
+    padding: 18px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.osa-panel .nav-link {
+    min-height: 52px;
+    padding: 14px 16px;
+    border-radius: 16px;
+    font-weight: 600;
+    transition: background-color var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast), border-color var(--motion-fast);
+}
+
+.osa-panel .nav-link.active {
+    box-shadow: 0 12px 24px rgba(91, 103, 232, 0.22);
+}
+
+.osa-panel .sidebar-backdrop {
+    display: none;
+}
+
+.osa-panel .main-content {
+    margin-left: 280px;
+    padding: 28px 28px 36px;
+}
+
+.osa-panel .top-header {
+    margin-bottom: 24px;
+    padding: 20px 24px;
+    gap: 16px;
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    border-radius: 24px;
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+    background: rgba(255, 255, 255, 0.9);
+}
+
+.osa-header-main {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+    flex: 1;
+}
+
+.page-title-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.osa-panel .page-title {
+    margin: 0;
+    font-size: 30px;
+    letter-spacing: -0.04em;
+}
+
+.page-context {
+    margin: 0;
+    font-size: 13px;
+    color: #64748b;
+}
+
+.mobile-nav-toggle {
+    display: none;
+    width: 42px;
+    height: 42px;
+    border: 1px solid #dbe3ee;
+    border-radius: 14px;
+    background: #ffffff;
+    color: #334155;
+    cursor: pointer;
+    transition: background-color var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
+}
+
+.osa-panel .user-profile,
+.osa-panel .btn-submit,
+.osa-panel .btn-cancel,
+.osa-panel .btn-ghost,
+.osa-panel .search-input,
+.osa-panel .nav-link,
+.osa-panel .toggle-btn,
+.osa-panel .manual-clear-close,
+.osa-panel .manual-clear-form textarea {
+    transition: background-color var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.osa-panel .osa-hero-card {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    align-items: center;
+    padding: 26px 28px;
+    margin-bottom: 22px;
+    border-radius: 24px;
+    background:
+        linear-gradient(135deg, rgba(47, 62, 156, 0.94) 0%, rgba(96, 69, 181, 0.92) 100%),
+        #4f46e5;
+    color: #ffffff;
+    box-shadow: 0 18px 36px rgba(79, 70, 229, 0.24);
+}
+
+.osa-hero-copy {
+    max-width: 620px;
+}
+
+.osa-hero-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 30px;
+    padding: 0 12px;
+    margin-bottom: 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.14);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.osa-hero-copy h2 {
+    margin: 0 0 10px;
+    font-size: 30px;
+    line-height: 1.08;
+    letter-spacing: -0.04em;
+}
+
+.osa-hero-copy p {
+    margin: 0;
+    max-width: 60ch;
+    color: rgba(255, 255, 255, 0.86);
+    line-height: 1.7;
+    font-size: 14px;
+}
+
+.osa-hero-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 220px;
+}
+
+.hero-action-btn {
+    min-height: 46px;
+    border-radius: 14px;
+    border: none;
+    padding: 0 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.hero-action-btn--primary {
+    background: #ffffff;
+    color: #312e81;
+    box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
+}
+
+.hero-action-btn--secondary {
+    background: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.osa-panel .summary-cards {
+    gap: 16px;
+    margin-bottom: 22px;
+}
+
+.osa-panel .summary-card,
+.osa-panel .status-section,
+.osa-panel .form-card,
+.osa-panel .manual-clear-dialog {
+    border-radius: 24px;
+    border: 1px solid rgba(226, 232, 240, 0.92);
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+    background: rgba(255, 255, 255, 0.94);
+}
+
+.osa-panel .summary-card:hover,
+.osa-panel .toggle-btn:hover,
+.osa-panel .btn-submit:hover,
+.osa-panel .btn-cancel:hover,
+.osa-panel .btn-ghost:hover {
+    transform: none;
+}
+
+.card-caption {
+    display: block;
+    margin-top: 6px;
+    font-size: 12px;
+    color: #64748b;
+}
+
+.osa-panel .section-header,
+.osa-panel .form-header {
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.osa-panel .section-title h2,
+.osa-panel .form-header h2 {
+    letter-spacing: -0.03em;
+}
+
+.osa-panel .form-message {
+    min-height: 20px;
+}
+
+@media (max-width: 1180px) {
+    .osa-panel .osa-hero-card {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .osa-hero-actions {
+        width: 100%;
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+}
+
+@media (max-width: 1000px) {
+    .osa-panel .main-content {
+        margin-left: 0 !important;
+        padding: 16px 16px 28px;
+    }
+
+    .osa-panel .sidebar {
+        width: 280px !important;
+        transform: translateX(-100%);
+        transition: transform var(--motion-normal);
+        z-index: 260;
+    }
+
+    .osa-panel .sidebar .logo-text,
+    .osa-panel .sidebar .nav-link span {
+        display: inline !important;
+    }
+
+    .osa-panel .sidebar-header {
+        padding: 10px 4px !important;
+        justify-content: flex-start !important;
+    }
+
+    .osa-panel .nav-link {
+        justify-content: flex-start !important;
+        padding: 14px 16px !important;
+    }
+
+    .osa-panel.osa-sidebar-open .sidebar {
+        transform: translateX(0);
+    }
+
+    .osa-panel .sidebar-backdrop {
+        position: fixed;
+        inset: 0;
+        display: block;
+        border: none;
+        background: rgba(15, 23, 42, 0.42);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--motion-normal);
+        z-index: 250;
+    }
+
+    .osa-panel.osa-sidebar-open .sidebar-backdrop {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .mobile-nav-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .osa-panel .page-title {
+        font-size: 24px;
+    }
+
+    .osa-panel .user-profile span {
+        display: none;
+    }
+}
+
+@media (max-width: 640px) {
+    .osa-panel .top-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .osa-panel .user-profile {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    .osa-panel .osa-hero-card,
+    .osa-panel .summary-card,
+    .osa-panel .status-section,
+    .osa-panel .form-card,
+    .osa-panel .manual-clear-dialog {
+        border-radius: 20px;
+    }
+
+    .osa-panel .osa-hero-card {
+        padding: 20px;
+    }
+
+    .osa-hero-copy h2 {
+        font-size: 24px;
+    }
+
+    .osa-hero-actions {
+        flex-direction: column;
+    }
+
+    .hero-action-btn {
+        width: 100%;
+    }
+}
+
 

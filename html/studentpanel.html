@@ -5,16 +5,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Student Dashboard - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/studentpanel.css">
     <link rel="stylesheet" href="../css/panel-theme.css">
+    <link rel="stylesheet" href="../css/studentpanel.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
 </head>
 
-<body>
+<body class="student-panel">
     <div class="dashboard-container">
+        <button class="sidebar-backdrop" id="sidebarBackdrop" type="button" aria-label="Close navigation"></button>
         <!-- Left Sidebar -->
-        <aside class="sidebar">
+        <aside class="sidebar" id="studentSidebar">
             <div class="sidebar-header">
                 <div class="logo-container">
                     <div class="logo-shield">
@@ -44,8 +45,7 @@
             </nav>
 
             <div class="sidebar-footer">
-                <a href="#" class="nav-link logout"
-                    onclick="SharedData.clearSession(); window.location.href='mainpage.html';">
+                <a href="#" class="nav-link logout" id="studentLogoutBtn">
                     <i class="fas fa-sign-out-alt"></i>
                     <span>Logout</span>
                 </a>
@@ -56,7 +56,22 @@
         <main class="main-content">
             <!-- Top Header -->
             <header class="top-header">
-                <h1 class="page-title" id="mainPageTitle">Student Dashboard</h1>
+                <div class="student-header-main">
+                    <button
+                        class="mobile-nav-toggle"
+                        id="studentMenuToggle"
+                        type="button"
+                        aria-label="Open navigation"
+                        aria-controls="studentSidebar"
+                        aria-expanded="false"
+                    >
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <div class="page-title-block">
+                        <h1 class="page-title" id="mainPageTitle">Student Dashboard</h1>
+                        <p class="page-context" id="pageContextText">Track evaluation progress and complete your forms on time.</p>
+                    </div>
+                </div>
                 <div class="user-info">
                     <button class="user-action-btn" id="notificationBtn" aria-label="View announcements">
                         <i class="fas fa-bell"></i>
@@ -105,6 +120,24 @@
 
             <!-- Dashboard View -->
             <div id="dashboardView" class="content-view">
+                <section class="student-hero-card">
+                    <div class="student-hero-copy">
+                        <span class="student-hero-badge">Current semester</span>
+                        <h2>Stay on top of your evaluation requirements.</h2>
+                        <p>Review pending forms, track completed submissions, and access your history from one dashboard.</p>
+                    </div>
+                    <div class="student-hero-actions">
+                        <button class="hero-action-btn hero-action-btn--primary" id="heroOpenEvaluationBtn" type="button">
+                            <i class="fas fa-file-signature"></i>
+                            Browse Pending Forms
+                        </button>
+                        <button class="hero-action-btn hero-action-btn--secondary" id="heroOpenHistoryBtn" type="button">
+                            <i class="fas fa-clock-rotate-left"></i>
+                            View History
+                        </button>
+                    </div>
+                </section>
+
                 <!-- Summary Cards -->
                 <div class="summary-cards">
                     <div class="summary-card pending">
@@ -114,6 +147,7 @@
                         <div class="card-content">
                             <h3>Pending Evaluations</h3>
                             <p class="card-number">4</p>
+                            <span class="card-caption">Awaiting your feedback</span>
                         </div>
                     </div>
 
@@ -124,6 +158,7 @@
                         <div class="card-content">
                             <h3>Completed</h3>
                             <p class="card-number">4</p>
+                            <span class="card-caption">Submitted successfully</span>
                         </div>
                     </div>
 
@@ -134,6 +169,7 @@
                         <div class="card-content">
                             <h3>Total Submissions</h3>
                             <p class="card-number">4</p>
+                            <span class="card-caption">This semester's workload</span>
                         </div>
                     </div>
                 </div>
@@ -145,6 +181,10 @@
                             <h2>My Evaluations</h2>
                             <p>Pending and completed Professor evaluations.</p>
                         </div>
+                        <button class="hero-action-btn hero-action-btn--secondary evaluations-action-btn" id="dashboardOpenEvaluationBtn" type="button">
+                            <i class="fas fa-list-check"></i>
+                            Jump to Evaluations
+                        </button>
                     </div>
 
                     <div class="evaluations-list">
@@ -228,7 +268,7 @@
                         <!-- Dynamic Questions Container -->
                         <div id="dynamic-questions-container">
                             <!-- Questions will be dynamically loaded here by studentpanel.js -->
-                            <div class="loading-questions" style="text-align: center; padding: 2rem;">
+                            <div class="loading-questions questionnaire-loading-state">
                                 <i class="fas fa-spinner fa-spin"></i> Loading questionnaire...
                             </div>
                         </div>
@@ -428,7 +468,7 @@
                 </div>
             </form>
 
-            <div class="proof-pending-box" id="studentProofPendingBox" style="display: none;">
+            <div class="proof-pending-box" id="studentProofPendingBox">
                 Your submitted proof is under OSA review. Please wait for the decision.
             </div>
         </div>

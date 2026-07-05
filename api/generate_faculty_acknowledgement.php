@@ -101,7 +101,7 @@ if (!is_array($payload)) {
     sendJsonError('Invalid JSON payload.', 400);
 }
 
-$paperData = [
+$paperData = [  
     'faculty_name' => normalizeRequiredString($payload, 'faculty_name'),
     'department' => normalizeRequiredString($payload, 'department'),
     'rank' => normalizeRequiredString($payload, 'rank'),

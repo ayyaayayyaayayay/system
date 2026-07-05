@@ -27,6 +27,22 @@
   --shadow-card: 0 6px 18px rgba(15, 23, 42, 0.05);
   --sidebar-width: 260px;
   --header-height: 66px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --radius-sm: 10px;
+  --surface-muted: #f8fafc;
+  --surface-soft: #eef2ff;
+  --border-strong: #cbd5e1;
+  --shadow-xl: 0 22px 50px rgba(15, 23, 42, 0.16);
+  --focus-ring: 0 0 0 4px rgba(91, 103, 232, 0.14);
+  --motion-fast: 0.18s ease;
+  --motion-normal: 0.24s ease;
 }
 
 body {
@@ -495,5 +511,72 @@ body {
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+.ui-message {
+  border-radius: 14px;
+  padding: 14px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  border: 1px solid transparent;
+}
+
+.ui-message--error {
+  background: #fef2f2;
+  color: #991b1b;
+  border-color: #fecaca;
+}
+
+.ui-message--success {
+  background: #ecfdf5;
+  color: #166534;
+  border-color: #bbf7d0;
+}
+
+.ui-message--info {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+
+.ui-message--muted {
+  background: #f8fafc;
+  color: #475569;
+  border-color: #e2e8f0;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .content-view,
+  .dropdown-panel.active,
+  .login-button::before,
+  .app-loading-overlay,
+  .app-loading-overlay-card,
+  .app-loading-overlay-spinner {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
   }
 }

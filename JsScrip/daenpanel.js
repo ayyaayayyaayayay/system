@@ -47,6 +47,9 @@ let deanFacultyFeedbackState = {
     lastTrendRows: []
 };
 let deanSupervisorTargetDirectory = [];
+let deanMobileDrawerBound = false;
+let deanViewportRefreshBound = false;
+let deanViewportRefreshTimer = 0;
 
 const DEAN_EMPTY_SUMMARY = {
     criteriaAverages: [],
@@ -58,6 +61,66 @@ const DEAN_EMPTY_SUMMARY = {
     detailedRows: [],
     totals: { required: 0, received: 0, responseRate: 0, averageScore: 0 }
 };
+
+function isDeanDashboardViewActive() {
+    const view = document.getElementById('dashboardView');
+    return !!(view && view.style.display !== 'none');
+}
+
+function isDeanFacultyResponseViewActive() {
+    const view = document.getElementById('facultyResponseView');
+    return !!(view && view.style.display !== 'none');
+}
+
+function refreshDeanViewportLayout() {
+    if (isDeanDashboardViewActive()) {
+        initializeReports();
+    }
+
+    if (isDeanFacultyResponseViewActive()) {
+        const trendSection = document.getElementById('deanSemestralTrendSection');
+        const isTrendVisible = !!(trendSection && trendSection.style.display !== 'none');
+        if (isTrendVisible) {
+            renderDeanSemestralTrendChart(deanFacultyFeedbackState.lastTrendRows || []);
+        }
+    }
+}
+
+function scheduleDeanViewportRefresh(delayMs) {
+    if (deanViewportRefreshTimer) {
+        window.clearTimeout(deanViewportRefreshTimer);
+    }
+
+    const wait = Number.isFinite(delayMs) ? delayMs : 180;
+    deanViewportRefreshTimer = window.setTimeout(function () {
+        deanViewportRefreshTimer = 0;
+
+        const runRefresh = function () {
+            refreshDeanViewportLayout();
+        };
+
+        if (typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(function () {
+                window.requestAnimationFrame(runRefresh);
+            });
+            return;
+        }
+
+        runRefresh();
+    }, wait);
+}
+
+function setupDeanViewportRefresh() {
+    if (deanViewportRefreshBound) return;
+
+    const handleViewportChange = function () {
+        scheduleDeanViewportRefresh(180);
+    };
+
+    window.addEventListener('resize', handleViewportChange);
+    window.addEventListener('orientationchange', handleViewportChange);
+    deanViewportRefreshBound = true;
+}
 
 function normalizeUserIdToken(value) {
     const raw = String(value || '').trim();
@@ -493,7 +556,7 @@ function resetDeanProfessorSemestralTrend() {
     statusEl.classList.remove('improved', 'declined', 'stable');
     statusEl.textContent = 'No semestral trend data available.';
     deltaEl.textContent = 'Open a professor comments list to load the last 4-semester performance trend.';
-    tableBody.innerHTML = '<tr><td colspan="5">No data available.</td></tr>';
+    tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="5">No data available.</td></tr>';
     deanFacultyFeedbackState.lastTrendRows = [];
     renderDeanSemestralTrendChart([]);
 }
@@ -520,11 +583,11 @@ function renderDeanProfessorSemestralTrend(professorUserId, selectedSemesterId) 
 
     tableBody.innerHTML = rows.map(item => `
         <tr>
-            <td>${escapeHTML(item.semesterLabel || item.semesterId)}</td>
-            <td class="avg-score">${Number(item.overallAverage || 0).toFixed(2)}</td>
-            <td>${Number(item.studentAverage || 0).toFixed(2)}</td>
-            <td>${Number(item.peerAverage || 0).toFixed(2)}</td>
-            <td>${Number(item.supervisorAverage || 0).toFixed(2)}</td>
+            <td data-label="Semester">${escapeHTML(item.semesterLabel || item.semesterId)}</td>
+            <td data-label="Overall Avg"><span class="avg-score">${Number(item.overallAverage || 0).toFixed(2)}</span></td>
+            <td data-label="Student">${Number(item.studentAverage || 0).toFixed(2)}</td>
+            <td data-label="Peer">${Number(item.peerAverage || 0).toFixed(2)}</td>
+            <td data-label="Supervisor">${Number(item.supervisorAverage || 0).toFixed(2)}</td>
         </tr>
     `).join('');
 
@@ -1087,8 +1150,11 @@ function initializeDashboard() {
     renderDeanAnnouncementPanels();
     setupNavigation();
     setupLogout();
+    setupMobileDrawer();
     setupHeaderPanels();
+    setupDeanHeroActions();
     setupTableActions();
+    setupDeanViewportRefresh();
     loadFacultySummary({ evaluationType: 'student' });
     loadProfessorCount();
     setupFacultyResponseView();
@@ -1103,6 +1169,7 @@ function initializeDashboard() {
     setupChangePasswordForm();
     setupPasswordToggles();
     initializeReports();
+    scheduleDeanViewportRefresh(120);
     setupDeanDataSync();
 }
 
@@ -1312,6 +1379,7 @@ function setupNavigation() {
             // Handle navigation (for future implementation)
             if (view) {
                 handleNavigation(view);
+                closeMobileDrawer();
             }
         });
     });
@@ -1351,6 +1419,7 @@ function handleNavigation(section) {
  * @param {string} viewName - Name of the view to show ('dashboard' or 'reports')
  */
 function switchView(viewName) {
+    closeMobileDrawer();
     const dashboardView = document.getElementById('dashboardView');
     const peerEvaluationView = document.getElementById('peerEvaluationView');
     const facultyPaperInboxView = document.getElementById('facultyPaperInboxView');
@@ -1413,6 +1482,10 @@ function switchView(viewName) {
         if (peerManagementView) peerManagementView.style.display = 'block';
         window.scrollTo(0, 0);
         closeAllPanels();
+    }
+
+    if (viewName === 'dashboard' || viewName === 'facultyResponse') {
+        scheduleDeanViewportRefresh(120);
     }
 }
 
@@ -1551,7 +1624,7 @@ function initializePeerCharts() {
  * Setup logout functionality
  */
 function setupLogout() {
-    const logoutLink = document.querySelector('.nav-link.logout');
+    const logoutLink = document.getElementById('deanLogoutBtn');
 
     if (logoutLink) {
         logoutLink.addEventListener('click', function (e) {
@@ -1589,6 +1662,75 @@ function clearUserSession() {
  */
 function showLogoutMessage() {
     console.log('Logging out...');
+}
+
+function setupMobileDrawer() {
+    if (deanMobileDrawerBound) return;
+
+    const toggleButtons = document.querySelectorAll('.mobile-nav-toggle');
+    const backdrop = document.getElementById('sidebarBackdrop');
+    if (!toggleButtons.length || !backdrop) return;
+
+    toggleButtons.forEach(button => {
+        button.addEventListener('click', function () {
+            const isOpen = document.body.classList.contains('dean-sidebar-open');
+            if (isOpen) {
+                closeMobileDrawer();
+            } else {
+                openMobileDrawer();
+            }
+        });
+    });
+
+    backdrop.addEventListener('click', closeMobileDrawer);
+    window.addEventListener('resize', function () {
+        if (window.innerWidth > 1000) {
+            closeMobileDrawer();
+        }
+    });
+
+    deanMobileDrawerBound = true;
+}
+
+function openMobileDrawer() {
+    document.body.classList.add('dean-sidebar-open');
+    document.querySelectorAll('.mobile-nav-toggle').forEach(button => {
+        button.setAttribute('aria-expanded', 'true');
+    });
+}
+
+function closeMobileDrawer() {
+    document.body.classList.remove('dean-sidebar-open');
+    document.querySelectorAll('.mobile-nav-toggle').forEach(button => {
+        button.setAttribute('aria-expanded', 'false');
+    });
+}
+
+function setupDeanHeroActions() {
+    const evaluationButton = document.getElementById('heroOpenEvaluationBtn');
+    const facultyResponseButton = document.getElementById('heroOpenFacultyResponseBtn');
+    const facultyPaperButton = document.getElementById('heroOpenFacultyPaperBtn');
+
+    if (evaluationButton) {
+        evaluationButton.addEventListener('click', function () {
+            switchView('peerEvaluation');
+            updateNavigation('peerEvaluation');
+        });
+    }
+
+    if (facultyResponseButton) {
+        facultyResponseButton.addEventListener('click', function () {
+            switchView('facultyResponse');
+            updateNavigation('facultyResponse');
+        });
+    }
+
+    if (facultyPaperButton) {
+        facultyPaperButton.addEventListener('click', function () {
+            switchView('facultyPaperInbox');
+            updateNavigation('facultyPaperInbox');
+        });
+    }
 }
 
 function normalizeDeanUserIdToken(value) {
@@ -1926,7 +2068,7 @@ function renderDeanFacultyPaperInbox() {
     const actorUserId = resolveCurrentDeanActorUserId();
     deanFacultyPaperState.actorUserId = actorUserId;
     if (!actorUserId) {
-        tableBody.innerHTML = '<tr><td colspan="6">Unable to resolve dean account for this session.</td></tr>';
+        tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="6">Unable to resolve dean account for this session.</td></tr>';
         renderDeanFacultyPaperDetail(null);
         return;
     }
@@ -1935,14 +2077,14 @@ function renderDeanFacultyPaperInbox() {
     try {
         papers = SharedData.listFacultyPapers('dean', actorUserId);
     } catch (error) {
-        tableBody.innerHTML = '<tr><td colspan="6">Failed to load faculty papers.</td></tr>';
+        tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="6">Failed to load faculty papers.</td></tr>';
         renderDeanFacultyPaperDetail(null);
         return;
     }
 
     deanFacultyPaperState.papers = Array.isArray(papers) ? papers : [];
     if (!deanFacultyPaperState.papers.length) {
-        tableBody.innerHTML = '<tr><td colspan="6">No faculty papers assigned.</td></tr>';
+        tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="6">No faculty papers assigned.</td></tr>';
         deanFacultyPaperState.selectedId = '';
         renderDeanFacultyPaperDetail(null);
         return;
@@ -1956,12 +2098,12 @@ function renderDeanFacultyPaperInbox() {
         const selected = deanFacultyPaperState.selectedId === paper.id;
         return `
             <tr class="${selected ? 'faculty-paper-row-active' : ''}">
-                <td>${escapeHTML(String(paper.id || 'N/A'))}</td>
-                <td>${escapeHTML(String(paper.professor_name || 'N/A'))}</td>
-                <td>${escapeHTML(String(paper.semester_label || 'N/A'))}</td>
-                <td>${escapeHTML(mapDeanPaperStatus(paper.status))}</td>
-                <td>${escapeHTML(formatDeanPaperTimestamp(paper.sent_at))}</td>
-                <td><button type="button" class="btn-submit dean-paper-open-btn" data-paper-id="${escapeHTML(String(paper.id || ''))}">Open</button></td>
+                <td data-label="Paper ID">${escapeHTML(String(paper.id || 'N/A'))}</td>
+                <td data-label="Professor">${escapeHTML(String(paper.professor_name || 'N/A'))}</td>
+                <td data-label="Semester">${escapeHTML(String(paper.semester_label || 'N/A'))}</td>
+                <td data-label="Status">${escapeHTML(mapDeanPaperStatus(paper.status))}</td>
+                <td data-label="Sent At">${escapeHTML(formatDeanPaperTimestamp(paper.sent_at))}</td>
+                <td data-label="Actions"><button type="button" class="btn-submit dean-paper-open-btn" data-paper-id="${escapeHTML(String(paper.id || ''))}">Open</button></td>
             </tr>
         `;
     }).join('');
@@ -2695,32 +2837,26 @@ function escapeHTML(str) {
  * Show a form message
  */
 function showFormMessage(form, message, type) {
-    const existing = form.querySelector('.form-message');
-    if (existing) existing.remove();
+    if (!form) return;
+    clearFormMessage(form);
 
     const messageDiv = document.createElement('div');
-    messageDiv.className = `form-message ${type}`;
+    const tone = type === 'error' ? 'error' : (type === 'success' ? 'success' : 'info');
+    messageDiv.className = `form-message ui-message ui-message--${tone}`;
     messageDiv.textContent = message;
-    messageDiv.style.cssText = `
-        background-color: ${type === 'error' ? '#fee2e2' : '#d1fae5'};
-        color: ${type === 'error' ? '#991b1b' : '#065f46'};
-        padding: 14px 18px;
-        border-radius: 12px;
-        margin-bottom: 20px;
-        text-align: center;
-        font-weight: 600;
-        border: 1px solid ${type === 'error' ? '#ef4444' : '#10b981'};
-        animation: fadeIn 0.3s ease;
-    `;
-
     form.insertBefore(messageDiv, form.firstChild);
 
     setTimeout(() => {
         if (messageDiv.parentNode) {
-            messageDiv.style.animation = 'fadeOut 0.3s ease';
-            setTimeout(() => messageDiv.remove(), 300);
+            messageDiv.remove();
         }
     }, 4000);
+}
+
+function clearFormMessage(form) {
+    if (!form) return;
+    const existing = form.querySelector('.form-message');
+    if (existing) existing.remove();
 }
 
 /**
@@ -2990,10 +3126,12 @@ function setupProfileActions() {
         button.addEventListener('click', function () {
             const targetId = this.getAttribute('data-target');
             if (!targetId) return;
+            hideAccountActionCards();
             const targetCard = document.getElementById(targetId);
             if (targetCard) {
                 targetCard.style.display = 'block';
-                targetCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                targetCard.scrollIntoView({ behavior: prefersReducedMotion ? 'auto' : 'smooth', block: 'start' });
             }
         });
     });
@@ -3003,7 +3141,12 @@ function setupProfileActions() {
             const targetId = this.getAttribute('data-target');
             const targetCard = targetId ? document.getElementById(targetId) : null;
             if (targetCard) {
-                targetCard.style.display = 'block';
+                const form = targetCard.querySelector('form');
+                if (form) {
+                    form.reset();
+                    clearFormMessage(form);
+                }
+                targetCard.style.display = 'none';
             }
         });
     });
@@ -3011,7 +3154,9 @@ function setupProfileActions() {
 
 function hideAccountActionCards() {
     document.querySelectorAll('.account-action-card').forEach(card => {
-        card.style.display = 'block';
+        const form = card.querySelector('form');
+        if (form) clearFormMessage(form);
+        card.style.display = 'none';
     });
 }
 
@@ -3747,7 +3892,7 @@ function renderFacultyResponseTable(items) {
     if (!tbody) return;
 
     if (!items.length) {
-        tbody.innerHTML = '<tr><td colspan="10">No faculty records found.</td></tr>';
+        tbody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="10">No faculty records found.</td></tr>';
         return;
     }
 
@@ -3763,16 +3908,16 @@ function renderFacultyResponseTable(items) {
         const employmentType = item.employmentType || '-';
         const position = item.position || '-';
         return '<tr>' +
-            '<td>' + item.professorId + '</td>' +
-            '<td>' + item.professorName + '</td>' +
-            '<td>' + item.institute + '</td>' +
-            '<td>' + employmentType + '</td>' +
-            '<td>' + position + '</td>' +
-            '<td><span class="count-pill">' + item.received + '/' + item.required + '</span></td>' +
-            '<td>' + responseRate + '%</td>' +
-            '<td>' + item.avgScore.toFixed(1) + '</td>' +
-            '<td><span class="dean-status-pill ' + statusClass + '">' + statusText + '</span></td>' +
-            '<td><button type="button" class="btn-submit faculty-comments-btn js-view-comments" data-professor-id="' + item.professorId + '" data-professor-user-id="' + (item.professorUserId || '') + '">View</button></td>' +
+            '<td data-label="Employee ID">' + item.professorId + '</td>' +
+            '<td data-label="Faculty Name">' + item.professorName + '</td>' +
+            '<td data-label="Institute">' + item.institute + '</td>' +
+            '<td data-label="Regular/Temporary">' + employmentType + '</td>' +
+            '<td data-label="Position">' + position + '</td>' +
+            '<td data-label="Evaluations Received"><span class="count-pill">' + item.received + '/' + item.required + '</span></td>' +
+            '<td data-label="Response Rate">' + responseRate + '%</td>' +
+            '<td data-label="Average Score">' + item.avgScore.toFixed(1) + '</td>' +
+            '<td data-label="Status"><span class="dean-status-pill ' + statusClass + '">' + statusText + '</span></td>' +
+            '<td data-label="Comments"><button type="button" class="btn-submit faculty-comments-btn js-view-comments" data-professor-id="' + item.professorId + '" data-professor-user-id="' + (item.professorUserId || '') + '">View</button></td>' +
             '</tr>';
     }).join('');
 }

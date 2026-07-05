@@ -19,6 +19,7 @@ let adminSemestralPerformanceChartInstance = null;
 let announcementComposerReady = false;
 let credentialDistributorParsedRows = [];
 let credentialDistributorFailures = [];
+let adminMobileDrawerBound = false;
 let credentialDistributorSmtpConfig = {
     senderEmail: '',
     senderName: '',
@@ -66,6 +67,7 @@ function initializeAdminPanel() {
     }
     setupNavigation();
     setupLogout();
+    setupMobileDrawer();
     setupModals();
     setupRoleBasedFields();
     setupOrganizationStructure();
@@ -79,6 +81,7 @@ function initializeAdminPanel() {
     loadActivityList();
     loadUsersByOrganization();
     setupQuickActions();
+    setupDashboardHeroActions();
     setupAnnouncementComposer();
     setupActivityLogButton();
     setupSecuritySettings();
@@ -245,8 +248,45 @@ function setupNavigation() {
             e.preventDefault();
             const viewId = link.getAttribute('data-view');
             switchToView(viewId);
+            closeMobileDrawer();
         });
     });
+}
+
+function setupMobileDrawer() {
+    if (adminMobileDrawerBound) return;
+
+    const sidebar = document.getElementById('adminSidebar');
+    const backdrop = document.getElementById('sidebarBackdrop');
+    const toggles = document.querySelectorAll('.mobile-nav-toggle');
+    if (!sidebar || !backdrop || !toggles.length) return;
+
+    toggles.forEach(toggle => {
+        toggle.addEventListener('click', () => {
+            if (document.body.classList.contains('admin-sidebar-open')) {
+                closeMobileDrawer();
+                return;
+            }
+            openMobileDrawer();
+        });
+    });
+
+    backdrop.addEventListener('click', closeMobileDrawer);
+    window.addEventListener('resize', () => {
+        if (window.innerWidth > 1000) {
+            closeMobileDrawer();
+        }
+    });
+
+    adminMobileDrawerBound = true;
+}
+
+function openMobileDrawer() {
+    document.body.classList.add('admin-sidebar-open');
+}
+
+function closeMobileDrawer() {
+    document.body.classList.remove('admin-sidebar-open');
 }
 
 /**
@@ -709,8 +749,24 @@ function resolveProtectedAdminEmail(users = []) {
     return BULK_SIMPLE_EMAIL_PATTERN.test(matchedEmail) ? matchedEmail : '';
 }
 
+function getExcelParser() {
+    if (typeof globalThis !== 'undefined' && globalThis.XLSX) {
+        return globalThis.XLSX;
+    }
+    if (typeof window !== 'undefined' && window.XLSX) {
+        return window.XLSX;
+    }
+    return null;
+}
+
 function readExcelRows(file) {
     return new Promise((resolve, reject) => {
+        const parser = getExcelParser();
+        if (!parser || typeof parser.read !== 'function' || !parser.utils || typeof parser.utils.sheet_to_json !== 'function') {
+            reject(new Error('Excel parser is not loaded.'));
+            return;
+        }
+
         const reader = new FileReader();
 
         reader.onerror = () => reject(new Error('Unable to read the selected Excel file.'));
@@ -718,7 +774,7 @@ function readExcelRows(file) {
         reader.onload = (event) => {
             try {
                 const arrayBuffer = event.target && event.target.result;
-                const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+                const workbook = parser.read(arrayBuffer, { type: 'array' });
                 const firstSheetName = workbook.SheetNames && workbook.SheetNames[0];
                 if (!firstSheetName) {
                     resolve([]);
@@ -726,7 +782,7 @@ function readExcelRows(file) {
                 }
 
                 const worksheet = workbook.Sheets[firstSheetName];
-                const rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+                const rows = parser.utils.sheet_to_json(worksheet, { defval: '' });
                 resolve(Array.isArray(rows) ? rows : []);
             } catch (error) {
                 reject(error);
@@ -821,11 +877,12 @@ function downloadCredentialTestGmailFailuresFile(failures) {
 
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 
-    if (typeof XLSX !== 'undefined' && XLSX.utils && XLSX.writeFile) {
-        const worksheet = XLSX.utils.json_to_sheet(rows);
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, 'Failed Emails');
-        XLSX.writeFile(workbook, `test_gmail_failed_emails_${stamp}.xlsx`);
+    const parser = getExcelParser();
+    if (parser && parser.utils && parser.writeFile) {
+        const worksheet = parser.utils.json_to_sheet(rows);
+        const workbook = parser.utils.book_new();
+        parser.utils.book_append_sheet(workbook, worksheet, 'Failed Emails');
+        parser.writeFile(workbook, `test_gmail_failed_emails_${stamp}.xlsx`);
         return;
     }
 
@@ -1071,7 +1128,7 @@ function setupCredentialDistributor() {
             fileInput.value = '';
             return;
         }
-        if (typeof XLSX === 'undefined') {
+        if (!getExcelParser()) {
             setCredentialDistributorFeedback('error', 'Excel parser is not loaded. Please refresh and try again.');
             fileInput.value = '';
             return;
@@ -1459,7 +1516,7 @@ function setupBulkRegister() {
             return;
         }
 
-        if (typeof XLSX === 'undefined') {
+        if (!getExcelParser()) {
             alert('Excel parser is not loaded. Please refresh the page and try again.');
             input.value = '';
             return;
@@ -3765,6 +3822,23 @@ function setupQuickActions() {
     });
 }
 
+function setupDashboardHeroActions() {
+    const openUsersBtn = document.getElementById('heroOpenUsersBtn');
+    const openSettingsBtn = document.getElementById('heroOpenSettingsBtn');
+
+    if (openUsersBtn) {
+        openUsersBtn.addEventListener('click', () => {
+            switchToView('users');
+        });
+    }
+
+    if (openSettingsBtn) {
+        openSettingsBtn.addEventListener('click', () => {
+            switchToView('system');
+        });
+    }
+}
+
 function normalizeAnnouncementComposerToken(value) {
     return String(value == null ? '' : value).trim().toLowerCase();
 }
@@ -3975,12 +4049,12 @@ function setupAnnouncementComposer() {
 }
 
 function setupActivityLogButton() {
-    const activityBtn = document.getElementById('open-activity-log');
-    if (activityBtn) {
+    const activityTriggers = document.querySelectorAll('#open-activity-log, .js-open-activity-log');
+    activityTriggers.forEach(activityBtn => {
         activityBtn.addEventListener('click', () => {
             switchToView('activity-log');
         });
-    }
+    });
 }
 
 function setupSecuritySettings() {
@@ -4033,7 +4107,8 @@ function switchToView(viewId) {
 
     const targetView = document.getElementById(safeViewId + '-view');
     if (targetView) {
-        targetView.style.display = 'block';
+        targetView.style.display = 'flex';
+        targetView.style.flexDirection = 'column';
     }
 
     setActiveNav(safeViewId);
@@ -4513,7 +4588,7 @@ async function handleBulkSubjectImport(event) {
     if (!file) return;
 
     try {
-        if (typeof XLSX === 'undefined') {
+        if (!getExcelParser()) {
             throw new Error('Excel parser is not loaded.');
         }
 
@@ -4620,7 +4695,7 @@ async function handleBulkOfferingImport(event) {
     if (!file) return;
 
     try {
-        if (typeof XLSX === 'undefined') {
+        if (!getExcelParser()) {
             throw new Error('Excel parser is not loaded.');
         }
 
@@ -4636,9 +4711,16 @@ async function handleBulkOfferingImport(event) {
         const departmentMap = buildBulkDepartmentMap(existingUsers);
         const programMap = buildBulkProgramMap();
         const currentSemester = String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : '').trim();
+        const semesterSelect = document.getElementById('offering-semester');
+        const targetSemester = String(semesterSelect && semesterSelect.value || currentSemester).trim();
 
         const payloadRows = [];
         const rowErrors = [];
+        let usedSpreadsheetSemesterOverride = false;
+
+        if (!targetSemester) {
+            throw new Error('No active semester is selected for offering import.');
+        }
 
         rows.forEach((rawRow, index) => {
             const rowNumber = index + 2;
@@ -4646,10 +4728,9 @@ async function handleBulkOfferingImport(event) {
             const hasAnyValue = Object.values(mapped).some(Boolean);
             if (!hasAnyValue) return;
 
-            const semesterSlug = normalizeBulkText(mapped.semesterSlug) || currentSemester;
-            if (!semesterSlug) {
-                rowErrors.push(`Row ${rowNumber}: semester_slug is required.`);
-                return;
+            const spreadsheetSemester = normalizeBulkText(mapped.semesterSlug);
+            if (spreadsheetSemester && spreadsheetSemester !== targetSemester) {
+                usedSpreadsheetSemesterOverride = true;
             }
 
             const campusSlug = campusMap.get(normalizeBulkLookupKey(mapped.campusSlug));
@@ -4689,7 +4770,7 @@ async function handleBulkOfferingImport(event) {
             }
 
             payloadRows.push({
-                semesterSlug,
+                semesterSlug: targetSemester,
                 campusSlug,
                 departmentCode,
                 programCode: programRecord.programCode,
@@ -4722,6 +4803,9 @@ async function handleBulkOfferingImport(event) {
         if (combinedErrors.length) {
             summaryLines.push('', 'Errors:');
             combinedErrors.forEach(msg => summaryLines.push('- ' + msg));
+        }
+        if (usedSpreadsheetSemesterOverride) {
+            summaryLines.push('', `Note: spreadsheet semester_slug values were ignored. Imported into current semester "${targetSemester}".`);
         }
 
         alert(summaryLines.join('\n'));
@@ -5392,7 +5476,10 @@ function setupAdminProfileActions() {
             const targetCard = document.getElementById(targetId);
             if (targetCard) {
                 targetCard.style.display = 'block';
-                targetCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                targetCard.scrollIntoView({
+                    behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+                    block: 'start'
+                });
             }
         });
     });
@@ -5403,7 +5490,10 @@ function setupAdminProfileActions() {
             const targetCard = targetId ? document.getElementById(targetId) : null;
             if (targetCard) {
                 const form = targetCard.querySelector('form');
-                if (form) form.reset();
+                if (form) {
+                    form.reset();
+                    clearFormMessage(form);
+                }
                 targetCard.style.display = 'none';
             }
         });
@@ -5412,8 +5502,36 @@ function setupAdminProfileActions() {
 
 function hideAdminAccountActionCards() {
     document.querySelectorAll('.account-action-card').forEach(card => {
+        const form = card.querySelector('form');
+        if (form) {
+            clearFormMessage(form);
+        }
         card.style.display = 'none';
     });
+}
+
+function showFormMessage(form, message, type) {
+    if (!form) return;
+
+    let messageElement = form.querySelector('.form-message');
+    if (!messageElement) {
+        messageElement = document.createElement('div');
+        messageElement.className = 'form-message';
+        messageElement.setAttribute('role', 'status');
+        const actions = form.querySelector('.form-actions');
+        form.insertBefore(messageElement, actions || null);
+    }
+
+    messageElement.className = `form-message ${type === 'error' ? 'error' : 'success'}`;
+    messageElement.textContent = message;
+}
+
+function clearFormMessage(form) {
+    if (!form) return;
+    const messageElement = form.querySelector('.form-message');
+    if (messageElement) {
+        messageElement.remove();
+    }
 }
 
 /**
@@ -5430,34 +5548,36 @@ function setupAdminChangeEmailForm() {
 }
 
 function handleAdminChangeEmail() {
+    const form = document.getElementById('adminChangeEmailForm');
     const currentEmail = document.getElementById('adminCurrentEmail').value.trim();
     const newEmail = document.getElementById('adminNewEmail').value.trim();
     const confirmEmail = document.getElementById('adminConfirmEmail').value.trim();
+    clearFormMessage(form);
 
     if (!newEmail || !confirmEmail) {
-        alert('Please fill out all email fields.');
+        showFormMessage(form, 'Please fill out all email fields.', 'error');
         return;
     }
 
     if (newEmail !== confirmEmail) {
-        alert('New email and confirmation do not match.');
+        showFormMessage(form, 'New email and confirmation do not match.', 'error');
         return;
     }
 
     if (currentEmail && newEmail.toLowerCase() === currentEmail.toLowerCase()) {
-        alert('New email must be different from the current email.');
+        showFormMessage(form, 'New email must be different from the current email.', 'error');
         return;
     }
 
     if (!SharedData.changeOwnEmail) {
-        alert('Email update service is unavailable.');
+        showFormMessage(form, 'Email update service is unavailable.', 'error');
         return;
     }
 
     try {
         const result = SharedData.changeOwnEmail(currentEmail, newEmail);
         const nextEmail = String(result && result.email || newEmail).trim();
-        alert('Email updated successfully.');
+        showFormMessage(form, 'Email updated successfully.', 'success');
 
         const profileEmail = document.getElementById('adminProfileEmail');
         if (profileEmail) profileEmail.textContent = nextEmail;
@@ -5468,12 +5588,13 @@ function handleAdminChangeEmail() {
         }
     } catch (error) {
         console.error('[AdminPanel] Failed to update email.', error);
-        alert(error && error.message ? error.message : 'Failed to update email.');
+        showFormMessage(form, error && error.message ? error.message : 'Failed to update email.', 'error');
         return;
     }
 
-    const form = document.getElementById('adminChangeEmailForm');
-    if (form) form.reset();
+    if (form) {
+        form.reset();
+    }
 }
 
 /**
@@ -5490,36 +5611,39 @@ function setupAdminProfilePasswordForm() {
 }
 
 function handleAdminProfilePasswordChange() {
+    const form = document.getElementById('adminChangePasswordForm');
     const currentPassword = document.getElementById('adminCurrentPassword').value.trim();
     const newPassword = document.getElementById('adminNewPassword').value.trim();
     const confirmPassword = document.getElementById('adminConfirmPassword').value.trim();
+    clearFormMessage(form);
 
     if (!currentPassword || !newPassword || !confirmPassword) {
-        alert('Please fill out all password fields.');
+        showFormMessage(form, 'Please fill out all password fields.', 'error');
         return;
     }
 
     if (newPassword !== confirmPassword) {
-        alert('New password and confirmation do not match.');
+        showFormMessage(form, 'New password and confirmation do not match.', 'error');
         return;
     }
 
     if (!SharedData.changeOwnPassword) {
-        alert('Password update service is unavailable.');
+        showFormMessage(form, 'Password update service is unavailable.', 'error');
         return;
     }
 
     try {
         SharedData.changeOwnPassword(currentPassword, newPassword);
-        alert('Password updated successfully.');
+        showFormMessage(form, 'Password updated successfully.', 'success');
     } catch (error) {
         console.error('[AdminPanel] Failed to update password.', error);
-        alert(error && error.message ? error.message : 'Failed to update password.');
+        showFormMessage(form, error && error.message ? error.message : 'Failed to update password.', 'error');
         return;
     }
 
-    const form = document.getElementById('adminChangePasswordForm');
-    if (form) form.reset();
+    if (form) {
+        form.reset();
+    }
 }
 
 /* Professor Management System

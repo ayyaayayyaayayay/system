@@ -1928,6 +1928,71 @@ body {
     }
 }
 
+@media (max-width: 1000px) {
+    .professor-panel .reports-content {
+        gap: 20px;
+    }
+
+    .professor-panel .detail-report-section,
+    .professor-panel .faculty-summary-section,
+    .professor-panel .analytics-section,
+    .professor-panel .summary-table-section,
+    .professor-panel .faculty-paper-detail-card {
+        padding: 22px 20px;
+    }
+
+    .professor-panel .filters-row {
+        width: 100%;
+        align-items: stretch;
+    }
+
+    .professor-panel .eval-type-filter,
+    .professor-panel .semester-filter {
+        flex: 1 1 220px;
+        min-width: 0;
+    }
+
+    .professor-panel .faculty-comments-header {
+        flex-direction: column;
+    }
+
+    .professor-panel .faculty-comments-actions {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .professor-panel .faculty-paper-header-actions {
+        width: 100%;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .professor-panel .faculty-paper-tabs {
+        flex-wrap: wrap;
+    }
+
+    .professor-panel .faculty-paper-meta-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .professor-panel .faculty-paper-detail-actions {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .professor-panel .faculty-paper-detail-actions > * {
+        flex: 1 1 220px;
+    }
+
+    .professor-panel .chart-container {
+        height: 280px;
+    }
+
+    .professor-panel .semestral-trend-chart-container {
+        height: 260px;
+    }
+}
+
 .faculty-paper-section {
     margin-bottom: 18px;
 }
@@ -1960,6 +2025,64 @@ body {
 
 .faculty-paper-detail-card {
     margin-top: 0;
+}
+
+.reports-content,
+.reports-content > *,
+.faculty-summary-section,
+.analytics-section,
+.summary-table-section,
+.detail-report-section,
+.charts-section,
+.chart-card,
+.semestral-trend-grid,
+.semestral-trend-panel,
+.semestral-trend-chart-card,
+.faculty-comments-panel,
+.faculty-paper-section,
+.faculty-paper-detail-card,
+.faculty-paper-meta-grid,
+.faculty-paper-header-actions,
+.faculty-paper-tabs,
+.faculty-paper-detail-actions {
+    min-width: 0;
+}
+
+.reports-content {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.reports-content > .detail-report-section,
+.reports-content > .faculty-summary-section,
+.reports-content > .analytics-section {
+    margin-bottom: 0;
+}
+
+.reports-breakdown-table-wrap,
+.report-trend-table-wrap,
+.report-detail-table-wrap,
+.faculty-paper-table-wrap {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+}
+
+.reports-breakdown-table-wrap .faculty-breakdown-table {
+    min-width: 640px;
+}
+
+.report-trend-table-wrap .summary-table {
+    min-width: 560px;
+}
+
+.report-detail-table-wrap .summary-table {
+    min-width: 900px;
+}
+
+.faculty-paper-table-wrap .summary-table {
+    min-width: 760px;
 }
 
 .faculty-paper-detail-text {
@@ -2120,6 +2243,729 @@ body {
     }
     .pdf-preview-toolbar h3 {
         font-size: 14px;
+    }
+}
+
+/* Phase 2 professor panel modernization */
+.professor-panel {
+    min-height: 100vh;
+    background:
+        radial-gradient(circle at top right, rgba(99, 102, 241, 0.1), transparent 28%),
+        linear-gradient(180deg, #f6f8fc 0%, #eef3f9 100%);
+    color: #0f172a;
+}
+
+.professor-panel .dashboard-container {
+    position: relative;
+}
+
+.professor-panel .sidebar {
+    width: 280px;
+    padding: 18px 16px;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+    border-right: 1px solid rgba(203, 213, 225, 0.9);
+}
+
+.professor-panel .sidebar-header,
+.professor-panel .sidebar-footer {
+    border: none;
+    padding: 10px 4px;
+}
+
+.professor-panel .logo-container {
+    align-items: flex-start;
+    gap: 14px;
+}
+
+.professor-panel .logo-shield {
+    width: 58px;
+    height: 58px;
+    border-radius: 18px;
+}
+
+.professor-panel .logo-text {
+    font-size: 14px;
+    text-align: left;
+    line-height: 1.5;
+    max-width: 160px;
+}
+
+.professor-panel .sidebar-nav {
+    padding: 18px 0;
+    gap: 10px;
+}
+
+.professor-panel .nav-link {
+    min-height: 52px;
+    padding: 14px 16px;
+    border-radius: 16px;
+    font-weight: 600;
+    transition: background-color var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast), border-color var(--motion-fast);
+}
+
+.professor-panel .nav-link.active {
+    box-shadow: 0 12px 24px rgba(91, 103, 232, 0.22);
+}
+
+.professor-panel .sidebar-backdrop {
+    display: none;
+}
+
+.professor-panel .main-content {
+    margin-left: 280px;
+    padding: 28px 28px 36px;
+}
+
+.professor-panel .top-header {
+    margin-bottom: 24px;
+    padding: 20px 24px;
+    gap: 16px;
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    border-radius: 24px;
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+    background: rgba(255, 255, 255, 0.9);
+}
+
+.professor-header-main {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+    flex: 1;
+}
+
+.page-title-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.professor-panel .page-title {
+    margin: 0;
+    font-size: 30px;
+    letter-spacing: -0.04em;
+}
+
+.page-context {
+    margin: 0;
+    font-size: 13px;
+    color: #64748b;
+}
+
+.mobile-nav-toggle {
+    display: none;
+    width: 42px;
+    height: 42px;
+    border: 1px solid #dbe3ee;
+    border-radius: 14px;
+    background: #ffffff;
+    color: #334155;
+    cursor: pointer;
+    transition: background-color var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
+}
+
+.professor-panel .user-info {
+    gap: 12px;
+}
+
+.professor-panel .user-action-btn,
+.professor-panel .user-profile,
+.professor-panel .btn-submit,
+.professor-panel .btn-cancel,
+.professor-panel .btn-action,
+.professor-panel .faculty-paper-tab,
+.professor-panel .faculty-comments-view,
+.professor-panel .faculty-comments-close,
+.professor-panel .faculty-comments-ai-btn,
+.professor-panel .rating-option,
+.professor-panel .form-select,
+.professor-panel .form-input,
+.professor-panel .summary-table,
+.professor-panel .nav-link {
+    transition: background-color var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.professor-panel .dropdown-panel {
+    width: min(360px, calc(100vw - 40px));
+    border-radius: 18px;
+    border: 1px solid #dbe5ee;
+    box-shadow: 0 20px 40px rgba(15, 23, 42, 0.12);
+    padding: 18px;
+}
+
+.professor-panel .dropdown-panel.active,
+.professor-panel .content-view,
+.professor-panel .form-message.ui-message {
+    animation: none;
+}
+
+.professor-panel .dashboard-hero-card {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    align-items: center;
+    padding: 26px 28px;
+    margin-bottom: 22px;
+    border-radius: 24px;
+    background:
+        linear-gradient(135deg, rgba(47, 62, 156, 0.94) 0%, rgba(96, 69, 181, 0.92) 100%),
+        #4f46e5;
+    color: #ffffff;
+    box-shadow: 0 18px 36px rgba(79, 70, 229, 0.24);
+}
+
+.dashboard-hero-copy {
+    max-width: 620px;
+}
+
+.dashboard-hero-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 30px;
+    padding: 0 12px;
+    margin-bottom: 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.14);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.dashboard-hero-copy h2 {
+    margin: 0 0 10px;
+    font-size: 30px;
+    line-height: 1.08;
+    letter-spacing: -0.04em;
+}
+
+.dashboard-hero-copy p {
+    margin: 0;
+    max-width: 60ch;
+    color: rgba(255, 255, 255, 0.86);
+    line-height: 1.7;
+    font-size: 14px;
+}
+
+.dashboard-hero-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 220px;
+}
+
+.hero-action-btn {
+    min-height: 46px;
+    border-radius: 14px;
+    border: none;
+    padding: 0 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.hero-action-btn--primary {
+    background: #ffffff;
+    color: #312e81;
+    box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
+}
+
+.hero-action-btn--secondary {
+    background: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.professor-panel .summary-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 22px;
+}
+
+.professor-panel .summary-card,
+.professor-panel .dashboard-widget-card,
+.professor-panel .action-card,
+.professor-panel .detail-report-section,
+.professor-panel .faculty-summary-section,
+.professor-panel .analytics-section,
+.professor-panel .summary-table-section,
+.professor-panel .charts-section > *,
+.professor-panel .form-card,
+.professor-panel .reports-blackout,
+.professor-panel .faculty-comments-panel {
+    border-radius: 24px;
+    border: 1px solid rgba(226, 232, 240, 0.92);
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+    background: rgba(255, 255, 255, 0.94);
+}
+
+.professor-panel .summary-card {
+    padding: 20px 22px;
+}
+
+.professor-panel .summary-card:hover,
+.professor-panel .action-card:hover,
+.professor-panel .btn-submit:hover,
+.professor-panel .btn-cancel:hover,
+.professor-panel .btn-action:hover,
+.professor-panel .faculty-paper-tab:hover,
+.professor-panel .rating-option:hover {
+    transform: none;
+}
+
+.professor-panel .card-caption {
+    display: block;
+    margin-top: 6px;
+    font-size: 12px;
+    color: #64748b;
+}
+
+.professor-panel .dashboard-widget-grid,
+.professor-panel .action-cards {
+    gap: 16px;
+}
+
+.professor-panel .dashboard-widget-card,
+.professor-panel .action-card,
+.professor-panel .detail-report-section,
+.professor-panel .faculty-summary-section,
+.professor-panel .summary-table-section,
+.professor-panel .form-card {
+    padding: 24px;
+}
+
+.professor-panel .form-header,
+.professor-panel .section-header,
+.professor-panel .dashboard-widget-header {
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.professor-panel .section-title h2,
+.professor-panel .form-header h2,
+.professor-panel .dashboard-widget-header h3 {
+    letter-spacing: -0.03em;
+}
+
+.professor-panel .questionnaire-loading-state {
+    padding: 24px 12px;
+    border: 1px dashed #cbd5e1;
+    border-radius: 16px;
+    background: #f8fafc;
+    text-align: center;
+    color: #475569;
+}
+
+.professor-panel .questionnaire-loading-state i {
+    margin: 0 0 10px;
+    font-size: 30px;
+    color: #94a3b8;
+}
+
+.professor-panel .questionnaire-loading-state p {
+    margin: 0;
+}
+
+.professor-panel .form-message {
+    margin-bottom: 20px;
+}
+
+.professor-panel .rating-scale input[type="radio"]:checked + .rating-option {
+    transform: none;
+    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.12);
+}
+
+.professor-panel .reports-blackout {
+    background: linear-gradient(135deg, #111827 0%, #1e293b 100%);
+    color: #f8fafc;
+}
+
+.professor-panel .faculty-comments-panel,
+.professor-panel .table-container,
+.professor-panel .summary-grid,
+.professor-panel .profile-grid {
+    gap: 16px;
+}
+
+@media (max-width: 1180px) {
+    .professor-panel .summary-cards {
+        grid-template-columns: 1fr;
+    }
+
+    .professor-panel .dashboard-hero-card {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .dashboard-hero-actions {
+        width: 100%;
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+}
+
+@media (max-width: 1000px) {
+    .professor-panel .main-content {
+        margin-left: 0 !important;
+        padding: 16px 16px 28px;
+    }
+
+    .professor-panel .sidebar {
+        width: 280px !important;
+        transform: translateX(-100%);
+        transition: transform var(--motion-normal);
+        z-index: 260;
+    }
+
+    .professor-panel .sidebar .logo-text,
+    .professor-panel .sidebar .nav-link span {
+        display: inline !important;
+    }
+
+    .professor-panel .sidebar-header {
+        padding: 10px 4px !important;
+        justify-content: flex-start !important;
+    }
+
+    .professor-panel .nav-link {
+        justify-content: flex-start !important;
+        padding: 14px 16px !important;
+    }
+
+    .professor-panel.professor-sidebar-open .sidebar {
+        transform: translateX(0);
+    }
+
+    .professor-panel .sidebar-backdrop {
+        position: fixed;
+        inset: 0;
+        display: block;
+        border: none;
+        background: rgba(15, 23, 42, 0.42);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--motion-normal);
+        z-index: 250;
+    }
+
+    .professor-panel.professor-sidebar-open .sidebar-backdrop {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .mobile-nav-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .professor-panel .top-header {
+        padding: 18px 16px;
+        border-radius: 20px;
+    }
+
+    .professor-panel .page-title {
+        font-size: 24px;
+    }
+
+    .professor-panel .user-profile span {
+        display: none;
+    }
+}
+
+@media (max-width: 640px) {
+    .professor-panel .reports-content {
+        gap: 16px;
+    }
+
+    .professor-panel .top-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .professor-panel .user-info {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    .professor-panel .dashboard-hero-card,
+    .professor-panel .summary-card,
+    .professor-panel .dashboard-widget-card,
+    .professor-panel .action-card,
+    .professor-panel .detail-report-section,
+    .professor-panel .faculty-summary-section,
+    .professor-panel .summary-table-section,
+    .professor-panel .form-card,
+    .professor-panel .reports-blackout,
+    .professor-panel .faculty-comments-panel {
+        border-radius: 20px;
+    }
+
+    .professor-panel .dashboard-hero-card {
+        padding: 20px;
+    }
+
+    .dashboard-hero-copy h2 {
+        font-size: 24px;
+    }
+
+    .dashboard-hero-actions {
+        flex-direction: column;
+    }
+
+    .hero-action-btn {
+        width: 100%;
+    }
+
+    .professor-panel .form-card,
+    .professor-panel .detail-report-section,
+    .professor-panel .faculty-summary-section,
+    .professor-panel .summary-table-section,
+    .professor-panel .analytics-section,
+    .professor-panel .faculty-comments-panel {
+        padding: 20px 16px;
+    }
+
+    .professor-panel .filters-row,
+    .professor-panel .faculty-comments-actions,
+    .professor-panel .faculty-paper-tabs,
+    .professor-panel .faculty-paper-detail-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .professor-panel .eval-type-filter,
+    .professor-panel .semester-filter {
+        width: 100%;
+        flex: 1 1 auto;
+    }
+
+    .professor-panel .faculty-comments-actions > *,
+    .professor-panel .faculty-paper-header-actions > *,
+    .professor-panel .faculty-paper-tabs > *,
+    .professor-panel .faculty-paper-ai-actions > *,
+    .professor-panel .faculty-paper-detail-actions > * {
+        width: 100%;
+    }
+
+    .professor-panel .faculty-paper-detail-actions {
+        gap: 12px;
+    }
+
+    .professor-panel .faculty-paper-detail-actions .btn-submit,
+    .professor-panel .faculty-paper-detail-actions .btn-cancel {
+        min-height: 48px;
+        padding: 12px 16px;
+        flex: 0 0 auto;
+        align-self: stretch;
+    }
+
+    .professor-panel .faculty-paper-meta-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    .professor-panel .faculty-paper-ai-actions {
+        align-items: stretch;
+    }
+
+    .professor-panel .chart-container {
+        height: 240px;
+    }
+
+    .professor-panel .semestral-trend-chart-container {
+        height: 220px;
+    }
+
+    .professor-panel .reports-breakdown-table-wrap,
+    .professor-panel .report-trend-table-wrap,
+    .professor-panel .report-detail-table-wrap,
+    .professor-panel .faculty-paper-table-wrap {
+        overflow: visible;
+    }
+
+    .professor-panel .reports-breakdown-table-wrap .faculty-breakdown-table,
+    .professor-panel .report-trend-table-wrap .summary-table,
+    .professor-panel .report-detail-table-wrap .summary-table,
+    .professor-panel .faculty-paper-table-wrap .summary-table {
+        min-width: 0;
+    }
+
+    .professor-panel .mobile-card-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+
+    .professor-panel .mobile-card-table thead {
+        display: none;
+    }
+
+    .professor-panel .mobile-card-table tbody {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .professor-panel .mobile-card-table tbody tr {
+        display: block;
+        border: 1px solid rgba(226, 232, 240, 0.92);
+        border-radius: 16px;
+        background: #ffffff;
+        overflow: hidden;
+    }
+
+    .professor-panel .mobile-card-table--faculty-paper tbody tr.faculty-paper-row-active {
+        background: #eef2ff;
+        border-color: #c7d2fe;
+    }
+
+    .professor-panel .mobile-card-table tbody td {
+        display: grid;
+        grid-template-columns: minmax(0, 112px) minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+        width: 100%;
+        padding: 10px 14px;
+        border-bottom: 1px solid #e2e8f0;
+        font-size: 13px;
+        text-align: left;
+        word-break: break-word;
+    }
+
+    .professor-panel .mobile-card-table tbody td::before {
+        content: attr(data-label);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #64748b;
+    }
+
+    .professor-panel .mobile-card-table tbody td:last-child {
+        border-bottom: none;
+    }
+
+    .professor-panel .mobile-card-table tbody tr.mobile-card-empty-row {
+        border: none;
+        border-radius: 0;
+        background: transparent;
+    }
+
+    .professor-panel .mobile-card-table tbody tr.mobile-card-empty-row td {
+        display: block;
+        padding: 0;
+        border: none;
+    }
+
+    .professor-panel .mobile-card-table tbody tr.mobile-card-empty-row td::before {
+        content: none;
+    }
+
+    .professor-panel .mobile-card-table .faculty-paper-open-btn,
+    .professor-panel .mobile-card-table tbody td[data-label="Actions"] .btn-submit,
+    .professor-panel .mobile-card-table tbody td[data-label="Actions"] .btn-cancel {
+        width: 100%;
+    }
+}
+
+@media (max-width: 1000px) and (orientation: landscape) {
+    .professor-panel .reports-breakdown-table-wrap,
+    .professor-panel .report-trend-table-wrap,
+    .professor-panel .report-detail-table-wrap,
+    .professor-panel .faculty-paper-table-wrap {
+        overflow: visible;
+    }
+
+    .professor-panel .reports-breakdown-table-wrap .faculty-breakdown-table,
+    .professor-panel .report-trend-table-wrap .summary-table,
+    .professor-panel .report-detail-table-wrap .summary-table,
+    .professor-panel .faculty-paper-table-wrap .summary-table {
+        min-width: 0;
+    }
+
+    .professor-panel .mobile-card-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+
+    .professor-panel .mobile-card-table thead {
+        display: none;
+    }
+
+    .professor-panel .mobile-card-table tbody {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .professor-panel .mobile-card-table tbody tr {
+        display: block;
+        border: 1px solid rgba(226, 232, 240, 0.92);
+        border-radius: 16px;
+        background: #ffffff;
+        overflow: hidden;
+    }
+
+    .professor-panel .mobile-card-table--faculty-paper tbody tr.faculty-paper-row-active {
+        background: #eef2ff;
+        border-color: #c7d2fe;
+    }
+
+    .professor-panel .mobile-card-table tbody td {
+        display: grid;
+        grid-template-columns: minmax(0, 112px) minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+        width: 100%;
+        padding: 10px 14px;
+        border-bottom: 1px solid #e2e8f0;
+        font-size: 13px;
+        text-align: left;
+        word-break: break-word;
+    }
+
+    .professor-panel .mobile-card-table tbody td::before {
+        content: attr(data-label);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #64748b;
+    }
+
+    .professor-panel .mobile-card-table tbody td:last-child {
+        border-bottom: none;
+    }
+
+    .professor-panel .mobile-card-table tbody tr.mobile-card-empty-row {
+        border: none;
+        border-radius: 0;
+        background: transparent;
+    }
+
+    .professor-panel .mobile-card-table tbody tr.mobile-card-empty-row td {
+        display: block;
+        padding: 0;
+        border: none;
+    }
+
+    .professor-panel .mobile-card-table tbody tr.mobile-card-empty-row td::before {
+        content: none;
+    }
+
+    .professor-panel .mobile-card-table .faculty-paper-open-btn,
+    .professor-panel .mobile-card-table tbody td[data-label="Actions"] .btn-submit,
+    .professor-panel .mobile-card-table tbody td[data-label="Actions"] .btn-cancel {
+        width: 100%;
     }
 }
 

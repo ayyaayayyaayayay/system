@@ -5,16 +5,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dean Dashboard - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/daenpanel.css">
     <link rel="stylesheet" href="../css/panel-theme.css">
+    <link rel="stylesheet" href="../css/daenpanel.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
 </head>
 
-<body>
+<body class="dean-panel">
     <div class="dashboard-container">
+        <button class="sidebar-backdrop" id="sidebarBackdrop" type="button" aria-label="Close navigation"></button>
         <!-- Left Sidebar -->
-        <aside class="sidebar">
+        <aside class="sidebar" id="deanSidebar">
             <div class="sidebar-header">
                 <div class="logo-container">
                     <div class="logo-shield">
@@ -52,8 +53,7 @@
             </nav>
 
             <div class="sidebar-footer">
-                <a href="#" class="nav-link logout"
-                    onclick="SharedData.clearSession(); window.location.href='mainpage.html';">
+                <a href="#" class="nav-link logout" id="deanLogoutBtn">
                     <i class="fas fa-sign-out-alt"></i>
                     <span>Logout</span>
                 </a>
@@ -66,7 +66,16 @@
             <div id="dashboardView" class="content-view">
                 <!-- Top Header -->
                 <header class="top-header">
-                    <h1 class="page-title">Dean Dashboard</h1>
+                    <div class="dean-header-main">
+                        <button class="mobile-nav-toggle" id="deanMenuToggle" type="button"
+                            aria-label="Open navigation" aria-controls="deanSidebar" aria-expanded="false">
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <div class="page-title-block">
+                            <h1 class="page-title">Dean Dashboard</h1>
+                            <p class="page-context">Review department-wide results, manage peer assignments, and process faculty papers.</p>
+                        </div>
+                    </div>
                     <div class="user-info">
                         <button class="user-action-btn js-notification-btn" aria-label="View announcements">
                             <i class="fas fa-bell"></i>
@@ -126,6 +135,28 @@
                     </div>
                 </header>
 
+                <section class="dashboard-hero-card">
+                    <div class="dashboard-hero-copy">
+                        <span class="dashboard-hero-badge">Dean workspace</span>
+                        <h2>Monitor faculty performance and department actions from one dashboard.</h2>
+                        <p>Use this panel to review evaluation trends, complete supervisor evaluations, process faculty papers, and manage peer rooms for your department scope.</p>
+                    </div>
+                    <div class="dashboard-hero-actions">
+                        <button type="button" class="hero-action-btn hero-action-btn--primary" id="heroOpenEvaluationBtn">
+                            <i class="fas fa-people-group"></i>
+                            <span>Open Evaluation</span>
+                        </button>
+                        <button type="button" class="hero-action-btn hero-action-btn--secondary" id="heroOpenFacultyResponseBtn">
+                            <i class="fas fa-users-viewfinder"></i>
+                            <span>View Faculty Results</span>
+                        </button>
+                        <button type="button" class="hero-action-btn hero-action-btn--secondary" id="heroOpenFacultyPaperBtn">
+                            <i class="fas fa-file-signature"></i>
+                            <span>Open Paper Inbox</span>
+                        </button>
+                    </div>
+                </section>
+
                 <!-- Summary Cards -->
                 <div class="summary-cards">
                     <div class="summary-card evaluations">
@@ -135,6 +166,7 @@
                         <div class="card-content">
                             <h3>Evaluations Received</h3>
                             <p class="card-number">0/0</p>
+                            <span class="card-caption">Received versus expected submissions</span>
                         </div>
                     </div>
 
@@ -145,6 +177,7 @@
                         <div class="card-content">
                             <h3>Professors Supervised</h3>
                             <p class="card-number">0</p>
+                            <span class="card-caption">Faculty under your department scope</span>
                         </div>
                     </div>
 
@@ -155,6 +188,7 @@
                         <div class="card-content">
                             <h3>Response Rate</h3>
                             <p class="card-number">0%</p>
+                            <span class="card-caption">Current selected semester participation</span>
                         </div>
                     </div>
                 </div>
@@ -273,7 +307,16 @@
             <!-- Peer Evaluation View -->
             <div id="peerEvaluationView" class="content-view" style="display: none;">
                 <header class="top-header">
-                    <h1 class="page-title">Evaluation</h1>
+                    <div class="dean-header-main">
+                        <button class="mobile-nav-toggle" type="button" aria-label="Open navigation"
+                            aria-controls="deanSidebar" aria-expanded="false" data-mobile-nav-toggle>
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <div class="page-title-block">
+                            <h1 class="page-title">Evaluation</h1>
+                            <p class="page-context">Complete supervisor evaluations with clearer section flow and stable feedback states.</p>
+                        </div>
+                    </div>
                     <div class="user-info">
                         <button class="user-action-btn js-notification-btn" aria-label="View announcements">
                             <i class="fas fa-bell"></i>
@@ -341,9 +384,8 @@
                         </div>
 
                         <div id="dynamic-supervisor-questions-container">
-                            <div class="empty-state" style="text-align: center; padding: 3rem 1rem;">
-                                <i class="fas fa-spinner fa-spin"
-                                    style="font-size: 3rem; color: #cbd5e1; margin-bottom: 1rem;"></i>
+                            <div class="questionnaire-loading-state">
+                                <i class="fas fa-spinner fa-spin"></i>
                                 <p>Loading supervisor evaluation form...</p>
                             </div>
                         </div>
@@ -365,7 +407,16 @@
             <!-- Faculty Paper Inbox View -->
             <div id="facultyPaperInboxView" class="content-view" style="display: none;">
                 <header class="top-header">
-                    <h1 class="page-title">Faculty Paper Inbox</h1>
+                    <div class="dean-header-main">
+                        <button class="mobile-nav-toggle" type="button" aria-label="Open navigation"
+                            aria-controls="deanSidebar" aria-expanded="false" data-mobile-nav-toggle>
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <div class="page-title-block">
+                            <h1 class="page-title">Faculty Paper Inbox</h1>
+                            <p class="page-context">Review assigned papers, update Section C, and preview acknowledgement records.</p>
+                        </div>
+                    </div>
                     <div class="user-info">
                         <button class="user-action-btn js-notification-btn" aria-label="View announcements">
                             <i class="fas fa-bell"></i>
@@ -416,8 +467,8 @@
                         </div>
                     </div>
 
-                    <div class="table-container">
-                        <table class="summary-table" id="deanFacultyPaperTable">
+                    <div class="table-container faculty-paper-table-wrap">
+                        <table class="summary-table mobile-card-table mobile-card-table--faculty-paper" id="deanFacultyPaperTable">
                             <thead>
                                 <tr>
                                     <th>Paper ID</th>
@@ -429,7 +480,7 @@
                                 </tr>
                             </thead>
                             <tbody id="deanFacultyPaperTableBody">
-                                <tr>
+                                <tr class="mobile-card-empty-row">
                                     <td colspan="6">No faculty papers assigned.</td>
                                 </tr>
                             </tbody>
@@ -443,7 +494,7 @@
                         <p id="deanFacultyPaperDetailMeta">Select a paper to continue.</p>
                     </div>
 
-                    <div class="profile-grid profile-grid-wide">
+                    <div class="profile-grid profile-grid-wide dean-faculty-paper-meta-grid">
                         <div class="profile-item"><span class="profile-label">Paper ID</span><span class="profile-value" id="deanFpDetailId">N/A</span></div>
                         <div class="profile-item"><span class="profile-label">Status</span><span class="profile-value" id="deanFpDetailStatus">N/A</span></div>
                         <div class="profile-item"><span class="profile-label">Professor Name</span><span class="profile-value" id="deanFpDetailFacultyName">N/A</span></div>
@@ -471,7 +522,7 @@
                             </div>
                         </div>
 
-                        <div class="form-actions">
+                        <div class="form-actions dean-faculty-paper-actions">
                             <button type="submit" class="btn-submit" id="deanFacultyPaperSaveBtn">Save Section C</button>
                             <button type="button" class="btn-cancel" id="deanFacultyPaperPreviewBtn">Preview PDF</button>
                         </div>
@@ -482,7 +533,16 @@
             <!-- Profile View -->
             <div id="profileView" class="content-view" style="display: none;">
                 <header class="top-header">
-                    <h1 class="page-title">Profile</h1>
+                    <div class="dean-header-main">
+                        <button class="mobile-nav-toggle" type="button" aria-label="Open navigation"
+                            aria-controls="deanSidebar" aria-expanded="false" data-mobile-nav-toggle>
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <div class="page-title-block">
+                            <h1 class="page-title">Profile</h1>
+                            <p class="page-context">Review dean details and manage your account information.</p>
+                        </div>
+                    </div>
                     <div class="user-info">
                         <button class="user-action-btn js-notification-btn" aria-label="View announcements">
                             <i class="fas fa-bell"></i>
@@ -586,7 +646,7 @@
                     </div>
                 </div>
 
-                <div class="form-card account-action-card" id="emailUpdateCard">
+                <div class="form-card account-action-card" id="emailUpdateCard" style="display: none;">
                     <div class="form-header">
                         <h2>Update Gmail</h2>
                         <p>Read-only in this phase. Update endpoint is not available yet.</p>
@@ -624,7 +684,7 @@
                     </form>
                 </div>
 
-                <div class="form-card account-action-card" id="passwordUpdateCard">
+                <div class="form-card account-action-card" id="passwordUpdateCard" style="display: none;">
                     <div class="form-header">
                         <h2>Update Account Password</h2>
                         <p>Read-only in this phase. Update endpoint is not available yet.</p>
@@ -685,7 +745,16 @@
             <!-- Faculty Response Rate & Counts View -->
             <div id="facultyResponseView" class="content-view" style="display: none;">
                 <header class="top-header">
-                    <h1 class="page-title">Faculty Response Rate & Counts</h1>
+                    <div class="dean-header-main">
+                        <button class="mobile-nav-toggle" type="button" aria-label="Open navigation"
+                            aria-controls="deanSidebar" aria-expanded="false" data-mobile-nav-toggle>
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <div class="page-title-block">
+                            <h1 class="page-title">Faculty Response Rate & Counts</h1>
+                            <p class="page-context">Search faculty performance, compare response rates, and review comment trends.</p>
+                        </div>
+                    </div>
                     <div class="user-info">
                         <button class="user-action-btn js-notification-btn" aria-label="View announcements">
                             <i class="fas fa-bell"></i>
@@ -760,7 +829,7 @@
                         your department scope for Selected semester. Total: 0</p>
 
                     <div class="table-container faculty-response-table-container">
-                        <table class="summary-table" id="facultyResponseCountsTable">
+                        <table class="summary-table mobile-card-table mobile-card-table--faculty-response" id="facultyResponseCountsTable">
                             <thead>
                                 <tr>
                                     <th>Employee ID</th>
@@ -776,7 +845,7 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr>
+                                <tr class="mobile-card-empty-row">
                                     <td colspan="10">Loading faculty response data...</td>
                                 </tr>
                             </tbody>
@@ -815,8 +884,8 @@
                             <div class="dean-semestral-trend-panel">
                                 <div class="dean-semestral-trend-status" id="deanSemestralTrendStatus">No semestral trend data available.</div>
                                 <p class="dean-semestral-trend-delta" id="deanSemestralTrendDelta">Open a professor comments list to load the last 4-semester performance trend.</p>
-                                <div class="table-container">
-                                    <table class="summary-table">
+                                <div class="table-container dean-trend-table-wrap">
+                                    <table class="summary-table mobile-card-table mobile-card-table--trend">
                                         <thead>
                                             <tr>
                                                 <th>Semester</th>
@@ -827,7 +896,7 @@
                                             </tr>
                                         </thead>
                                         <tbody id="deanSemestralTrendTableBody">
-                                            <tr>
+                                            <tr class="mobile-card-empty-row">
                                                 <td colspan="5">No data available.</td>
                                             </tr>
                                         </tbody>
@@ -851,7 +920,16 @@
             <!-- Faculty Peer-to-Peer Management View -->
             <div id="peerManagementView" class="content-view" style="display: none;">
                 <header class="top-header">
-                    <h1 class="page-title">Faculty Peer-to-Peer Management</h1>
+                    <div class="dean-header-main">
+                        <button class="mobile-nav-toggle" type="button" aria-label="Open navigation"
+                            aria-controls="deanSidebar" aria-expanded="false" data-mobile-nav-toggle>
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <div class="page-title-block">
+                            <h1 class="page-title">Faculty Peer-to-Peer Management</h1>
+                            <p class="page-context">Create peer rooms, manage members, and maintain room assignments cleanly.</p>
+                        </div>
+                    </div>
                     <div class="user-info">
                         <button class="user-action-btn js-notification-btn" aria-label="View announcements">
                             <i class="fas fa-bell"></i>

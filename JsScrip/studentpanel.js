@@ -33,6 +33,7 @@ let evaluationBehaviorCapture = {
 };
 let studentHeaderPanelsBound = false;
 let studentProofModalBound = false;
+let studentMobileDrawerBound = false;
 
 /**
  * Check if user is authenticated
@@ -103,6 +104,7 @@ function redirectToLogin() {
  */
 function initializeDashboard() {
     loadUserInfo();
+    setupMobileDrawer();
     setupHeaderPanels();
     renderStudentAnnouncements();
     renderAssignedEvaluationList();
@@ -120,6 +122,7 @@ function initializeDashboard() {
     setupHistoryView();
     setupStudentProofModal();
     refreshStudentProofRequirement();
+    setupStudentHeroActions();
 
     SharedData.onDataChange(function (key) {
         if (key === SharedData.KEYS.USERS) {
@@ -1058,6 +1061,7 @@ function setupNavigation() {
             // Switch views
             if (view) {
                 switchView(view);
+                closeMobileDrawer();
             }
         });
     });
@@ -1068,6 +1072,7 @@ function setupNavigation() {
  * @param {string} viewName - Name of the view to show ('dashboard' or 'evaluationForm')
  */
 function switchView(viewName) {
+    closeMobileDrawer();
     const dashboardView = document.getElementById('dashboardView');
     const evaluationFormView = document.getElementById('evaluationFormView');
     const profileView = document.getElementById('profileView');
@@ -1076,6 +1081,7 @@ function switchView(viewName) {
 
     if (viewName === 'dashboard') {
         if (pageTitle) pageTitle.textContent = 'Student Dashboard';
+        setPageContextText('Track evaluation progress and complete your forms on time.');
         dashboardView.style.display = 'block';
         evaluationFormView.style.display = 'none';
         if (profileView) profileView.style.display = 'none';
@@ -1086,6 +1092,7 @@ function switchView(viewName) {
         refreshStudentProofRequirement();
     } else if (viewName === 'evaluationForm') {
         if (pageTitle) pageTitle.textContent = 'Evaluation Form';
+        setPageContextText('Review each section carefully before submitting your evaluation.');
         dashboardView.style.display = 'none';
         evaluationFormView.style.display = 'block';
         if (profileView) profileView.style.display = 'none';
@@ -1101,6 +1108,7 @@ function switchView(viewName) {
         startEvaluationBehaviorCapture(false);
     } else if (viewName === 'profile') {
         if (pageTitle) pageTitle.textContent = 'Profile';
+        setPageContextText('Review your student profile and update your account password.');
         dashboardView.style.display = 'none';
         evaluationFormView.style.display = 'none';
         if (profileView) profileView.style.display = 'block';
@@ -1109,12 +1117,20 @@ function switchView(viewName) {
         window.scrollTo(0, 0);
     } else if (viewName === 'history') {
         if (pageTitle) pageTitle.textContent = 'History';
+        setPageContextText('Browse your submitted evaluations and view past answers.');
         dashboardView.style.display = 'none';
         evaluationFormView.style.display = 'none';
         if (profileView) profileView.style.display = 'none';
         if (historyView) historyView.style.display = 'block';
         closeStudentProofModal();
         window.scrollTo(0, 0);
+    }
+}
+
+function setPageContextText(text) {
+    const pageContext = document.getElementById('pageContextText');
+    if (pageContext) {
+        pageContext.textContent = String(text || '').trim();
     }
 }
 
@@ -1146,7 +1162,7 @@ function handleNavigation(section) {
  * Setup logout functionality
  */
 function setupLogout() {
-    const logoutLink = document.querySelector('.nav-link.logout');
+    const logoutLink = document.getElementById('studentLogoutBtn');
 
     if (logoutLink) {
         logoutLink.addEventListener('click', function (e) {
@@ -1213,6 +1229,75 @@ function setupEvaluationButtons() {
 
         handleStartEvaluation(professorName, courseCode, courseOfferingId);
     });
+}
+
+function setupMobileDrawer() {
+    if (studentMobileDrawerBound) return;
+
+    const toggleBtn = document.getElementById('studentMenuToggle');
+    const backdrop = document.getElementById('sidebarBackdrop');
+    if (!toggleBtn || !backdrop) return;
+
+    toggleBtn.addEventListener('click', function () {
+        const isOpen = document.body.classList.contains('student-sidebar-open');
+        if (isOpen) {
+            closeMobileDrawer();
+        } else {
+            openMobileDrawer();
+        }
+    });
+
+    backdrop.addEventListener('click', closeMobileDrawer);
+    window.addEventListener('resize', function () {
+        if (window.innerWidth > 900) {
+            closeMobileDrawer();
+        }
+    });
+
+    studentMobileDrawerBound = true;
+}
+
+function openMobileDrawer() {
+    document.body.classList.add('student-sidebar-open');
+    const toggleBtn = document.getElementById('studentMenuToggle');
+    if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'true');
+}
+
+function closeMobileDrawer() {
+    document.body.classList.remove('student-sidebar-open');
+    const toggleBtn = document.getElementById('studentMenuToggle');
+    if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
+}
+
+function setupStudentHeroActions() {
+    const openEvaluationBtn = document.getElementById('heroOpenEvaluationBtn');
+    const openHistoryBtn = document.getElementById('heroOpenHistoryBtn');
+    const dashboardOpenEvaluationBtn = document.getElementById('dashboardOpenEvaluationBtn');
+
+    const focusEvaluationList = function () {
+        switchView('dashboard');
+        updateNavigation('dashboard');
+        const evaluationsSection = document.querySelector('.evaluations-section');
+        if (evaluationsSection) {
+            const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            evaluationsSection.scrollIntoView({ behavior: prefersReducedMotion ? 'auto' : 'smooth', block: 'start' });
+        }
+    };
+
+    if (openEvaluationBtn) {
+        openEvaluationBtn.addEventListener('click', focusEvaluationList);
+    }
+
+    if (openHistoryBtn) {
+        openHistoryBtn.addEventListener('click', function () {
+            switchView('history');
+            updateNavigation('history');
+        });
+    }
+
+    if (dashboardOpenEvaluationBtn) {
+        dashboardOpenEvaluationBtn.addEventListener('click', focusEvaluationList);
+    }
 }
 
 /**
@@ -3071,18 +3156,36 @@ function setupRatingInputs() {
 
     ratingInputs.forEach(input => {
         input.addEventListener('change', function () {
-            // Add visual feedback
-            const label = this.nextElementSibling;
-            if (label) {
-                // Animate the selected rating
-                label.style.transform = 'scale(1.1)';
-                setTimeout(() => {
-                    label.style.transform = 'scale(1.05)';
-                }, 200);
-            }
             applyExceptionReportingRequirements();
         });
     });
+}
+
+function renderStudentFormMessage(message, tone) {
+    const form = document.getElementById('evaluationForm');
+    if (!form) return;
+
+    const existingMessage = form.querySelector('.form-message');
+    if (existingMessage) {
+        existingMessage.remove();
+    }
+
+    if (!message) {
+        return;
+    }
+
+    const messageDiv = document.createElement('div');
+    const state = String(tone || 'error').toLowerCase();
+    const variant = state === 'success' ? 'ui-message--success' : 'ui-message--error';
+    messageDiv.className = `form-message ui-message ${variant}`;
+    messageDiv.textContent = String(message);
+    form.insertBefore(messageDiv, form.firstChild);
+
+    setTimeout(() => {
+        if (messageDiv.parentNode) {
+            messageDiv.remove();
+        }
+    }, 5000);
 }
 
 /**
@@ -3090,38 +3193,7 @@ function setupRatingInputs() {
  * @param {string} message - Success message
  */
 function showSuccessMessage(message) {
-    // Remove existing messages
-    const existingMessage = document.querySelector('.form-message');
-    if (existingMessage) {
-        existingMessage.remove();
-    }
-
-    // Create success message
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'form-message success';
-    messageDiv.textContent = message;
-    messageDiv.style.cssText = `
-        background-color: #d1fae5;
-        color: #065f46;
-        padding: 16px 20px;
-        border-radius: 12px;
-        margin-bottom: 24px;
-        text-align: center;
-        font-weight: 600;
-        border: 1px solid #10b981;
-        animation: fadeIn 0.3s ease;
-    `;
-
-    const form = document.getElementById('evaluationForm');
-    if (form) {
-        form.insertBefore(messageDiv, form.firstChild);
-
-        // Auto-remove after 5 seconds
-        setTimeout(() => {
-            messageDiv.style.animation = 'fadeOut 0.3s ease';
-            setTimeout(() => messageDiv.remove(), 300);
-        }, 5000);
-    }
+    renderStudentFormMessage(message, 'success');
 }
 
 /**
@@ -3129,38 +3201,7 @@ function showSuccessMessage(message) {
  * @param {string} message - Error message
  */
 function showErrorMessage(message) {
-    // Remove existing messages
-    const existingMessage = document.querySelector('.form-message');
-    if (existingMessage) {
-        existingMessage.remove();
-    }
-
-    // Create error message
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'form-message error';
-    messageDiv.textContent = message;
-    messageDiv.style.cssText = `
-        background-color: #fee2e2;
-        color: #991b1b;
-        padding: 16px 20px;
-        border-radius: 12px;
-        margin-bottom: 24px;
-        text-align: center;
-        font-weight: 600;
-        border: 1px solid #ef4444;
-        animation: fadeIn 0.3s ease;
-    `;
-
-    const form = document.getElementById('evaluationForm');
-    if (form) {
-        form.insertBefore(messageDiv, form.firstChild);
-
-        // Auto-remove after 5 seconds
-        setTimeout(() => {
-            messageDiv.style.animation = 'fadeOut 0.3s ease';
-            setTimeout(() => messageDiv.remove(), 300);
-        }, 5000);
-    }
+    renderStudentFormMessage(message, 'error');
 }
 
 /**

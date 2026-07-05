@@ -5259,16 +5259,33 @@ function maskLoginSecurityEmail($email) {
 }
 
 function getCredentialDistributorRawConfig(PDO $pdo) {
-    // Fixed SMTP configuration requested by system owner.
-    // Gmail app password is normalized by removing spaces.
-    $fixedSenderEmail = 'nationalacph@gmail.com';
-    $fixedSenderName = 'NAAP Evaluation System';
-    $fixedAppPassword = preg_replace('/\s+/', '', 'szbk oere oalb btiu');
+    $stored = getSettingJson($pdo, 'credentialDistributorConfig', []);
+    $envSenderEmail = trim((string) (getenv('NAAP_SMTP_EMAIL') ?: ''));
+    $envSenderName = trim((string) (getenv('NAAP_SMTP_NAME') ?: ''));
+    $envAppPassword = trim((string) (getenv('NAAP_SMTP_APP_PASSWORD') ?: ''));
+
+    $senderEmail = $envSenderEmail !== ''
+        ? $envSenderEmail
+        : trim((string) ($stored['senderEmail'] ?? ''));
+
+    $senderName = $envSenderName !== ''
+        ? $envSenderName
+        : trim((string) ($stored['senderName'] ?? ''));
+
+    if ($senderName === '') {
+        $senderName = 'NAAP Evaluation System';
+    }
+
+    $appPassword = $envAppPassword !== ''
+        ? $envAppPassword
+        : trim((string) ($stored['appPassword'] ?? ''));
+
+    $appPassword = preg_replace('/\s+/', '', $appPassword ?? '');
 
     return [
-        'senderEmail' => $fixedSenderEmail,
-        'senderName' => $fixedSenderName,
-        'appPassword' => $fixedAppPassword,
+        'senderEmail' => $senderEmail,
+        'senderName' => $senderName,
+        'appPassword' => $appPassword,
     ];
 }
 

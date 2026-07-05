@@ -9,12 +9,14 @@ document.addEventListener("DOMContentLoaded", function () {
     renderProfileDetails();
     setupNavigation();
     setupLogout();
+    setupMobileDrawer();
     initializeStatusMonitoring();
     setupDataSubscriptions();
     setupProfilePhotoUpload();
     setupProfileForms();
     setupProfileActionToggle();
     setupPasswordVisibility();
+    setupDashboardHeroActions();
 });
 
 let allStudents = [];
@@ -24,6 +26,7 @@ let currentSearchKeyword = "";
 let latestAnalyticsSnapshot = null;
 let selectedAnalyticsDepartment = "";
 let manualClearModalContext = null;
+let osaMobileDrawerBound = false;
 
 function checkAuthentication() {
     return !!SharedData.requireSession("osa");
@@ -103,8 +106,81 @@ function setupNavigation() {
 
             navLinks.forEach((nav) => nav.classList.remove("active"));
             link.classList.add("active");
+            closeMobileDrawer();
         });
     });
+}
+
+function setupMobileDrawer() {
+    if (osaMobileDrawerBound) return;
+
+    const toggleButtons = document.querySelectorAll(".mobile-nav-toggle");
+    const backdrop = document.getElementById("sidebarBackdrop");
+    if (!toggleButtons.length || !backdrop) return;
+
+    toggleButtons.forEach((button) => {
+        button.addEventListener("click", function () {
+            const isOpen = document.body.classList.contains("osa-sidebar-open");
+            if (isOpen) {
+                closeMobileDrawer();
+            } else {
+                openMobileDrawer();
+            }
+        });
+    });
+
+    backdrop.addEventListener("click", closeMobileDrawer);
+    window.addEventListener("resize", function () {
+        if (window.innerWidth > 1000) {
+            closeMobileDrawer();
+        }
+    });
+
+    osaMobileDrawerBound = true;
+}
+
+function openMobileDrawer() {
+    document.body.classList.add("osa-sidebar-open");
+    document.querySelectorAll(".mobile-nav-toggle").forEach((button) => {
+        button.setAttribute("aria-expanded", "true");
+    });
+}
+
+function closeMobileDrawer() {
+    document.body.classList.remove("osa-sidebar-open");
+    document.querySelectorAll(".mobile-nav-toggle").forEach((button) => {
+        button.setAttribute("aria-expanded", "false");
+    });
+}
+
+function setupDashboardHeroActions() {
+    const statusBtn = document.getElementById("heroOpenStatusBtn");
+    const proofBtn = document.getElementById("heroOpenProofReviewBtn");
+    const navLinks = document.querySelectorAll(".sidebar-nav .nav-link[data-view]");
+
+    function activateView(viewId) {
+        document.querySelectorAll(".content-view").forEach((view) => {
+            view.classList.toggle("active", view.id === viewId);
+        });
+
+        navLinks.forEach((nav) => {
+            nav.classList.toggle("active", nav.dataset.view === viewId);
+        });
+
+        closeMobileDrawer();
+    }
+
+    if (statusBtn) {
+        statusBtn.addEventListener("click", function () {
+            activateView("studentStatusView");
+        });
+    }
+
+    if (proofBtn) {
+        proofBtn.addEventListener("click", function () {
+            activateView("proofReviewView");
+        });
+    }
 }
 
 function normalizeTextToken(value) {
@@ -1415,7 +1491,6 @@ function setupProfileForms() {
 
             if (newEmailInput) newEmailInput.value = "";
             if (confirmEmailInput) confirmEmailInput.value = "";
-            resetFormMessages();
         });
     }
 
@@ -1467,7 +1542,6 @@ function setupProfileForms() {
             if (currentPasswordInput) currentPasswordInput.value = "";
             if (newPasswordInput) newPasswordInput.value = "";
             if (confirmPasswordInput) confirmPasswordInput.value = "";
-            resetFormMessages();
         });
     }
 }
