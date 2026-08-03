@@ -101,33 +101,6 @@ body.auth-page::after {
   color: rgba(226, 232, 240, 0.88);
 }
 
-.brand-highlights {
-  margin-top: 34px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.brand-highlight-card {
-  padding: 18px 18px 20px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.brand-highlight-card h2 {
-  margin: 0 0 8px;
-  font-size: 15px;
-  color: #f8fafc;
-}
-
-.brand-highlight-card p {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.6;
-  color: rgba(226, 232, 240, 0.82);
-}
-
 .auth-panel {
   padding: 36px 34px;
   background: rgba(255, 255, 255, 0.94);
@@ -415,10 +388,6 @@ body.auth-page::after {
     max-width: none;
   }
 
-  .brand-highlights {
-    grid-template-columns: 1fr;
-  }
-
   .auth-panel {
     padding: 28px 22px;
   }
@@ -467,12 +436,6 @@ body.auth-page::after {
     display: block;
   }
 
-  body.auth-page.auth-mobile-about-active .auth-panel-view--about .brand-highlight-card {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.12);
-  }
-
-  body.auth-page.auth-mobile-about-active .auth-panel-view--about .brand-highlight-card p,
   body.auth-page.auth-mobile-about-active .auth-panel-view--about .system-title {
     color: rgba(226, 232, 240, 0.88);
   }

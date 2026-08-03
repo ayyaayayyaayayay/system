@@ -25,6 +25,7 @@ let osaProfile = null;
 let currentSearchKeyword = "";
 let latestAnalyticsSnapshot = null;
 let selectedAnalyticsDepartment = "";
+let selectedAnalyticsCampus = "all";
 let manualClearModalContext = null;
 let osaMobileDrawerBound = false;
 
@@ -246,6 +247,7 @@ function buildStudentDirectory() {
             fullName: String(user.name || "").trim() || "Unknown Student",
             department: String(user.department || user.institute || "UNASSIGNED").trim().toUpperCase() || "UNASSIGNED",
             program: String(user.programCode || user.programName || "UNASSIGNED").trim().toUpperCase() || "UNASSIGNED",
+            campus: String(user.campus || user.campusSlug || "UNASSIGNED").trim().toUpperCase() || "UNASSIGNED",
             yearSection: String(user.yearSection || "").trim() || "N/A",
         });
 
@@ -262,8 +264,6 @@ function getEvaluationPeriodState() {
         ? SharedData.getEvalPeriodDates("student-professor")
         : { start: "", end: "" };
     const endRaw = String(dates && dates.end || "").trim();
-    const now = new Date();
-
     if (!endRaw) {
         return {
             isClosed: false,
@@ -272,8 +272,8 @@ function getEvaluationPeriodState() {
         };
     }
 
-    const endDate = new Date(`${endRaw}T23:59:59`);
-    const isClosed = !Number.isNaN(endDate.getTime()) && now > endDate;
+    const todayYmd = SharedData.getCurrentPhilippineDateYmd();
+    const isClosed = todayYmd !== '' && todayYmd > endRaw;
 
     return {
         isClosed: isClosed,
@@ -339,6 +339,7 @@ function buildStatusRows() {
             fullName: String(enrollment.studentName || "").trim() || (baseMeta && baseMeta.fullName) || "Unknown Student",
             department: (baseMeta && baseMeta.department) || "UNASSIGNED",
             program: (baseMeta && baseMeta.program) || "UNASSIGNED",
+            campus: (baseMeta && baseMeta.campus) || "UNASSIGNED",
             yearSection: (baseMeta && baseMeta.yearSection) || "N/A",
         });
     });
@@ -426,6 +427,7 @@ function buildStatusRows() {
             fullName: "Unknown Student",
             department: "UNASSIGNED",
             program: "UNASSIGNED",
+            campus: "UNASSIGNED",
             yearSection: "N/A",
         };
         const expectedCount = expectedSet.size;
@@ -451,6 +453,7 @@ function buildStatusRows() {
             fullName: meta.fullName || "Unknown Student",
             department: meta.department || "UNASSIGNED",
             program: meta.program || "UNASSIGNED",
+            campus: meta.campus || "UNASSIGNED",
             yearSection: meta.yearSection || "N/A",
             expectedCount,
             completedCount,
@@ -542,6 +545,51 @@ function buildProgramBreakdown(rows) {
     return list;
 }
 
+function getAnalyticsRowsForSelectedCampus(rows) {
+    const source = Array.isArray(rows) ? rows : [];
+    const selectedCampus = String(selectedAnalyticsCampus || "all").trim();
+    if (!selectedCampus || selectedCampus === "all") return source;
+
+    return source.filter(function (row) {
+        return String(row && row.campus || "UNASSIGNED").trim() === selectedCampus;
+    });
+}
+
+function buildAnalyticsSnapshotFromRows(rows, sourceSnapshot) {
+    return {
+        rows,
+        periodState: sourceSnapshot && sourceSnapshot.periodState,
+        summary: buildSummaryFromRows(rows),
+        departmentBreakdown: buildDepartmentBreakdown(rows),
+        programBreakdown: buildProgramBreakdown(rows),
+    };
+}
+
+function renderAnalyticsCampusFilter(rows) {
+    const select = document.getElementById("analyticsCampusSelect");
+    if (!select) return;
+
+    const campuses = Array.from(new Set((Array.isArray(rows) ? rows : []).map(function (row) {
+        return String(row && row.campus || "UNASSIGNED").trim() || "UNASSIGNED";
+    }))).sort(function (a, b) {
+        return a.localeCompare(b);
+    });
+
+    const currentValue = campuses.includes(selectedAnalyticsCampus) ? selectedAnalyticsCampus : "all";
+    if (selectedAnalyticsCampus !== currentValue) {
+        selectedAnalyticsCampus = currentValue;
+        selectedAnalyticsDepartment = "";
+    }
+
+    const options = ['<option value="all">All Campuses</option>'].concat(campuses.map(function (campus) {
+        const selected = campus === selectedAnalyticsCampus ? " selected" : "";
+        return `<option value="${escapeHtml(campus)}"${selected}>${escapeHtml(campus)}</option>`;
+    }));
+
+    select.innerHTML = options.join("");
+    select.value = selectedAnalyticsCampus;
+}
+
 function refreshStatusAndAnalytics() {
     const snapshot = buildStatusRows();
     allStudents = snapshot.rows;
@@ -561,7 +609,13 @@ function renderStatusPeriodNote(periodState) {
 
 function renderDashboardAnalytics(snapshot) {
     latestAnalyticsSnapshot = snapshot;
-    const summary = snapshot.summary || { assigned: 0, evaluated: 0, notEvaluated: 0, completionRate: 0 };
+    renderAnalyticsCampusFilter(snapshot.rows);
+
+    const analyticsSnapshot = buildAnalyticsSnapshotFromRows(
+        getAnalyticsRowsForSelectedCampus(snapshot.rows),
+        snapshot
+    );
+    const summary = analyticsSnapshot.summary || { assigned: 0, evaluated: 0, notEvaluated: 0, completionRate: 0 };
     setText("assignedCount", summary.assigned);
     setText("evaluatedCountAnalytics", summary.evaluated);
     setText("notEvaluatedCountAnalytics", summary.notEvaluated);
@@ -574,7 +628,7 @@ function renderDashboardAnalytics(snapshot) {
     const emptyEl = document.getElementById("analyticsEmptyState");
     if (!deptBody || !progBody || !progTitle || !progEmpty || !emptyEl) return;
 
-    if (!snapshot.rows.length) {
+    if (!analyticsSnapshot.rows.length) {
         deptBody.innerHTML = "";
         progBody.innerHTML = "";
         selectedAnalyticsDepartment = "";
@@ -582,18 +636,21 @@ function renderDashboardAnalytics(snapshot) {
         progEmpty.textContent = "Select a department above to view its programs.";
         progEmpty.style.display = "block";
         emptyEl.style.display = "block";
+        emptyEl.textContent = selectedAnalyticsCampus === "all"
+            ? "No assigned students found for analytics."
+            : "No assigned students found for the selected campus.";
         return;
     }
 
     emptyEl.style.display = "none";
-    const hasSelectedDepartment = snapshot.departmentBreakdown.some(function (item) {
+    const hasSelectedDepartment = analyticsSnapshot.departmentBreakdown.some(function (item) {
         return item.department === selectedAnalyticsDepartment;
     });
     if (!hasSelectedDepartment) {
         selectedAnalyticsDepartment = "";
     }
 
-    deptBody.innerHTML = snapshot.departmentBreakdown.map(function (item) {
+    deptBody.innerHTML = analyticsSnapshot.departmentBreakdown.map(function (item) {
         const isActive = item.department === selectedAnalyticsDepartment;
         return `
             <tr class="analytics-dept-row${isActive ? " active" : ""}" data-department="${escapeHtml(item.department)}" tabindex="0" role="button" aria-label="Show programs for ${escapeHtml(item.department)}">
@@ -614,7 +671,7 @@ function renderDashboardAnalytics(snapshot) {
         return;
     }
 
-    const filteredPrograms = snapshot.programBreakdown.filter(function (item) {
+    const filteredPrograms = analyticsSnapshot.programBreakdown.filter(function (item) {
         return item.department === selectedAnalyticsDepartment;
     });
     progTitle.textContent = `Programs under ${selectedAnalyticsDepartment}`;
@@ -643,9 +700,8 @@ function renderDashboardAnalytics(snapshot) {
 function formatNotedAt(value) {
     const raw = String(value || "").trim();
     if (!raw) return "";
-    const parsed = new Date(raw);
-    if (Number.isNaN(parsed.getTime())) return raw;
-    return parsed.toLocaleString();
+    const formatted = SharedData.formatDateTimeInPhilippines(raw);
+    return formatted || raw;
 }
 
 function renderStatusTable(students, periodState) {
@@ -966,7 +1022,8 @@ function renderProofReviewTable(periodState) {
 
 function setupAnalyticsInteractions() {
     const deptBody = document.getElementById("departmentAnalyticsBody");
-    if (!deptBody) return;
+    const campusSelect = document.getElementById("analyticsCampusSelect");
+    if (!deptBody && !campusSelect) return;
 
     function selectDepartmentFromEvent(event) {
         const row = event.target.closest("tr[data-department]");
@@ -980,12 +1037,24 @@ function setupAnalyticsInteractions() {
         }
     }
 
-    deptBody.addEventListener("click", selectDepartmentFromEvent);
-    deptBody.addEventListener("keydown", function (event) {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        selectDepartmentFromEvent(event);
-    });
+    if (deptBody) {
+        deptBody.addEventListener("click", selectDepartmentFromEvent);
+        deptBody.addEventListener("keydown", function (event) {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            selectDepartmentFromEvent(event);
+        });
+    }
+
+    if (campusSelect) {
+        campusSelect.addEventListener("change", function () {
+            selectedAnalyticsCampus = String(campusSelect.value || "all").trim() || "all";
+            selectedAnalyticsDepartment = "";
+            if (latestAnalyticsSnapshot) {
+                renderDashboardAnalytics(latestAnalyticsSnapshot);
+            }
+        });
+    }
 }
 
 function setupSearch() {

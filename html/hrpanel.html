@@ -5,8 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HR Dashboard - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/panel-theme.css">
-    <link rel="stylesheet" href="../css/hrpanel.css?v=20260626a">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260802c">
+    <link rel="stylesheet" href="../css/hrpanel.css?v=20260729c">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -214,7 +214,19 @@
 
                                 <div class="user-list" id="professor-ranking-list">
                                     <div class="empty-state">
-                                        <i class="fas fa-spinner fa-spin"></i>
+                                        <div class="loading-hourglass-frame loading-hourglass-frame--small" aria-hidden="true">
+                                            <div class="hourglassBackground">
+                                                <div class="hourglassContainer">
+                                                    <div class="hourglassCurves"></div>
+                                                    <div class="hourglassCapTop"></div>
+                                                    <div class="hourglassGlassTop"></div>
+                                                    <div class="hourglassSand"></div>
+                                                    <div class="hourglassSandStream"></div>
+                                                    <div class="hourglassCapBottom"></div>
+                                                    <div class="hourglassGlass"></div>
+                                                </div>
+                                            </div>
+                                        </div>
                                         <p>Loading professor ranking...</p>
                                     </div>
                                 </div>
@@ -244,7 +256,19 @@
                                 <div id="hr-system-notifications" class="notification-alert-list" aria-live="polite">
                                     <div class="notification-alert">
                                         <div class="alert-icon">
-                                            <i class="fas fa-spinner fa-spin"></i>
+                                            <div class="loading-hourglass-frame loading-hourglass-frame--tiny" aria-hidden="true">
+                                                <div class="hourglassBackground">
+                                                    <div class="hourglassContainer">
+                                                        <div class="hourglassCurves"></div>
+                                                        <div class="hourglassCapTop"></div>
+                                                        <div class="hourglassGlassTop"></div>
+                                                        <div class="hourglassSand"></div>
+                                                        <div class="hourglassSandStream"></div>
+                                                        <div class="hourglassCapBottom"></div>
+                                                        <div class="hourglassGlass"></div>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                         <div class="alert-content">
                                             <div class="alert-message">Loading system notifications...</div>
@@ -269,7 +293,7 @@
                                     <p class="chart-subtitle">Completed, pending drafts, and not started for current semester</p>
                                     <canvas id="hr-evaluation-overview-chart"></canvas>
                                 </div>
-                                <div class="chart-container">
+                                <div class="chart-container graph-chart-container">
                                     <h3 class="chart-title">Semestral Performance</h3>
                                     <p class="chart-subtitle">Student submissions across latest 4 semesters</p>
                                     <canvas id="hr-semestral-performance-chart"></canvas>
@@ -295,12 +319,12 @@
                                     Student to Professor Evaluation
                                 </h2>
                                 <div class="charts-grid">
-                                    <div class="chart-container">
+                                    <div class="chart-container graph-chart-container">
                                         <h3 class="chart-title">Average Scores by Category</h3>
                                         <p class="chart-subtitle">Performance across different evaluation criteria</p>
                                         <canvas id="student-professor-bar-chart"></canvas>
                                     </div>
-                                    <div class="chart-container">
+                                    <div class="chart-container rating-chart-container">
                                         <h3 class="chart-title">Rating Distribution</h3>
                                         <p class="chart-subtitle">Breakdown of student ratings</p>
                                         <canvas id="student-professor-pie-chart"></canvas>
@@ -332,12 +356,12 @@
                                     Professor to Professor Analytics
                                 </h2>
                                 <div class="charts-grid">
-                                    <div class="chart-container">
+                                    <div class="chart-container graph-chart-container">
                                         <h3 class="chart-title">Average Scores by Category</h3>
                                         <p class="chart-subtitle">Performance across different evaluation criteria</p>
                                         <canvas id="professor-professor-bar-chart"></canvas>
                                     </div>
-                                    <div class="chart-container">
+                                    <div class="chart-container rating-chart-container">
                                         <h3 class="chart-title">Rating Distribution</h3>
                                         <p class="chart-subtitle">Breakdown of professor ratings</p>
                                         <canvas id="professor-professor-pie-chart"></canvas>
@@ -371,12 +395,12 @@
                                     Supervisor to Professor Evaluation
                                 </h2>
                                 <div class="charts-grid">
-                                    <div class="chart-container">
+                                    <div class="chart-container graph-chart-container">
                                         <h3 class="chart-title">Average Scores by Category</h3>
                                         <p class="chart-subtitle">Performance across different evaluation criteria</p>
                                         <canvas id="supervisor-professor-bar-chart"></canvas>
                                     </div>
-                                    <div class="chart-container">
+                                    <div class="chart-container rating-chart-container">
                                         <h3 class="chart-title">Rating Distribution</h3>
                                         <p class="chart-subtitle">Breakdown of supervisor ratings</p>
                                         <canvas id="supervisor-professor-pie-chart"></canvas>
@@ -405,14 +429,6 @@
                 <!-- Evaluation Settings View -->
                 <div id="settings-view" class="content-view" style="display: none;">
                     <div class="settings-container hr-settings-container">
-                        <div class="view-header hr-settings-view-header">
-                            <h1 class="settings-view-title">
-                                <i class="fas fa-sliders-h settings-view-title-icon"></i> Evaluation Settings
-                            </h1>
-                            <p>Configure evaluation periods, questionnaires,
-                                and criteria</p>
-                        </div>
-
                         <!-- Evaluation Period Configuration -->
                         <section class="admin-section eval-period-section hr-settings-section">
                             <div class="section-header">
@@ -604,20 +620,28 @@
                 <!-- User Management View -->
                 <div id="user-management-view" class="content-view" style="display: none;">
                     <div class="user-management-container">
-                        <div class="um-header">
-                            <div class="um-title">
-                                <h1>Professor Management</h1>
-                                <p>Manage professors across different departments</p>
+                        <div class="professor-toolbar">
+                            <div class="professor-filter-controls">
+                                <div class="professor-search">
+                                    <i class="fas fa-search"></i>
+                                    <input type="text" id="professor-search" placeholder="Search by employee ID or name">
+                                </div>
+                                <select id="professor-campus-filter" class="professor-campus-filter" aria-label="Filter professors by campus">
+                                    <option value="all">All Campuses</option>
+                                </select>
+                                <button type="button" class="btn-professor-search" id="professor-search-btn">
+                                    <i class="fas fa-search"></i>
+                                    Search
+                                </button>
+                                <button type="button" class="btn-professor-clear" id="professor-clear-btn">
+                                    <i class="fas fa-rotate-left"></i>
+                                    Clear
+                                </button>
                             </div>
                             <button class="btn-add-professor" id="add-professor-btn">
                                 <i class="fas fa-user-plus"></i>
                                 Add Professor
                             </button>
-                        </div>
-
-                        <div class="professor-search">
-                            <i class="fas fa-search"></i>
-                            <input type="text" id="professor-search" placeholder="Search by employee ID or name">
                         </div>
 
                         <!-- Department Tabs -->
@@ -819,9 +843,11 @@
 
                 <!-- AI Insights View -->
                 <div id="ai-insights-view" class="content-view" style="display: none;">
-                    <div class="view-header">
-                        <h1><i class="fas fa-brain"></i> AI Insights</h1>
-                        <p>Behavior scoring, bias detection, cross-source discrepancy checks, and credibility scoring.</p>
+                    <div class="ai-insights-report-actions">
+                        <button type="button" class="btn-add-user" id="hr-print-ai-insights-btn">
+                            <i class="fas fa-print"></i>
+                            Print AI Insights Summary
+                        </button>
                     </div>
 
                     <section class="admin-section ai-insights-section">
@@ -1014,10 +1040,6 @@
 
                 <!-- Activity Log View -->
                 <div id="activity-log-view" class="content-view" style="display: none;">
-                    <div class="view-header">
-                        <h1><i class="fas fa-clipboard-list"></i> Activity Log</h1>
-                        <p>Monitor all system events and user actions</p>
-                    </div>
                     <div class="activity-log-controls">
                         <div class="log-control">
                             <label for="hr-activity-from">From</label>
@@ -1067,11 +1089,7 @@
                 <div id="questionnaire-view" class="content-view" style="display: none;">
                     <div class="questionnaire-container">
                         <div class="questionnaire-header">
-                            <div class="questionnaire-title-section">
-                                <h1>Evaluation Questionnaire</h1>
-                                <p>Create and manage questions for student evaluations</p>
-                            </div>
-                            <div class="questionnaire-actions">
+                        <div class="questionnaire-actions">
                                 <div class="questionnaire-semester-selector">
                                     <label for="semester-select">Semester:</label>
                                     <select id="semester-select" class="questionnaire-type-dropdown"></select>
@@ -1291,9 +1309,10 @@
                         placeholder="e.g., Management of Teaching and Learning" required>
                 </div>
                 <div class="form-group">
-                    <label for="section-description">Section Description</label>
+                    <label for="section-description" id="section-description-label">Section Description</label>
                     <textarea id="section-description" name="sectionDescription" rows="4"
                         placeholder="Enter a detailed description of this section..." required></textarea>
+                    <small class="form-hint" id="section-description-hint">Required for student-to-professor questionnaires.</small>
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn-cancel" id="cancel-section-form">Cancel</button>
@@ -1430,8 +1449,9 @@
         </div>
     </div>
 
-    <script src="../JsScrip/db-data.js?v=20260626a"></script>
-    <script src="../JsScrip/hrpanel.js?v=20260626a"></script>
+    <script src="../JsScrip/db-data.js?v=20260802e"></script>
+    <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
+    <script src="../JsScrip/hrpanel.js?v=20260802a"></script>
 </body>
 
 </html>

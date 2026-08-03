@@ -1,7 +1,7 @@
 <?php
 /**
  * Profile image upload endpoint.
- * Accepts multipart/form-data and stores images in uploads/profiles/.
+ * Accepts multipart/form-data and stores images in profile_photos.
  */
 
 require_once __DIR__ . '/db.php';
@@ -9,10 +9,10 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/state_helpers.php';
 
 function resolveAuthenticatedProfileImageUser(PDO $pdo) {
-    $session = requireNaapAuthenticatedSession();
+    $session = requireNaapAuthenticatedSession($pdo);
     $user = buildUserSnapshotById($pdo, $session['userId'], false);
     if (!$user) {
-        destroyNaapSession();
+        destroyNaapSession($pdo);
         sendJson([
             'success' => false,
             'error' => 'Authentication required.',
@@ -20,7 +20,7 @@ function resolveAuthenticatedProfileImageUser(PDO $pdo) {
     }
 
     if (normalizeLookupValue($user['status'] ?? 'active') === 'inactive') {
-        destroyNaapSession();
+        destroyNaapSession($pdo);
         sendJson([
             'success' => false,
             'error' => 'Account is inactive.',

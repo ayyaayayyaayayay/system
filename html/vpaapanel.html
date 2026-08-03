@@ -5,8 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VPAA Evaluation Overview - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/panel-theme.css">
-    <link rel="stylesheet" href="../css/vpaapanel.css">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260802c">
+    <link rel="stylesheet" href="../css/vpaapanel.css?v=20260802a">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
@@ -144,12 +144,12 @@
                                 Student to Professor Evaluation
                             </h2>
                             <div class="charts-grid">
-                                <div class="chart-container">
+                                <div class="chart-container graph-chart-container">
                                     <h3 class="chart-title">Average Scores by Category</h3>
                                     <p class="chart-subtitle">Performance across different evaluation criteria</p>
                                     <canvas id="vpaa-student-professor-bar-chart"></canvas>
                                 </div>
-                                <div class="chart-container">
+                                <div class="chart-container rating-chart-container">
                                     <h3 class="chart-title">Rating Distribution</h3>
                                     <p class="chart-subtitle">Breakdown of student ratings</p>
                                     <canvas id="vpaa-student-professor-pie-chart"></canvas>
@@ -180,12 +180,12 @@
                                 Professor to Professor Evaluation
                             </h2>
                             <div class="charts-grid">
-                                <div class="chart-container">
+                                <div class="chart-container graph-chart-container">
                                     <h3 class="chart-title">Average Scores by Category</h3>
                                     <p class="chart-subtitle">Performance across different evaluation criteria</p>
                                     <canvas id="vpaa-professor-professor-bar-chart"></canvas>
                                 </div>
-                                <div class="chart-container">
+                                <div class="chart-container rating-chart-container">
                                     <h3 class="chart-title">Rating Distribution</h3>
                                     <p class="chart-subtitle">Breakdown of professor ratings</p>
                                     <canvas id="vpaa-professor-professor-pie-chart"></canvas>
@@ -216,12 +216,12 @@
                                 Supervisor to Professor Evaluation
                             </h2>
                             <div class="charts-grid">
-                                <div class="chart-container">
+                                <div class="chart-container graph-chart-container">
                                     <h3 class="chart-title">Average Scores by Category</h3>
                                     <p class="chart-subtitle">Performance across different evaluation criteria</p>
                                     <canvas id="vpaa-supervisor-professor-bar-chart"></canvas>
                                 </div>
-                                <div class="chart-container">
+                                <div class="chart-container rating-chart-container">
                                     <h3 class="chart-title">Rating Distribution</h3>
                                     <p class="chart-subtitle">Breakdown of supervisor ratings</p>
                                     <canvas id="vpaa-supervisor-professor-pie-chart"></canvas>
@@ -567,8 +567,9 @@
         </div>
     </div>
 
-    <script src="../JsScrip/db-data.js?v=20260414d"></script>
-    <script src="../JsScrip/vpaapanel.js?v=20260414d"></script>
+    <script src="../JsScrip/db-data.js?v=20260802e"></script>
+    <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
+    <script src="../JsScrip/vpaapanel.js?v=20260802c"></script>
 </body>
 
 </html>

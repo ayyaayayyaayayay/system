@@ -1,4 +1,4 @@
-﻿// Professor Panel JavaScript - Dashboard Functionality
+// Professor Panel JavaScript - Dashboard Functionality
 
 // Wait for DOM to be fully loaded
 document.addEventListener('DOMContentLoaded', function () {
@@ -223,7 +223,7 @@ function getAggregateEvaluationType(evaluation) {
     if (rawType === 'peer' || rawType === 'professor' || rawType === 'professor-to-professor' || rawType === 'professor-professor') {
         return 'professor';
     }
-    if (rawType === 'supervisor' || rawType === 'dean' || rawType === 'hr' || rawType === 'vpaa' || rawType === 'admin' || rawType === 'supervisor-to-professor' || rawType === 'supervisor-professor') {
+    if (rawType === 'supervisor' || rawType === 'dean' || rawType === 'procoor' || rawType === 'hr' || rawType === 'vpaa' || rawType === 'admin' || rawType === 'supervisor-to-professor' || rawType === 'supervisor-professor') {
         return 'supervisor';
     }
     return '';
@@ -667,7 +667,7 @@ function getEvaluationPeriodCountdown(typeKey, label) {
     const dates = SharedData.getEvalPeriodDates(typeKey) || { start: '', end: '' };
     const startDate = parseDateBoundary(dates.start, 'start');
     const endDate = parseDateBoundary(dates.end, 'end');
-    const now = new Date();
+    const now = SharedData.getNowDate();
 
     if (!startDate || !endDate) {
         return {
@@ -1162,32 +1162,22 @@ function initializeEvaluationCharts(type) {
     const pieInstanceKey = `${meta.chartPrefix}PieChartInstance`;
 
     const categories = Array.isArray(summary.criteriaAverages) ? summary.criteriaAverages : [];
-    const labels = categories.length ? categories.map(item => item.name) : ['No Data'];
-    const values = categories.length ? categories.map(item => Number(item.average || 0).toFixed ? Number(item.average.toFixed(2)) : Number(item.average || 0)) : [0];
 
     const barCtx = document.getElementById(barCanvasId);
     if (barCtx) {
-        if (window[barInstanceKey]) window[barInstanceKey].destroy();
-        window[barInstanceKey] = new Chart(barCtx, {
-            type: 'bar',
-            data: {
-                labels,
-                datasets: [{
-                    label: 'Average Score',
-                    data: values,
-                    backgroundColor: '#667eea',
-                    borderColor: '#4752c4',
-                    borderWidth: 1,
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: { beginAtZero: true, max: 5, ticks: { stepSize: 1 } }
-                },
-                plugins: { legend: { display: true, position: 'bottom' } }
-            }
+        const sectionSeries = window.AppChartDesign.buildSectionSeries(categories, {
+            labelKey: 'name',
+            valueKey: 'average'
+        });
+        window[barInstanceKey] = window.AppChartDesign.renderBarChart(barCtx, {
+            labels: sectionSeries.labels,
+            values: sectionSeries.values,
+            fullLabels: sectionSeries.fullLabels,
+            label: 'Average Score',
+            colors: ['#4f46e5', '#22c55e'],
+            maxValue: 5,
+            stepSize: 1,
+            tooltipDecimals: 2
         });
     }
 
@@ -1201,23 +1191,9 @@ function initializeEvaluationCharts(type) {
 
     const pieCtx = document.getElementById(pieCanvasId);
     if (pieCtx) {
-        if (window[pieInstanceKey]) window[pieInstanceKey].destroy();
-        window[pieInstanceKey] = new Chart(pieCtx, {
-            type: 'pie',
-            data: {
-                labels: ['5 Stars', '4 Stars', '3 Stars', '2 Stars', '1 Star'],
-                datasets: [{
-                    data: pieValues,
-                    backgroundColor: ['#10b981', '#34d399', '#fbbf24', '#f59e0b', '#ef4444'],
-                    borderWidth: 2,
-                    borderColor: '#ffffff',
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: true, position: 'bottom' } }
-            }
+        window[pieInstanceKey] = window.AppChartDesign.renderRatingDistributionChart(pieCtx, {
+            values: pieValues,
+            averageRating: summary.averageRating
         });
     }
 }
@@ -1294,33 +1270,15 @@ function renderSemestralTrendChart(rows) {
     const values = chartRows.map(item => Number((item.overallAverage || 0).toFixed(2)));
     const hasData = values.some(value => value > 0);
 
-    if (window.semestralTrendChartInstance) {
-        window.semestralTrendChartInstance.destroy();
-    }
-
-    window.semestralTrendChartInstance = new Chart(canvas, {
-        type: 'line',
-        data: {
-            labels: labels.length ? labels : ['No Data'],
-            datasets: [{
-                label: 'Overall Average',
-                data: hasData ? values : [0],
-                borderColor: '#4752c4',
-                backgroundColor: 'rgba(71, 82, 196, 0.15)',
-                fill: true,
-                tension: 0.25,
-                pointRadius: 4,
-                pointHoverRadius: 5,
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: { beginAtZero: true, max: 5, ticks: { stepSize: 1 } }
-            },
-            plugins: { legend: { display: true, position: 'bottom' } }
-        }
+    window.semestralTrendChartInstance = window.AppChartDesign.renderLineChart(canvas, {
+        labels: labels.length ? labels : ['No Data'],
+        values: hasData ? values : [0],
+        label: 'Overall Average',
+        lineColor: '#4f46e5',
+        fillColor: 'rgba(79, 70, 229, 0.2)',
+        maxValue: 5,
+        stepSize: 1,
+        tooltipDecimals: 2
     });
 }
 
@@ -1556,6 +1514,26 @@ function toPaperRatingPercent(value) {
     return percent.toFixed(2);
 }
 
+function normalizeFacultyPaperLoadType(value) {
+    return String(value || '').trim().toLowerCase() === 'excess' ? 'excess' : 'main';
+}
+
+function getFacultyPaperLoadTypeLabel(value) {
+    return normalizeFacultyPaperLoadType(value) === 'excess' ? 'Excess Load' : 'Main Load';
+}
+
+function getSelectedFacultyPaperLoadType() {
+    const select = document.getElementById('facultyPaperLoadTypeSelect');
+    return normalizeFacultyPaperLoadType(select && select.value);
+}
+
+function setSelectedFacultyPaperLoadType(value) {
+    const select = document.getElementById('facultyPaperLoadTypeSelect');
+    if (select) {
+        select.value = normalizeFacultyPaperLoadType(value);
+    }
+}
+
 /**
  * Build payload for faculty acknowledgement paper.
  */
@@ -1569,7 +1547,12 @@ function buildFacultyPaperData() {
         context.semesterList
     );
 
-    const studentSummary = professorPanelState.summaryByType.student || PROFESSOR_PANEL_EMPTY_SUMMARY;
+    const loadType = getSelectedFacultyPaperLoadType();
+    const studentSummary = fetchFacultySummaryFromSql({
+        semesterId: professorPanelState.currentSelection && professorPanelState.currentSelection.semesterId,
+        evaluationType: 'student',
+        loadType,
+    });
     const supervisorSummary = professorPanelState.summaryByType.supervisor || PROFESSOR_PANEL_EMPTY_SUMMARY;
 
     return {
@@ -1577,6 +1560,7 @@ function buildFacultyPaperData() {
         department: String(context.professor.department || '').trim() || 'N/A',
         rank: String(context.professor.position || '').trim() || 'N/A',
         semester_label: String(semesterLabel || '').trim() || 'N/A',
+        load_type: loadType,
         set_rating: toPaperRatingPercent(studentSummary.totals && studentSummary.totals.averageScore),
         saf_rating: toPaperRatingPercent(supervisorSummary.totals && supervisorSummary.totals.averageScore),
     };
@@ -1772,7 +1756,10 @@ function buildFacultyPaperDraftPayload() {
     const selectedPaper = (professorPanelState.facultyPaper.records || []).find(item =>
         String(item && item.id || '') === String(professorPanelState.facultyPaper.selectedId || '')
     );
-    const selectedDraftId = selectedPaper && normalizeToken(selectedPaper.status) === 'draft'
+    const selectedLoadType = normalizeFacultyPaperLoadType(paperData.load_type);
+    const selectedDraftId = selectedPaper
+        && normalizeToken(selectedPaper.status) === 'draft'
+        && normalizeFacultyPaperLoadType(selectedPaper.load_type || selectedPaper.loadType) === selectedLoadType
         ? String(selectedPaper.id || '').trim()
         : '';
 
@@ -1790,6 +1777,7 @@ function buildFacultyPaperDraftPayload() {
                 || 'current'
             ).trim(),
             semester_label: paperData.semester_label,
+            load_type: selectedLoadType,
             set_rating: paperData.set_rating,
             saf_rating: paperData.saf_rating,
         }
@@ -1799,15 +1787,14 @@ function buildFacultyPaperDraftPayload() {
 function normalizePaperTimestamp(value) {
     const raw = String(value || '').trim();
     if (!raw) return 'N/A';
-    const date = new Date(raw);
-    if (Number.isNaN(date.getTime())) return raw;
-    return date.toLocaleString('en-US', {
+    const formatted = SharedData.formatDateTimeInPhilippines(raw, 'en-US', {
         year: 'numeric',
         month: 'short',
         day: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
     });
+    return formatted || raw;
 }
 
 function isPaperInCurrentFilter(paper, filter) {
@@ -1843,6 +1830,7 @@ function setFacultyPaperAiFeedback(type, message) {
         const loader = document.createElement('span');
         loader.className = 'faculty-paper-ai-loader';
         loader.setAttribute('aria-hidden', 'true');
+        loader.innerHTML = window.AppHourglassMarkup ? window.AppHourglassMarkup('tiny') : '';
 
         const label = document.createElement('span');
         label.className = 'faculty-paper-ai-loader-text';
@@ -1884,9 +1872,11 @@ function clampFacultyAiComments(comments, maxItems = 120, maxLength = 400) {
 function buildFacultySectionCRecommendationContext(paper) {
     const context = professorPanelState.context || buildProfessorPanelContext();
     const semesterId = String((paper && paper.semester_id) || professorPanelState.currentSelection.semesterId || context.currentSemester || '').trim();
+    const loadType = normalizeFacultyPaperLoadType(paper && (paper.load_type || paper.loadType));
     const studentSummary = fetchFacultySummaryFromSql({
         semesterId,
         evaluationType: 'student',
+        loadType,
     });
     const criteriaAverages = Array.isArray(studentSummary && studentSummary.criteriaAverages)
         ? studentSummary.criteriaAverages.map(item => ({
@@ -1916,6 +1906,7 @@ function buildFacultySectionCRecommendationContext(paper) {
             professorName: String(paper && paper.professor_name || '').trim(),
             department: String(paper && paper.department || '').trim(),
             rank: String(paper && paper.rank || '').trim(),
+            loadType: loadType,
         },
         ratings: {
             setRating: String(paper && paper.set_rating || '').trim(),
@@ -2098,8 +2089,10 @@ function renderProfessorFacultyPaperDetail(paper) {
     setText('fpDetailDepartment', paper.department || 'N/A');
     setText('fpDetailRank', paper.rank || 'N/A');
     setText('fpDetailSemester', paper.semester_label || 'N/A');
+    setText('fpDetailLoadType', getFacultyPaperLoadTypeLabel(paper.load_type || paper.loadType));
     setText('fpDetailSetRating', paper.set_rating || 'N/A');
     setText('fpDetailSafRating', paper.saf_rating || 'N/A');
+    setSelectedFacultyPaperLoadType(paper.load_type || paper.loadType);
 
     if (areasInput) areasInput.value = String(paper.section_c_areas || '');
     if (activitiesInput) activitiesInput.value = String(paper.section_c_activities || '');
@@ -2138,6 +2131,7 @@ function renderProfessorFacultyPaperDetail(paper) {
                 department: paper.department || 'N/A',
                 rank: paper.rank || 'N/A',
                 semester_label: paper.semester_label || 'N/A',
+                load_type: normalizeFacultyPaperLoadType(paper.load_type || paper.loadType),
                 set_rating: paper.set_rating || 'N/A',
                 saf_rating: paper.saf_rating || 'N/A',
                 section_c_areas: areasInput ? areasInput.value : (paper.section_c_areas || ''),
@@ -2242,14 +2236,14 @@ async function renderProfessorFacultyPaperList() {
 
     const gate = resolveFacultyPaperGateState();
     if (gate.locked) {
-        tableBody.innerHTML = `<tr class="mobile-card-empty-row"><td colspan="6">${escapeHTML(getFacultyPaperGateMessage())}</td></tr>`;
+        tableBody.innerHTML = `<tr class="mobile-card-empty-row"><td colspan="7">${escapeHTML(getFacultyPaperGateMessage())}</td></tr>`;
         if (detailCard) detailCard.style.display = 'none';
         return;
     }
 
     const actor = getProfessorPaperActor();
     if (!actor.context || !actor.context.linked || !actor.actorUserId) {
-        tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="6">Your login is not linked to an active professor account.</td></tr>';
+        tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="7">Your login is not linked to an active professor account.</td></tr>';
         if (detailCard) detailCard.style.display = 'none';
         return;
     }
@@ -2258,7 +2252,7 @@ async function renderProfessorFacultyPaperList() {
     try {
         records = SharedData.listFacultyPapers(actor.role, actor.actorUserId);
     } catch (error) {
-        tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="6">Failed to load faculty papers.</td></tr>';
+        tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="7">Failed to load faculty papers.</td></tr>';
         if (detailCard) detailCard.style.display = 'none';
         return;
     }
@@ -2268,7 +2262,7 @@ async function renderProfessorFacultyPaperList() {
     professorPanelState.facultyPaper.records = records;
 
     if (!visible.length) {
-        tableBody.innerHTML = `<tr class="mobile-card-empty-row"><td colspan="6">No ${filter === 'archive' ? 'archived' : 'active'} faculty papers.</td></tr>`;
+        tableBody.innerHTML = `<tr class="mobile-card-empty-row"><td colspan="7">No ${filter === 'archive' ? 'archived' : 'active'} faculty papers.</td></tr>`;
         professorPanelState.facultyPaper.selectedId = '';
         renderProfessorFacultyPaperDetail(null);
         return;
@@ -2281,14 +2275,17 @@ async function renderProfessorFacultyPaperList() {
     tableBody.innerHTML = visible.map(paper => {
         const isSelected = professorPanelState.facultyPaper.selectedId === paper.id;
         const statusLabel = resolvePaperStatusLabel(paper.status);
-        const recipient = sanitizePaperTextValueClient(paper.recipient_dean_name || '');
+        const recipient = sanitizePaperTextValueClient(paper.recipient_name || paper.recipient_dean_name || '');
+        const recipientRole = String(paper.recipient_role || '').trim().toLowerCase();
+        const recipientLabel = recipientRole === 'procoor' ? 'Recipient Coordinator' : 'Recipient Dean';
         const recipientText = recipient || '-';
         return `
             <tr data-paper-id="${escapeHTML(String(paper.id || ''))}" class="${isSelected ? 'faculty-paper-row-active' : ''}">
                 <td data-label="Paper ID">${escapeHTML(String(paper.id || 'N/A'))}</td>
                 <td data-label="Semester">${escapeHTML(String(paper.semester_label || 'N/A'))}</td>
+                <td data-label="Load">${escapeHTML(getFacultyPaperLoadTypeLabel(paper.load_type || paper.loadType))}</td>
                 <td data-label="Status">${escapeHTML(statusLabel)}</td>
-                <td data-label="Recipient Dean">${escapeHTML(recipientText)}</td>
+                <td data-label="${escapeHTML(recipientLabel)}">${escapeHTML(recipientText)}</td>
                 <td data-label="Updated">${escapeHTML(normalizePaperTimestamp(paper.updated_at))}</td>
                 <td data-label="Actions"><button type="button" class="btn-submit faculty-paper-open-btn" data-paper-open="${escapeHTML(String(paper.id || ''))}">Open</button></td>
             </tr>
@@ -3039,7 +3036,7 @@ function handlePeerEvaluation() {
         ratings: ratingsGroup,
         qualitative: qualitativeGroup,
         comments: formData.get('peerComments') || '',
-        submittedAt: new Date().toISOString()
+        submittedAt: SharedData.getNowIsoString()
     };
 
     try {
@@ -3052,7 +3049,7 @@ function handlePeerEvaluation() {
             title: 'Peer Evaluation Submitted',
             user: payload.evaluatorName,
             role: 'professor',
-            date: new Date().toISOString()
+            date: SharedData.getNowIsoString()
         });
     } catch (error) {
         const message = String(error && error.message || '');
@@ -3334,6 +3331,8 @@ function fetchFacultySummaryFromSql(query) {
     const context = professorPanelState.context || buildProfessorPanelContext();
     const semesterId = String(query && query.semesterId || professorPanelState.currentSelection.semesterId || context.currentSemester || '').trim();
     const evaluationType = getEvaluationTypeMeta(query && query.evaluationType || 'student').id;
+    const requestedLoadType = String(query && query.loadType || '').trim();
+    const selectedLoadType = requestedLoadType ? normalizeFacultyPaperLoadType(requestedLoadType) : '';
     const questionMeta = buildQuestionMeta(context, evaluationType, semesterId);
     const professorId = context && context.professor ? context.professor.id : '';
 
@@ -3352,6 +3351,11 @@ function fetchFacultySummaryFromSql(query) {
         if (!isEvaluationInSemester(evaluation, semesterId)) return;
         const targetProfessorId = resolveEvaluationTargetProfessorId(evaluation, evaluationType, context);
         if (!targetProfessorId || targetProfessorId !== professorId) return;
+        if (evaluationType === 'student' && selectedLoadType) {
+            const offeringId = String(evaluation && evaluation.courseOfferingId || '').trim();
+            const offering = offeringId ? context.offeringsById[offeringId] : null;
+            if (!offering || normalizeFacultyPaperLoadType(offering.loadType || offering.load_type) !== selectedLoadType) return;
+        }
 
         matchedEvaluations.push(evaluation);
 
@@ -3401,6 +3405,7 @@ function fetchFacultySummaryFromSql(query) {
         const professorOfferings = (context.offerings || []).filter(offering =>
             normalizeUserIdToken(offering && offering.professorUserId) === professorId &&
             !!(offering && offering.isActive) &&
+            (!selectedLoadType || normalizeFacultyPaperLoadType(offering && (offering.loadType || offering.load_type)) === selectedLoadType) &&
             (!semesterId || String(offering && offering.semesterSlug || '').trim() === semesterId)
         );
 
@@ -3519,7 +3524,7 @@ function fetchFacultySummaryFromSql(query) {
         if (evaluationType === 'professor') {
             requiredTotal = Math.max(Number(context && context.peerAssignmentsStats && context.peerAssignmentsStats.total || 0), 0);
         } else {
-            const supervisorRoles = new Set(['dean', 'hr', 'vpaa', 'admin']);
+            const supervisorRoles = new Set(['dean', 'procoor', 'hr', 'vpaa', 'admin']);
             requiredTotal = (context.users || []).filter(user =>
                 supervisorRoles.has(normalizeToken(user && user.role)) &&
                 normalizeToken(user && user.status) !== 'inactive'
@@ -4207,9 +4212,7 @@ function updateNavigation(viewName) {
 
 function parseDateBoundary(dateString, boundary) {
     if (!dateString) return null;
-    const timePart = boundary === 'end' ? 'T23:59:59' : 'T00:00:00';
-    const date = new Date(dateString + timePart);
-    return Number.isNaN(date.getTime()) ? null : date;
+    return SharedData.parsePhilippineDateBoundary(dateString, boundary);
 }
 
 function resolveReportsGateState() {
@@ -4217,11 +4220,10 @@ function resolveReportsGateState() {
     const startDate = parseDateBoundary(studentPeriod.start, 'start');
     const endDate = parseDateBoundary(studentPeriod.end, 'end');
     const hasValidDates = !!(startDate && endDate);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const todayYmd = SharedData.getCurrentPhilippineDateYmd();
 
     const isPeriodOpen = hasValidDates && SharedData.isEvalPeriodOpen('student-professor');
-    const hasPeriodEnded = hasValidDates && today > endDate;
+    const hasPeriodEnded = hasValidDates && todayYmd !== '' && todayYmd > String(studentPeriod.end || '');
     const locked = !hasValidDates || isPeriodOpen || !hasPeriodEnded;
 
     return {
@@ -4351,13 +4353,12 @@ function applyReportBlackout() {
 }
 
 function formatDisplayDate(dateString) {
-    const date = new Date(dateString);
-    if (Number.isNaN(date.getTime())) return dateString;
-    return date.toLocaleDateString('en-US', {
+    const formatted = SharedData.formatDateInPhilippines(dateString, 'en-US', {
         year: 'numeric',
         month: 'short',
         day: 'numeric'
     });
+    return formatted || dateString;
 }
 
 /**
@@ -4379,7 +4380,7 @@ function isSessionExpired() {
     }
 
     const loginTime = new Date(session.loginTime);
-    const now = new Date();
+    const now = SharedData.getNowDate();
     const hoursDiff = (now - loginTime) / (1000 * 60 * 60);
 
     // Session expires after 8 hours

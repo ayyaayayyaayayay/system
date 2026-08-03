@@ -1,4 +1,4 @@
-﻿const criteriaKeys = [
+const criteriaKeys = [
     "Teaching Effectiveness",
     "Clarity of Instruction",
     "Assessment Fairness",
@@ -103,7 +103,7 @@ function resolveVpaaEvaluationType(evaluation) {
     const token = normalizeVpaaToken(evaluation && (evaluation.evaluatorRole || evaluation.evaluationType));
     if (token === "student" || token === "student-to-professor" || token === "student-professor") return "student";
     if (token === "peer" || token === "professor" || token === "professor-to-professor" || token === "professor-professor") return "professor";
-    if (token === "supervisor" || token === "dean" || token === "hr" || token === "vpaa" || token === "admin" || token === "supervisor-to-professor" || token === "supervisor-professor") return "supervisor";
+    if (token === "supervisor" || token === "dean" || token === "procoor" || token === "hr" || token === "vpaa" || token === "admin" || token === "supervisor-to-professor" || token === "supervisor-professor") return "supervisor";
     return "";
 }
 
@@ -325,7 +325,7 @@ function buildVpaaChartDataForType(typeKey, semesterLabel, context) {
     result.categoryScores = categoryOrder.map(function (category) {
         const bucket = categoryTotals[category] || { sum: 0, count: 0 };
         const score = bucket.count ? (bucket.sum / bucket.count) : 0;
-        return { category: category, score: Number(score.toFixed(1)) };
+        return { category: category, score: Number(score.toFixed(2)) };
     });
 
     const weightedTotal = Object.keys(result.ratingDistribution).reduce(function (sum, key) {
@@ -1155,7 +1155,7 @@ function buildProfessorAnalyticsForType(typeKey, evaluations, semesterLabel) {
         categoryScores: categories.map((category) => {
             const bucket = categoryTotals[category] || { sum: 0, count: 0 };
             const score = bucket.count ? (bucket.sum / bucket.count) : 0;
-            return { category, score: Number(score.toFixed(1)), responses: bucket.count };
+            return { category, score: Number(score.toFixed(2)), responses: bucket.count };
         }),
         ratingDistribution: distribution,
         totalEvaluations: list.length
@@ -1206,8 +1206,8 @@ function renderDashboardCharts() {
         avgId: "vpaa-student-prof-avg-rating",
         totalId: "vpaa-student-prof-total",
         countId: "vpaa-student-prof-count",
-        barColor: "rgba(102, 126, 234, 0.8)",
-        barBorder: "rgba(102, 126, 234, 1)"
+        barColor: "#4f46e5",
+        barBorder: "#22c55e"
     }, vpaaChartDataByType.student || createEmptyChartData());
 
     renderDashboardChartPair({
@@ -1239,85 +1239,26 @@ function renderDashboardChartPair(config, chartData) {
     const chartKey = dashboardCharts[config.key];
 
     if (barCtx) {
-        if (chartKey.bar) {
-            chartKey.bar.destroy();
-        }
-        chartKey.bar = new Chart(barCtx, {
-            type: "bar",
-            data: {
-                labels: chartData.categoryScores.map((item) => item.category),
-                datasets: [{
-                    label: "Average Score",
-                    data: chartData.categoryScores.map((item) => item.score),
-                    backgroundColor: config.barColor,
-                    borderColor: config.barBorder,
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: true,
-                scales: {
-                    x: {
-                        ticks: {
-                            maxRotation: 0,
-                            minRotation: 0,
-                            autoSkip: false
-                        }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        max: 5,
-                        ticks: {
-                            stepSize: 1
-                        }
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: "bottom"
-                    }
-                }
-            }
+        const sectionSeries = window.AppChartDesign.buildSectionSeries(chartData.categoryScores, {
+            labelKey: 'category',
+            valueKey: 'score'
+        });
+        chartKey.bar = window.AppChartDesign.renderBarChart(barCtx, {
+            labels: sectionSeries.labels,
+            values: sectionSeries.values,
+            fullLabels: sectionSeries.fullLabels,
+            label: 'Average Score',
+            colors: [config.barColor || '#4f46e5', config.barBorder || '#22c55e'],
+            maxValue: 5,
+            stepSize: 1,
+            tooltipDecimals: 2
         });
     }
 
     if (pieCtx) {
-        if (chartKey.pie) {
-            chartKey.pie.destroy();
-        }
-        chartKey.pie = new Chart(pieCtx, {
-            type: "pie",
-            data: {
-                labels: ["5 Stars", "4 Stars", "3 Stars", "2 Stars", "1 Star"],
-                datasets: [{
-                    data: [
-                        chartData.ratingDistribution[5],
-                        chartData.ratingDistribution[4],
-                        chartData.ratingDistribution[3],
-                        chartData.ratingDistribution[2],
-                        chartData.ratingDistribution[1]
-                    ],
-                    backgroundColor: [
-                        "#10b981",
-                        "#34d399",
-                        "#fbbf24",
-                        "#f97316",
-                        "#ef4444"
-                    ]
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: true,
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: "bottom"
-                    }
-                }
-            }
+        chartKey.pie = window.AppChartDesign.renderRatingDistributionChart(pieCtx, {
+            ratingDistribution: chartData.ratingDistribution,
+            averageRating: chartData.averageRating
         });
     }
 
@@ -1955,7 +1896,7 @@ function normalizeAiAnalyticsSourceLabel(value) {
     if (!token) return "General";
     if (token.includes("student")) return "Student to Professor";
     if (token.includes("peer") || token.includes("professor")) return "Professor to Professor";
-    if (token.includes("supervisor") || token.includes("dean") || token.includes("vpaa") || token.includes("hr")) return "Supervisor to Professor";
+    if (token.includes("supervisor") || token.includes("dean") || token.includes("procoor") || token.includes("vpaa") || token.includes("hr")) return "Supervisor to Professor";
     return "General";
 }
 
@@ -2306,10 +2247,14 @@ function getAiJudgmentClass(label) {
 function renderAiInsightState(outputEl, stateType, message) {
     if (!outputEl) return;
     const type = String(stateType || "info").toLowerCase();
+    const safeMessage = escapeHtml(message || "No data available.");
+    const stateContent = type === "loading"
+        ? `${window.AppHourglassMarkup ? window.AppHourglassMarkup("small") : ""}<span>${safeMessage}</span>`
+        : safeMessage;
     outputEl.classList.add("visible");
     outputEl.innerHTML = `
         <div class="vpaa-ai-note">AI Analytics uses all comment sources (student, peer, supervisor).</div>
-        <div class="vpaa-ai-state ${escapeAttr(type)}">${escapeHtml(message || "No data available.")}</div>
+        <div class="vpaa-ai-state ${escapeAttr(type)}">${stateContent}</div>
     `;
 }
 

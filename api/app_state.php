@@ -414,6 +414,157 @@ function resolveRecipientDeanForProfessor(array $users, $departmentCode) {
     return $activeDeans[0];
 }
 
+function normalizePaperDepartmentToken($value) {
+    return strtoupper(trim((string) $value));
+}
+
+function resolveFacultyPaperRecipientRole(array $paper) {
+    $role = normalizeActorRoleToken($paper['recipient_role'] ?? '');
+    if ($role !== '') {
+        return $role;
+    }
+
+    $legacyRecipientId = normalizePaperUserIdToken($paper['recipient_dean_user_id'] ?? '');
+    return $legacyRecipientId !== '' ? 'dean' : '';
+}
+
+function resolveFacultyPaperRecipientUserId(array $paper) {
+    $recipientUserId = normalizePaperUserIdToken($paper['recipient_user_id'] ?? '');
+    if ($recipientUserId !== '') {
+        return $recipientUserId;
+    }
+    return normalizePaperUserIdToken($paper['recipient_dean_user_id'] ?? '');
+}
+
+function resolveFacultyPaperRecipientName(array $paper) {
+    $recipientName = sanitizePaperTextValue($paper['recipient_name'] ?? '', 150);
+    if ($recipientName !== '') {
+        return $recipientName;
+    }
+    return sanitizePaperTextValue($paper['recipient_dean_name'] ?? '', 150);
+}
+
+function canDeanViewFacultyPaper(array $paper, array $actorUser) {
+    $status = normalizePaperStatusValue($paper['status'] ?? '');
+    if ($status !== 'sent' && $status !== 'completed') {
+        return false;
+    }
+
+    $deanDepartment = normalizePaperDepartmentToken($actorUser['department'] ?? ($actorUser['institute'] ?? ''));
+    $paperDepartment = normalizePaperDepartmentToken($paper['department'] ?? '');
+    if ($deanDepartment === '' || $paperDepartment === '') {
+        return false;
+    }
+
+    return $deanDepartment === $paperDepartment;
+}
+
+function canDeanEditFacultyPaper(array $paper, $actorUserId, array $actorUser) {
+    if (!canDeanViewFacultyPaper($paper, $actorUser)) {
+        return false;
+    }
+    if (resolveFacultyPaperRecipientRole($paper) === 'procoor') {
+        return false;
+    }
+
+    $userId = normalizePaperUserIdToken($actorUserId);
+    if ($userId === '') {
+        return false;
+    }
+
+    $recipientUserId = resolveFacultyPaperRecipientUserId($paper);
+    $legacyDeanUserId = normalizePaperUserIdToken($paper['recipient_dean_user_id'] ?? '');
+    return ($recipientUserId !== '' && $recipientUserId === $userId)
+        || ($legacyDeanUserId !== '' && $legacyDeanUserId === $userId)
+        || ($recipientUserId === '' && canDeanViewFacultyPaper($paper, $actorUser));
+}
+
+function canCoordinatorViewFacultyPaper(array $paper, $actorUserId) {
+    $status = normalizePaperStatusValue($paper['status'] ?? '');
+    if ($status !== 'sent' && $status !== 'completed') {
+        return false;
+    }
+    if (resolveFacultyPaperRecipientRole($paper) !== 'procoor') {
+        return false;
+    }
+
+    $userId = normalizePaperUserIdToken($actorUserId);
+    return $userId !== '' && resolveFacultyPaperRecipientUserId($paper) === $userId;
+}
+
+function canCoordinatorEditFacultyPaper(array $paper, $actorUserId) {
+    return canCoordinatorViewFacultyPaper($paper, $actorUserId);
+}
+
+function decorateFacultyPaperForActor(array $paper, $actorRole, array $actorUser = []) {
+    $role = normalizeActorRoleToken($actorRole);
+    $actorUserId = normalizePaperUserIdToken($actorUser['id'] ?? '');
+    $paper['recipient_role'] = resolveFacultyPaperRecipientRole($paper);
+    $paper['recipient_user_id'] = resolveFacultyPaperRecipientUserId($paper);
+    $paper['recipient_name'] = resolveFacultyPaperRecipientName($paper);
+    $paper['canCurrentActorEdit'] = false;
+
+    if ($role === 'professor') {
+        $paper['canCurrentActorEdit'] = normalizePaperStatusValue($paper['status'] ?? '') === 'draft'
+            && normalizePaperUserIdToken($paper['professor_user_id'] ?? '') === $actorUserId;
+    } elseif ($role === 'dean') {
+        $paper['canCurrentActorEdit'] = canDeanEditFacultyPaper($paper, $actorUserId, $actorUser);
+    } elseif ($role === 'procoor') {
+        $paper['canCurrentActorEdit'] = canCoordinatorEditFacultyPaper($paper, $actorUserId);
+    }
+
+    return $paper;
+}
+
+function resolveFacultyPaperRecipientForProfessor(PDO $pdo, array $users, array $professor) {
+    $professorUserId = parsePaperUserIdNumber($professor['id'] ?? '');
+    $professorScope = $professorUserId > 0
+        ? resolveStaffProgramScopeRowByUserId($pdo, $professorUserId)
+        : null;
+
+    $departmentCode = normalizePaperDepartmentToken($professor['department'] ?? ($professor['institute'] ?? ''));
+    $activeCoordinator = $professorScope
+        ? resolveActiveCoordinatorScopeRowByProgramId($pdo, (int) $professorScope['program_id'])
+        : null;
+    $activeDean = $professorScope
+        ? resolveActiveDeanScopeRowByDepartmentId($pdo, (int) $professorScope['department_id'])
+        : null;
+
+    if (!$activeDean && $departmentCode !== '') {
+        $fallbackDean = resolveRecipientDeanForProfessor($users, $departmentCode);
+        if ($fallbackDean) {
+            $activeDean = [
+                'user_id' => parsePaperUserIdNumber($fallbackDean['id'] ?? ''),
+                'name' => (string) ($fallbackDean['name'] ?? ''),
+            ];
+        }
+    }
+
+    if ($activeCoordinator) {
+        return [
+            'recipientRole' => 'procoor',
+            'recipientUserId' => 'u' . (int) $activeCoordinator['user_id'],
+            'recipientName' => sanitizePaperTextValue($activeCoordinator['name'] ?? 'Program Coordinator', 150),
+            'oversightDeanUserId' => $activeDean && (int) ($activeDean['user_id'] ?? 0) > 0
+                ? ('u' . (int) $activeDean['user_id'])
+                : '',
+            'oversightDeanName' => sanitizePaperTextValue($activeDean['name'] ?? '', 150),
+        ];
+    }
+
+    if ($activeDean && (int) ($activeDean['user_id'] ?? 0) > 0) {
+        return [
+            'recipientRole' => 'dean',
+            'recipientUserId' => 'u' . (int) $activeDean['user_id'],
+            'recipientName' => sanitizePaperTextValue($activeDean['name'] ?? 'Dean', 150),
+            'oversightDeanUserId' => 'u' . (int) $activeDean['user_id'],
+            'oversightDeanName' => sanitizePaperTextValue($activeDean['name'] ?? 'Dean', 150),
+        ];
+    }
+
+    return null;
+}
+
 function normalizePaperStatusValue($status) {
     $raw = strtolower(trim((string) $status));
     $allowed = ['draft', 'archived', 'sent', 'completed'];
@@ -423,22 +574,32 @@ function normalizePaperStatusValue($status) {
     return 'draft';
 }
 
-function filterFacultyPapersByActor(array $papers, $actorRole, $actorUserId) {
+function filterFacultyPapersByActor(array $papers, $actorRole, $actorUserId, array $actorUser = []) {
     $role = normalizeActorRoleToken($actorRole);
     $userId = normalizePaperUserIdToken($actorUserId);
 
     if ($role === 'professor') {
-        return array_values(array_filter($papers, function ($paper) use ($userId) {
+        return array_values(array_map(function ($paper) use ($actorRole, $actorUser) {
+            return decorateFacultyPaperForActor($paper, $actorRole, $actorUser);
+        }, array_filter($papers, function ($paper) use ($userId) {
             return normalizePaperUserIdToken($paper['professor_user_id'] ?? '') === $userId;
-        }));
+        })));
     }
 
     if ($role === 'dean') {
-        return array_values(array_filter($papers, function ($paper) use ($userId) {
-            $recipientId = normalizePaperUserIdToken($paper['recipient_dean_user_id'] ?? '');
-            $status = normalizePaperStatusValue($paper['status'] ?? '');
-            return $recipientId === $userId && ($status === 'sent' || $status === 'completed');
-        }));
+        return array_values(array_map(function ($paper) use ($actorRole, $actorUser) {
+            return decorateFacultyPaperForActor($paper, $actorRole, $actorUser);
+        }, array_filter($papers, function ($paper) use ($actorUser) {
+            return canDeanViewFacultyPaper($paper, $actorUser);
+        })));
+    }
+
+    if ($role === 'procoor') {
+        return array_values(array_map(function ($paper) use ($actorRole, $actorUser) {
+            return decorateFacultyPaperForActor($paper, $actorRole, $actorUser);
+        }, array_filter($papers, function ($paper) use ($userId) {
+            return canCoordinatorViewFacultyPaper($paper, $userId);
+        })));
     }
 
     return [];
@@ -602,7 +763,10 @@ function normalizeEvaluationActorRole($value) {
     if ($token === 'peer' || $token === 'professor' || $token === 'professor-to-professor') {
         return 'professor';
     }
-    if ($token === 'supervisor' || $token === 'dean' || $token === 'supervisor-to-professor') {
+    if ($token === 'supervisor' || $token === 'dean' || $token === 'procoor' || $token === 'supervisor-to-professor') {
+        if ($token === 'procoor') {
+            return 'procoor';
+        }
         return 'dean';
     }
     if ($token === 'admin' || $token === 'hr' || $token === 'osa' || $token === 'vpaa') {
@@ -637,6 +801,73 @@ function resolvePeerEvaluateeUserIdFromEvaluationPayload(array $evaluation) {
     }
 
     return 0;
+}
+
+function resolveSupervisorEvaluationTargetProfessor(PDO $pdo, array $evaluation) {
+    $candidateValues = [
+        $evaluation['targetProfessorId'] ?? '',
+        $evaluation['targetUserId'] ?? '',
+        $evaluation['targetId'] ?? '',
+        $evaluation['colleagueId'] ?? '',
+    ];
+
+    foreach ($candidateValues as $candidate) {
+        $user = buildUserSnapshotById($pdo, $candidate, false);
+        if ($user && normalizeActorRoleToken($user['role'] ?? '') === 'professor') {
+            return $user;
+        }
+    }
+
+    return null;
+}
+
+function enforceSupervisorEvaluationScope(PDO $pdo, array $actorUser, $actorRole, array $evaluation) {
+    $role = normalizeActorRoleToken($actorRole);
+    if ($role !== 'dean' && $role !== 'procoor') {
+        return;
+    }
+
+    $targetProfessor = resolveSupervisorEvaluationTargetProfessor($pdo, $evaluation);
+    if (!$targetProfessor) {
+        sendJson(['success' => false, 'error' => 'Target professor is required for supervisor evaluation.'], 400);
+    }
+
+    $targetProfessorUserId = parsePaperUserIdNumber($targetProfessor['id'] ?? '');
+    $targetScope = $targetProfessorUserId > 0
+        ? resolveStaffProgramScopeRowByUserId($pdo, $targetProfessorUserId)
+        : null;
+    if (!$targetScope) {
+        sendJson(['success' => false, 'error' => 'Unable to resolve professor program scope.'], 400);
+    }
+
+    if ($role === 'dean') {
+        $deanUserId = parsePaperUserIdNumber($actorUser['id'] ?? '');
+        $deanScope = $deanUserId > 0 ? resolveActiveDeanScopeRow($pdo, $deanUserId) : null;
+        if (!$deanScope) {
+            sendJson(['success' => false, 'error' => 'Active dean scope could not be resolved.'], 403);
+        }
+        if ((int) $deanScope['department_id'] !== (int) $targetScope['department_id']) {
+            sendJson(['success' => false, 'error' => 'Permission denied for professor outside your department scope.'], 403);
+        }
+
+        $activeCoordinator = resolveActiveCoordinatorScopeRowByProgramId($pdo, (int) $targetScope['program_id']);
+        if ($activeCoordinator) {
+            sendJson([
+                'success' => false,
+                'error' => 'This program is assigned to an active Program Coordinator. Dean supervisor evaluation is read-only for this program.',
+            ], 403);
+        }
+        return;
+    }
+
+    $coordinatorUserId = parsePaperUserIdNumber($actorUser['id'] ?? '');
+    $coordinatorScope = $coordinatorUserId > 0 ? resolveActiveCoordinatorScopeRow($pdo, $coordinatorUserId) : null;
+    if (!$coordinatorScope) {
+        sendJson(['success' => false, 'error' => 'Active coordinator scope could not be resolved.'], 403);
+    }
+    if ((int) $coordinatorScope['program_id'] !== (int) $targetScope['program_id']) {
+        sendJson(['success' => false, 'error' => 'Permission denied for professor outside your program scope.'], 403);
+    }
 }
 
 function requireActiveHrOrAdminByIdentity(array $users, array $identity) {
@@ -676,15 +907,15 @@ function requireActiveVpaaHrOrAdminByIdentity(array $users, array $identity) {
 }
 
 function getAuthenticatedSessionAppUser(PDO $pdo, $includeSensitive = false) {
-    $session = requireNaapAuthenticatedSession();
+    $session = requireNaapAuthenticatedSession($pdo);
     $user = buildUserSnapshotById($pdo, $session['userId'], $includeSensitive);
     if (!$user) {
-        destroyNaapSession();
+        destroyNaapSession($pdo);
         sendJson(['success' => false, 'error' => 'Authentication required.'], 401);
     }
 
     if (normalizeActorRoleToken($user['status'] ?? 'active') === 'inactive') {
-        destroyNaapSession();
+        destroyNaapSession($pdo);
         sendJson(['success' => false, 'error' => 'Account is inactive'], 403);
     }
 
@@ -772,32 +1003,12 @@ function countBiasPatternHits($haystack, array $patterns) {
 
 function mergeBiasClassifications(array $geminiClassification, array $ruleClassification) {
     $geminiLabel = normalizeBiasLabel($geminiClassification['label'] ?? '');
-    $ruleLabel = normalizeBiasLabel($ruleClassification['label'] ?? '');
     $geminiReason = normalizeBiasDetectionText($geminiClassification['reason'] ?? '');
-    $ruleReason = normalizeBiasDetectionText($ruleClassification['reason'] ?? '');
-
-    if ($ruleLabel === 'Biased' && $geminiLabel !== 'Biased') {
-        return [
-            'label' => 'Biased',
-            'reason' => $ruleReason !== ''
-                ? ($ruleReason . ' Strict rule override applied.')
-                : 'Strict rule override applied because the comment contains blanket or attack-style language.',
-            'source' => 'gemini+rule',
-        ];
-    }
-
-    if (getBiasLabelSeverity($geminiLabel) >= getBiasLabelSeverity($ruleLabel)) {
-        return [
-            'label' => $geminiLabel,
-            'reason' => $geminiReason !== '' ? $geminiReason : 'Model-generated classification.',
-            'source' => 'gemini',
-        ];
-    }
 
     return [
-        'label' => $ruleLabel,
-        'reason' => $ruleReason !== '' ? $ruleReason : 'Rule-based classification.',
-        'source' => 'rule',
+        'label' => $geminiLabel,
+        'reason' => $geminiReason !== '' ? $geminiReason : 'Model-generated classification.',
+        'source' => 'gemini',
     ];
 }
 
@@ -1394,9 +1605,10 @@ function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = []) {
         ];
     }
 
-    $geminiKey = getenv('NAAP_GEMINI_API_KEY');
-    $geminiModel = getenv('NAAP_GEMINI_MODEL') ?: 'gemini-2.5-flash';
-    $geminiTimeout = (int) (getenv('NAAP_GEMINI_TIMEOUT_MS') ?: 30000);
+    $geminiConfig = getGeminiRawConfig($pdo);
+    $geminiKey = (string) ($geminiConfig['apiKey'] ?? '');
+    $geminiModel = (string) ($geminiConfig['model'] ?? 'gemini-2.5-flash');
+    $geminiTimeout = (int) ($geminiConfig['timeoutMs'] ?? 30000);
     if ($geminiTimeout <= 0) $geminiTimeout = 30000;
     if ($geminiTimeout < 30000) $geminiTimeout = 30000;
     if ($geminiTimeout > 60000) $geminiTimeout = 60000;
@@ -1449,23 +1661,19 @@ function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = []) {
     } else {
         $runSource = 'rule';
     }
-    $usedRuleInMerge = false;
-
     foreach ($commentItems as $item) {
         $id = (string) ($item['id'] ?? '');
-        $ruleClassified = classifyBiasCommentByRules($item['comment'] ?? '');
         $geminiClassified = is_array($modelResultsById[$id] ?? null)
             ? $modelResultsById[$id]
             : null;
         if (is_array($geminiClassified)) {
-            $classified = mergeBiasClassifications($geminiClassified, $ruleClassified);
-            $classifiedSource = trim((string) ($classified['source'] ?? ''));
-            if ($classifiedSource !== 'gemini') {
-                $usedRuleInMerge = true;
-            }
+            $classified = [
+                'label' => normalizeBiasLabel($geminiClassified['label'] ?? ''),
+                'reason' => normalizeBiasDetectionText($geminiClassified['reason'] ?? 'Model-generated classification.'),
+                'source' => 'gemini',
+            ];
         } else {
-            $classified = $ruleClassified;
-            $usedRuleInMerge = true;
+            $classified = classifyBiasCommentByRules($item['comment'] ?? '');
         }
 
         $label = normalizeBiasLabel($classified['label'] ?? '');
@@ -1497,16 +1705,12 @@ function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = []) {
     }
 
     $summary['total'] = count($items);
-    if ($runSource === 'gemini' && $usedRuleInMerge) {
-        $summary['source'] = 'gemini+rule';
-    } else {
-        $summary['source'] = $runSource;
-    }
+    $summary['source'] = $runSource;
 
     if ($summary['source'] === 'gemini+rule') {
         $summary['warning'] = $geminiWarning !== ''
             ? ('Gemini partial fallback: ' . $geminiWarning)
-            : 'Gemini and rule-based classification were combined.';
+            : 'Gemini returned partial classifications. Rule fallback filled missing items.';
     } elseif ($summary['source'] === 'gemini') {
         $summary['warning'] = '';
     } else {
@@ -1585,6 +1789,7 @@ function normalizeExplainabilitySourceLabel($value) {
     if (
         strpos($token, 'supervisor') !== false
         || strpos($token, 'dean') !== false
+        || strpos($token, 'procoor') !== false
         || strpos($token, 'vpaa') !== false
         || strpos($token, 'hr') !== false
     ) {
@@ -1597,7 +1802,13 @@ function getExplainabilitySourceBucket($sourceLabel) {
     $token = strtolower(trim((string) $sourceLabel));
     if (strpos($token, 'student') !== false) return 'student';
     if (strpos($token, 'professor') !== false || strpos($token, 'peer') !== false) return 'professor';
-    if (strpos($token, 'supervisor') !== false || strpos($token, 'dean') !== false || strpos($token, 'vpaa') !== false || strpos($token, 'hr') !== false) {
+    if (
+        strpos($token, 'supervisor') !== false
+        || strpos($token, 'dean') !== false
+        || strpos($token, 'procoor') !== false
+        || strpos($token, 'vpaa') !== false
+        || strpos($token, 'hr') !== false
+    ) {
         return 'supervisor';
     }
     return 'general';
@@ -2430,12 +2641,10 @@ function analyzeEvaluationExplainabilitySnapshot(PDO $pdo, array $payload = []) 
         ];
     }
 
-    $geminiKey = getenv('NAAP_GEMINI_API_KEY');
-    $geminiModel = getenv('NAAP_GEMINI_MODEL') ?: 'gemini-2.5-flash';
-    $geminiTimeoutEnv = getenv('NAAP_GEMINI_TIMEOUT_MS');
-    $geminiTimeout = ($geminiTimeoutEnv !== false && trim((string) $geminiTimeoutEnv) !== '')
-        ? $geminiTimeoutEnv
-        : '25000';
+    $geminiConfig = getGeminiRawConfig($pdo);
+    $geminiKey = (string) ($geminiConfig['apiKey'] ?? '');
+    $geminiModel = (string) ($geminiConfig['model'] ?? 'gemini-2.5-flash');
+    $geminiTimeout = (string) ((int) ($geminiConfig['timeoutMs'] ?? 25000));
 
     $geminiInsight = null;
     if (trim((string) $geminiKey) !== '') {
@@ -2454,10 +2663,13 @@ function analyzeEvaluationExplainabilitySnapshot(PDO $pdo, array $payload = []) 
         ];
     }
 
-    $merged = mergeExplainabilityInsightWithFallback($geminiInsight, $ruleInsight);
+    $geminiInsight['stats'] = is_array($ruleInsight['stats'] ?? null) ? $ruleInsight['stats'] : [
+        'totalComments' => 0,
+        'sourceCounts' => ['student' => 0, 'professor' => 0, 'supervisor' => 0],
+    ];
     return [
-        'source' => ($merged['usedRule'] ?? false) ? 'gemini+rule' : 'gemini',
-        'insight' => $merged['insight'] ?? $ruleInsight,
+        'source' => 'gemini',
+        'insight' => $geminiInsight,
     ];
 }
 
@@ -2917,9 +3129,10 @@ function generateFacultySectionCRecommendationsSnapshot(array $context) {
         ];
     }
 
-    $geminiKey = getenv('NAAP_GEMINI_API_KEY');
-    $geminiModel = getenv('NAAP_GEMINI_MODEL') ?: 'gemini-2.5-flash';
-    $geminiTimeout = getenv('NAAP_GEMINI_TIMEOUT_MS') ?: '15000';
+    $geminiConfig = getGeminiRawConfig($pdo);
+    $geminiKey = (string) ($geminiConfig['apiKey'] ?? '');
+    $geminiModel = (string) ($geminiConfig['model'] ?? 'gemini-2.5-flash');
+    $geminiTimeout = (string) ((int) ($geminiConfig['timeoutMs'] ?? 15000));
 
     $gemini = null;
     if (trim((string) $geminiKey) !== '') {
@@ -2935,12 +3148,11 @@ function generateFacultySectionCRecommendationsSnapshot(array $context) {
         ];
     }
 
-    $merged = mergeFacultySectionCRecommendation($gemini, $rule);
     return [
-        'source' => ($merged['usedRule'] ?? false) ? 'gemini+rule' : 'gemini',
-        'weakAreas' => $merged['weakAreas'] ?? [],
-        'sectionC' => $merged['sectionC'] ?? ['areas' => '', 'activities' => '', 'actionPlan' => ''],
-        'reasoning' => $merged['reasoning'] ?? [],
+        'source' => 'gemini',
+        'weakAreas' => normalizeFacultyWeakAreasOutput($gemini['weakAreas'] ?? []),
+        'sectionC' => normalizeFacultySectionCOutput($gemini['sectionC'] ?? []),
+        'reasoning' => normalizeFacultyReasoningOutput($gemini['reasoning'] ?? []),
     ];
 }
 
@@ -2949,6 +3161,8 @@ function persistOwnEmailChangeSnapshot(PDO $pdo, array $actorUser, array $body) 
     if ($actorUserId <= 0) {
         throw new RuntimeException('Unable to resolve account identity.');
     }
+
+    $beforeUser = buildUserSnapshotById($pdo, $actorUserId, false);
 
     $currentEmail = strtolower(trim((string) ($body['currentEmail'] ?? '')));
     $newEmail = strtolower(trim((string) ($body['newEmail'] ?? '')));
@@ -2988,6 +3202,18 @@ function persistOwnEmailChangeSnapshot(PDO $pdo, array $actorUser, array $body) 
         'email' => $newEmail,
     ], normalizeActorRoleToken($actorUser['role'] ?? ''));
 
+    if (is_array($updatedUser)) {
+        safeLogAdminFlatStateChangeSnapshot(
+            $pdo,
+            $actorUser,
+            'Own Email Updated',
+            'user',
+            'Own account email',
+            is_array($beforeUser) ? buildUserActivityFlatState($beforeUser, ['userId' => 'u' . $actorUserId]) : [],
+            buildUserActivityFlatState($updatedUser, ['userId' => 'u' . $actorUserId])
+        );
+    }
+
     return [
         'email' => $newEmail,
         'user' => $updatedUser ?: [
@@ -3003,6 +3229,8 @@ function persistOwnPasswordChangeSnapshot(PDO $pdo, array $actorUser, array $bod
     if ($actorUserId <= 0) {
         throw new RuntimeException('Unable to resolve account identity.');
     }
+
+    $beforeUser = buildUserSnapshotById($pdo, $actorUserId, false);
 
     $currentPassword = (string) ($body['currentPassword'] ?? '');
     $newPassword = (string) ($body['newPassword'] ?? '');
@@ -3029,6 +3257,21 @@ function persistOwnPasswordChangeSnapshot(PDO $pdo, array $actorUser, array $bod
         ':password' => normalizePasswordForStorage($newPassword),
         ':id' => $actorUserId,
     ]);
+
+    $afterUser = buildUserSnapshotById($pdo, $actorUserId, false);
+    safeLogAdminFlatStateChangeSnapshot(
+        $pdo,
+        $actorUser,
+        'Own Password Updated',
+        'user',
+        'Own account password',
+        is_array($beforeUser)
+            ? buildUserActivityFlatState($beforeUser, ['userId' => 'u' . $actorUserId, 'passwordMarker' => '[stored]'])
+            : ['User u' . $actorUserId . ' Password' => '[stored]'],
+        is_array($afterUser)
+            ? buildUserActivityFlatState($afterUser, ['userId' => 'u' . $actorUserId, 'passwordMarker' => '[updated]'])
+            : ['User u' . $actorUserId . ' Password' => '[updated]']
+    );
 
     return [
         'updated' => true,
@@ -3062,9 +3305,18 @@ try {
         case 'setUsers':
             $users = is_array($body['users'] ?? null) ? $body['users'] : [];
             if ($authenticatedRole === 'admin') {
-                $users = persistUsersSnapshot($pdo, $users);
+                $users = persistUsersSnapshot($pdo, $users, [
+                    'activity_actor' => $authenticatedUser,
+                    'activity_action' => 'Users Saved',
+                    'activity_type' => 'user',
+                ]);
             } elseif ($authenticatedRole === 'hr') {
-                $users = persistUsersSnapshot($pdo, $users, ['allowed_roles' => ['professor']]);
+                $users = persistUsersSnapshot($pdo, $users, [
+                    'allowed_roles' => ['professor'],
+                    'activity_actor' => $authenticatedUser,
+                    'activity_action' => 'Users Saved',
+                    'activity_type' => 'user',
+                ]);
             } else {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
@@ -3086,9 +3338,18 @@ try {
             $user = is_array($body['user'] ?? null) ? $body['user'] : [];
             try {
                 if ($authenticatedRole === 'admin') {
-                    $createdUser = createUserSnapshot($pdo, $user);
+                    $createdUser = createUserSnapshot($pdo, $user, [
+                        'activity_actor' => $authenticatedUser,
+                        'activity_action' => 'User Created',
+                        'activity_type' => 'user',
+                    ]);
                 } elseif ($authenticatedRole === 'hr') {
-                    $createdUser = createUserSnapshot($pdo, $user, ['allowed_roles' => ['professor']]);
+                    $createdUser = createUserSnapshot($pdo, $user, [
+                        'allowed_roles' => ['professor'],
+                        'activity_actor' => $authenticatedUser,
+                        'activity_action' => 'User Created',
+                        'activity_type' => 'user',
+                    ]);
                 } else {
                     sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
                 }
@@ -3107,9 +3368,18 @@ try {
             $user = is_array($body['user'] ?? null) ? $body['user'] : [];
             try {
                 if ($authenticatedRole === 'admin') {
-                    $updatedUser = updateUserSnapshot($pdo, $userId, $user);
+                    $updatedUser = updateUserSnapshot($pdo, $userId, $user, [
+                        'activity_actor' => $authenticatedUser,
+                        'activity_action' => 'User Updated',
+                        'activity_type' => 'user',
+                    ]);
                 } elseif ($authenticatedRole === 'hr') {
-                    $updatedUser = updateUserSnapshot($pdo, $userId, $user, ['allowed_roles' => ['professor']]);
+                    $updatedUser = updateUserSnapshot($pdo, $userId, $user, [
+                        'allowed_roles' => ['professor'],
+                        'activity_actor' => $authenticatedUser,
+                        'activity_action' => 'User Updated',
+                        'activity_type' => 'user',
+                    ]);
                 } else {
                     sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
                 }
@@ -3127,9 +3397,18 @@ try {
             $userId = $body['userId'] ?? '';
             try {
                 if ($authenticatedRole === 'admin') {
-                    $users = deleteUserSnapshot($pdo, $userId);
+                    $users = deleteUserSnapshot($pdo, $userId, [
+                        'activity_actor' => $authenticatedUser,
+                        'activity_action' => 'User Deleted',
+                        'activity_type' => 'user',
+                    ]);
                 } elseif ($authenticatedRole === 'hr') {
-                    $users = deleteUserSnapshot($pdo, $userId, ['allowed_roles' => ['professor']]);
+                    $users = deleteUserSnapshot($pdo, $userId, [
+                        'allowed_roles' => ['professor'],
+                        'activity_actor' => $authenticatedUser,
+                        'activity_action' => 'User Deleted',
+                        'activity_type' => 'user',
+                    ]);
                 } else {
                     sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
                 }
@@ -3146,9 +3425,18 @@ try {
             $users = is_array($body['users'] ?? null) ? $body['users'] : [];
             try {
                 if ($authenticatedRole === 'admin') {
-                    $users = bulkUpsertUsersSnapshot($pdo, $users);
+                    $users = bulkUpsertUsersSnapshot($pdo, $users, [
+                        'activity_actor' => $authenticatedUser,
+                        'activity_action' => 'Bulk Users Saved',
+                        'activity_type' => 'user',
+                    ]);
                 } elseif ($authenticatedRole === 'hr') {
-                    $users = bulkUpsertUsersSnapshot($pdo, $users, ['allowed_roles' => ['professor']]);
+                    $users = bulkUpsertUsersSnapshot($pdo, $users, [
+                        'allowed_roles' => ['professor'],
+                        'activity_actor' => $authenticatedUser,
+                        'activity_action' => 'Bulk Users Saved',
+                        'activity_type' => 'user',
+                    ]);
                 } else {
                     sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
                 }
@@ -3166,7 +3454,7 @@ try {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
             $campuses = is_array($body['campuses'] ?? null) ? $body['campuses'] : [];
-            setSettingJson($pdo, 'sharedCampusData', $campuses);
+            persistCampusesSnapshot($pdo, $campuses, $authenticatedUser);
             sendJson(['success' => true, 'campuses' => $campuses]);
             break;
 
@@ -3175,7 +3463,7 @@ try {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
             $program = is_array($body['program'] ?? null) ? $body['program'] : [];
-            $programs = upsertProgramSnapshot($pdo, $program);
+            $programs = upsertProgramSnapshot($pdo, $program, $authenticatedUser);
             sendJson([
                 'success' => true,
                 'programs' => $programs,
@@ -3188,7 +3476,7 @@ try {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
             $programId = $body['programId'] ?? null;
-            $programs = deleteProgramSnapshot($pdo, $programId);
+            $programs = deleteProgramSnapshot($pdo, $programId, $authenticatedUser);
             sendJson([
                 'success' => true,
                 'programs' => $programs,
@@ -3201,7 +3489,7 @@ try {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
             $data = is_array($body['data'] ?? null) ? $body['data'] : [];
-            $questionnaires = persistQuestionnairesSnapshot($pdo, $data);
+            $questionnaires = persistQuestionnairesSnapshot($pdo, $data, $authenticatedUser);
             sendJson(['success' => true, 'questionnaires' => $questionnaires]);
             break;
 
@@ -3210,7 +3498,7 @@ try {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
             $periods = is_array($body['periods'] ?? null) ? $body['periods'] : getDefaultEvalPeriods();
-            persistEvalPeriods($pdo, array_merge(getDefaultEvalPeriods(), $periods));
+            persistEvalPeriods($pdo, array_merge(getDefaultEvalPeriods(), $periods), $authenticatedUser);
             sendJson(['success' => true]);
             break;
 
@@ -3221,7 +3509,7 @@ try {
             $partial = is_array($body['settings'] ?? null) ? $body['settings'] : [];
             $current = buildSettingsSnapshot($pdo);
             $updated = array_merge($current, $partial);
-            setSettingJson($pdo, 'sharedSettings', $updated);
+            persistSettingsSnapshot($pdo, $updated, $authenticatedUser);
             sendJson(['success' => true, 'settings' => $updated]);
             break;
 
@@ -3273,6 +3561,28 @@ try {
             ]);
             break;
 
+        case 'getGeminiConfig':
+            if ($authenticatedRole !== 'admin') {
+                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
+            }
+            sendJson([
+                'success' => true,
+                'config' => buildGeminiConfigSnapshot($pdo),
+            ]);
+            break;
+
+        case 'saveGeminiConfig':
+            if ($authenticatedRole !== 'admin') {
+                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
+            }
+            $configInput = is_array($body['config'] ?? null) ? $body['config'] : $body;
+            $savedConfig = persistGeminiConfigSnapshot($pdo, is_array($configInput) ? $configInput : []);
+            sendJson([
+                'success' => true,
+                'config' => $savedConfig,
+            ]);
+            break;
+
         case 'bulkDistributeCredentials':
             $rows = is_array($body['rows'] ?? null) ? $body['rows'] : [];
             if ($authenticatedRole !== 'admin') {
@@ -3283,6 +3593,28 @@ try {
                 'success' => true,
                 'summary' => $result['summary'] ?? ['total' => 0, 'sent' => 0, 'failed' => 0],
                 'failures' => $result['failures'] ?? [],
+            ]);
+            break;
+
+        case 'sendTestSmtpEmail':
+            $recipientEmail = trim((string) ($body['recipientEmail'] ?? ''));
+            $subject = trim((string) ($body['subject'] ?? ''));
+            $message = trim((string) ($body['message'] ?? ''));
+            if ($authenticatedRole !== 'admin') {
+                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
+            }
+            try {
+                $result = sendTestSmtpEmailSnapshot($pdo, $recipientEmail, $subject, $message, $authenticatedUser);
+            } catch (RuntimeException $e) {
+                sendJson([
+                    'success' => false,
+                    'message' => 'SMTP test email failed.',
+                    'error' => $e->getMessage(),
+                ], 400);
+            }
+            sendJson([
+                'success' => true,
+                'message' => (string) ($result['message'] ?? 'Test email sent successfully.'),
             ]);
             break;
 
@@ -3445,7 +3777,7 @@ try {
             if ($value === '' || $label === '') {
                 sendJson(['success' => false, 'error' => 'Semester value and label are required'], 400);
             }
-            addSemesterSnapshot($pdo, $value, $label);
+            addSemesterSnapshot($pdo, $value, $label, $authenticatedUser);
             sendJson(['success' => true]);
             break;
 
@@ -3457,10 +3789,11 @@ try {
             if ($value === '') {
                 sendJson(['success' => false, 'error' => 'Current semester is required'], 400);
             }
-            setCurrentSemesterSnapshot($pdo, $value);
+            setCurrentSemesterSnapshot($pdo, $value, $authenticatedUser);
             sendJson(['success' => true]);
             break;
 
+        case 'generateDeanProgramPeerAssignments':
         case 'autoGeneratePeerRoom':
             if ($authenticatedRole !== 'dean') {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
@@ -3471,20 +3804,40 @@ try {
             }
 
             $programCode = trim((string) ($body['programCode'] ?? ''));
-            $professorCount = (int) ($body['professorCount'] ?? 0);
-            $roomName = trim((string) ($body['roomName'] ?? ''));
+            $peerCount = (int) ($body['peerCount'] ?? ($body['professorCount'] ?? 0));
 
-            $result = generateDeanPeerRoomSnapshot(
+            $result = generateDeanProgramPeerAssignmentsSnapshot(
                 $pdo,
                 $deanUserId,
                 $programCode,
-                $professorCount,
-                $roomName
+                $peerCount
             );
 
             sendJson(array_merge(['success' => true], $result));
             break;
 
+        case 'generateCoordinatorProgramPeerAssignments':
+            if ($authenticatedRole !== 'procoor') {
+                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
+            }
+            $coordinatorUserId = parsePaperUserIdNumber($authenticatedUser['id'] ?? '');
+            if ($coordinatorUserId <= 0) {
+                sendJson(['success' => false, 'error' => 'Unable to resolve coordinator identity.'], 400);
+            }
+
+            $programCode = trim((string) ($body['programCode'] ?? ''));
+            $peerCount = (int) ($body['peerCount'] ?? ($body['professorCount'] ?? 0));
+            $result = generateCoordinatorProgramPeerAssignmentsSnapshot(
+                $pdo,
+                $coordinatorUserId,
+                $programCode,
+                $peerCount
+            );
+
+            sendJson(array_merge(['success' => true], $result));
+            break;
+
+        case 'listDeanProgramPeerAssignmentsCurrent':
         case 'listDeanPeerRoomsCurrent':
             if ($authenticatedRole !== 'dean') {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
@@ -3494,7 +3847,48 @@ try {
                 sendJson(['success' => false, 'error' => 'Unable to resolve dean identity.'], 400);
             }
 
-            $result = buildDeanPeerRoomsCurrentSnapshot($pdo, $deanUserId);
+            $result = listDeanProgramPeerAssignmentsCurrentSnapshot($pdo, $deanUserId);
+            sendJson(array_merge(['success' => true], $result));
+            break;
+
+        case 'listCoordinatorProgramPeerAssignmentsCurrent':
+            if ($authenticatedRole !== 'procoor') {
+                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
+            }
+            $coordinatorUserId = parsePaperUserIdNumber($authenticatedUser['id'] ?? '');
+            if ($coordinatorUserId <= 0) {
+                sendJson(['success' => false, 'error' => 'Unable to resolve coordinator identity.'], 400);
+            }
+
+            $result = listCoordinatorProgramPeerAssignmentsCurrentSnapshot($pdo, $coordinatorUserId);
+            sendJson(array_merge(['success' => true], $result));
+            break;
+
+        case 'listDeanProgramPeerAssignmentDetailsCurrent':
+            if ($authenticatedRole !== 'dean') {
+                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
+            }
+            $deanUserId = parsePaperUserIdNumber($authenticatedUser['id'] ?? '');
+            if ($deanUserId <= 0) {
+                sendJson(['success' => false, 'error' => 'Unable to resolve dean identity.'], 400);
+            }
+
+            $programCode = trim((string) ($body['programCode'] ?? ''));
+            $result = listDeanProgramPeerAssignmentDetailsCurrentSnapshot($pdo, $deanUserId, $programCode);
+            sendJson(array_merge(['success' => true], $result));
+            break;
+
+        case 'listCoordinatorProgramPeerAssignmentDetailsCurrent':
+            if ($authenticatedRole !== 'procoor') {
+                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
+            }
+            $coordinatorUserId = parsePaperUserIdNumber($authenticatedUser['id'] ?? '');
+            if ($coordinatorUserId <= 0) {
+                sendJson(['success' => false, 'error' => 'Unable to resolve coordinator identity.'], 400);
+            }
+
+            $programCode = trim((string) ($body['programCode'] ?? ''));
+            $result = listCoordinatorProgramPeerAssignmentDetailsCurrentSnapshot($pdo, $coordinatorUserId, $programCode);
             sendJson(array_merge(['success' => true], $result));
             break;
 
@@ -3512,80 +3906,14 @@ try {
             break;
 
         case 'listDeanPeerRoomMembersCurrent':
-            if ($authenticatedRole !== 'dean') {
-                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
-            }
-            $deanUserId = parsePaperUserIdNumber($authenticatedUser['id'] ?? '');
-            if ($deanUserId <= 0) {
-                sendJson(['success' => false, 'error' => 'Unable to resolve dean identity.'], 400);
-            }
-
-            $roomId = $body['roomId'] ?? null;
-            $result = listDeanPeerRoomMembersCurrentSnapshot($pdo, $deanUserId, $roomId);
-            sendJson(array_merge(['success' => true], $result));
-            break;
-
         case 'listDeanPeerRoomEligibleProfessorsCurrent':
-            if ($authenticatedRole !== 'dean') {
-                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
-            }
-            $deanUserId = parsePaperUserIdNumber($authenticatedUser['id'] ?? '');
-            if ($deanUserId <= 0) {
-                sendJson(['success' => false, 'error' => 'Unable to resolve dean identity.'], 400);
-            }
-
-            $roomId = $body['roomId'] ?? null;
-            $result = listDeanPeerRoomEligibleProfessorsCurrentSnapshot($pdo, $deanUserId, $roomId);
-            sendJson(array_merge(['success' => true], $result));
-            break;
-
         case 'addDeanPeerRoomMembers':
-            if ($authenticatedRole !== 'dean') {
-                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
-            }
-            $deanUserId = parsePaperUserIdNumber($authenticatedUser['id'] ?? '');
-            if ($deanUserId <= 0) {
-                sendJson(['success' => false, 'error' => 'Unable to resolve dean identity.'], 400);
-            }
-
-            $roomId = $body['roomId'] ?? null;
-            $professorUserIds = is_array($body['professorUserIds'] ?? null) ? $body['professorUserIds'] : [];
-            $singleProfessorUserId = $body['professorUserId'] ?? '';
-            if ($singleProfessorUserId !== '') {
-                $professorUserIds[] = $singleProfessorUserId;
-            }
-
-            $result = addDeanPeerRoomMembersSnapshot($pdo, $deanUserId, $roomId, $professorUserIds);
-            sendJson(array_merge(['success' => true], $result));
-            break;
-
         case 'removeDeanPeerRoomMember':
-            if ($authenticatedRole !== 'dean') {
-                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
-            }
-            $deanUserId = parsePaperUserIdNumber($authenticatedUser['id'] ?? '');
-            if ($deanUserId <= 0) {
-                sendJson(['success' => false, 'error' => 'Unable to resolve dean identity.'], 400);
-            }
-
-            $roomId = $body['roomId'] ?? null;
-            $professorUserId = $body['professorUserId'] ?? null;
-            $result = removeDeanPeerRoomMemberSnapshot($pdo, $deanUserId, $roomId, $professorUserId);
-            sendJson(array_merge(['success' => true], $result));
-            break;
-
         case 'dismantleDeanPeerRoom':
-            if ($authenticatedRole !== 'dean') {
-                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
-            }
-            $deanUserId = parsePaperUserIdNumber($authenticatedUser['id'] ?? '');
-            if ($deanUserId <= 0) {
-                sendJson(['success' => false, 'error' => 'Unable to resolve dean identity.'], 400);
-            }
-
-            $roomId = $body['roomId'] ?? null;
-            $result = dismantleDeanPeerRoomSnapshot($pdo, $deanUserId, $roomId);
-            sendJson(array_merge(['success' => true], $result));
+            sendJson([
+                'success' => false,
+                'error' => 'Peer room management is no longer supported. Use the program-based peer assignment actions instead.',
+            ], 410);
             break;
 
         case 'setEvaluations':
@@ -3604,16 +3932,16 @@ try {
             }
 
             $actorRole = normalizeEvaluationActorRole($authenticatedRole);
-            if ($actorRole !== 'student' && $actorRole !== 'professor' && $actorRole !== 'dean') {
+            if ($actorRole !== 'student' && $actorRole !== 'professor' && $actorRole !== 'dean' && $actorRole !== 'procoor') {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
 
             $actorUser = $authenticatedUser;
-            $nowIso = date('c');
+            $nowIso = getAuthoritativePhilippineIso8601();
 
             $evaluationId = trim((string) ($evaluation['id'] ?? ''));
             if ($evaluationId === '') {
-                $evaluation['id'] = 'eval_' . time() . '_' . mt_rand(1000, 9999);
+                $evaluation['id'] = 'eval_' . getAuthoritativePhilippineUnixTimestamp() . '_' . mt_rand(1000, 9999);
             }
 
             if (trim((string) ($evaluation['timestamp'] ?? '')) === '') {
@@ -3693,6 +4021,11 @@ try {
                 if (!$hasPendingAssignment) {
                     sendJson(['success' => false, 'error' => 'Peer evaluation target is not assigned for the current semester.'], 400);
                 }
+            }
+
+            if ($actorRole === 'dean' || $actorRole === 'procoor') {
+                $evaluation['evaluationType'] = 'supervisor';
+                enforceSupervisorEvaluationScope($pdo, $actorUser, $actorRole, $evaluation);
             }
 
             if ($actorRole === 'student') {
@@ -3845,7 +4178,7 @@ try {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
             $subject = is_array($body['subject'] ?? null) ? $body['subject'] : [];
-            $savedSubject = upsertSubjectSnapshot($pdo, $subject);
+            $savedSubject = upsertSubjectSnapshot($pdo, $subject, $authenticatedUser);
             sendJson([
                 'success' => true,
                 'subject' => $savedSubject,
@@ -3858,7 +4191,7 @@ try {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
             $rows = is_array($body['rows'] ?? null) ? $body['rows'] : [];
-            $result = importSubjectsSnapshot($pdo, $rows);
+            $result = importSubjectsSnapshot($pdo, $rows, $authenticatedUser);
             sendJson(array_merge(['success' => true], $result));
             break;
 
@@ -3867,7 +4200,7 @@ try {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
             $offering = is_array($body['offering'] ?? null) ? $body['offering'] : [];
-            $result = upsertCourseOfferingSnapshot($pdo, $offering);
+            $result = upsertCourseOfferingSnapshot($pdo, $offering, $authenticatedUser);
             sendJson(array_merge(['success' => true], $result));
             break;
 
@@ -3877,7 +4210,16 @@ try {
             }
             $rows = is_array($body['rows'] ?? null) ? $body['rows'] : [];
             $replaceExisting = !empty($body['replaceExisting']);
-            $result = importCourseOfferingsSnapshot($pdo, $rows, $replaceExisting);
+            $result = importCourseOfferingsSnapshot($pdo, $rows, $replaceExisting, $authenticatedUser);
+            sendJson(array_merge(['success' => true], $result));
+            break;
+
+        case 'markExcessCourseOfferings':
+            if ($authenticatedRole !== 'admin') {
+                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
+            }
+            $rows = is_array($body['rows'] ?? null) ? $body['rows'] : [];
+            $result = markExcessCourseOfferingsSnapshot($pdo, $rows, $authenticatedUser);
             sendJson(array_merge(['success' => true], $result));
             break;
 
@@ -3887,7 +4229,7 @@ try {
             }
             $courseOfferingId = $body['courseOfferingId'] ?? null;
             $studentUserIds = is_array($body['studentUserIds'] ?? null) ? $body['studentUserIds'] : [];
-            $result = setCourseOfferingStudentsSnapshot($pdo, $courseOfferingId, $studentUserIds);
+            $result = setCourseOfferingStudentsSnapshot($pdo, $courseOfferingId, $studentUserIds, $authenticatedUser);
             sendJson(array_merge(['success' => true], $result));
             break;
 
@@ -3896,7 +4238,7 @@ try {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
             $courseOfferingId = $body['courseOfferingId'] ?? null;
-            $result = deactivateCourseOfferingSnapshot($pdo, $courseOfferingId);
+            $result = deactivateCourseOfferingSnapshot($pdo, $courseOfferingId, $authenticatedUser);
             sendJson(array_merge(['success' => true], $result));
             break;
 
@@ -3934,7 +4276,7 @@ try {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
             $items = is_array($body['announcements'] ?? null) ? $body['announcements'] : [];
-            persistAnnouncementsSnapshot($pdo, $items);
+            persistAnnouncementsSnapshot($pdo, $items, $authenticatedUser);
             sendJson(['success' => true]);
             break;
 
@@ -3959,7 +4301,7 @@ try {
         case 'listFacultyPapers':
             $actorRole = $authenticatedRole;
             $actorUserId = normalizePaperUserIdToken($authenticatedUser['id'] ?? '');
-            if ($actorRole !== 'professor' && $actorRole !== 'dean') {
+            if ($actorRole !== 'professor' && $actorRole !== 'dean' && $actorRole !== 'procoor') {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
             if ($actorRole === 'professor') {
@@ -3967,7 +4309,7 @@ try {
             }
 
             $allPapers = buildFacultyAcknowledgementPapersSnapshot($pdo);
-            $filtered = filterFacultyPapersByActor($allPapers, $actorRole, $actorUserId);
+            $filtered = filterFacultyPapersByActor($allPapers, $actorRole, $actorUserId, $authenticatedUser);
             sendJson([
                 'success' => true,
                 'papers' => getFacultyPapersSorted($filtered),
@@ -4000,12 +4342,13 @@ try {
                 $rank = getRequiredPayloadString($payload, 'rank', 'rank');
                 $setRating = normalizePaperRatingValue($payload['set_rating'] ?? 'N/A');
                 $safRating = normalizePaperRatingValue($payload['saf_rating'] ?? 'N/A');
+                $loadType = normalizeCourseOfferingLoadType($payload['load_type'] ?? 'main');
             } catch (InvalidArgumentException $e) {
                 sendJson(['success' => false, 'error' => $e->getMessage()], 400);
             }
 
             $paperId = sanitizePaperTextValue($payload['id'] ?? '', 80);
-            $nowIso = date('c');
+            $nowIso = getAuthoritativePhilippineIso8601();
             $papers = buildFacultyAcknowledgementPapersSnapshot($pdo);
             $record = null;
             $recordIndex = -1;
@@ -4025,7 +4368,8 @@ try {
                     if (
                         normalizePaperUserIdToken($item['professor_user_id'] ?? '') === $actorUserId &&
                         normalizePaperStatusValue($item['status'] ?? '') === 'draft' &&
-                        sanitizePaperTextValue($item['semester_id'] ?? '', 100) === $semesterId
+                        sanitizePaperTextValue($item['semester_id'] ?? '', 100) === $semesterId &&
+                        normalizeCourseOfferingLoadType($item['load_type'] ?? 'main') === $loadType
                     ) {
                         $record = $item;
                         $recordIndex = $index;
@@ -4044,7 +4388,7 @@ try {
 
             if (!$record) {
                 $record = [
-                    'id' => 'FP-' . time() . '-' . mt_rand(1000, 9999),
+                    'id' => 'FP-' . getAuthoritativePhilippineUnixTimestamp() . '-' . mt_rand(1000, 9999),
                     'status' => 'draft',
                     'created_at' => $nowIso,
                     'updated_at' => $nowIso,
@@ -4054,15 +4398,21 @@ try {
                     'rank' => $rank,
                     'semester_id' => $semesterId,
                     'semester_label' => $semesterLabel,
+                    'load_type' => $loadType,
                     'set_rating' => $setRating,
                     'saf_rating' => $safRating,
                     'recipient_dean_user_id' => '',
                     'recipient_dean_name' => '',
+                    'recipient_user_id' => '',
+                    'recipient_name' => '',
+                    'recipient_role' => '',
                     'sent_at' => null,
                     'section_c_areas' => '',
                     'section_c_activities' => '',
                     'section_c_action_plan' => '',
                     'section_c_saved_at' => null,
+                    'section_c_saved_by_role' => '',
+                    'section_c_saved_by_user_id' => '',
                     'latest_file_path' => '',
                     'latest_file_name' => '',
                     'latest_file_created_at' => null,
@@ -4079,11 +4429,17 @@ try {
                 $record['rank'] = $rank;
                 $record['semester_id'] = $semesterId;
                 $record['semester_label'] = $semesterLabel;
+                $record['load_type'] = $loadType;
                 $record['set_rating'] = $setRating;
                 $record['saf_rating'] = $safRating;
                 $record['recipient_dean_user_id'] = '';
                 $record['recipient_dean_name'] = '';
+                $record['recipient_user_id'] = '';
+                $record['recipient_name'] = '';
+                $record['recipient_role'] = '';
                 $record['sent_at'] = null;
+                $record['section_c_saved_by_role'] = '';
+                $record['section_c_saved_by_user_id'] = '';
                 $papers[$recordIndex] = $record;
             }
 
@@ -4117,7 +4473,7 @@ try {
                 }
 
                 $paper['status'] = 'archived';
-                $paper['updated_at'] = date('c');
+                $paper['updated_at'] = getAuthoritativePhilippineIso8601();
                 $papers[$index] = $paper;
                 $found = true;
                 break;
@@ -4128,7 +4484,7 @@ try {
             }
 
             persistFacultyAcknowledgementPapersSnapshot($pdo, $papers);
-            sendJson(['success' => true, 'papers' => getFacultyPapersSorted(filterFacultyPapersByActor($papers, $actorRole, $actorUserId))]);
+            sendJson(['success' => true, 'papers' => getFacultyPapersSorted(filterFacultyPapersByActor($papers, $actorRole, $actorUserId, $authenticatedUser))]);
             break;
 
         case 'sendFacultyPaper':
@@ -4158,17 +4514,25 @@ try {
                     sendJson(['success' => false, 'error' => 'Only draft papers can be sent.'], 400);
                 }
 
-                $recipient = resolveRecipientDeanForProfessor($users, $paper['department'] ?? '');
-                if (!$recipient) {
-                    sendJson(['success' => false, 'error' => 'No active dean account is available for routing.'], 400);
+                $professor = buildUserSnapshotById($pdo, $authenticatedUser['id'] ?? '', false);
+                if (!$professor || normalizeActorRoleToken($professor['role'] ?? '') !== 'professor') {
+                    sendJson(['success' => false, 'error' => 'Professor account not found.'], 400);
                 }
 
-                $nowIso = date('c');
+                $recipient = resolveFacultyPaperRecipientForProfessor($pdo, $users, $professor);
+                if (!$recipient) {
+                    sendJson(['success' => false, 'error' => 'No active supervisor account is available for routing.'], 400);
+                }
+
+                $nowIso = getAuthoritativePhilippineIso8601();
                 $paper['status'] = 'sent';
                 $paper['updated_at'] = $nowIso;
                 $paper['sent_at'] = $nowIso;
-                $paper['recipient_dean_user_id'] = normalizePaperUserIdToken($recipient['id'] ?? '');
-                $paper['recipient_dean_name'] = sanitizePaperTextValue($recipient['name'] ?? 'Dean', 150);
+                $paper['recipient_role'] = normalizeActorRoleToken($recipient['recipientRole'] ?? '');
+                $paper['recipient_user_id'] = normalizePaperUserIdToken($recipient['recipientUserId'] ?? '');
+                $paper['recipient_name'] = sanitizePaperTextValue($recipient['recipientName'] ?? 'Supervisor', 150);
+                $paper['recipient_dean_user_id'] = normalizePaperUserIdToken($recipient['oversightDeanUserId'] ?? '');
+                $paper['recipient_dean_name'] = sanitizePaperTextValue($recipient['oversightDeanName'] ?? '', 150);
                 $paper = facultyPdfPersistPaperVersion($paper, 'sent', $actorRole, $actorUserId);
                 $papers[$index] = $paper;
                 $found = true;
@@ -4180,14 +4544,14 @@ try {
             }
 
             persistFacultyAcknowledgementPapersSnapshot($pdo, $papers);
-            sendJson(['success' => true, 'papers' => getFacultyPapersSorted(filterFacultyPapersByActor($papers, $actorRole, $actorUserId))]);
+            sendJson(['success' => true, 'papers' => getFacultyPapersSorted(filterFacultyPapersByActor($papers, $actorRole, $actorUserId, $authenticatedUser))]);
             break;
 
         case 'saveFacultyPaperSectionC':
             $actorRole = $authenticatedRole;
             $actorUserId = normalizePaperUserIdToken($authenticatedUser['id'] ?? '');
             $paperId = sanitizePaperTextValue($body['paper_id'] ?? '', 80);
-            if ($actorRole !== 'dean' && $actorRole !== 'professor') {
+            if ($actorRole !== 'dean' && $actorRole !== 'professor' && $actorRole !== 'procoor') {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
             if ($actorRole === 'professor') {
@@ -4213,8 +4577,14 @@ try {
 
                 $status = normalizePaperStatusValue($paper['status'] ?? '');
                 if ($actorRole === 'dean') {
-                    $recipientId = normalizePaperUserIdToken($paper['recipient_dean_user_id'] ?? '');
-                    if ($recipientId === '' || $recipientId !== $actorUserId) {
+                    if (!canDeanEditFacultyPaper($paper, $actorUserId, $authenticatedUser)) {
+                        sendJson(['success' => false, 'error' => 'Permission denied for this paper.'], 403);
+                    }
+                    if ($status !== 'sent' && $status !== 'completed') {
+                        sendJson(['success' => false, 'error' => 'Section C can only be saved for sent papers.'], 400);
+                    }
+                } elseif ($actorRole === 'procoor') {
+                    if (!canCoordinatorEditFacultyPaper($paper, $actorUserId)) {
                         sendJson(['success' => false, 'error' => 'Permission denied for this paper.'], 403);
                     }
                     if ($status !== 'sent' && $status !== 'completed') {
@@ -4230,8 +4600,8 @@ try {
                     }
                 }
 
-                $nowIso = date('c');
-                if ($actorRole === 'dean') {
+                $nowIso = getAuthoritativePhilippineIso8601();
+                if ($actorRole === 'dean' || $actorRole === 'procoor') {
                     $paper['status'] = 'completed';
                 }
                 $paper['updated_at'] = $nowIso;
@@ -4239,6 +4609,8 @@ try {
                 $paper['section_c_areas'] = $areas;
                 $paper['section_c_activities'] = $activities;
                 $paper['section_c_action_plan'] = $actionPlan;
+                $paper['section_c_saved_by_role'] = $actorRole;
+                $paper['section_c_saved_by_user_id'] = $actorUserId;
                 if (normalizePaperStatusValue($paper['status'] ?? '') === 'completed') {
                     $paper = facultyPdfPersistPaperVersion($paper, 'completed', $actorRole, $actorUserId);
                 }

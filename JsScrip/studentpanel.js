@@ -34,6 +34,8 @@ let evaluationBehaviorCapture = {
 let studentHeaderPanelsBound = false;
 let studentProofModalBound = false;
 let studentMobileDrawerBound = false;
+let studentMobileHeaderScrollBound = false;
+let studentLastHeaderScrollY = 0;
 
 /**
  * Check if user is authenticated
@@ -106,8 +108,10 @@ function initializeDashboard() {
     loadUserInfo();
     setupMobileDrawer();
     setupHeaderPanels();
+    setupMobileHeaderScrollBehavior();
     renderStudentAnnouncements();
     renderAssignedEvaluationList();
+    updateEvaluationAvailabilityUi();
     setupNavigation();
     setupLogout();
     setupEvaluationButtons();
@@ -142,6 +146,7 @@ function initializeDashboard() {
             renderAssignedEvaluationList();
             refreshEvaluationStatuses();
             updateSummaryCards();
+            updateEvaluationAvailabilityUi();
             renderStudentAnnouncements();
             refreshStudentProofRequirement();
         }
@@ -277,6 +282,218 @@ function buildCurrentStudentIdentity(session) {
     };
 }
 
+function getStudentEvaluationAssignmentState() {
+    const session = getUserSession() || {};
+    const currentStudent = resolveCurrentStudentUser(session);
+    const studentIdentity = buildCurrentStudentIdentity(session);
+    const semesterId = getActiveSemesterId();
+    const periodOpen = SharedData.isEvalPeriodOpen
+        ? SharedData.isEvalPeriodOpen('student-professor')
+        : false;
+    const periodDates = SharedData.getEvalPeriodDates
+        ? SharedData.getEvalPeriodDates('student-professor')
+        : { start: '', end: '' };
+
+    if (!currentStudent || !currentStudent.id) {
+        return {
+            ready: false,
+            isPeriodOpen: periodOpen,
+            periodDates,
+            assignedRows: [],
+            pendingRows: [],
+            completedRows: [],
+            completedCount: 0,
+            totalAssigned: 0,
+            canAccessEvaluationForm: false,
+            message: 'Unable to resolve your student profile for evaluation assignments.'
+        };
+    }
+
+    const subjectManagement = SharedData.getSubjectManagement ? SharedData.getSubjectManagement() : null;
+    const offerings = (subjectManagement && Array.isArray(subjectManagement.offerings)) ? subjectManagement.offerings : [];
+    const enrollments = (subjectManagement && Array.isArray(subjectManagement.enrollments)) ? subjectManagement.enrollments : [];
+    const dueText = periodDates && periodDates.end ? periodDates.end : 'Not set';
+    const activeOfferingById = new Map(
+        offerings
+            .filter(item => item && item.isActive && String(item.semesterSlug || '') === String(semesterId))
+            .map(item => [String(item.id), item])
+    );
+
+    const assignedRows = enrollments
+        .filter(item =>
+            item &&
+            String(item.studentUserId || '') === String(currentStudent.id) &&
+            String(item.status || '').toLowerCase() === 'enrolled' &&
+            activeOfferingById.has(String(item.courseOfferingId || ''))
+        )
+        .map(item => {
+            const offeringId = String(item.courseOfferingId || '').trim();
+            const offering = activeOfferingById.get(offeringId);
+            if (!offering) return null;
+
+            const professorName = String(offering.professorName || '').trim();
+            const subjectCode = String(offering.subjectCode || '').trim();
+            if (!professorName || !subjectCode) return null;
+
+            const row = {
+                offeringId: String(offering.id || offeringId).trim(),
+                professorName,
+                subjectCode,
+                subjectName: String(offering.subjectName || '').trim(),
+                sectionName: String(offering.sectionName || '').trim(),
+                dueText,
+                offering
+            };
+            row.submitted = isSubmittedEvaluation(
+                studentIdentity.primaryStudentId,
+                studentIdentity.primarySemesterId,
+                row.professorName,
+                studentIdentity,
+                row.offeringId,
+                row.subjectCode
+            );
+            return row;
+        })
+        .filter(Boolean)
+        .sort((a, b) => {
+            const professorCompare = String(a.professorName).localeCompare(String(b.professorName));
+            if (professorCompare !== 0) return professorCompare;
+            const subjectCompare = String(a.subjectCode).localeCompare(String(b.subjectCode));
+            if (subjectCompare !== 0) return subjectCompare;
+            return String(a.sectionName).localeCompare(String(b.sectionName));
+        });
+
+    const completedRows = assignedRows.filter(row => row.submitted);
+    const pendingRows = assignedRows.filter(row => !row.submitted);
+    const totalAssigned = assignedRows.length;
+    const completedCount = completedRows.length;
+    const canAccessEvaluationForm = periodOpen && totalAssigned > 0 && pendingRows.length > 0;
+
+    let message = '';
+    if (!periodOpen) {
+        if (periodDates && periodDates.start && periodDates.end) {
+            message = `The Student to Professor evaluation period is closed. Evaluation period: ${periodDates.start} to ${periodDates.end}.`;
+        } else {
+            message = 'The Student to Professor evaluation period is not currently open.';
+        }
+    } else if (totalAssigned === 0) {
+        message = 'No assigned evaluations for the current semester yet.';
+    } else if (!pendingRows.length) {
+        message = 'You have completed all assigned professor evaluations for this semester.';
+    } else {
+        message = 'Select a pending professor evaluation from the Dashboard.';
+    }
+
+    return {
+        ready: true,
+        isPeriodOpen: periodOpen,
+        periodDates,
+        assignedRows,
+        pendingRows,
+        completedRows,
+        completedCount,
+        totalAssigned,
+        canAccessEvaluationForm,
+        message,
+        currentStudent,
+        studentIdentity,
+        semesterId
+    };
+}
+
+function validateSelectedEvaluationTarget(options) {
+    const cfg = options || {};
+    const state = cfg.assignmentState || getStudentEvaluationAssignmentState();
+    const targetParts = getSelectedTargetParts();
+    const selectedOfferingId = getSelectedCourseOfferingId();
+
+    if (!state.ready) {
+        return { valid: false, state, row: null, message: state.message };
+    }
+    if (!state.isPeriodOpen) {
+        return { valid: false, state, row: null, message: state.message };
+    }
+    if (!selectedOfferingId) {
+        return {
+            valid: false,
+            state,
+            row: null,
+            message: 'Please select an active pending professor evaluation from the Dashboard.'
+        };
+    }
+
+    const row = state.assignedRows.find(item => String(item.offeringId) === String(selectedOfferingId));
+    if (!row) {
+        return {
+            valid: false,
+            state,
+            row: null,
+            message: 'This evaluation is no longer assigned to you. Please select an active pending professor evaluation from the Dashboard.'
+        };
+    }
+
+    if (
+        normalizeValue(row.professorName) !== normalizeValue(targetParts.professorName) ||
+        normalizeValue(row.subjectCode) !== normalizeValue(targetParts.subjectCode)
+    ) {
+        return {
+            valid: false,
+            state,
+            row,
+            message: 'Selected evaluation target no longer matches your assigned professor and subject. Please select it from the Dashboard again.'
+        };
+    }
+
+    if (row.submitted) {
+        return {
+            valid: false,
+            state,
+            row,
+            message: 'This evaluation was already submitted for the selected professor this semester.'
+        };
+    }
+
+    return { valid: true, state, row, message: '' };
+}
+
+function updateEvaluationAvailabilityUi(stateInput) {
+    const state = stateInput || getStudentEvaluationAssignmentState();
+    const formLink = document.querySelector('.nav-link[data-view="evaluationForm"]');
+    const activeView = getCurrentStudentViewName();
+
+    if (formLink) {
+        formLink.hidden = !state.canAccessEvaluationForm;
+        formLink.setAttribute('aria-hidden', state.canAccessEvaluationForm ? 'false' : 'true');
+        formLink.tabIndex = state.canAccessEvaluationForm ? 0 : -1;
+        formLink.classList.toggle('is-disabled', !state.canAccessEvaluationForm);
+        formLink.title = state.canAccessEvaluationForm ? '' : state.message;
+        if (!state.canAccessEvaluationForm && formLink.classList.contains('active')) {
+            formLink.classList.remove('active');
+        }
+    }
+
+    if (!state.canAccessEvaluationForm && activeView === 'evaluationForm') {
+        clearUnavailableEvaluationContext();
+        updateEvaluationTargetIndicator();
+        switchView('dashboard', { reason: state.message });
+        updateNavigation('dashboard');
+        showErrorMessage(state.message || 'Evaluation forms are not available right now.');
+    }
+}
+
+function getCurrentStudentViewName() {
+    const dashboardView = document.getElementById('dashboardView');
+    const evaluationFormView = document.getElementById('evaluationFormView');
+    const profileView = document.getElementById('profileView');
+    const historyView = document.getElementById('historyView');
+
+    if (evaluationFormView && evaluationFormView.style.display !== 'none') return 'evaluationForm';
+    if (profileView && profileView.style.display !== 'none') return 'profile';
+    if (historyView && historyView.style.display !== 'none') return 'history';
+    if (dashboardView && dashboardView.style.display !== 'none') return 'dashboard';
+    return 'dashboard';
+}
+
 function evaluationBelongsToStudent(ev, studentIdentity) {
     if (!ev || !studentIdentity || !Array.isArray(studentIdentity.tokens) || !studentIdentity.tokens.length) {
         return false;
@@ -317,9 +534,8 @@ function extractSemesterNumber(value) {
 function formatSubmittedAt(value) {
     const raw = String(value || '').trim();
     if (!raw) return 'N/A';
-    const date = new Date(raw);
-    if (Number.isNaN(date.getTime())) return raw;
-    return date.toLocaleString();
+    const formatted = SharedData.formatDateTimeInPhilippines(raw);
+    return formatted || raw;
 }
 
 function getStudentQuestionnaireForSemester(semesterId) {
@@ -552,72 +768,53 @@ function renderAssignedEvaluationList() {
     const listContainer = document.querySelector('.evaluations-list');
     if (!listContainer) return;
 
-    const subjectManagement = SharedData.getSubjectManagement ? SharedData.getSubjectManagement() : null;
-    const offerings = (subjectManagement && Array.isArray(subjectManagement.offerings)) ? subjectManagement.offerings : [];
-    const enrollments = (subjectManagement && Array.isArray(subjectManagement.enrollments)) ? subjectManagement.enrollments : [];
-    const activeSemester = getActiveSemesterId();
-    const session = getUserSession() || {};
-    const currentStudent = resolveCurrentStudentUser(session);
+    const state = getStudentEvaluationAssignmentState();
 
-    if (!currentStudent || !currentStudent.id) {
+    if (!state.ready) {
         listContainer.innerHTML = `
             <div class="empty-state" style="text-align:center; padding:2rem 1rem;">
                 <i class="fas fa-user-lock" style="font-size:2rem; color:#cbd5e1; margin-bottom:0.75rem;"></i>
                 <p>Unable to resolve your student profile for evaluation assignments.</p>
             </div>
         `;
+        updateEvaluationAvailabilityUi(state);
         return;
     }
 
-    const activeOfferingById = new Map(
-        offerings
-            .filter(item => item && item.isActive && String(item.semesterSlug || '') === String(activeSemester))
-            .map(item => [String(item.id), item])
-    );
-
-    const assignedEnrollments = enrollments.filter(item =>
-        item &&
-        String(item.studentUserId || '') === String(currentStudent.id) &&
-        String(item.status || '').toLowerCase() === 'enrolled' &&
-        activeOfferingById.has(String(item.courseOfferingId))
-    );
-
-    if (!assignedEnrollments.length) {
+    if (!state.assignedRows.length) {
         listContainer.innerHTML = `
             <div class="empty-state" style="text-align:center; padding:2rem 1rem;">
                 <i class="fas fa-clipboard-check" style="font-size:2rem; color:#cbd5e1; margin-bottom:0.75rem;"></i>
-                <p>No assigned evaluations for the current semester yet.</p>
+                <p>${escapeHtml(state.message)}</p>
             </div>
         `;
+        updateEvaluationAvailabilityUi(state);
         return;
     }
 
-    const dueDates = SharedData.getEvalPeriodDates ? SharedData.getEvalPeriodDates('student-professor') : { end: '' };
-    const dueText = dueDates && dueDates.end ? dueDates.end : 'Not set';
+    if (!state.isPeriodOpen) {
+        listContainer.innerHTML = `
+            <div class="empty-state" style="text-align:center; padding:2rem 1rem;">
+                <i class="fas fa-calendar-xmark" style="font-size:2rem; color:#f59e0b; margin-bottom:0.75rem;"></i>
+                <p>${escapeHtml(state.message)}</p>
+            </div>
+        `;
+        updateEvaluationAvailabilityUi(state);
+        return;
+    }
 
-    const rows = assignedEnrollments
-        .map(item => {
-            const offering = activeOfferingById.get(String(item.courseOfferingId));
-            if (!offering) return null;
-            return {
-                offeringId: offering.id,
-                professorName: offering.professorName || 'Unknown Professor',
-                subjectCode: offering.subjectCode || 'N/A',
-                subjectName: offering.subjectName || '',
-                sectionName: offering.sectionName || '',
-                dueText,
-            };
-        })
-        .filter(Boolean)
-        .sort((a, b) => {
-            const professorCompare = String(a.professorName).localeCompare(String(b.professorName));
-            if (professorCompare !== 0) return professorCompare;
-            const subjectCompare = String(a.subjectCode).localeCompare(String(b.subjectCode));
-            if (subjectCompare !== 0) return subjectCompare;
-            return String(a.sectionName).localeCompare(String(b.sectionName));
-        });
+    if (!state.pendingRows.length) {
+        listContainer.innerHTML = `
+            <div class="empty-state" style="text-align:center; padding:2rem 1rem;">
+                <i class="fas fa-check-circle" style="font-size:2rem; color:#22c55e; margin-bottom:0.75rem;"></i>
+                <p>${escapeHtml(state.message)}</p>
+            </div>
+        `;
+        updateEvaluationAvailabilityUi(state);
+        return;
+    }
 
-    listContainer.innerHTML = rows.map(row => `
+    listContainer.innerHTML = state.pendingRows.map(row => `
         <div class="evaluation-item" data-offering-id="${escapeHtml(row.offeringId)}">
             <div class="evaluation-info">
                 <div class="teacher-name">${escapeHtml(row.professorName)}</div>
@@ -631,6 +828,8 @@ function renderAssignedEvaluationList() {
             <button class="btn-start">Start Evaluation</button>
         </div>
     `).join('');
+
+    updateEvaluationAvailabilityUi(state);
 }
 
 function normalizeProofUserId(value) {
@@ -651,8 +850,8 @@ function getStudentEvaluationPeriodStateForProof() {
     if (!endRaw) {
         return { hasEndDate: false, isClosed: false, endDate: '' };
     }
-    const endDate = new Date(`${endRaw}T23:59:59`);
-    const isClosed = !Number.isNaN(endDate.getTime()) && (new Date()) > endDate;
+    const todayYmd = SharedData.getCurrentPhilippineDateYmd();
+    const isClosed = todayYmd !== '' && todayYmd > endRaw;
     return { hasEndDate: true, isClosed, endDate: endRaw };
 }
 
@@ -815,7 +1014,7 @@ function openStudentProofModal(options) {
         form.style.display = 'none';
         pendingBox.style.display = 'block';
         const submittedText = proofRecord && proofRecord.submittedAt
-            ? ` Submitted on ${new Date(proofRecord.submittedAt).toLocaleString()}.`
+            ? ` Submitted on ${SharedData.formatDateTimeInPhilippines(proofRecord.submittedAt)}.`
             : '';
         pendingBox.textContent = `Your submitted proof is under OSA review.${submittedText}`;
         setStudentProofStatusMessage('info', '');
@@ -908,7 +1107,7 @@ function handleStudentProofFormSubmit(event) {
             status: 'pending',
             reason: reason,
             proofDriveLink: proofDriveLink,
-            submittedAt: new Date().toISOString(),
+            submittedAt: SharedData.getNowIsoString(),
         };
 
         setStudentProofStatusMessage('success', 'Proof submitted. Waiting for OSA review.');
@@ -1037,6 +1236,7 @@ function togglePanel(panelToToggle, panelToClose) {
     const isActive = panelToToggle.classList.contains('active');
     panelToClose.classList.remove('active');
     panelToToggle.classList.toggle('active', !isActive);
+    showStudentMobileHeader();
 }
 
 /**
@@ -1051,6 +1251,26 @@ function setupNavigation() {
 
             // Get view to show
             const view = this.getAttribute('data-view');
+            if (view === 'evaluationForm') {
+                const state = getStudentEvaluationAssignmentState();
+                updateEvaluationAvailabilityUi(state);
+                if (!state.canAccessEvaluationForm) {
+                    showErrorMessage(state.message || 'Evaluation forms are not available right now.');
+                    switchView('dashboard');
+                    updateNavigation('dashboard');
+                    return;
+                }
+
+                const targetValidation = validateSelectedEvaluationTarget({ assignmentState: state });
+                if (!targetValidation.valid) {
+                    clearUnavailableEvaluationContext();
+                    updateEvaluationTargetIndicator();
+                    showErrorMessage('Please select an active pending professor evaluation from the Dashboard.');
+                    switchView('dashboard');
+                    updateNavigation('dashboard');
+                    return;
+                }
+            }
 
             // Remove active class from all links
             navLinks.forEach(l => l.classList.remove('active'));
@@ -1071,7 +1291,8 @@ function setupNavigation() {
  * Switch between dashboard and evaluation form views
  * @param {string} viewName - Name of the view to show ('dashboard' or 'evaluationForm')
  */
-function switchView(viewName) {
+function switchView(viewName, options) {
+    const cfg = options || {};
     closeMobileDrawer();
     const dashboardView = document.getElementById('dashboardView');
     const evaluationFormView = document.getElementById('evaluationFormView');
@@ -1091,6 +1312,27 @@ function switchView(viewName) {
         updateSummaryCards();
         refreshStudentProofRequirement();
     } else if (viewName === 'evaluationForm') {
+        const assignmentState = getStudentEvaluationAssignmentState();
+        const targetValidation = validateSelectedEvaluationTarget({ assignmentState });
+        if (!assignmentState.canAccessEvaluationForm || !targetValidation.valid) {
+            clearUnavailableEvaluationContext();
+            updateEvaluationTargetIndicator();
+            if (pageTitle) pageTitle.textContent = 'Student Dashboard';
+            setPageContextText('Track evaluation progress and complete your forms on time.');
+            dashboardView.style.display = 'block';
+            evaluationFormView.style.display = 'none';
+            if (profileView) profileView.style.display = 'none';
+            if (historyView) historyView.style.display = 'none';
+            renderAssignedEvaluationList();
+            refreshEvaluationStatuses();
+            updateSummaryCards();
+            updateEvaluationAvailabilityUi(assignmentState);
+            if (cfg.reason || targetValidation.message) {
+                showErrorMessage(cfg.reason || targetValidation.message);
+            }
+            window.scrollTo(0, 0);
+            return;
+        }
         if (pageTitle) pageTitle.textContent = 'Evaluation Form';
         setPageContextText('Review each section carefully before submitting your evaluation.');
         dashboardView.style.display = 'none';
@@ -1259,6 +1501,7 @@ function setupMobileDrawer() {
 
 function openMobileDrawer() {
     document.body.classList.add('student-sidebar-open');
+    showStudentMobileHeader();
     const toggleBtn = document.getElementById('studentMenuToggle');
     if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'true');
 }
@@ -1269,6 +1512,76 @@ function closeMobileDrawer() {
     if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
 }
 
+function setupMobileHeaderScrollBehavior() {
+    if (studentMobileHeaderScrollBound) return;
+
+    const header = document.querySelector('.student-panel .top-header');
+    if (!header) return;
+
+    studentLastHeaderScrollY = window.scrollY || 0;
+
+    const handleScroll = function () {
+        updateStudentMobileHeaderVisibility();
+    };
+
+    const handleResize = function () {
+        if (!isStudentMobileHeaderMode()) {
+            showStudentMobileHeader();
+        }
+        studentLastHeaderScrollY = window.scrollY || 0;
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('resize', handleResize);
+    studentMobileHeaderScrollBound = true;
+}
+
+function isStudentMobileHeaderMode() {
+    return window.innerWidth <= 1000;
+}
+
+function isStudentHeaderPanelOpen() {
+    const announcementPanel = document.getElementById('announcementPanel');
+    const profilePanel = document.getElementById('profilePanel');
+    return document.body.classList.contains('student-sidebar-open') ||
+        (announcementPanel && announcementPanel.classList.contains('active')) ||
+        (profilePanel && profilePanel.classList.contains('active'));
+}
+
+function showStudentMobileHeader() {
+    const header = document.querySelector('.student-panel .top-header');
+    if (!header) return;
+    header.classList.remove('student-header-hidden');
+    studentLastHeaderScrollY = window.scrollY || 0;
+}
+
+function updateStudentMobileHeaderVisibility() {
+    const header = document.querySelector('.student-panel .top-header');
+    if (!header) return;
+
+    const currentY = Math.max(0, window.scrollY || 0);
+    const delta = currentY - studentLastHeaderScrollY;
+    const threshold = 16;
+
+    if (!isStudentMobileHeaderMode() || currentY <= 4 || isStudentHeaderPanelOpen()) {
+        header.classList.remove('student-header-hidden');
+        studentLastHeaderScrollY = currentY;
+        return;
+    }
+
+    if (Math.abs(delta) < threshold) {
+        return;
+    }
+
+    if (delta > 0 && currentY > 120) {
+        header.classList.add('student-header-hidden');
+    } else if (delta < 0) {
+        header.classList.remove('student-header-hidden');
+    }
+
+    studentLastHeaderScrollY = currentY;
+}
+
 function setupStudentHeroActions() {
     const openEvaluationBtn = document.getElementById('heroOpenEvaluationBtn');
     const openHistoryBtn = document.getElementById('heroOpenHistoryBtn');
@@ -1277,6 +1590,11 @@ function setupStudentHeroActions() {
     const focusEvaluationList = function () {
         switchView('dashboard');
         updateNavigation('dashboard');
+        const state = getStudentEvaluationAssignmentState();
+        updateEvaluationAvailabilityUi(state);
+        if (!state.canAccessEvaluationForm) {
+            showErrorMessage(state.message || 'No pending evaluation forms are available right now.');
+        }
         const evaluationsSection = document.querySelector('.evaluations-section');
         if (evaluationsSection) {
             const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1323,10 +1641,28 @@ function handleStartEvaluation(professorName, courseCode, courseOfferingId) {
     const studentIdentity = buildCurrentStudentIdentity(session);
     const studentId = studentIdentity.primaryStudentId;
     const semesterId = getActiveSemesterId();
+    const assignmentState = getStudentEvaluationAssignmentState();
+    const assignedRow = assignmentState.pendingRows.find(row =>
+        String(row.offeringId) === String(courseOfferingId || '') &&
+        normalizeValue(row.professorName) === normalizeValue(professorName) &&
+        normalizeValue(row.subjectCode) === normalizeValue(courseCode)
+    );
+
+    if (!assignmentState.canAccessEvaluationForm || !assignedRow) {
+        clearUnavailableEvaluationContext();
+        renderAssignedEvaluationList();
+        refreshEvaluationStatuses();
+        updateSummaryCards();
+        updateEvaluationAvailabilityUi(assignmentState);
+        showErrorMessage(assignmentState.message || 'This evaluation is no longer assigned to you. Please select an active pending professor evaluation from the Dashboard.');
+        return;
+    }
+
     if (isSubmittedEvaluation(studentId, semesterId, professorName, studentIdentity, courseOfferingId, courseCode)) {
         alert('You already submitted an evaluation for this professor this semester.');
         refreshEvaluationStatuses();
         updateSummaryCards();
+        updateEvaluationAvailabilityUi();
         return;
     }
 
@@ -1375,6 +1711,14 @@ function setupSubmitNewButton() {
  * Handle submit new evaluation action
  */
 function handleSubmitNewEvaluation() {
+    const state = getStudentEvaluationAssignmentState();
+    if (!state.canAccessEvaluationForm) {
+        showErrorMessage(state.message || 'No pending evaluation forms are available right now.');
+        switchView('dashboard');
+        updateNavigation('dashboard');
+        return;
+    }
+
     // ── Evaluation period gate ──
     if (!SharedData.isEvalPeriodOpen('student-professor')) {
         const dates = SharedData.getEvalPeriodDates('student-professor');
@@ -1395,10 +1739,10 @@ function handleSubmitNewEvaluation() {
  * Update summary cards with dynamic data
  */
 function updateSummaryCards() {
-    // Count pending and completed evaluations
-    const pendingCount = document.querySelectorAll('.status-badge.pending').length;
-    const completedCount = document.querySelectorAll('.status-badge.completed').length;
-    const totalCount = pendingCount + completedCount;
+    const state = getStudentEvaluationAssignmentState();
+    const pendingCount = state.ready ? state.pendingRows.length : 0;
+    const completedCount = state.ready ? state.completedCount : 0;
+    const totalCount = state.ready ? state.totalAssigned : 0;
 
     // Update card numbers
     const pendingCard = document.querySelector('.summary-card.pending .card-number');
@@ -1662,12 +2006,12 @@ function startEvaluationBehaviorCapture(force) {
 
     if (shouldReset) {
         evaluationBehaviorCapture.captureKey = captureKey;
-        evaluationBehaviorCapture.startedAt = new Date().toISOString();
+        evaluationBehaviorCapture.startedAt = SharedData.getNowIsoString();
     }
 }
 
 function buildEvaluationBehaviorMeta(payload, questionDefinitions) {
-    const submittedAt = String(payload && payload.submittedAt || '').trim() || new Date().toISOString();
+    const submittedAt = String(payload && payload.submittedAt || '').trim() || SharedData.getNowIsoString();
     const startedAt = String(evaluationBehaviorCapture.startedAt || '').trim() || submittedAt;
     const startedTs = Date.parse(startedAt);
     const submittedTs = Date.parse(submittedAt);
@@ -1827,9 +2171,8 @@ function applyDraftToForm(draft) {
 function formatDraftSavedAt(value) {
     const text = String(value || '').trim();
     if (!text) return '';
-    const date = new Date(text);
-    if (Number.isNaN(date.getTime())) return text;
-    return date.toLocaleString();
+    const formatted = SharedData.formatDateTimeInPhilippines(text);
+    return formatted || text;
 }
 
 function updateDraftStatusIndicator(options) {
@@ -1916,7 +2259,7 @@ function collectDraftPayload() {
         ratings: ratings,
         qualitative: qualitative,
         comments: comments,
-        updatedAt: new Date().toISOString(),
+        updatedAt: SharedData.getNowIsoString(),
         status: 'draft'
     };
 }
@@ -2877,12 +3220,27 @@ function handleFormSubmission() {
         return;
     }
 
+    const targetValidation = validateSelectedEvaluationTarget();
+    if (!targetValidation.valid) {
+        clearUnavailableEvaluationContext();
+        updateEvaluationTargetIndicator();
+        switchView('dashboard');
+        updateNavigation('dashboard');
+        renderAssignedEvaluationList();
+        refreshEvaluationStatuses();
+        updateSummaryCards();
+        updateEvaluationAvailabilityUi(targetValidation.state);
+        showErrorMessage(targetValidation.message || 'This evaluation is no longer assigned to you. Please select an active pending professor evaluation from the Dashboard.');
+        return;
+    }
+
     if (isSubmittedEvaluation(studentId, semesterId, targetParts.professorName, studentIdentity, selectedOfferingId, targetParts.subjectCode)) {
         showErrorMessage('This evaluation was already submitted for the selected professor this semester.');
         switchView('dashboard');
         updateNavigation('dashboard');
         refreshEvaluationStatuses();
         updateSummaryCards();
+        updateEvaluationAvailabilityUi();
         return;
     }
 
@@ -2942,6 +3300,7 @@ function handleFormSubmission() {
                     updateNavigation('dashboard');
                     refreshEvaluationStatuses();
                     updateSummaryCards();
+                    updateEvaluationAvailabilityUi();
                 }, 2000);
             })
             .catch(error => {
@@ -3006,7 +3365,7 @@ function collectFormData() {
         ratings: ratingsGroup,
         qualitative: qualitativeGroup,
         comments: formData.get('comments') || '',
-        submittedAt: new Date().toISOString(),
+        submittedAt: SharedData.getNowIsoString(),
         status: 'submitted'
     };
     data.behaviorMeta = buildEvaluationBehaviorMeta(data, allQuestions);
@@ -3049,7 +3408,7 @@ function submitEvaluation(data) {
                 title: 'Evaluation Submitted',
                 user: evaluatorData.evaluatorName,
                 role: 'student',
-                date: new Date().toISOString()
+                date: SharedData.getNowIsoString()
             });
 
             setTimeout(() => {
@@ -3148,6 +3507,14 @@ function clearSelectedEvaluationTarget() {
     resetEvaluationBehaviorCapture();
 }
 
+function clearUnavailableEvaluationContext() {
+    removeAutosaveTimer();
+    clearSelectedEvaluationTarget();
+    evaluationDraftState.lastSavedAt = '';
+    evaluationDraftState.lastDraftKey = '';
+    updateDraftStatusIndicator({ state: 'idle' });
+}
+
 /**
  * Setup rating inputs for better UX
  */
@@ -3223,7 +3590,7 @@ function isSessionExpired() {
     }
 
     const loginTime = new Date(session.loginTime);
-    const now = new Date();
+    const now = SharedData.getNowDate();
     const hoursDiff = (now - loginTime) / (1000 * 60 * 60);
 
     // Session expires after 8 hours

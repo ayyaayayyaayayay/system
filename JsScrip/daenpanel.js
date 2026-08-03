@@ -1,4 +1,4 @@
-﻿// Dean Panel JavaScript - Dashboard Functionality
+// Dean Panel JavaScript - Dashboard Functionality
 
 let deanProfessorCount = 0;
 let deanFacultyPaperState = {
@@ -9,6 +9,7 @@ let deanFacultyPaperState = {
 
 // Wait for DOM to be fully loaded
 document.addEventListener('DOMContentLoaded', function () {
+    applySupervisorPanelCopy();
     // Check authentication
     if (!checkAuthentication()) {
         redirectToLogin();
@@ -46,16 +47,39 @@ let deanFacultyFeedbackState = {
     loadedComments: [],
     lastTrendRows: []
 };
+let deanIferDirectoryState = {
+    records: [],
+    query: '',
+    templateName: 'ifer.docx',
+    semesterId: '',
+    initialized: false
+};
 let deanSupervisorTargetDirectory = [];
 let deanMobileDrawerBound = false;
 let deanViewportRefreshBound = false;
 let deanViewportRefreshTimer = 0;
+const SUPERVISOR_PANEL_CONFIG = (() => {
+    const cfg = window.NAAP_SUPERVISOR_PANEL || {};
+    const role = String(cfg.role || 'dean').trim().toLowerCase() === 'procoor' ? 'procoor' : 'dean';
+    return Object.assign({
+        role,
+        label: role === 'procoor' ? 'Program Coordinator' : 'Dean',
+        dashboardTitle: role === 'procoor' ? 'Program Coordinator Dashboard' : 'Dean Dashboard',
+        scopeLabel: role === 'procoor' ? 'program' : 'department',
+        scopeDescriptor: role === 'procoor' ? 'program scope' : 'department scope',
+        peerListMethod: role === 'procoor' ? 'listCoordinatorProgramPeerAssignmentsCurrent' : 'listDeanProgramPeerAssignmentsCurrent',
+        peerDetailsMethod: role === 'procoor' ? 'listCoordinatorProgramPeerAssignmentDetailsCurrent' : 'listDeanProgramPeerAssignmentDetailsCurrent',
+        peerGenerateMethod: role === 'procoor' ? 'generateCoordinatorProgramPeerAssignments' : 'generateDeanProgramPeerAssignments'
+    }, cfg, { role });
+})();
+const SUPERVISOR_ROLE = SUPERVISOR_PANEL_CONFIG.role;
 
 const DEAN_EMPTY_SUMMARY = {
     criteriaAverages: [],
     breakdownRows: [],
     subjects: [],
     ratingDistribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+    ratingDistributionAverage: 0,
     comments: [],
     commentBuckets: {},
     detailedRows: [],
@@ -134,6 +158,57 @@ function normalizeRoleToken(value) {
     return String(value || '').trim().toLowerCase();
 }
 
+function isProgramScopedSupervisorPanel() {
+    return SUPERVISOR_ROLE === 'procoor';
+}
+
+function getSupervisorLabel() {
+    return String(SUPERVISOR_PANEL_CONFIG.label || (isProgramScopedSupervisorPanel() ? 'Program Coordinator' : 'Dean'));
+}
+
+function getSupervisorScopeDescriptor() {
+    return String(SUPERVISOR_PANEL_CONFIG.scopeDescriptor || (isProgramScopedSupervisorPanel() ? 'program scope' : 'department scope'));
+}
+
+function getSupervisorAnonymousLabel() {
+    return `Anonymous ${getSupervisorLabel()}`;
+}
+
+function getSupervisorPeerMethodName(kind) {
+    if (kind === 'list') return SUPERVISOR_PANEL_CONFIG.peerListMethod;
+    if (kind === 'details') return SUPERVISOR_PANEL_CONFIG.peerDetailsMethod;
+    if (kind === 'generate') return SUPERVISOR_PANEL_CONFIG.peerGenerateMethod;
+    return '';
+}
+
+function applySupervisorPanelCopy() {
+    document.title = String(SUPERVISOR_PANEL_CONFIG.dashboardTitle || document.title);
+    document.body.classList.add('dean-panel');
+    document.body.classList.toggle('procoor-panel', isProgramScopedSupervisorPanel());
+    if (!isProgramScopedSupervisorPanel()) return;
+
+    const replacements = [
+        ['Dean Dashboard', 'Program Coordinator Dashboard'],
+        ['Dean Profile', 'Program Coordinator Profile'],
+        ['Dean workspace', 'Program coordinator workspace'],
+        ['Dean User', 'Program Coordinator User'],
+        ['Latest updates for deans', 'Latest updates for program coordinators'],
+        ['Review department-wide results, manage peer assignments, and process faculty papers.', 'Review program-specific results, manage peer assignments, and process faculty papers.'],
+        ['Section C (Editable by Professor and Dean)', 'Section C (Editable by Professor and Program Coordinator)']
+    ];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+        const node = walker.currentNode;
+        let nextText = String(node.textContent || '');
+        replacements.forEach(([from, to]) => {
+            nextText = nextText.replaceAll(from, to);
+        });
+        if (nextText !== node.textContent) {
+            node.textContent = nextText;
+        }
+    }
+}
+
 function getLatestSemesterOption() {
     const list = (SharedData.getSemesterList && SharedData.getSemesterList()) || [];
     if (!Array.isArray(list) || !list.length) return null;
@@ -165,6 +240,22 @@ function getScopedDeanDepartment() {
     return String((dean && (dean.department || dean.institute)) || '').trim().toUpperCase();
 }
 
+function getScopedDeanProgramCode() {
+    const supervisor = resolveCurrentDeanUserAnyStatus(getUserSession() || {});
+    return String((supervisor && supervisor.programCode) || '').trim().toUpperCase();
+}
+
+function isProfessorWithinSupervisorScope(user, scopedDepartment, scopedProgramCode) {
+    if (normalizeRoleToken(user && user.role) !== 'professor') return false;
+    const department = String((user && (user.department || user.institute)) || '').trim().toUpperCase();
+    if (!department || !scopedDepartment || department !== scopedDepartment) return false;
+    if (isProgramScopedSupervisorPanel()) {
+        const programCode = String(user && user.programCode || '').trim().toUpperCase();
+        if (!programCode || !scopedProgramCode || programCode !== scopedProgramCode) return false;
+    }
+    return true;
+}
+
 function isActiveUser(user) {
     return normalizeRoleToken(user && user.status || 'active') !== 'inactive';
 }
@@ -172,11 +263,9 @@ function isActiveUser(user) {
 function getScopedProfessorUsers(includeInactive = false) {
     const users = (SharedData.getUsers && SharedData.getUsers()) || [];
     const scopedDepartment = getScopedDeanDepartment();
+    const scopedProgramCode = getScopedDeanProgramCode();
     return (Array.isArray(users) ? users : []).filter(user => {
-        if (normalizeRoleToken(user && user.role) !== 'professor') return false;
-        const department = String((user && (user.department || user.institute)) || '').trim().toUpperCase();
-        if (!department || !scopedDepartment) return false;
-        if (department !== scopedDepartment) return false;
+        if (!isProfessorWithinSupervisorScope(user, scopedDepartment, scopedProgramCode)) return false;
         if (!includeInactive && !isActiveUser(user)) return false;
         return true;
     });
@@ -203,7 +292,7 @@ function resolveEvaluationTypeToken(evaluation) {
     const token = normalizeRoleToken((evaluation && evaluation.evaluatorRole) || (evaluation && evaluation.evaluationType));
     if (token === 'student') return 'student';
     if (token === 'peer' || token === 'professor' || token === 'professor-to-professor') return 'professor';
-    if (token === 'supervisor' || token === 'dean' || token === 'supervisor-to-professor') return 'supervisor';
+    if (token === 'supervisor' || token === 'dean' || token === 'procoor' || token === 'supervisor-to-professor') return 'supervisor';
     return '';
 }
 
@@ -517,33 +606,15 @@ function renderDeanSemestralTrendChart(rows) {
     const labels = chartRows.length ? chartRows.map(item => item.semesterLabel) : ['No Data'];
     const values = chartRows.length ? chartRows.map(item => Number((item.overallAverage || 0).toFixed(2))) : [0];
 
-    if (window.deanSemestralTrendChartInstance) {
-        window.deanSemestralTrendChartInstance.destroy();
-    }
-
-    window.deanSemestralTrendChartInstance = new Chart(canvas, {
-        type: 'line',
-        data: {
-            labels,
-            datasets: [{
-                label: 'Overall Average',
-                data: values,
-                borderColor: '#4752c4',
-                backgroundColor: 'rgba(71, 82, 196, 0.15)',
-                fill: true,
-                tension: 0.25,
-                pointRadius: 4,
-                pointHoverRadius: 5
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: { beginAtZero: true, max: 5, ticks: { stepSize: 1 } }
-            },
-            plugins: { legend: { display: true, position: 'bottom' } }
-        }
+    window.deanSemestralTrendChartInstance = window.AppChartDesign.renderLineChart(canvas, {
+        labels,
+        values,
+        label: 'Overall Average',
+        lineColor: '#4f46e5',
+        fillColor: 'rgba(79, 70, 229, 0.2)',
+        maxValue: 5,
+        stepSize: 1,
+        tooltipDecimals: 2
     });
 }
 
@@ -634,6 +705,19 @@ function computeAverageRatingFromEvaluations(evaluations) {
     return count ? (sum / count) : 0;
 }
 
+function computeDistributionAverage(distribution) {
+    let weighted = 0;
+    let total = 0;
+    Object.keys(distribution || {}).forEach(key => {
+        const rating = Number(key);
+        const count = Number(distribution[key] || 0);
+        if (!Number.isFinite(rating) || !Number.isFinite(count)) return;
+        weighted += rating * count;
+        total += count;
+    });
+    return total ? (weighted / total) : 0;
+}
+
 function formatDisplaySection(sectionName) {
     const value = String(sectionName || '').trim();
     if (!value) return '';
@@ -643,7 +727,7 @@ function formatDisplaySection(sectionName) {
 
 function getActiveSupervisorCount() {
     const users = (SharedData.getUsers && SharedData.getUsers()) || [];
-    const supervisorRoles = new Set(['dean', 'hr', 'vpaa', 'admin']);
+    const supervisorRoles = new Set(['dean', 'procoor', 'hr', 'vpaa', 'admin']);
     return (Array.isArray(users) ? users : []).filter(user =>
         supervisorRoles.has(normalizeRoleToken(user && user.role)) &&
         isActiveUser(user)
@@ -702,7 +786,7 @@ function getDeanEvaluationTypeMeta(type) {
     if (token === 'peer' || token === 'professor') {
         return { id: 'professor', label: 'Professor Evaluation' };
     }
-    if (token === 'supervisor' || token === 'dean') {
+    if (token === 'supervisor' || token === 'dean' || token === 'procoor') {
         return { id: 'supervisor', label: 'Supervisor Evaluation' };
     }
     return { id: 'student', label: 'Student Evaluation' };
@@ -740,12 +824,11 @@ function buildDeanPanelContext() {
         ? SharedData.getSubjectManagement()
         : { offerings: [], enrollments: [] };
     const scopedDepartment = String((deanUser && (deanUser.department || deanUser.institute)) || '').trim().toUpperCase();
+    const scopedProgramCode = String((deanUser && deanUser.programCode) || '').trim().toUpperCase();
 
     const scopedProfessors = (Array.isArray(users) ? users : []).filter(user => {
-        if (normalizeRoleToken(user && user.role) !== 'professor') return false;
         if (!isActiveUser(user)) return false;
-        const department = String((user && (user.department || user.institute)) || '').trim().toUpperCase();
-        return !!department && !!scopedDepartment && department === scopedDepartment;
+        return isProfessorWithinSupervisorScope(user, scopedDepartment, scopedProgramCode);
     });
 
     const professorLookup = buildDeanUserLookup(scopedProfessors);
@@ -789,6 +872,7 @@ function buildDeanPanelContext() {
         semesterList: Array.isArray(semesterList) ? semesterList : [],
         currentSemester,
         scopedDepartment,
+        scopedProgramCode,
         scopedProfessors,
         professorLookup,
         professorById,
@@ -848,6 +932,7 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
     });
 
     const ratingDistribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    let ratingDistributionAverage = 0;
     const matchedEvaluations = [];
     const comments = [];
 
@@ -869,7 +954,9 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
             if (!Number.isFinite(parsed)) return;
             const value = Math.max(1, Math.min(5, parsed));
             const rounded = Math.max(1, Math.min(5, Math.round(value)));
-            ratingDistribution[rounded] += 1;
+            if (evaluationType !== 'student') {
+                ratingDistribution[rounded] += 1;
+            }
 
             const questionToken = String(questionId || '').trim();
             const category = questionMeta.categoryByQuestionId[questionToken]
@@ -896,6 +983,22 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
             ));
         });
     });
+
+    if (evaluationType === 'student') {
+        let evaluationAverageTotal = 0;
+        let evaluationAverageCount = 0;
+        matchedEvaluations.forEach(evaluation => {
+            const evaluationAverage = computeAverageRatingFromEvaluations([evaluation]);
+            if (!evaluationAverage) return;
+            evaluationAverageTotal += evaluationAverage;
+            evaluationAverageCount += 1;
+            const bucket = Math.max(1, Math.min(5, Math.round(evaluationAverage)));
+            ratingDistribution[bucket] += 1;
+        });
+        ratingDistributionAverage = evaluationAverageCount ? (evaluationAverageTotal / evaluationAverageCount) : 0;
+    } else {
+        ratingDistributionAverage = computeDistributionAverage(ratingDistribution);
+    }
 
     const commentBuckets = {};
     const breakdownRows = [];
@@ -1037,6 +1140,8 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
         breakdownRows,
         subjects: breakdownRows,
         ratingDistribution,
+        ratingDistributionAverage,
+        averageRating: averageScore,
         comments,
         commentBuckets,
         detailedRows,
@@ -1054,14 +1159,14 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
  * @returns {boolean} - True if user is authenticated as dean
  */
 function checkAuthentication() {
-    const session = SharedData.requireSession('dean');
+    const session = SharedData.requireSession(SUPERVISOR_ROLE);
     if (!session) {
         return false;
     }
 
     try {
         return session.isAuthenticated === true
-            && session.role === 'dean'
+            && session.role === SUPERVISOR_ROLE
             && normalizeDeanToken(session.status || 'active') !== 'inactive';
     } catch (e) {
         return false;
@@ -1071,38 +1176,38 @@ function checkAuthentication() {
 function resolveCurrentDeanUserAnyStatus(sessionInput) {
     const session = sessionInput || getUserSession() || {};
     const users = (typeof SharedData !== 'undefined' && SharedData.getUsers) ? SharedData.getUsers() : [];
-    const deans = (Array.isArray(users) ? users : []).filter(user => normalizeDeanToken(user && user.role) === 'dean');
-    if (!deans.length) return null;
+    const supervisors = (Array.isArray(users) ? users : []).filter(user => normalizeDeanToken(user && user.role) === SUPERVISOR_ROLE);
+    if (!supervisors.length) return null;
 
     const sessionUserId = normalizeDeanUserIdToken(session && session.userId);
     if (sessionUserId) {
-        const byId = deans.find(user => normalizeDeanUserIdToken(user && user.id) === sessionUserId);
+        const byId = supervisors.find(user => normalizeDeanUserIdToken(user && user.id) === sessionUserId);
         if (byId) return byId;
     }
 
     const sessionEmail = normalizeDeanToken(session && session.email);
     if (sessionEmail) {
-        const byEmail = deans.find(user => normalizeDeanToken(user && user.email) === sessionEmail);
+        const byEmail = supervisors.find(user => normalizeDeanToken(user && user.email) === sessionEmail);
         if (byEmail) return byEmail;
     }
 
     const sessionEmployeeId = normalizeDeanToken(session && session.employeeId);
     if (sessionEmployeeId) {
-        const byEmployeeId = deans.find(user => normalizeDeanToken(user && user.employeeId) === sessionEmployeeId);
+        const byEmployeeId = supervisors.find(user => normalizeDeanToken(user && user.employeeId) === sessionEmployeeId);
         if (byEmployeeId) return byEmployeeId;
     }
 
     const sessionUsername = normalizeDeanToken(session && session.username);
     if (sessionUsername) {
-        const byName = deans.find(user => normalizeDeanToken(user && user.name) === sessionUsername);
+        const byName = supervisors.find(user => normalizeDeanToken(user && user.name) === sessionUsername);
         if (byName) return byName;
-        const byEmailName = deans.find(user => normalizeDeanToken(user && user.email) === sessionUsername);
+        const byEmailName = supervisors.find(user => normalizeDeanToken(user && user.email) === sessionUsername);
         if (byEmailName) return byEmailName;
     }
 
     const sessionFullName = normalizeDeanToken(session && session.fullName);
     if (sessionFullName) {
-        const byFullName = deans.find(user => normalizeDeanToken(user && user.name) === sessionFullName);
+        const byFullName = supervisors.find(user => normalizeDeanToken(user && user.name) === sessionFullName);
         if (byFullName) return byFullName;
     }
 
@@ -1122,7 +1227,7 @@ function enforceActiveDeanAccount(options = {}) {
     const form = cfg.form || document.getElementById('peerEvaluationForm');
     const message = isInactive
         ? 'Your account is inactive. You cannot access evaluations. Please contact your administrator.'
-        : 'Your login session is not linked to an active dean account.';
+        : `Your login session is not linked to an active ${getSupervisorLabel().toLowerCase()} account.`;
 
     if (cfg.inline && form && typeof showFormMessage === 'function') {
         showFormMessage(form, message, 'error');
@@ -1158,6 +1263,7 @@ function initializeDashboard() {
     loadFacultySummary({ evaluationType: 'student' });
     loadProfessorCount();
     setupFacultyResponseView();
+    setupDeanIferDirectory();
     setupPeerManagementView();
     setupDeanFacultyPaperInbox();
     updateSummaryCards();
@@ -1183,6 +1289,7 @@ function setupDeanDataSync() {
             renderDeanAnnouncementPanels();
             populatePeerProfessorOptions();
             loadProfessorCount();
+            refreshDeanIferDirectory();
             if (deanSummaryState.selectedEvaluationType) {
                 loadFacultySummary({
                     semesterId: deanSummaryState.selectedSemesterId,
@@ -1212,6 +1319,11 @@ function setupDeanDataSync() {
                 semesterId: deanSummaryState.selectedSemesterId,
                 evaluationType: deanSummaryState.selectedEvaluationType
             });
+            refreshDeanIferDirectory();
+        }
+
+        if (key === SharedData.KEYS.FACULTY_PAPERS) {
+            refreshDeanIferDirectory();
         }
     });
 }
@@ -1503,58 +1615,28 @@ function initializeStudentCharts() {
     const summary = getDeanSummaryForType('student');
     const criteria = Array.isArray(summary.criteriaAverages) ? summary.criteriaAverages : [];
     const distribution = summary.ratingDistribution || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-    const labels = criteria.length ? criteria.map(item => item.name) : ['No data'];
-    const values = criteria.length ? criteria.map(item => Number(item.average || 0)) : [0];
 
     if (barCtx) {
-        if (window.studentBarChartInstance) window.studentBarChartInstance.destroy();
-        window.studentBarChartInstance = new Chart(barCtx, {
-            type: 'bar',
-            data: {
-                labels,
-                datasets: [{
-                    label: 'Average Score',
-                    data: values,
-                    backgroundColor: '#667eea',
-                    borderColor: '#764ba2',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: { beginAtZero: true, max: 5, ticks: { stepSize: 1 } }
-                },
-                plugins: { legend: { display: true, position: 'bottom' } }
-            }
+        const sectionSeries = window.AppChartDesign.buildSectionSeries(criteria, {
+            labelKey: 'name',
+            valueKey: 'average'
+        });
+        window.studentBarChartInstance = window.AppChartDesign.renderBarChart(barCtx, {
+            labels: sectionSeries.labels,
+            values: sectionSeries.values,
+            fullLabels: sectionSeries.fullLabels,
+            label: 'Average Score',
+            colors: ['#4f46e5', '#22c55e'],
+            maxValue: 5,
+            stepSize: 1,
+            tooltipDecimals: 2
         });
     }
 
     if (pieCtx) {
-        if (window.studentPieChartInstance) window.studentPieChartInstance.destroy();
-        window.studentPieChartInstance = new Chart(pieCtx, {
-            type: 'pie',
-            data: {
-                labels: ['5 Stars', '4 Stars', '3 Stars', '2 Stars', '1 Star'],
-                datasets: [{
-                    data: [
-                        Number(distribution[5] || 0),
-                        Number(distribution[4] || 0),
-                        Number(distribution[3] || 0),
-                        Number(distribution[2] || 0),
-                        Number(distribution[1] || 0)
-                    ],
-                    backgroundColor: ['#10b981', '#34d399', '#fbbf24', '#f59e0b', '#ef4444'],
-                    borderWidth: 2,
-                    borderColor: '#ffffff'
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: true, position: 'bottom' } }
-            }
+        window.studentPieChartInstance = window.AppChartDesign.renderRatingDistributionChart(pieCtx, {
+            ratingDistribution: distribution,
+            averageRating: Number(summary.ratingDistributionAverage || summary.averageRating || (summary.totals && summary.totals.averageScore) || 0)
         });
     }
 }
@@ -1565,58 +1647,28 @@ function initializePeerCharts() {
     const summary = getDeanSummaryForType('professor');
     const criteria = Array.isArray(summary.criteriaAverages) ? summary.criteriaAverages : [];
     const distribution = summary.ratingDistribution || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-    const labels = criteria.length ? criteria.map(item => item.name) : ['No data'];
-    const values = criteria.length ? criteria.map(item => Number(item.average || 0)) : [0];
 
     if (barCtx) {
-        if (window.peerBarChartInstance) window.peerBarChartInstance.destroy();
-        window.peerBarChartInstance = new Chart(barCtx, {
-            type: 'bar',
-            data: {
-                labels,
-                datasets: [{
-                    label: 'Peer Avg Score',
-                    data: values,
-                    backgroundColor: '#34d399',
-                    borderColor: '#059669',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: { beginAtZero: true, max: 5, ticks: { stepSize: 1 } }
-                },
-                plugins: { legend: { display: true, position: 'bottom' } }
-            }
+        const sectionSeries = window.AppChartDesign.buildSectionSeries(criteria, {
+            labelKey: 'name',
+            valueKey: 'average'
+        });
+        window.peerBarChartInstance = window.AppChartDesign.renderBarChart(barCtx, {
+            labels: sectionSeries.labels,
+            values: sectionSeries.values,
+            fullLabels: sectionSeries.fullLabels,
+            label: 'Peer Avg Score',
+            colors: ['#2563eb', '#14b8a6'],
+            maxValue: 5,
+            stepSize: 1,
+            tooltipDecimals: 2
         });
     }
 
     if (pieCtx) {
-        if (window.peerPieChartInstance) window.peerPieChartInstance.destroy();
-        window.peerPieChartInstance = new Chart(pieCtx, {
-            type: 'pie',
-            data: {
-                labels: ['5 Stars', '4 Stars', '3 Stars', '2 Stars', '1 Star'],
-                datasets: [{
-                    data: [
-                        Number(distribution[5] || 0),
-                        Number(distribution[4] || 0),
-                        Number(distribution[3] || 0),
-                        Number(distribution[2] || 0),
-                        Number(distribution[1] || 0)
-                    ],
-                    backgroundColor: ['#10b981', '#34d399', '#fbbf24', '#f59e0b', '#ef4444'],
-                    borderWidth: 2,
-                    borderColor: '#ffffff'
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: true, position: 'bottom' } }
-            }
+        window.peerPieChartInstance = window.AppChartDesign.renderRatingDistributionChart(pieCtx, {
+            ratingDistribution: distribution,
+            averageRating: Number(summary.averageRating || (summary.totals && summary.totals.averageScore) || 0)
         });
     }
 }
@@ -1755,15 +1807,14 @@ function resolveCurrentDeanActorUserId() {
 function formatDeanPaperTimestamp(value) {
     const raw = String(value || '').trim();
     if (!raw) return 'N/A';
-    const date = new Date(raw);
-    if (Number.isNaN(date.getTime())) return raw;
-    return date.toLocaleString('en-US', {
+    const formatted = SharedData.formatDateTimeInPhilippines(raw, 'en-US', {
         year: 'numeric',
         month: 'short',
         day: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
     });
+    return formatted || raw;
 }
 
 function mapDeanPaperStatus(status) {
@@ -1986,6 +2037,246 @@ async function openDeanStoredPaperPdf(paper, actorUserId, versionNo) {
     modal.classList.add('active');
 }
 
+function getDeanIferActiveSemesterId() {
+    const semesterFilter = document.getElementById('deanIferSemesterSelect');
+    return resolveSelectedSemesterId(
+        semesterFilter && semesterFilter.value
+            ? semesterFilter.value
+            : deanIferDirectoryState.semesterId || deanSummaryState.selectedSemesterId
+    );
+}
+
+function parsePdfFilenameFromDisposition(headerValue) {
+    const value = String(headerValue || '').trim();
+    if (!value) return '';
+
+    const utfMatch = value.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utfMatch && utfMatch[1]) {
+        try {
+            return decodeURIComponent(utfMatch[1]).replace(/["']/g, '').trim();
+        } catch (_error) {
+            return String(utfMatch[1]).replace(/["']/g, '').trim();
+        }
+    }
+
+    const simpleMatch = value.match(/filename="?([^";]+)"?/i);
+    return simpleMatch && simpleMatch[1] ? String(simpleMatch[1]).trim() : '';
+}
+
+function buildDeanIferCommentKey(source, evaluation, field, questionKey, index) {
+    return [
+        String(source || '').trim().toLowerCase(),
+        String(evaluation && evaluation.id || '').trim() || 'unknown',
+        String(field || '').trim() || 'field',
+        String(questionKey || '').trim() || '-',
+        String(Math.max(0, Number(index) || 0))
+    ].join('|');
+}
+
+function collectDeanIferEvaluationCommentItems(evaluation, source) {
+    const items = [];
+    const commentText = String(evaluation && evaluation.comments || '').trim();
+    if (commentText) {
+        items.push({
+            key: buildDeanIferCommentKey(source, evaluation, 'comments', '-', 0),
+            text: commentText,
+            date: String(evaluation && (evaluation.submittedAt || evaluation.timestamp) || '').trim(),
+            source: source === 'supervisor' ? 'Supervisor Evaluation' : 'Student Evaluation'
+        });
+    }
+
+    const qualitative = evaluation && typeof evaluation.qualitative === 'object' && evaluation.qualitative
+        ? evaluation.qualitative
+        : {};
+    let index = 0;
+    Object.keys(qualitative).forEach(questionKey => {
+        const text = String(qualitative[questionKey] || '').trim();
+        if (!text) return;
+        items.push({
+            key: buildDeanIferCommentKey(source, evaluation, 'qualitative', questionKey, index),
+            text,
+            date: String(evaluation && (evaluation.submittedAt || evaluation.timestamp) || '').trim(),
+            source: source === 'supervisor' ? 'Supervisor Evaluation' : 'Student Evaluation'
+        });
+        index += 1;
+    });
+
+    return items;
+}
+
+function resolveDeanIferRecordProfessorId(record, context) {
+    const direct = normalizeUserIdToken(record && record.professorUserId);
+    if (direct) return direct;
+
+    const employeeToken = normalizeRoleToken(record && record.employeeId);
+    const nameToken = normalizeRoleToken(record && record.professorName);
+    const professor = (context.scopedProfessors || []).find(item =>
+        normalizeRoleToken(item && (item.employeeId || item.id)) === employeeToken
+        || normalizeRoleToken(item && item.name) === nameToken
+    );
+    return normalizeUserIdToken(professor && professor.id);
+}
+
+function isDeanIferEvaluationForRecord(evaluation, source, record, context, targetProfessorId) {
+    const resolved = resolveDeanTargetProfessorId(evaluation, source, context);
+    if (resolved && targetProfessorId && resolved === targetProfessorId) {
+        return true;
+    }
+
+    const employeeToken = normalizeRoleToken(record && record.employeeId);
+    const nameToken = normalizeRoleToken(record && record.professorName);
+    const candidates = [
+        evaluation && evaluation.targetProfessorId,
+        evaluation && evaluation.targetId,
+        evaluation && evaluation.colleagueId,
+        evaluation && evaluation.targetUserId
+    ];
+    for (let index = 0; index < candidates.length; index += 1) {
+        const candidateUserId = normalizeUserIdToken(candidates[index]);
+        if (candidateUserId && targetProfessorId && candidateUserId === targetProfessorId) return true;
+        const candidateToken = normalizeRoleToken(candidates[index]);
+        if (candidateToken && employeeToken && candidateToken === employeeToken) return true;
+    }
+
+    const nameCandidates = [
+        evaluation && evaluation.targetProfessor,
+        evaluation && evaluation.professorSubject,
+        evaluation && evaluation.targetName
+    ];
+    for (let index = 0; index < nameCandidates.length; index += 1) {
+        const head = normalizeRoleToken(String(nameCandidates[index] || '').split(' - ')[0]);
+        if (head && nameToken && head === nameToken) return true;
+    }
+
+    return false;
+}
+
+function buildDeanIferSelectableComments(record, semesterId) {
+    const context = buildDeanPanelContext();
+    const targetProfessorId = resolveDeanIferRecordProfessorId(record, context);
+    const result = {
+        student: [],
+        supervisor: []
+    };
+    const seen = {
+        student: new Set(),
+        supervisor: new Set()
+    };
+
+    (context.evaluations || []).forEach(evaluation => {
+        if (!isEvaluationInSemester(evaluation, semesterId)) return;
+        const type = resolveEvaluationTypeToken(evaluation);
+        if (type !== 'student' && type !== 'supervisor') return;
+        if (!isDeanIferEvaluationForRecord(evaluation, type, record, context, targetProfessorId)) return;
+
+        collectDeanIferEvaluationCommentItems(evaluation, type).forEach(item => {
+            if (!item.text || seen[type].has(item.key)) return;
+            seen[type].add(item.key);
+            result[type].push(item);
+        });
+    });
+
+    Object.keys(result).forEach(source => {
+        result[source].sort((left, right) => {
+            const leftTime = new Date(left.date || 0).getTime() || 0;
+            const rightTime = new Date(right.date || 0).getTime() || 0;
+            return rightTime - leftTime;
+        });
+    });
+
+    return result;
+}
+
+function renderDeanIferCommentOptions(container, comments, source) {
+    if (!container) return;
+    if (!Array.isArray(comments) || !comments.length) {
+        container.innerHTML = '<div class="dean-ifer-comment-empty">No comments available for this source.</div>';
+        return;
+    }
+
+    container.innerHTML = comments.map((comment, index) => `
+        <label class="dean-ifer-comment-option">
+            <input type="checkbox" class="dean-ifer-comment-check" data-source="${escapeHTML(source)}" value="${escapeHTML(comment.key)}">
+            <span>
+                <strong>${escapeHTML(String(comment.source || 'Comment'))} ${escapeHTML(String(index + 1))}</strong>
+                <span>${escapeHTML(String(comment.text || ''))}</span>
+                <em>${escapeHTML(formatDisplayDate(comment.date))}</em>
+            </span>
+        </label>
+    `).join('');
+}
+
+function updateDeanIferCommentLimitState(modal) {
+    ['student', 'supervisor'].forEach(source => {
+        const checks = Array.from(modal.querySelectorAll(`.dean-ifer-comment-check[data-source="${source}"]`));
+        const selected = checks.filter(item => item.checked);
+        checks.forEach(item => {
+            item.disabled = false;
+        });
+        const counter = modal.querySelector(`[data-ifer-comment-count="${source}"]`);
+        if (counter) counter.textContent = `${selected.length} selected`;
+    });
+}
+
+function openDeanIferCommentPicker(record) {
+    return openDeanIferTemplatePreview(record);
+}
+
+async function openDeanIferTemplatePreview(record) {
+    const professorUserId = String(record && record.professorUserId || '').trim();
+    const semesterId = getDeanIferActiveSemesterId();
+    if (!professorUserId) {
+        alert('Unable to resolve professor account for IFER download.');
+        return;
+    }
+    if (!semesterId) {
+        alert('Select a semester first.');
+        return;
+    }
+
+    let response;
+    try {
+        response = await fetch('../api/generate_ifer.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                professor_user_id: professorUserId,
+                semester_id: semesterId
+            })
+        });
+    } catch (_error) {
+        alert('Unable to connect to the IFER generator.');
+        return;
+    }
+
+    if (!response.ok) {
+        let errorMessage = 'Failed to generate IFER Word file.';
+        try {
+            const data = await response.json();
+            if (data && data.error) errorMessage = String(data.error);
+        } catch (_error) {
+            // Ignore non-JSON body.
+        }
+        alert(errorMessage);
+        return;
+    }
+
+    const wordBlob = await response.blob();
+    const fileName = parsePdfFilenameFromDisposition(response.headers.get('Content-Disposition'))
+        || String(deanIferDirectoryState.templateName || 'ifer.docx').trim()
+        || 'ifer.docx';
+    const blobUrl = URL.createObjectURL(wordBlob);
+    const anchor = document.createElement('a');
+    anchor.href = blobUrl;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+}
+
 function renderDeanFacultyPaperDetail(paper) {
     const card = document.getElementById('deanFacultyPaperDetailCard');
     const meta = document.getElementById('deanFacultyPaperDetailMeta');
@@ -2023,7 +2314,9 @@ function renderDeanFacultyPaperDetail(paper) {
     if (activitiesInput) activitiesInput.value = String(paper.section_c_activities || '');
     if (actionPlanInput) actionPlanInput.value = String(paper.section_c_action_plan || '');
 
-    const editable = normalizeDeanToken(paper.status) === 'sent' || normalizeDeanToken(paper.status) === 'completed';
+    const editable = paper && typeof paper.canCurrentActorEdit === 'boolean'
+        ? !!paper.canCurrentActorEdit
+        : (normalizeDeanToken(paper.status) === 'sent' || normalizeDeanToken(paper.status) === 'completed');
     if (areasInput) areasInput.disabled = !editable;
     if (activitiesInput) activitiesInput.disabled = !editable;
     if (actionPlanInput) actionPlanInput.disabled = !editable;
@@ -2051,6 +2344,7 @@ function renderDeanFacultyPaperDetail(paper) {
                 department: paper.department || 'N/A',
                 rank: paper.rank || 'N/A',
                 semester_label: paper.semester_label || 'N/A',
+                load_type: String(paper.load_type || paper.loadType || 'main').trim().toLowerCase() === 'excess' ? 'excess' : 'main',
                 set_rating: paper.set_rating || 'N/A',
                 saf_rating: paper.saf_rating || 'N/A',
                 section_c_areas: areasInput ? areasInput.value : (paper.section_c_areas || ''),
@@ -2068,14 +2362,14 @@ function renderDeanFacultyPaperInbox() {
     const actorUserId = resolveCurrentDeanActorUserId();
     deanFacultyPaperState.actorUserId = actorUserId;
     if (!actorUserId) {
-        tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="6">Unable to resolve dean account for this session.</td></tr>';
+        tableBody.innerHTML = `<tr class="mobile-card-empty-row"><td colspan="6">Unable to resolve ${getSupervisorLabel().toLowerCase()} account for this session.</td></tr>`;
         renderDeanFacultyPaperDetail(null);
         return;
     }
 
     let papers = [];
     try {
-        papers = SharedData.listFacultyPapers('dean', actorUserId);
+        papers = SharedData.listFacultyPapers(SUPERVISOR_ROLE, actorUserId);
     } catch (error) {
         tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="6">Failed to load faculty papers.</td></tr>';
         renderDeanFacultyPaperDetail(null);
@@ -2128,7 +2422,7 @@ function setupDeanFacultyPaperInbox() {
             event.preventDefault();
             const actorUserId = deanFacultyPaperState.actorUserId || resolveCurrentDeanActorUserId();
             if (!actorUserId) {
-                alert('Unable to resolve dean account.');
+                alert(`Unable to resolve ${getSupervisorLabel().toLowerCase()} account.`);
                 return;
             }
 
@@ -2144,7 +2438,7 @@ function setupDeanFacultyPaperInbox() {
 
             try {
                 const response = SharedData.saveFacultyPaperSectionC({
-                    actor_role: 'dean',
+                    actor_role: SUPERVISOR_ROLE,
                     actor_user_id: actorUserId,
                     paper_id: paperId,
                     section_c: {
@@ -2317,11 +2611,11 @@ function populatePeerProfessorOptions() {
             const label = deanSupervisorTargetDirectory.length === 1 ? 'employee' : 'employees';
             searchMeta.textContent = lockedCount > 0
                 ? `Showing ${deanSupervisorTargetDirectory.length} ${label}. ${lockedCount} already evaluated this semester were hidden.`
-                : `Showing ${deanSupervisorTargetDirectory.length} ${label} in your department scope.`;
+                : `Showing ${deanSupervisorTargetDirectory.length} ${label} in your ${getSupervisorScopeDescriptor()}.`;
         } else if (scopedDirectory.length > 0) {
-            searchMeta.textContent = 'All employees in your department scope were already evaluated this semester.';
+            searchMeta.textContent = `All employees in your ${getSupervisorScopeDescriptor()} were already evaluated this semester.`;
         } else {
-            searchMeta.textContent = 'No active professors in your department scope.';
+            searchMeta.textContent = `No active professors in your ${getSupervisorScopeDescriptor()}.`;
         }
     }
 
@@ -2393,7 +2687,7 @@ function isSupervisorTargetLocked(targetId) {
 
     return evaluations.some(ev => {
         const role = String(ev.evaluatorRole || ev.evaluationType || '').toLowerCase();
-        if (role && role !== 'dean' && role !== 'supervisor') return false;
+        if (role && role !== 'dean' && role !== 'procoor' && role !== 'supervisor') return false;
 
         const evEvaluator = normalizeSupervisorLockValue(ev.evaluatorId || ev.evaluatorUsername);
         if (!evEvaluator || evEvaluator !== normalizeSupervisorLockValue(evaluatorId)) return false;
@@ -2517,8 +2811,8 @@ function handlePeerEvaluation() {
     const evaluationKey = buildSupervisorEvaluationKey(session.username || '', semesterId, targetProfessorId);
     const payload = {
         evaluatorId: session.username || '',
-        evaluatorName: session.fullName || 'Anonymous Dean',
-        evaluatorRole: 'dean',
+        evaluatorName: session.fullName || getSupervisorAnonymousLabel(),
+        evaluatorRole: SUPERVISOR_ROLE,
         evaluationType: 'supervisor',
         targetId: formData.get('peerProfessor'),
         targetProfessorId: targetProfessorId,
@@ -2527,7 +2821,7 @@ function handlePeerEvaluation() {
         ratings: ratingsGroup,
         qualitative: qualitativeGroup,
         comments: formData.get('peerComments') || '',
-        submittedAt: new Date().toISOString()
+        submittedAt: SharedData.getNowIsoString()
     };
 
     try {
@@ -2539,8 +2833,8 @@ function handlePeerEvaluation() {
             type: 'evaluation_submitted',
             title: 'Supervisor Evaluation Submitted',
             user: payload.evaluatorName,
-            role: 'dean',
-            date: new Date().toISOString()
+            role: SUPERVISOR_ROLE,
+            date: SharedData.getNowIsoString()
         });
     } catch (error) {
         const message = String(error && error.message || '');
@@ -3306,13 +3600,12 @@ function updateNavigation(viewName) {
 }
 
 function formatDisplayDate(dateString) {
-    const date = new Date(dateString);
-    if (Number.isNaN(date.getTime())) return dateString;
-    return date.toLocaleDateString('en-US', {
+    const formatted = SharedData.formatDateInPhilippines(dateString, 'en-US', {
         year: 'numeric',
         month: 'short',
         day: 'numeric'
     });
+    return formatted || dateString;
 }
 
 /**
@@ -3333,7 +3626,7 @@ function setupDeanEvaluationResults() {
         evaluationType: 'student'
     }).then(results => {
         const institutes = Array.from(new Set(results.map(item => item.institute))).sort();
-        instituteFilter.innerHTML = '<option value="all">Department scope</option>' + institutes.map(institute =>
+        instituteFilter.innerHTML = `<option value="all">${isProgramScopedSupervisorPanel() ? 'Program scope' : 'Department scope'}</option>` + institutes.map(institute =>
             '<option value="' + institute + '">' + institute + '</option>'
         ).join('');
         renderDeanProfessorResults(results, instituteFilter.value);
@@ -3362,30 +3655,30 @@ function getDeanAssignedInstitutes(sessionOrUsername) {
 
 function buildDeanPeerRequiredCountMap(semesterId) {
     const requiredByProfessor = {};
-    if (!SharedData || typeof SharedData.listDeanPeerRoomsCurrent !== 'function') {
+    const detailMethod = getSupervisorPeerMethodName('details');
+    if (!SharedData || typeof SharedData[detailMethod] !== 'function') {
         return requiredByProfessor;
     }
 
     const selectedSemester = resolveSelectedSemesterId(semesterId);
     try {
-        const response = SharedData.listDeanPeerRoomsCurrent({});
+        const response = SharedData[detailMethod]({});
         const currentSemester = String(response && response.currentSemester || '').trim();
         if (!currentSemester || (selectedSemester && currentSemester !== selectedSemester)) {
             return requiredByProfessor;
         }
 
-        const rooms = Array.isArray(response && response.rooms) ? response.rooms : [];
-        rooms.forEach(room => {
-            const members = Array.isArray(room && room.members) ? room.members : [];
-            const perMemberRequired = Math.max(members.length - 1, 0);
-            members.forEach(member => {
-                const professorUserId = normalizeUserIdToken(member && member.userId);
+        const programs = Array.isArray(response && response.programs) ? response.programs : [];
+        programs.forEach(program => {
+            const professors = Array.isArray(program && program.professors) ? program.professors : [];
+            professors.forEach(professor => {
+                const professorUserId = normalizeUserIdToken(professor && professor.userId);
                 if (!professorUserId) return;
-                requiredByProfessor[professorUserId] = (requiredByProfessor[professorUserId] || 0) + perMemberRequired;
+                requiredByProfessor[professorUserId] = Math.max(Number(professor && professor.outgoingCount || 0), 0);
             });
         });
     } catch (error) {
-        console.warn('[Dean] Unable to load peer room assignment counts for response table.', error);
+        console.warn('[Dean] Unable to load peer assignment counts for response table.', error);
     }
 
     return requiredByProfessor;
@@ -3524,7 +3817,7 @@ function renderDeanProfessorResults(results, selectedInstitute) {
         if (professorCountEl) professorCountEl.textContent = '0';
         if (averageScoreEl) averageScoreEl.textContent = '0.0/5.0';
         if (responseRateEl) responseRateEl.textContent = '0%';
-        if (scopeBadge) scopeBadge.textContent = 'Scope: ' + (selectedInstitute === 'all' ? 'Department scope' : selectedInstitute);
+        if (scopeBadge) scopeBadge.textContent = 'Scope: ' + (selectedInstitute === 'all' ? (isProgramScopedSupervisorPanel() ? 'Program scope' : 'Department scope') : selectedInstitute);
         return;
     }
     tbody.innerHTML = filtered.map(item => {
@@ -3554,7 +3847,205 @@ function renderDeanProfessorResults(results, selectedInstitute) {
     if (professorCountEl) professorCountEl.textContent = String(filtered.length);
     if (averageScoreEl) averageScoreEl.textContent = averageScore.toFixed(1) + '/5.0';
     if (responseRateEl) responseRateEl.textContent = responseRate + '%';
-    if (scopeBadge) scopeBadge.textContent = 'Scope: ' + (selectedInstitute === 'all' ? 'Department scope' : selectedInstitute);
+    if (scopeBadge) scopeBadge.textContent = 'Scope: ' + (selectedInstitute === 'all' ? (isProgramScopedSupervisorPanel() ? 'Program scope' : 'Department scope') : selectedInstitute);
+}
+
+function buildDeanIferDirectoryRecords() {
+    const context = buildDeanPanelContext();
+    const session = getUserSession() || {};
+    const assignedInstitutes = getDeanAssignedInstitutes(session);
+    const instituteSet = new Set(
+        (Array.isArray(assignedInstitutes) ? assignedInstitutes : [])
+            .map(item => String(item || '').trim().toUpperCase())
+            .filter(Boolean)
+    );
+    const professors = Array.isArray(context && context.scopedProfessors) ? context.scopedProfessors : [];
+
+    return professors
+        .filter(professor => {
+            if (!instituteSet.size) return true;
+            const institute = String((professor && (professor.department || professor.institute)) || '').trim().toUpperCase();
+            return instituteSet.has(institute);
+        })
+        .map(professor => ({
+            professorUserId: normalizeUserIdToken(professor && professor.id),
+            employeeId: String(professor && (professor.employeeId || professor.id) || '').trim() || 'N/A',
+            professorName: String(professor && professor.name || '').trim() || 'Unknown',
+            institute: String((professor && (professor.department || professor.institute)) || '').trim().toUpperCase() || 'N/A',
+            position: String(professor && professor.position || '').trim() || 'N/A',
+            status: normalizeRoleToken(professor && professor.status || 'active') === 'inactive' ? 'Inactive' : 'Active',
+            fileName: deanIferDirectoryState.templateName,
+            recordKey: [
+                normalizeUserIdToken(professor && professor.id),
+                String(professor && (professor.employeeId || professor.id) || '').trim(),
+                String(professor && professor.name || '').trim()
+            ].join('::')
+        }))
+        .sort((left, right) => String(left.professorName || '').localeCompare(String(right.professorName || '')));
+}
+
+function filterDeanIferDirectoryRecords(records, query) {
+    const keyword = String(query || '').trim().toLowerCase();
+    if (!keyword) return records.slice();
+
+    return records.filter(record => {
+        const professorName = String(record && record.professorName || '').toLowerCase();
+        const employeeId = String(record && record.employeeId || '').toLowerCase();
+        const institute = String(record && record.institute || '').toLowerCase();
+        return professorName.includes(keyword) || employeeId.includes(keyword) || institute.includes(keyword);
+    });
+}
+
+function renderDeanIferDirectory() {
+    const tableBody = document.getElementById('deanIferTableBody');
+    const resultEl = document.getElementById('deanIferSearchResult');
+    const templateNameEl = document.getElementById('deanIferTemplateName');
+    const searchInput = document.getElementById('deanIferSearchInput');
+    const semesterSelect = document.getElementById('deanIferSemesterSelect');
+
+    if (!tableBody || !resultEl) return;
+
+    if (templateNameEl) {
+        templateNameEl.textContent = deanIferDirectoryState.templateName;
+    }
+    if (searchInput && searchInput.value !== deanIferDirectoryState.query) {
+        searchInput.value = deanIferDirectoryState.query;
+    }
+    if (semesterSelect && deanIferDirectoryState.semesterId && semesterSelect.value !== deanIferDirectoryState.semesterId) {
+        semesterSelect.value = deanIferDirectoryState.semesterId;
+    }
+
+    const records = Array.isArray(deanIferDirectoryState.records) ? deanIferDirectoryState.records : [];
+    const query = deanIferDirectoryState.query;
+    const semesterLabel = getSemesterLabelById(getDeanIferActiveSemesterId());
+    const filtered = filterDeanIferDirectoryRecords(records, query);
+
+    if (!records.length) {
+        resultEl.textContent = `No professors found in your ${getSupervisorScopeDescriptor()}.`;
+        tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="6">No professors available for IFER viewing yet.</td></tr>';
+        return;
+    }
+
+    if (!filtered.length) {
+        resultEl.textContent = `No IFER matches found for "${query}".`;
+        tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="6">No professor matches your search.</td></tr>';
+        return;
+    }
+
+    resultEl.textContent = query
+        ? `Showing ${filtered.length} of ${records.length} professors for "${query}". Semester: ${semesterLabel}. File: ${deanIferDirectoryState.templateName}`
+        : `Showing ${filtered.length} professors in your ${getSupervisorScopeDescriptor()} for ${semesterLabel}. File: ${deanIferDirectoryState.templateName}`;
+
+    tableBody.innerHTML = filtered.map(record => {
+        const statusClass = record.status === 'Inactive' ? 'inactive' : 'active';
+        return `
+            <tr>
+                <td data-label="Employee ID">${escapeHTML(record.employeeId)}</td>
+                <td data-label="Professor Name">
+                    <div class="dean-ifer-professor-cell">
+                        <strong>${escapeHTML(record.professorName)}</strong>
+                        <span class="dean-status-pill ${statusClass}">${escapeHTML(record.status)}</span>
+                    </div>
+                </td>
+                <td data-label="Institute">${escapeHTML(record.institute)}</td>
+                <td data-label="Position">${escapeHTML(record.position)}</td>
+                <td data-label="IFER File"><span class="dean-ifer-file-name">${escapeHTML(record.fileName)}</span></td>
+                <td data-label="Action"><button type="button" class="btn-submit dean-ifer-open-btn" data-professor-key="${escapeHTML(record.recordKey)}">Download IFER</button></td>
+            </tr>
+        `;
+    }).join('');
+
+    tableBody.querySelectorAll('.dean-ifer-open-btn').forEach(button => {
+        button.addEventListener('click', function () {
+            const professorKey = String(button.getAttribute('data-professor-key') || '').trim();
+            const record = filtered.find(item => String(item.recordKey || '').trim() === professorKey)
+                || null;
+            openDeanIferTemplatePreview(record);
+        });
+    });
+}
+
+function refreshDeanIferDirectory() {
+    populateDeanIferSemesterFilter();
+    deanIferDirectoryState.records = buildDeanIferDirectoryRecords();
+    renderDeanIferDirectory();
+}
+
+function populateDeanIferSemesterFilter() {
+    const semesterSelect = document.getElementById('deanIferSemesterSelect');
+    if (!semesterSelect) return;
+
+    const context = buildDeanPanelContext();
+    const list = Array.isArray(context && context.semesterList) ? context.semesterList : [];
+    const fallbackId = resolveSelectedSemesterId(deanIferDirectoryState.semesterId || deanSummaryState.selectedSemesterId || context.currentSemester);
+    const options = list.length
+        ? list
+        : (fallbackId ? [{ value: fallbackId, label: getSemesterLabelById(fallbackId) }] : []);
+
+    semesterSelect.innerHTML = '';
+    options.forEach(item => {
+        const value = String(item && item.value || '').trim();
+        if (!value) return;
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = String(item && item.label || '').trim() || getSemesterLabelById(value);
+        semesterSelect.appendChild(option);
+    });
+
+    if (!semesterSelect.options.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No semester available';
+        semesterSelect.appendChild(option);
+    }
+
+    const preferred = String(deanIferDirectoryState.semesterId || fallbackId || '').trim();
+    if (preferred && Array.from(semesterSelect.options).some(opt => opt.value === preferred)) {
+        semesterSelect.value = preferred;
+    } else if (semesterSelect.options.length) {
+        semesterSelect.selectedIndex = 0;
+    }
+
+    deanIferDirectoryState.semesterId = resolveSelectedSemesterId(semesterSelect.value || fallbackId);
+}
+
+function setupDeanIferDirectory() {
+    const searchInput = document.getElementById('deanIferSearchInput');
+    const searchBtn = document.getElementById('deanIferSearchBtn');
+    const resetBtn = document.getElementById('deanIferResetBtn');
+    const semesterSelect = document.getElementById('deanIferSemesterSelect');
+
+    if (!searchInput || !searchBtn || !resetBtn || !semesterSelect) return;
+
+    if (!deanIferDirectoryState.initialized) {
+        deanIferDirectoryState.initialized = true;
+
+        searchBtn.addEventListener('click', function () {
+            deanIferDirectoryState.query = searchInput.value.trim();
+            renderDeanIferDirectory();
+        });
+
+        resetBtn.addEventListener('click', function () {
+            deanIferDirectoryState.query = '';
+            searchInput.value = '';
+            renderDeanIferDirectory();
+        });
+
+        searchInput.addEventListener('keydown', function (event) {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            deanIferDirectoryState.query = searchInput.value.trim();
+            renderDeanIferDirectory();
+        });
+
+        semesterSelect.addEventListener('change', function () {
+            deanIferDirectoryState.semesterId = resolveSelectedSemesterId(semesterSelect.value);
+            renderDeanIferDirectory();
+        });
+    }
+
+    searchInput.value = deanIferDirectoryState.query;
+    refreshDeanIferDirectory();
 }
 
 /**
@@ -3997,7 +4488,7 @@ function updateFacultySearchResult(count, total, keyword, view, semesterId) {
     const semesterLabel = getSemesterLabelById(semesterId || deanSummaryState.selectedSemesterId);
 
     if (!keyword) {
-        resultEl.textContent = 'Showing ' + label + ' under your department scope for ' + semesterLabel + '. Total: ' + total;
+        resultEl.textContent = 'Showing ' + label + ' under your ' + getSupervisorScopeDescriptor() + ' for ' + semesterLabel + '. Total: ' + total;
         return;
     }
 
@@ -4019,343 +4510,245 @@ function fetchDeanSupervisorEvaluationResultsFromSql(query) {
 }
 
 /**
- * Setup faculty peer-to-peer room management
- * Rule: auto-generation is dean-scoped and current-semester only.
+ * Setup dean program-based peer assignment management.
  */
 function setupPeerManagementView() {
     const programSelect = document.getElementById('peerMgmtProgramSelect');
     const professorCountInput = document.getElementById('peerMgmtProfessorCount');
-    const roomNameInput = document.getElementById('peerMgmtRoomName');
     const createRoomBtn = document.getElementById('peerMgmtCreateRoomBtn');
     const clearSelectionBtn = document.getElementById('peerMgmtClearSelectionBtn');
     const messageEl = document.getElementById('peerMgmtMessage');
-    const roomsTable = document.getElementById('peerMgmtRoomsTable');
-    const roomSelect = document.getElementById('peerMgmtRoomSelect');
-    const roomDisplay = document.getElementById('peerMgmtRoomDisplay');
-    const manualProfessorSelect = document.getElementById('peerMgmtManualProfessorSelect');
-    const addProfessorBtn = document.getElementById('peerMgmtAddProfessorBtn');
-    const viewMembersBtn = document.getElementById('peerMgmtViewMembersBtn');
-    const dismantleRoomBtn = document.getElementById('peerMgmtDismantleRoomBtn');
-    const membersTable = document.getElementById('peerMgmtRoomMembersTable');
+    const programsTable = document.getElementById('peerMgmtProgramsTable');
+    const selectedProgramDisplay = document.getElementById('peerMgmtSelectedProgramDisplay');
+    const viewAssignmentsBtn = document.getElementById('peerMgmtViewAssignmentsBtn');
+    const assignmentDetailsTable = document.getElementById('peerMgmtAssignmentDetailsTable');
 
     if (
-        !programSelect || !professorCountInput || !roomNameInput ||
-        !createRoomBtn || !clearSelectionBtn || !messageEl || !roomsTable ||
-        !roomSelect || !roomDisplay || !manualProfessorSelect || !addProfessorBtn ||
-        !viewMembersBtn || !dismantleRoomBtn || !membersTable
+        !programSelect || !professorCountInput || !createRoomBtn ||
+        !clearSelectionBtn || !messageEl || !programsTable ||
+        !selectedProgramDisplay || !viewAssignmentsBtn || !assignmentDetailsTable
     ) {
         return;
     }
 
     const scopedDepartment = getScopedDeanDepartment();
     let scopedPrograms = [];
-    let roomRowsCache = [];
+    let programSummaryCache = [];
+    let selectedProgramCode = '';
 
     function setMessage(text, type) {
         messageEl.textContent = text;
         messageEl.classList.remove('success', 'error', 'info');
-        messageEl.classList.add(type || 'info');
+        if (text) {
+            messageEl.classList.add(type || 'info');
+        }
     }
 
     function formatDateTime(value) {
         const raw = String(value || '').trim();
         if (!raw) return 'N/A';
-        const dt = new Date(raw);
-        if (Number.isNaN(dt.getTime())) return raw;
-        return dt.toLocaleString();
+        const formatted = SharedData.formatDateTimeInPhilippines(raw);
+        return formatted || raw;
     }
 
-    function normalizeRoomId(value) {
-        const parsed = parseInt(String(value || '').trim(), 10);
-        return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    function normalizeProgramCode(value) {
+        return String(value || '').trim().toUpperCase();
     }
 
-    function getSelectedRoomId() {
-        return normalizeRoomId(roomSelect.value || '');
+    function getProgramLabel(program) {
+        const code = normalizeProgramCode(program && program.programCode || program && program.program_code || '');
+        const name = String(program && (program.programName || program.program_name) || '').trim();
+        if (!code && !name) return 'No program selected';
+        return name ? `${code} - ${name}` : code;
     }
 
-    function setSelectedRoom(roomId) {
-        const normalizedId = normalizeRoomId(roomId);
-        if (normalizedId <= 0) {
-            roomSelect.value = '';
-            roomDisplay.value = Array.isArray(roomRowsCache) && roomRowsCache.length
-                ? 'Select a room from Existing Rooms actions'
-                : 'No rooms available';
-            return 0;
+    function setSelectedProgram(programCode) {
+        const normalizedCode = normalizeProgramCode(programCode);
+        selectedProgramCode = normalizedCode;
+        if (!normalizedCode) {
+            programSelect.value = '';
+            selectedProgramDisplay.value = 'No program selected';
+            viewAssignmentsBtn.disabled = true;
+            return '';
         }
 
-        roomSelect.value = String(normalizedId);
-        const roomEntry = roomRowsCache.find(room => normalizeRoomId(room && room.id) === normalizedId);
-        roomDisplay.value = roomEntry && roomEntry.roomName
-            ? String(roomEntry.roomName)
-            : ('Room #' + String(normalizedId));
-        return normalizedId;
+        const summaryEntry = programSummaryCache.find(program => normalizeProgramCode(program && program.programCode) === normalizedCode);
+        const scopedEntry = scopedPrograms.find(program => normalizeProgramCode(program && program.programCode) === normalizedCode);
+        if (summaryEntry || scopedEntry) {
+            programSelect.value = normalizedCode;
+        }
+        selectedProgramDisplay.value = getProgramLabel(summaryEntry || scopedEntry || { programCode: normalizedCode });
+        viewAssignmentsBtn.disabled = false;
+        return normalizedCode;
     }
 
-    function renderMembersTable(payload) {
-        const tbody = membersTable.querySelector('tbody');
+    function resolveProgramStatusClass(programSummary) {
+        const status = String(programSummary && programSummary.status || '').trim().toLowerCase();
+        if (status === 'generated') return 'good';
+        if (status === 'submitted-locked') return 'active';
+        if (status === 'not-generated') return 'inactive';
+        return 'needs-attention';
+    }
+
+    function renderAssignmentDetails(payload) {
+        const tbody = assignmentDetailsTable.querySelector('tbody');
         if (!tbody) return;
 
-        const rows = Array.isArray(payload && payload.members) ? payload.members : [];
-        const roomId = normalizeRoomId(payload && payload.room && payload.room.id);
+        const rows = Array.isArray(payload && payload.professors) ? payload.professors : [];
+        const emptyMessage = String(payload && payload.emptyMessage || '').trim();
         if (!rows.length) {
-            tbody.innerHTML = '<tr><td colspan="4">No members found for this room.</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="5">${escapeHTML(emptyMessage || 'No peer assignment details available for this program.')}</td></tr>`;
             return;
         }
 
-        tbody.innerHTML = rows.map(member => {
-            const memberName = String(member && member.name || 'Professor');
-            const memberNameEncoded = encodeURIComponent(memberName);
+        tbody.innerHTML = rows.map(professor => {
+            const willEvaluate = Array.isArray(professor && professor.willEvaluate) ? professor.willEvaluate : [];
+            const willBeEvaluatedBy = Array.isArray(professor && professor.willBeEvaluatedBy) ? professor.willBeEvaluatedBy : [];
+            const outgoingLabel = willEvaluate.length
+                ? willEvaluate.map(item => escapeHTML(String(item && item.name || 'Professor'))).join('<br>')
+                : '<span class="table-empty-text">None</span>';
+            const incomingLabel = willBeEvaluatedBy.length
+                ? willBeEvaluatedBy.map(item => escapeHTML(String(item && item.name || 'Professor'))).join('<br>')
+                : '<span class="table-empty-text">None</span>';
             return (
-            '<tr>' +
-            '<td>' + escapeHTML(member.name || 'N/A') + '</td>' +
-            '<td>' + escapeHTML(member.email || 'N/A') + '</td>' +
-            '<td>' + escapeHTML(member.employeeId || 'N/A') + '</td>' +
-            '<td>' +
-            '<div class="peer-mgmt-member-actions">' +
-            '<button type="button" class="btn-cancel peer-mgmt-member-remove-btn" data-room-id="' + String(roomId || 0) + '" data-user-id="' + escapeHTML(String(member.userId || '')) + '" data-member-name="' + memberNameEncoded + '">Remove</button>' +
-            '</div>' +
-            '</td>' +
-            '</tr>'
+                '<tr>' +
+                '<td>' + escapeHTML(professor && professor.name || 'N/A') + '</td>' +
+                '<td>' + outgoingLabel + '</td>' +
+                '<td>' + incomingLabel + '</td>' +
+                '<td>' + String(Number(professor && professor.pendingCount || 0)) + '</td>' +
+                '<td>' + String(Number(professor && professor.submittedCount || 0)) + '</td>' +
+                '</tr>'
             );
         }).join('');
     }
 
-    function renderRoomSelectOptions(preferredRoomId) {
-        const selectedCandidate = normalizeRoomId(preferredRoomId);
-        const hasRooms = Array.isArray(roomRowsCache) && roomRowsCache.length > 0;
-
-        if (!hasRooms) {
-            setSelectedRoom(0);
-            manualProfessorSelect.innerHTML = '<option value="">No eligible professors</option>';
-            addProfessorBtn.disabled = true;
-            viewMembersBtn.disabled = true;
-            dismantleRoomBtn.disabled = true;
-            renderMembersTable({ members: [] });
-            return;
-        }
-
-        const hasPreferred = selectedCandidate > 0
-            && roomRowsCache.some(room => normalizeRoomId(room && room.id) === selectedCandidate);
-        const currentSelected = getSelectedRoomId();
-        const hasCurrent = currentSelected > 0
-            && roomRowsCache.some(room => normalizeRoomId(room && room.id) === currentSelected);
-        const fallbackRoomId = normalizeRoomId(roomRowsCache[0] && roomRowsCache[0].id);
-        const finalRoomId = hasPreferred
-            ? selectedCandidate
-            : (hasCurrent ? currentSelected : fallbackRoomId);
-
-        setSelectedRoom(finalRoomId);
-
-        addProfessorBtn.disabled = false;
-        viewMembersBtn.disabled = false;
-        dismantleRoomBtn.disabled = false;
-    }
-
-    function renderEligibleProfessors(payload) {
-        const rows = Array.isArray(payload && payload.professors) ? payload.professors : [];
-        if (!rows.length) {
-            manualProfessorSelect.innerHTML = '<option value="">No eligible professors available</option>';
-            return;
-        }
-
-        manualProfessorSelect.innerHTML = '<option value="">Select professor to add</option>' +
-            rows.map(item =>
-                `<option value="${escapeHTML(String(item.userId || ''))}">${escapeHTML(String(item.name || 'Professor'))} (${escapeHTML(String(item.employeeId || 'N/A'))})</option>`
-            ).join('');
-    }
-
     function renderPrograms() {
         const allPrograms = (SharedData.getPrograms && SharedData.getPrograms()) || [];
+        const scopedProgramCode = getScopedDeanProgramCode();
         scopedPrograms = (Array.isArray(allPrograms) ? allPrograms : [])
             .filter(program => {
                 const dept = String(program && program.departmentCode || '').trim().toUpperCase();
-                return !!scopedDepartment && dept === scopedDepartment;
+                if (!scopedDepartment || dept !== scopedDepartment) return false;
+                if (isProgramScopedSupervisorPanel()) {
+                    const programCode = String(program && program.programCode || '').trim().toUpperCase();
+                    return !!scopedProgramCode && programCode === scopedProgramCode;
+                }
+                return true;
             })
             .sort((a, b) => String(a && a.programCode || '').localeCompare(String(b && b.programCode || '')));
 
         if (!scopedPrograms.length) {
             programSelect.innerHTML = '<option value="">No programs available in your scope</option>';
+            createRoomBtn.disabled = true;
+            viewAssignmentsBtn.disabled = true;
             return;
         }
 
+        createRoomBtn.disabled = false;
         programSelect.innerHTML = '<option value="">Select program</option>' +
             scopedPrograms.map(program =>
                 `<option value="${escapeHTML(String(program.programCode || ''))}">${escapeHTML(String(program.programCode || ''))} - ${escapeHTML(String(program.programName || ''))}</option>`
             ).join('');
+        if (isProgramScopedSupervisorPanel() && scopedPrograms.length === 1) {
+            programSelect.value = String(scopedPrograms[0].programCode || '');
+        }
     }
 
-    function renderRoomsTable(payload) {
-        const tbody = roomsTable.querySelector('tbody');
+    function renderProgramsTable(payload) {
+        const tbody = programsTable.querySelector('tbody');
         if (!tbody) return;
 
-        const rows = Array.isArray(payload && payload.rooms) ? payload.rooms : [];
-        roomRowsCache = rows.slice();
+        const rows = Array.isArray(payload && payload.programs) ? payload.programs : [];
+        programSummaryCache = rows.slice();
         if (!rows.length) {
-            tbody.innerHTML = '<tr><td colspan="6">No rooms generated for the current semester.</td></tr>';
-            renderRoomSelectOptions(0);
+            tbody.innerHTML = '<tr><td colspan="6">No peer assignment data available for the current semester.</td></tr>';
+            setSelectedProgram('');
             return;
         }
 
         tbody.innerHTML = rows.map(room =>
             '<tr>' +
-            '<td>' + escapeHTML(room.roomName || 'N/A') + '</td>' +
             '<td>' + escapeHTML((room.programCode || 'N/A') + (room.programName ? (' - ' + room.programName) : '')) + '</td>' +
-            '<td>' + String(room.memberCount || 0) + '</td>' +
-            '<td>' + String(room.submittedAssignments || 0) + '/' + String(room.totalAssignments || 0) + ' submitted</td>' +
-            '<td>' + escapeHTML(formatDateTime(room.createdAt)) + '</td>' +
+            '<td>' + String(room.professorCount || 0) + '</td>' +
+            '<td>' + String(room.requestedPeerCount || 0) + '</td>' +
+            '<td>' + String(room.actualPeerCount || 0) + '</td>' +
+            '<td><span class="dean-status-pill ' + resolveProgramStatusClass(room) + '">' + escapeHTML(String(room.statusMessage || '')) + '</span></td>' +
             '<td>' +
             '<div class="peer-mgmt-row-actions">' +
-            '<button type="button" class="btn-cancel peer-mgmt-room-view-btn" data-room-id="' + String(Number(room.id) || 0) + '">View</button>' +
-            '<button type="button" class="btn-cancel peer-mgmt-room-dismantle-btn" data-room-id="' + String(Number(room.id) || 0) + '">Dismantle</button>' +
+            '<button type="button" class="btn-cancel peer-mgmt-program-view-btn" data-program-code="' + escapeHTML(String(room.programCode || '')) + '">View</button>' +
             '</div>' +
             '</td>' +
             '</tr>'
         ).join('');
-
-        renderRoomSelectOptions(getSelectedRoomId());
     }
 
-    function loadEligibleProfessors(roomId, options = {}) {
-        const selectedRoomId = normalizeRoomId(roomId);
-        if (selectedRoomId <= 0) {
-            manualProfessorSelect.innerHTML = '<option value="">Select a room first</option>';
-            return;
-        }
-        try {
-            const response = SharedData.listDeanPeerRoomEligibleProfessorsCurrent({ roomId: selectedRoomId }, selectedRoomId);
-            renderEligibleProfessors(response || {});
-            if (!options || !options.silent) {
-                setMessage('Eligible professors loaded for selected room.', 'info');
-            }
-        } catch (error) {
-            manualProfessorSelect.innerHTML = '<option value="">Unable to load eligible professors</option>';
-            if (!options || !options.silent) {
-                setMessage(String(error && error.message || 'Unable to load eligible professors.'), 'error');
-            }
-        }
-    }
-
-    function loadRoomMembers(roomId, options = {}) {
-        const selectedRoomId = normalizeRoomId(roomId);
-        if (selectedRoomId <= 0) {
-            renderMembersTable({ members: [] });
-            return;
-        }
-        try {
-            const response = SharedData.listDeanPeerRoomMembersCurrent({ roomId: selectedRoomId }, selectedRoomId);
-            renderMembersTable(response || {});
-            if (!options || !options.silent) {
-                const roomName = String(response && response.room && response.room.roomName || '').trim();
-                if (roomName) {
-                    setMessage('Loaded members for room: ' + roomName + '.', 'info');
-                } else {
-                    setMessage('Loaded room members.', 'info');
-                }
-            }
-        } catch (error) {
-            renderMembersTable({ members: [] });
-            if (!options || !options.silent) {
-                setMessage(String(error && error.message || 'Unable to load room members.'), 'error');
-            }
-        }
-    }
-
-    function dismantleRoom(roomId) {
-        const selectedRoomId = normalizeRoomId(roomId);
-        if (selectedRoomId <= 0) {
-            setMessage('Select a room first.', 'error');
-            return;
-        }
-
-        const roomEntry = roomRowsCache.find(room => normalizeRoomId(room && room.id) === selectedRoomId);
-        const roomLabel = roomEntry && roomEntry.roomName ? roomEntry.roomName : ('Room #' + selectedRoomId);
-        const approved = window.confirm('Dismantle "' + roomLabel + '"? This removes room members and assignments for this room.');
-        if (!approved) {
-            return;
-        }
-
-        dismantleRoomBtn.disabled = true;
-        try {
-            const response = SharedData.dismantleDeanPeerRoom({ roomId: selectedRoomId });
-            const info = response && response.dismantledRoom ? response.dismantledRoom : {};
-            setMessage(
-                'Room dismantled: ' + String(info.roomName || roomLabel) + ' (' +
-                String(info.memberCount || 0) + ' members, ' +
-                String(info.assignmentCount || 0) + ' assignments).',
-                'success'
-            );
-            renderMembersTable({ members: [] });
-            loadRooms({ silent: true });
-        } catch (error) {
-            setMessage(String(error && error.message || 'Failed to dismantle room.'), 'error');
-        } finally {
-            dismantleRoomBtn.disabled = false;
-        }
-    }
-
-    function removeRoomMember(roomId, professorUserId, memberName) {
-        const selectedRoomId = normalizeRoomId(roomId);
-        const professorToken = String(professorUserId || '').trim();
-        if (selectedRoomId <= 0 || !professorToken) {
-            setMessage('Unable to remove room member due to invalid selection.', 'error');
-            return;
-        }
-
-        const name = String(memberName || 'this professor').trim();
-        const approved = window.confirm('Remove "' + name + '" from this room? Their room assignments in this room will also be removed.');
-        if (!approved) {
-            return;
-        }
-
-        try {
-            const response = SharedData.removeDeanPeerRoomMember({
-                roomId: selectedRoomId,
-                professorUserId: professorToken
-            });
-            const removedMember = response && response.removedMember ? response.removedMember : null;
-            setMessage(
-                'Removed ' + String(removedMember && removedMember.name || name)
-                + '. Deleted assignments: ' + String(response && response.deletedAssignmentCount || 0) + '.',
-                'success'
-            );
-            loadRooms({ silent: true, preferredRoomId: selectedRoomId });
-            loadRoomMembers(selectedRoomId, { silent: true });
-        } catch (error) {
-            setMessage(String(error && error.message || 'Failed to remove professor from room.'), 'error');
-        }
-    }
-
-    function loadRooms(options = {}) {
+    function loadProgramSummaries(options = {}) {
         const silent = !!(options && options.silent);
-        const preferredRoomId = normalizeRoomId(options && options.preferredRoomId);
+        const preferredProgramCode = normalizeProgramCode(options && options.preferredProgramCode);
         try {
-            const response = SharedData.listDeanPeerRoomsCurrent({});
-            renderRoomsTable(response || {});
-            const selectedRoomId = preferredRoomId > 0 ? preferredRoomId : getSelectedRoomId();
-            if (selectedRoomId > 0) {
-                loadEligibleProfessors(selectedRoomId, { silent: true });
+            const response = SharedData[getSupervisorPeerMethodName('list')]({});
+            renderProgramsTable(response || {});
+            const selectedCode = preferredProgramCode || normalizeProgramCode(programSelect.value || selectedProgramCode);
+            if (selectedCode) {
+                setSelectedProgram(selectedCode);
+                loadAssignmentDetails(selectedCode, { silent: true });
             } else {
-                manualProfessorSelect.innerHTML = '<option value="">Select a room first</option>';
+                renderAssignmentDetails({
+                    emptyMessage: 'Select a program to view assignment details.'
+                });
             }
             if (!silent) {
                 const semesterLabel = String(response && response.currentSemester || '').trim();
                 if (semesterLabel) {
-                    setMessage('Loaded current semester rooms: ' + semesterLabel + '.', 'info');
+                    setMessage('Loaded current semester peer assignments: ' + semesterLabel + '.', 'info');
                 } else {
                     setMessage('No current semester is configured yet.', 'error');
                 }
             }
         } catch (error) {
-            renderRoomsTable({ rooms: [] });
+            renderProgramsTable({ programs: [] });
+            renderAssignmentDetails({
+                emptyMessage: 'Unable to load peer assignment details.'
+            });
             if (!silent) {
-                setMessage(String(error && error.message || 'Unable to load peer rooms.'), 'error');
+                setMessage(String(error && error.message || 'Unable to load peer assignments.'), 'error');
+            }
+        }
+    }
+
+    function loadAssignmentDetails(programCode, options = {}) {
+        const silent = !!(options && options.silent);
+        const normalizedCode = normalizeProgramCode(programCode || selectedProgramCode || programSelect.value);
+        if (!normalizedCode) {
+            setSelectedProgram('');
+            renderAssignmentDetails({
+                emptyMessage: 'Select a program to view assignment details.'
+            });
+            return;
+        }
+
+        try {
+            const response = SharedData[getSupervisorPeerMethodName('details')]({
+                programCode: normalizedCode
+            });
+            setSelectedProgram(normalizedCode);
+            renderAssignmentDetails(response || {});
+            if (!silent) {
+                const summary = response && response.summary ? response.summary : null;
+                const type = summary && summary.status === 'generated' ? 'success' : 'info';
+                setMessage(String(summary && summary.statusMessage || 'Loaded peer assignment details.'), type);
+            }
+        } catch (error) {
+            renderAssignmentDetails({
+                emptyMessage: 'Unable to load peer assignment details for the selected program.'
+            });
+            if (!silent) {
+                setMessage(String(error && error.message || 'Unable to load peer assignment details.'), 'error');
             }
         }
     }
 
     function clearInputs() {
-        roomNameInput.value = '';
         if (scopedPrograms.length > 0) {
             programSelect.value = '';
         }
@@ -4363,53 +4756,30 @@ function setupPeerManagementView() {
     }
 
     createRoomBtn.addEventListener('click', function () {
-        const programCode = String(programSelect.value || '').trim().toUpperCase();
-        const professorCount = parseInt(String(professorCountInput.value || '').trim(), 10);
-        const roomName = String(roomNameInput.value || '').trim();
-
+        const programCode = normalizeProgramCode(programSelect.value);
+        const peerCount = parseInt(String(professorCountInput.value || '').trim(), 10);
         if (!programCode) {
             setMessage('Program selection is required.', 'error');
             return;
         }
-        if (!Number.isFinite(professorCount) || professorCount < 2) {
-            setMessage('Professor count must be at least 2.', 'error');
+        if (!Number.isFinite(peerCount) || peerCount < 1) {
+            setMessage('Peer count must be at least 1.', 'error');
             return;
         }
 
         createRoomBtn.disabled = true;
         try {
-            const response = SharedData.autoGeneratePeerRoom({
+            const response = SharedData[getSupervisorPeerMethodName('generate')]({
                 programCode,
-                professorCount,
-                roomName
+                peerCount
             });
             const summary = response && response.summary ? response.summary : null;
-            const generatedRooms = Array.isArray(response && response.rooms) ? response.rooms : [];
-            const generatedRoom = response && response.room
-                ? response.room
-                : (generatedRooms.length ? generatedRooms[0] : null);
-
-            if (summary) {
-                setMessage(
-                    'Generated ' + String(summary.roomCount || 0) + ' room(s) for '
-                    + String(summary.totalEligibleUsed || 0) + ' professors ('
-                    + String(summary.totalAssignments || 0) + ' assignments).',
-                    'success'
-                );
-            } else if (generatedRoom) {
-                setMessage(
-                    'Room generated: ' + (generatedRoom.roomName || 'N/A')
-                    + ' (' + String(generatedRoom.memberCount || 0) + ' professors, '
-                    + String(generatedRoom.assignmentCount || 0) + ' assignments).',
-                    'success'
-                );
-            } else {
-                setMessage('Room generated successfully.', 'success');
-            }
-            clearInputs();
-            loadRooms({ silent: true, preferredRoomId: Number(generatedRoom && generatedRoom.id) || 0 });
+            const type = summary && summary.status === 'generated' ? 'success' : 'info';
+            setMessage(String(summary && summary.statusMessage || 'Peer assignments generated.'), type);
+            setSelectedProgram(programCode);
+            loadProgramSummaries({ silent: true, preferredProgramCode: programCode });
         } catch (error) {
-            setMessage(String(error && error.message || 'Failed to generate room.'), 'error');
+            setMessage(String(error && error.message || 'Failed to generate peer assignments.'), 'error');
         } finally {
             createRoomBtn.disabled = false;
         }
@@ -4417,96 +4787,52 @@ function setupPeerManagementView() {
 
     clearSelectionBtn.addEventListener('click', function () {
         clearInputs();
+        setSelectedProgram('');
+        renderAssignmentDetails({
+            emptyMessage: 'Select a program to view assignment details.'
+        });
         setMessage('', 'info');
     });
 
-    addProfessorBtn.addEventListener('click', function () {
-        const selectedRoomId = getSelectedRoomId();
-        const professorUserId = String(manualProfessorSelect.value || '').trim();
-        if (selectedRoomId <= 0) {
-            setMessage('Select a room first.', 'error');
+    viewAssignmentsBtn.addEventListener('click', function () {
+        const programCode = normalizeProgramCode(selectedProgramCode || programSelect.value);
+        if (!programCode) {
+            setMessage('Select a program first.', 'error');
             return;
         }
-        if (!professorUserId) {
-            setMessage('Select a professor to add.', 'error');
-            return;
-        }
+        loadAssignmentDetails(programCode);
+    });
 
-        addProfessorBtn.disabled = true;
-        try {
-            const response = SharedData.addDeanPeerRoomMembers({
-                roomId: selectedRoomId,
-                professorUserIds: [professorUserId]
+    programSelect.addEventListener('change', function () {
+        const programCode = normalizeProgramCode(this.value);
+        if (!programCode) {
+            setSelectedProgram('');
+            renderAssignmentDetails({
+                emptyMessage: 'Select a program to view assignment details.'
             });
-            const addedMembers = Array.isArray(response && response.addedMembers) ? response.addedMembers : [];
-            setMessage(
-                'Added ' + String(addedMembers.length) + ' professor(s). New assignments: ' + String(response && response.assignmentAddedCount || 0) + '.',
-                'success'
-            );
-            loadRooms({ silent: true, preferredRoomId: selectedRoomId });
-            loadRoomMembers(selectedRoomId, { silent: true });
-        } catch (error) {
-            setMessage(String(error && error.message || 'Failed to add professor to room.'), 'error');
-        } finally {
-            addProfessorBtn.disabled = false;
-        }
-    });
-
-    viewMembersBtn.addEventListener('click', function () {
-        const selectedRoomId = getSelectedRoomId();
-        if (selectedRoomId <= 0) {
-            setMessage('Select a room first.', 'error');
             return;
         }
-        loadRoomMembers(selectedRoomId);
+        setSelectedProgram(programCode);
+        loadAssignmentDetails(programCode, { silent: true });
     });
 
-    dismantleRoomBtn.addEventListener('click', function () {
-        const selectedRoomId = getSelectedRoomId();
-        dismantleRoom(selectedRoomId);
-    });
-
-    roomsTable.addEventListener('click', function (event) {
+    programsTable.addEventListener('click', function (event) {
         const target = event.target;
         if (!(target instanceof HTMLElement)) return;
-        const viewBtn = target.closest('.peer-mgmt-room-view-btn');
-        if (viewBtn) {
-            const roomId = normalizeRoomId(viewBtn.getAttribute('data-room-id'));
-            if (roomId > 0) {
-                setSelectedRoom(roomId);
-                loadEligibleProfessors(roomId, { silent: true });
-                loadRoomMembers(roomId);
-            }
-            return;
-        }
+        const viewBtn = target.closest('.peer-mgmt-program-view-btn');
+        if (!viewBtn) return;
 
-        const dismantleBtn = target.closest('.peer-mgmt-room-dismantle-btn');
-        if (dismantleBtn) {
-            const roomId = normalizeRoomId(dismantleBtn.getAttribute('data-room-id'));
-            dismantleRoom(roomId);
-        }
-    });
-
-    membersTable.addEventListener('click', function (event) {
-        const target = event.target;
-        if (!(target instanceof HTMLElement)) return;
-        const removeBtn = target.closest('.peer-mgmt-member-remove-btn');
-        if (!removeBtn) return;
-
-        const roomId = normalizeRoomId(removeBtn.getAttribute('data-room-id'));
-        const professorUserId = String(removeBtn.getAttribute('data-user-id') || '').trim();
-        const memberName = decodeURIComponent(String(removeBtn.getAttribute('data-member-name') || '').trim());
-
-        removeBtn.disabled = true;
-        try {
-            removeRoomMember(roomId, professorUserId, memberName);
-        } finally {
-            removeBtn.disabled = false;
-        }
+        const programCode = normalizeProgramCode(viewBtn.getAttribute('data-program-code'));
+        if (!programCode) return;
+        setSelectedProgram(programCode);
+        loadAssignmentDetails(programCode);
     });
 
     renderPrograms();
-    loadRooms();
+    renderAssignmentDetails({
+        emptyMessage: 'Select a program to view assignment details.'
+    });
+    loadProgramSummaries();
 }
 
 /**
@@ -4528,7 +4854,7 @@ function isSessionExpired() {
     }
 
     const loginTime = new Date(session.loginTime);
-    const now = new Date();
+    const now = SharedData.getNowDate();
     const hoursDiff = (now - loginTime) / (1000 * 60 * 60);
 
     // Session expires after 8 hours

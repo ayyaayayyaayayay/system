@@ -1985,6 +1985,123 @@ body {
     background: #f9fafb;
 }
 
+.dean-ifer-section {
+    margin-top: 18px;
+    border: 1px solid var(--border-color);
+    border-radius: 18px;
+    background:
+        radial-gradient(circle at top right, rgba(14, 165, 233, 0.12), transparent 32%),
+        linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+    padding: 22px;
+    box-shadow: 0 16px 32px rgba(15, 23, 42, 0.06);
+}
+
+.dean-ifer-header {
+    margin-bottom: 16px;
+}
+
+.dean-ifer-header-actions {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.dean-ifer-semester-group {
+    min-width: 220px;
+    margin-bottom: 0;
+}
+
+.dean-ifer-semester-group label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #334155;
+    margin-bottom: 6px;
+    display: block;
+}
+
+.dean-ifer-file-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 999px;
+    border: 1px solid #bfdbfe;
+    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+    color: #1d4ed8;
+    font-size: 13px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.dean-ifer-toolbar {
+    display: flex;
+    align-items: flex-end;
+    gap: 16px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+.dean-ifer-toolbar .form-group {
+    flex: 1;
+    min-width: 260px;
+    margin-bottom: 0;
+}
+
+.dean-ifer-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.dean-ifer-result {
+    font-size: 12px;
+    color: #475569;
+    margin-bottom: 14px;
+    font-weight: 600;
+}
+
+.dean-ifer-table-wrap {
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    max-height: 420px;
+    overflow-y: auto;
+    background: #ffffff;
+}
+
+.dean-ifer-table-wrap .summary-table {
+    min-width: 780px;
+}
+
+.dean-ifer-table-wrap .summary-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #f8fafc;
+}
+
+.dean-ifer-professor-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.dean-ifer-file-name {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-size: 12px;
+    font-weight: 700;
+    word-break: break-all;
+}
+
+.dean-ifer-open-btn {
+    min-width: 120px;
+}
+
 /* Peer Management View */
 .peer-mgmt-section {
     display: flex;
@@ -2072,23 +2189,29 @@ body {
     border-radius: 10px;
 }
 
-#peerMgmtRoomsTable thead th {
+#peerMgmtRoomsTable thead th,
+#peerMgmtProgramsTable thead th,
+#peerMgmtAssignmentDetailsTable thead th {
     position: sticky;
     top: 0;
     z-index: 1;
     background: #f9fafb;
 }
 
-#peerMgmtRoomsTable {
+#peerMgmtRoomsTable,
+#peerMgmtProgramsTable {
     min-width: 900px;
 }
 
-#peerMgmtRoomMembersTable {
+#peerMgmtRoomMembersTable,
+#peerMgmtAssignmentDetailsTable {
     min-width: 620px;
 }
 
 #peerMgmtRoomsTable th:last-child,
-#peerMgmtRoomsTable td:last-child {
+#peerMgmtRoomsTable td:last-child,
+#peerMgmtProgramsTable th:last-child,
+#peerMgmtProgramsTable td:last-child {
     width: 210px;
 }
 
@@ -2214,7 +2337,8 @@ body {
         grid-template-columns: 1fr;
     }
 
-    #peerMgmtRoomsTable {
+    #peerMgmtRoomsTable,
+    #peerMgmtProgramsTable {
         min-width: 760px;
     }
 }
@@ -2293,6 +2417,13 @@ body {
     color: #111827;
 }
 
+.pdf-preview-filename {
+    margin-top: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #64748b;
+}
+
 .pdf-preview-actions {
     display: flex;
     align-items: center;
@@ -2313,6 +2444,124 @@ body {
     flex: 1;
 }
 
+.dean-ifer-comment-dialog {
+    width: min(1040px, 96vw);
+    max-height: min(88vh, 860px);
+    background: #ffffff;
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 24px 60px rgba(2, 6, 23, 0.45);
+    display: flex;
+    flex-direction: column;
+}
+
+.dean-ifer-comment-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    padding: 16px;
+    overflow: auto;
+}
+
+.dean-ifer-comment-group {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #f8fafc;
+    overflow: hidden;
+}
+
+.dean-ifer-comment-group-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid #e2e8f0;
+    background: #ffffff;
+}
+
+.dean-ifer-comment-group-head h4 {
+    margin: 0;
+    font-size: 13px;
+    color: #111827;
+}
+
+.dean-ifer-comment-group-head span {
+    flex: none;
+    font-size: 12px;
+    font-weight: 700;
+    color: #475569;
+}
+
+.dean-ifer-comment-list {
+    max-height: 440px;
+    overflow: auto;
+    padding: 10px;
+}
+
+.dean-ifer-comment-option {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    padding: 10px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #ffffff;
+    cursor: pointer;
+}
+
+.dean-ifer-comment-option + .dean-ifer-comment-option {
+    margin-top: 8px;
+}
+
+.dean-ifer-comment-option input {
+    margin-top: 3px;
+}
+
+.dean-ifer-comment-option span {
+    display: block;
+    min-width: 0;
+}
+
+.dean-ifer-comment-option strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 12px;
+    color: #0f172a;
+}
+
+.dean-ifer-comment-option span span {
+    font-size: 13px;
+    line-height: 1.45;
+    color: #334155;
+}
+
+.dean-ifer-comment-option em {
+    display: block;
+    margin-top: 6px;
+    font-size: 11px;
+    font-style: normal;
+    color: #64748b;
+}
+
+.dean-ifer-comment-option:has(input:checked) {
+    border-color: #2563eb;
+    background: #eff6ff;
+}
+
+.dean-ifer-comment-option:has(input:disabled:not(:checked)) {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.dean-ifer-comment-empty {
+    padding: 18px;
+    text-align: center;
+    font-size: 13px;
+    color: #64748b;
+}
+
 @media (max-width: 768px) {
     .pdf-preview-dialog {
         width: 100%;
@@ -2321,6 +2570,18 @@ body {
     }
     .pdf-preview-toolbar h3 {
         font-size: 14px;
+    }
+    .dean-ifer-comment-dialog {
+        width: 100%;
+        max-height: 92vh;
+        border-radius: 10px;
+    }
+    .dean-ifer-comment-grid {
+        grid-template-columns: 1fr;
+    }
+    .dean-ifer-comment-group-head {
+        align-items: flex-start;
+        flex-direction: column;
     }
 }
 
@@ -2384,7 +2645,14 @@ body {
 }
 
 .dean-panel .nav-link.active {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+    color: #ffffff;
     box-shadow: 0 12px 24px rgba(91, 103, 232, 0.22);
+}
+
+.dean-panel .nav-link.active i,
+.dean-panel .nav-link.active span {
+    color: #ffffff;
 }
 
 .dean-panel .sidebar-backdrop {
@@ -2631,13 +2899,6 @@ body {
     background: #f8fafc;
     text-align: center;
     color: #475569;
-}
-
-.dean-panel .questionnaire-loading-state i {
-    display: block;
-    margin: 0 0 10px;
-    font-size: 30px;
-    color: #94a3b8;
 }
 
 .dean-panel .questionnaire-loading-state p {
@@ -3009,6 +3270,9 @@ body {
     .dean-panel .faculty-response-controls,
     .dean-panel .faculty-response-actions,
     .dean-panel .faculty-response-toggle,
+    .dean-panel .dean-ifer-header-actions,
+    .dean-panel .dean-ifer-toolbar,
+    .dean-panel .dean-ifer-actions,
     .dean-panel .faculty-comments-actions,
     .dean-panel .dean-faculty-paper-actions,
     .dean-panel .peer-mgmt-ops-actions {
@@ -3018,6 +3282,8 @@ body {
 
     .dean-panel .faculty-response-actions > *,
     .dean-panel .faculty-response-toggle > *,
+    .dean-panel .dean-ifer-header-actions > *,
+    .dean-panel .dean-ifer-actions > *,
     .dean-panel .faculty-comments-actions > *,
     .dean-panel .dean-faculty-paper-actions > *,
     .dean-panel .peer-mgmt-ops-actions > * {
@@ -3031,6 +3297,8 @@ body {
     .dean-panel .faculty-response-actions .btn-submit,
     .dean-panel .faculty-response-actions .btn-cancel,
     .dean-panel .faculty-response-toggle .response-toggle-btn,
+    .dean-panel .dean-ifer-actions .btn-submit,
+    .dean-panel .dean-ifer-actions .btn-cancel,
     .dean-panel .dean-faculty-paper-actions .btn-submit,
     .dean-panel .dean-faculty-paper-actions .btn-cancel,
     .dean-panel .peer-mgmt-ops-actions .btn-submit,
@@ -3064,6 +3332,7 @@ body {
 
     .dean-panel .faculty-paper-table-wrap,
     .dean-panel .faculty-response-table-container,
+    .dean-panel .dean-ifer-table-wrap,
     .dean-panel .dean-trend-table-wrap {
         overflow: visible;
         max-height: none;
@@ -3074,6 +3343,7 @@ body {
 
     .dean-panel .faculty-paper-table-wrap .summary-table,
     .dean-panel .faculty-response-table-container .summary-table,
+    .dean-panel .dean-ifer-table-wrap .summary-table,
     .dean-panel .dean-trend-table-wrap .summary-table {
         min-width: 0;
     }
@@ -3150,6 +3420,7 @@ body {
     }
 
     .dean-panel .mobile-card-table .dean-paper-open-btn,
+    .dean-panel .mobile-card-table .dean-ifer-open-btn,
     .dean-panel .mobile-card-table .faculty-comments-btn,
     .dean-panel .mobile-card-table tbody td[data-label="Actions"] .btn-submit,
     .dean-panel .mobile-card-table tbody td[data-label="Actions"] .btn-cancel,
@@ -3162,6 +3433,7 @@ body {
 @media (max-width: 1000px) and (orientation: landscape) {
     .dean-panel .faculty-paper-table-wrap,
     .dean-panel .faculty-response-table-container,
+    .dean-panel .dean-ifer-table-wrap,
     .dean-panel .dean-trend-table-wrap {
         overflow: visible;
         max-height: none;
@@ -3172,6 +3444,7 @@ body {
 
     .dean-panel .faculty-paper-table-wrap .summary-table,
     .dean-panel .faculty-response-table-container .summary-table,
+    .dean-panel .dean-ifer-table-wrap .summary-table,
     .dean-panel .dean-trend-table-wrap .summary-table {
         min-width: 0;
     }
@@ -3248,6 +3521,7 @@ body {
     }
 
     .dean-panel .mobile-card-table .dean-paper-open-btn,
+    .dean-panel .mobile-card-table .dean-ifer-open-btn,
     .dean-panel .mobile-card-table .faculty-comments-btn,
     .dean-panel .mobile-card-table tbody td[data-label="Actions"] .btn-submit,
     .dean-panel .mobile-card-table tbody td[data-label="Actions"] .btn-cancel,

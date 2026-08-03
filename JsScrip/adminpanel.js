@@ -21,9 +21,22 @@ let credentialDistributorParsedRows = [];
 let credentialDistributorFailures = [];
 let adminMobileDrawerBound = false;
 let credentialDistributorSmtpConfig = {
-    senderEmail: '',
-    senderName: '',
-    hasAppPassword: false
+    host: '',
+    port: 587,
+    encryption: 'tls',
+    auth: true,
+    username: '',
+    fromEmail: '',
+    fromName: '',
+    timeout: 20,
+    hasPassword: false,
+    source: 'database'
+};
+let geminiRuntimeConfig = {
+    model: 'gemini-2.5-flash',
+    timeoutMs: 30000,
+    hasApiKey: false,
+    source: 'database'
 };
 
 /**
@@ -86,7 +99,8 @@ function initializeAdminPanel() {
     setupActivityLogButton();
     setupSecuritySettings();
     setupCredentialDistributor();
-    setupCredentialTestGmailComposer();
+    setupCredentialTestSmtpComposer();
+    setupGeminiConfig();
     setupAdminProfilePhotoUpload();
     setupAdminProfileActions();
     setupAdminChangeEmailForm();
@@ -122,6 +136,29 @@ function renderProfessorDepartmentOptions() {
     });
 }
 
+function populateProfessorCampusFilter() {
+    const campusSelect = document.getElementById('professor-campus-filter');
+    if (!campusSelect) return;
+
+    const campuses = typeof SharedData.getCampuses === 'function' ? SharedData.getCampuses() : [];
+    const realCampuses = Array.isArray(campuses)
+        ? campuses.filter(campus => campus && campus.id && String(campus.id).toLowerCase() !== 'all')
+        : [];
+    const previousValue = currentProfessorCampusFilter || campusSelect.value || 'all';
+
+    campusSelect.innerHTML = '<option value="all">All Campuses</option>';
+    realCampuses.forEach(campus => {
+        const opt = document.createElement('option');
+        opt.value = campus.id;
+        opt.textContent = campus.name || campus.id;
+        campusSelect.appendChild(opt);
+    });
+
+    const hasPrevious = previousValue === 'all' || realCampuses.some(campus => String(campus.id) === String(previousValue));
+    currentProfessorCampusFilter = hasPrevious ? previousValue : 'all';
+    campusSelect.value = currentProfessorCampusFilter;
+}
+
 /**
  * Dynamically populated filtering tabs for Professor Management.
  */
@@ -129,15 +166,18 @@ function renderProfessorDepartmentTabs() {
     const tabsContainer = document.querySelector('.department-tabs');
     if (!tabsContainer) return;
 
-    // Always preserve "all" tab
+    const departments = SharedData.getAllDepartments();
+    const selectedDepartment = currentDepartmentFilter !== 'all' && departments.includes(currentDepartmentFilter)
+        ? currentDepartmentFilter
+        : 'all';
+    currentDepartmentFilter = selectedDepartment;
+
     tabsContainer.innerHTML = `
-        <button class="dept-tab active" data-department="all">
+        <button class="dept-tab ${selectedDepartment === 'all' ? 'active' : ''}" data-department="all">
             <i class="fas fa-users"></i>
             All Departments
         </button>
     `;
-
-    const departments = SharedData.getAllDepartments();
 
     const icons = {
         'ICS': 'fa-laptop-code',
@@ -149,9 +189,12 @@ function renderProfessorDepartmentTabs() {
     departments.forEach(dept => {
         const iconClass = icons[dept] || icons['DEFAULT'];
         const btn = document.createElement('button');
-        btn.className = 'dept-tab';
+        btn.className = `dept-tab ${dept === selectedDepartment ? 'active' : ''}`;
         btn.setAttribute('data-department', dept);
-        btn.innerHTML = `<i class="fas ${iconClass}"></i> ${dept}`;
+        const icon = document.createElement('i');
+        icon.className = `fas ${iconClass}`;
+        btn.appendChild(icon);
+        btn.appendChild(document.createTextNode(` ${dept}`));
         tabsContainer.appendChild(btn);
     });
 
@@ -163,7 +206,6 @@ function renderProfessorDepartmentTabs() {
             e.currentTarget.classList.add('active');
 
             currentDepartmentFilter = e.currentTarget.getAttribute('data-department');
-            // Assuming renderProfessors uses the active tab to filter
             renderProfessors();
         });
     });
@@ -392,7 +434,7 @@ const BULK_HEADER_ALIASES = {
     programcode: 'programCode'
 };
 
-const BULK_ALLOWED_ROLES = new Set(['student', 'professor', 'dean', 'osa', 'vpaa', 'hr', 'admin']);
+const BULK_ALLOWED_ROLES = new Set(['student', 'professor', 'dean', 'procoor', 'osa', 'vpaa', 'hr', 'admin']);
 const BULK_UNASSIGNED_DEPARTMENT = 'UNASSIGNED';
 const BULK_SIMPLE_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CREDENTIAL_DISTRIBUTOR_HEADER_ALIASES = {
@@ -543,6 +585,11 @@ function normalizeProgramCode(value) {
     return normalizeBulkText(value).toUpperCase();
 }
 
+function roleRequiresProgramAssignment(role) {
+    const token = normalizeRoleCode(role);
+    return token === 'student' || token === 'professor' || token === 'procoor';
+}
+
 function buildBulkCampusMap(existingUsers = []) {
     const map = new Map();
     const users = Array.isArray(existingUsers) ? existingUsers : [];
@@ -680,7 +727,7 @@ function downloadBulkCredentialsCsv(credentialRows) {
     const csvContent = '\uFEFF' + lines.join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const stamp = SharedData.getNowIsoString().replace(/[:.]/g, '-');
     const anchor = document.createElement('a');
     anchor.href = url;
     anchor.download = `bulk_register_credentials_${stamp}.csv`;
@@ -705,7 +752,7 @@ function downloadBulkInvalidRowsCsv(rowErrors) {
     const csvContent = '\uFEFF' + lines.join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const stamp = SharedData.getNowIsoString().replace(/[:.]/g, '-');
     const anchor = document.createElement('a');
     anchor.href = url;
     anchor.download = `bulk_register_invalid_rows_${stamp}.csv`;
@@ -856,7 +903,7 @@ function downloadCredentialDistributorFailuresCsv(failures) {
     const csvContent = '\uFEFF' + lines.join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const stamp = SharedData.getNowIsoString().replace(/[:.]/g, '-');
     const anchor = document.createElement('a');
     anchor.href = url;
     anchor.download = `credential_distribution_failures_${stamp}.csv`;
@@ -875,7 +922,7 @@ function downloadCredentialTestGmailFailuresFile(failures) {
         Reason: item && item.reason ? String(item.reason) : 'Unknown error'
     }));
 
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const stamp = SharedData.getNowIsoString().replace(/[:.]/g, '-');
 
     const parser = getExcelParser();
     if (parser && parser.utils && parser.writeFile) {
@@ -931,20 +978,34 @@ function setCredentialDistributorBusyState(isBusy) {
     const input = document.getElementById('credential-distributor-input');
     const saveConfigBtn = document.getElementById('credential-save-config-btn');
     const clearPasswordBtn = document.getElementById('credential-clear-password-btn');
-    const senderEmailInput = document.getElementById('credential-sender-email');
-    const senderNameInput = document.getElementById('credential-sender-name');
-    const appPasswordInput = document.getElementById('credential-app-password');
+    const smtpFields = [
+        document.getElementById('credential-smtp-host'),
+        document.getElementById('credential-smtp-port'),
+        document.getElementById('credential-smtp-encryption'),
+        document.getElementById('credential-smtp-auth'),
+        document.getElementById('credential-smtp-username'),
+        document.getElementById('credential-smtp-timeout'),
+        document.getElementById('credential-smtp-from-email'),
+        document.getElementById('credential-smtp-from-name'),
+        document.getElementById('credential-smtp-password')
+    ];
 
     [selectBtn, sendBtn, saveConfigBtn, clearPasswordBtn].forEach(button => {
         if (button) button.disabled = !!isBusy;
     });
-    [input, senderEmailInput, senderNameInput, appPasswordInput].forEach(field => {
+    [input].concat(smtpFields).forEach(field => {
         if (field) field.disabled = !!isBusy;
     });
 }
 
 function isCredentialDistributorSmtpConfigured() {
-    return !!(credentialDistributorSmtpConfig.senderEmail && credentialDistributorSmtpConfig.hasAppPassword);
+    if (!credentialDistributorSmtpConfig.host || !credentialDistributorSmtpConfig.fromEmail) {
+        return false;
+    }
+    if (credentialDistributorSmtpConfig.auth) {
+        return !!(credentialDistributorSmtpConfig.username && credentialDistributorSmtpConfig.hasPassword);
+    }
+    return true;
 }
 
 function setCredentialDistributorLoadingState(isLoading, message, progressText, titleText) {
@@ -986,9 +1047,15 @@ function setupCredentialDistributor() {
         username: session && session.username ? session.username : '',
         role: session && session.role ? session.role : '',
     };
-    const senderEmailInput = document.getElementById('credential-sender-email');
-    const senderNameInput = document.getElementById('credential-sender-name');
-    const appPasswordInput = document.getElementById('credential-app-password');
+    const hostInput = document.getElementById('credential-smtp-host');
+    const portInput = document.getElementById('credential-smtp-port');
+    const encryptionInput = document.getElementById('credential-smtp-encryption');
+    const authInput = document.getElementById('credential-smtp-auth');
+    const usernameInput = document.getElementById('credential-smtp-username');
+    const timeoutInput = document.getElementById('credential-smtp-timeout');
+    const fromEmailInput = document.getElementById('credential-smtp-from-email');
+    const fromNameInput = document.getElementById('credential-smtp-from-name');
+    const passwordInput = document.getElementById('credential-smtp-password');
     const saveConfigBtn = document.getElementById('credential-save-config-btn');
     const clearPasswordBtn = document.getElementById('credential-clear-password-btn');
     const configStatus = document.getElementById('credential-config-status');
@@ -1005,24 +1072,61 @@ function setupCredentialDistributor() {
         }
     }
 
+    function formatCredentialConfigSource(source) {
+        const token = String(source || 'database').trim().toLowerCase();
+        return token === 'env' ? 'environment variables' : 'database fallback';
+    }
+
+    function buildCredentialConfigStatusMessage(config) {
+        const parts = [];
+        const sourceLabel = formatCredentialConfigSource(config && config.source);
+        if (!config || !config.host) {
+            parts.push(`SMTP not configured. Active source: ${sourceLabel}.`);
+        } else if (!isCredentialDistributorSmtpConfigured()) {
+            parts.push(`SMTP saved from ${sourceLabel}, but the configuration is incomplete.`);
+        } else {
+            parts.push(`SMTP ready via ${sourceLabel}.`);
+        }
+
+        if (config && config.host) {
+            parts.push(`Host: ${config.host}:${config.port || 0}.`);
+        }
+        if (config && config.fromEmail) {
+            parts.push(`From: ${config.fromEmail}.`);
+        }
+        parts.push(config && config.hasPassword ? 'Password is present.' : 'Password is missing.');
+
+        return parts.join(' ');
+    }
+
     function applyCredentialSmtpConfig(config) {
         credentialDistributorSmtpConfig = {
-            senderEmail: String(config && config.senderEmail || '').trim(),
-            senderName: String(config && config.senderName || '').trim(),
-            hasAppPassword: !!(config && config.hasAppPassword)
+            host: String(config && config.host || '').trim(),
+            port: Number(config && config.port || 587),
+            encryption: String(config && config.encryption || 'tls').trim() || 'tls',
+            auth: !(config && config.auth === false),
+            username: String(config && config.username || '').trim(),
+            fromEmail: String(config && (config.fromEmail || config.senderEmail) || '').trim(),
+            fromName: String(config && (config.fromName || config.senderName) || '').trim(),
+            timeout: Number(config && config.timeout || 20),
+            hasPassword: !!(config && (config.hasPassword || config.hasAppPassword)),
+            source: String(config && config.source || 'database').trim() || 'database'
         };
 
-        if (senderEmailInput) senderEmailInput.value = credentialDistributorSmtpConfig.senderEmail;
-        if (senderNameInput) senderNameInput.value = credentialDistributorSmtpConfig.senderName || 'NAAP Evaluation System';
-        if (appPasswordInput) appPasswordInput.value = '';
+        if (hostInput) hostInput.value = credentialDistributorSmtpConfig.host;
+        if (portInput) portInput.value = credentialDistributorSmtpConfig.port ? String(credentialDistributorSmtpConfig.port) : '';
+        if (encryptionInput) encryptionInput.value = credentialDistributorSmtpConfig.encryption;
+        if (authInput) authInput.value = credentialDistributorSmtpConfig.auth ? 'true' : 'false';
+        if (usernameInput) usernameInput.value = credentialDistributorSmtpConfig.username;
+        if (timeoutInput) timeoutInput.value = credentialDistributorSmtpConfig.timeout ? String(credentialDistributorSmtpConfig.timeout) : '20';
+        if (fromEmailInput) fromEmailInput.value = credentialDistributorSmtpConfig.fromEmail;
+        if (fromNameInput) fromNameInput.value = credentialDistributorSmtpConfig.fromName || 'NAAP Evaluation System';
+        if (passwordInput) passwordInput.value = '';
 
-        if (!credentialDistributorSmtpConfig.senderEmail) {
-            setCredentialConfigStatus('SMTP not configured. Enter sender Gmail and app password.', 'error');
-        } else if (!credentialDistributorSmtpConfig.hasAppPassword) {
-            setCredentialConfigStatus('Sender Gmail saved, but app password is missing.', 'error');
-        } else {
-            setCredentialConfigStatus(`SMTP ready (${credentialDistributorSmtpConfig.senderEmail}).`, 'success');
-        }
+        setCredentialConfigStatus(
+            buildCredentialConfigStatusMessage(credentialDistributorSmtpConfig),
+            isCredentialDistributorSmtpConfigured() ? 'success' : 'error'
+        );
     }
 
     function loadCredentialSmtpConfig() {
@@ -1035,15 +1139,26 @@ function setupCredentialDistributor() {
         }
     }
 
-    if (saveConfigBtn && senderEmailInput && senderNameInput && appPasswordInput) {
+    if (saveConfigBtn && hostInput && portInput && encryptionInput && authInput && usernameInput && timeoutInput && fromEmailInput && fromNameInput && passwordInput) {
         saveConfigBtn.addEventListener('click', () => {
-            const senderEmail = String(senderEmailInput.value || '').trim();
-            const senderName = String(senderNameInput.value || '').trim();
-            const appPassword = String(appPasswordInput.value || '').trim();
+            const host = String(hostInput.value || '').trim();
+            const port = String(portInput.value || '').trim();
+            const encryption = String(encryptionInput.value || '').trim();
+            const authEnabled = String(authInput.value || 'true').trim() !== 'false';
+            const username = String(usernameInput.value || '').trim();
+            const timeout = String(timeoutInput.value || '').trim();
+            const fromEmail = String(fromEmailInput.value || '').trim();
+            const fromName = String(fromNameInput.value || '').trim();
+            const password = String(passwordInput.value || '').trim();
 
-            if (!senderEmail) {
-                setCredentialConfigStatus('Sender Gmail is required.', 'error');
-                senderEmailInput.focus();
+            if (!host) {
+                setCredentialConfigStatus('SMTP host is required.', 'error');
+                hostInput.focus();
+                return;
+            }
+            if (!fromEmail) {
+                setCredentialConfigStatus('SMTP from email is required.', 'error');
+                fromEmailInput.focus();
                 return;
             }
 
@@ -1051,11 +1166,17 @@ function setupCredentialDistributor() {
             setCredentialConfigStatus('Saving SMTP configuration...', 'info');
             try {
                 const payload = {
-                    senderEmail,
-                    senderName: senderName || 'NAAP Evaluation System'
+                    host,
+                    port: port,
+                    encryption,
+                    auth: authEnabled,
+                    username,
+                    timeout,
+                    fromEmail,
+                    fromName: fromName || 'NAAP Evaluation System'
                 };
-                if (appPassword !== '') {
-                    payload.appPassword = appPassword;
+                if (password !== '') {
+                    payload.password = password;
                 }
 
                 const saved = SharedData.saveCredentialDistributorConfig(payload, actor);
@@ -1070,30 +1191,41 @@ function setupCredentialDistributor() {
         });
     }
 
-    if (clearPasswordBtn && senderEmailInput && senderNameInput && appPasswordInput) {
+    if (clearPasswordBtn && hostInput && portInput && encryptionInput && authInput && usernameInput && timeoutInput && fromEmailInput && fromNameInput) {
         clearPasswordBtn.addEventListener('click', () => {
-            const senderEmail = String(senderEmailInput.value || '').trim();
-            const senderName = String(senderNameInput.value || '').trim();
-            if (!senderEmail) {
-                setCredentialConfigStatus('Enter sender Gmail first before clearing password.', 'error');
-                senderEmailInput.focus();
+            const host = String(hostInput.value || '').trim();
+            const fromEmail = String(fromEmailInput.value || '').trim();
+            if (!host) {
+                setCredentialConfigStatus('Enter SMTP host first before clearing the password.', 'error');
+                hostInput.focus();
+                return;
+            }
+            if (!fromEmail) {
+                setCredentialConfigStatus('Enter SMTP from email first before clearing the password.', 'error');
+                fromEmailInput.focus();
                 return;
             }
 
             setCredentialDistributorBusyState(true);
-            setCredentialConfigStatus('Clearing saved app password...', 'info');
+            setCredentialConfigStatus('Clearing saved SMTP password...', 'info');
             try {
                 const saved = SharedData.saveCredentialDistributorConfig({
-                    senderEmail,
-                    senderName: senderName || 'NAAP Evaluation System',
-                    appPassword: '',
-                    clearAppPassword: true
+                    host,
+                    port: String(portInput.value || '').trim(),
+                    encryption: String(encryptionInput.value || '').trim(),
+                    auth: String(authInput.value || 'true').trim() !== 'false',
+                    username: String(usernameInput.value || '').trim(),
+                    timeout: String(timeoutInput.value || '').trim(),
+                    fromEmail,
+                    fromName: String(fromNameInput.value || '').trim() || 'NAAP Evaluation System',
+                    password: '',
+                    clearPassword: true
                 }, actor);
                 applyCredentialSmtpConfig(saved);
-                setCredentialDistributorFeedback('info', 'Saved app password cleared.');
+                setCredentialDistributorFeedback('info', 'Saved SMTP password cleared.');
             } catch (error) {
                 console.error('[AdminPanel] Failed to clear SMTP password.', error);
-                setCredentialConfigStatus('Failed to clear app password: ' + (error.message || 'Unknown error'), 'error');
+                setCredentialConfigStatus('Failed to clear SMTP password: ' + (error.message || 'Unknown error'), 'error');
             } finally {
                 setCredentialDistributorBusyState(false);
             }
@@ -1168,12 +1300,14 @@ function setupCredentialDistributor() {
         if (!isCredentialDistributorSmtpConfigured()) {
             setCredentialDistributorFeedback(
                 'error',
-                'Credential distributor SMTP is not fully configured. Set Sender Gmail and App Password, then click "Save SMTP Config".'
+                'SMTP is not fully configured. Set the host, from email, and authentication credentials, then save the SMTP config.'
             );
-            if (appPasswordInput && !credentialDistributorSmtpConfig.hasAppPassword) {
-                appPasswordInput.focus();
-            } else if (senderEmailInput && !credentialDistributorSmtpConfig.senderEmail) {
-                senderEmailInput.focus();
+            if (passwordInput && credentialDistributorSmtpConfig.auth && !credentialDistributorSmtpConfig.hasPassword) {
+                passwordInput.focus();
+            } else if (fromEmailInput && !credentialDistributorSmtpConfig.fromEmail) {
+                fromEmailInput.focus();
+            } else if (hostInput && !credentialDistributorSmtpConfig.host) {
+                hostInput.focus();
             }
             return;
         }
@@ -1244,8 +1378,8 @@ function setupCredentialDistributor() {
     }
 }
 
-function setCredentialTestGmailFeedback(type, message) {
-    const feedback = document.getElementById('credential-test-gmail-feedback');
+function setCredentialTestSmtpFeedback(type, message) {
+    const feedback = document.getElementById('credential-test-smtp-feedback');
     if (!feedback) return;
 
     feedback.classList.remove('success', 'error', 'info');
@@ -1261,22 +1395,24 @@ function setCredentialTestGmailFeedback(type, message) {
     feedback.style.display = 'block';
 }
 
-function setCredentialTestGmailBusyState(isBusy) {
-    const subjectInput = document.getElementById('credential-test-gmail-subject');
-    const messageInput = document.getElementById('credential-test-gmail-message');
-    const sendBtn = document.getElementById('credential-test-gmail-send-btn');
+function setCredentialTestSmtpBusyState(isBusy) {
+    const recipientInput = document.getElementById('credential-test-smtp-recipient');
+    const subjectInput = document.getElementById('credential-test-smtp-subject');
+    const messageInput = document.getElementById('credential-test-smtp-message');
+    const sendBtn = document.getElementById('credential-test-smtp-send-btn');
 
-    [subjectInput, messageInput, sendBtn].forEach(element => {
+    [recipientInput, subjectInput, messageInput, sendBtn].forEach(element => {
         if (element) element.disabled = !!isBusy;
     });
 }
 
-function setupCredentialTestGmailComposer() {
-    const subjectInput = document.getElementById('credential-test-gmail-subject');
-    const messageInput = document.getElementById('credential-test-gmail-message');
-    const sendBtn = document.getElementById('credential-test-gmail-send-btn');
+function setupCredentialTestSmtpComposer() {
+    const recipientInput = document.getElementById('credential-test-smtp-recipient');
+    const subjectInput = document.getElementById('credential-test-smtp-subject');
+    const messageInput = document.getElementById('credential-test-smtp-message');
+    const sendBtn = document.getElementById('credential-test-smtp-send-btn');
 
-    if (!subjectInput || !messageInput || !sendBtn) {
+    if (!recipientInput || !subjectInput || !messageInput || !sendBtn) {
         return;
     }
 
@@ -1288,91 +1424,176 @@ function setupCredentialTestGmailComposer() {
         role: session && session.role ? session.role : '',
     };
 
-    function estimateActiveRecipientCount() {
-        const users = SharedData.getUsers ? SharedData.getUsers() : [];
-        const seenEmails = new Set();
-        (Array.isArray(users) ? users : []).forEach(user => {
-            if (!user) return;
-            const status = String(user.status || 'active').trim().toLowerCase();
-            if (status !== 'active') return;
-            const email = String(user.email || '').trim().toLowerCase();
-            if (!email) return;
-            seenEmails.add(email);
-        });
-        return seenEmails.size;
-    }
-
     sendBtn.addEventListener('click', () => {
         if (!isCredentialDistributorSmtpConfigured()) {
-            setCredentialTestGmailFeedback(
+            setCredentialTestSmtpFeedback(
                 'error',
-                'SMTP is not configured. In Bulk Credential Distributor, save Sender Gmail and App Password first.'
+                'SMTP is not configured. Save the SMTP host, from email, and credentials first.'
             );
             return;
         }
 
+        const recipientEmail = String(recipientInput.value || '').trim();
         const subject = String(subjectInput.value || '').trim();
         const message = String(messageInput.value || '').trim();
 
+        if (!recipientEmail) {
+            setCredentialTestSmtpFeedback('error', 'Please enter a recipient email address.');
+            recipientInput.focus();
+            return;
+        }
         if (!subject) {
-            setCredentialTestGmailFeedback('error', 'Please enter an email subject.');
+            setCredentialTestSmtpFeedback('error', 'Please enter an email subject.');
             subjectInput.focus();
             return;
         }
-        if (!message) {
-            setCredentialTestGmailFeedback('error', 'Please enter an email message.');
-            messageInput.focus();
-            return;
-        }
 
-        setCredentialTestGmailBusyState(true);
-        setCredentialTestGmailFeedback('info', 'Sending test Gmail broadcast. Please wait...');
-        const estimatedCount = estimateActiveRecipientCount();
+        setCredentialTestSmtpBusyState(true);
+        setCredentialTestSmtpFeedback('info', 'Sending one-recipient SMTP test email. Please wait...');
         setCredentialDistributorLoadingState(
             true,
-            `Sending test Gmail broadcast to approximately ${estimatedCount} active user(s). This may take a while for large lists.`,
-            'Preparing email batch...',
-            'Sending Test Broadcast'
+            `Sending a test email to ${recipientEmail}.`,
+            'Preparing message...',
+            'Sending Test Email'
         );
 
         setTimeout(() => {
             try {
-                const response = SharedData.sendBulkTestGmail(subject, message, actor);
-                const summary = response && response.summary ? response.summary : { total: 0, sent: 0, failed: 0 };
-                const failures = Array.isArray(response && response.failures) ? response.failures : [];
-
-                const lines = [
-                    'Test Gmail broadcast completed.',
-                    `Total: ${summary.total || 0}`,
-                    `Sent: ${summary.sent || 0}`,
-                    `Failed: ${summary.failed || 0}`
-                ];
-                if (failures.length > 0) {
-                    lines.push('');
-                    lines.push('Top failures:');
-                    failures.slice(0, 10).forEach(item => {
-                        const emailText = item && item.email ? item.email : 'no-email';
-                        const reason = item && item.reason ? item.reason : 'Unknown error';
-                        lines.push(`- ${emailText}: ${reason}`);
-                    });
-                    if (failures.length > 10) {
-                        lines.push(`- ... and ${failures.length - 10} more`);
-                    }
-                }
-
-                setCredentialTestGmailFeedback(failures.length > 0 ? 'error' : 'success', lines.join('\n'));
-                if (failures.length > 0) {
-                    downloadCredentialTestGmailFailuresFile(failures);
-                }
+                const response = SharedData.sendTestSmtpEmail(recipientEmail, subject, message, actor);
+                setCredentialTestSmtpFeedback(
+                    response && response.success ? 'success' : 'error',
+                    String(response && response.message || 'SMTP test email completed.')
+                );
             } catch (error) {
-                console.error('[AdminPanel] Test Gmail broadcast failed.', error);
-                setCredentialTestGmailFeedback('error', 'Test Gmail broadcast failed: ' + (error.message || 'Unknown error'));
+                console.error('[AdminPanel] SMTP test email failed.', error);
+                setCredentialTestSmtpFeedback('error', 'SMTP test email failed: ' + (error.message || 'Unknown error'));
             } finally {
                 setCredentialDistributorLoadingState(false, '', '', 'Distributing Credentials');
-                setCredentialTestGmailBusyState(false);
+                setCredentialTestSmtpBusyState(false);
             }
         }, 50);
     });
+}
+
+function setupGeminiConfig() {
+    const modelInput = document.getElementById('gemini-model');
+    const timeoutInput = document.getElementById('gemini-timeout-ms');
+    const apiKeyInput = document.getElementById('gemini-api-key');
+    const saveBtn = document.getElementById('gemini-save-config-btn');
+    const clearBtn = document.getElementById('gemini-clear-key-btn');
+    const status = document.getElementById('gemini-config-status');
+
+    if (!modelInput || !timeoutInput || !apiKeyInput || !saveBtn || !clearBtn || !status) {
+        return;
+    }
+
+    const session = SharedData.getSession ? SharedData.getSession() : null;
+    const actor = {
+        userId: session && session.userId ? session.userId : '',
+        email: session && session.email ? session.email : '',
+        username: session && session.username ? session.username : '',
+        role: session && session.role ? session.role : '',
+    };
+
+    function setGeminiConfigStatus(message, type) {
+        status.textContent = String(message || '');
+        if (type === 'error') {
+            status.style.color = 'var(--danger-color)';
+        } else if (type === 'success') {
+            status.style.color = 'var(--success-color)';
+        } else {
+            status.style.color = 'var(--text-secondary)';
+        }
+    }
+
+    function formatGeminiConfigSource(source) {
+        return String(source || 'database').trim().toLowerCase() === 'env'
+            ? 'environment variables'
+            : 'database fallback';
+    }
+
+    function applyGeminiConfig(config) {
+        geminiRuntimeConfig = {
+            model: String(config && config.model || 'gemini-2.5-flash').trim() || 'gemini-2.5-flash',
+            timeoutMs: Number(config && config.timeoutMs || 30000),
+            hasApiKey: !!(config && config.hasApiKey),
+            source: String(config && config.source || 'database').trim() || 'database'
+        };
+
+        modelInput.value = geminiRuntimeConfig.model;
+        timeoutInput.value = geminiRuntimeConfig.timeoutMs ? String(geminiRuntimeConfig.timeoutMs) : '30000';
+        apiKeyInput.value = '';
+
+        const sourceLabel = formatGeminiConfigSource(geminiRuntimeConfig.source);
+        const keyLabel = geminiRuntimeConfig.hasApiKey ? 'API key is present.' : 'API key is missing.';
+        setGeminiConfigStatus(
+            `Gemini ready via ${sourceLabel}. Model: ${geminiRuntimeConfig.model}. Timeout: ${geminiRuntimeConfig.timeoutMs} ms. ${keyLabel}`,
+            geminiRuntimeConfig.hasApiKey ? 'success' : 'error'
+        );
+    }
+
+    function loadGeminiConfig() {
+        try {
+            const config = SharedData.getGeminiConfig(actor);
+            applyGeminiConfig(config);
+        } catch (error) {
+            console.error('[AdminPanel] Failed to load Gemini config.', error);
+            setGeminiConfigStatus('Unable to load Gemini config: ' + (error.message || 'Unknown error'), 'error');
+        }
+    }
+
+    function setGeminiBusyState(isBusy) {
+        [modelInput, timeoutInput, apiKeyInput, saveBtn, clearBtn].forEach(element => {
+            if (element) element.disabled = !!isBusy;
+        });
+    }
+
+    saveBtn.addEventListener('click', () => {
+        const model = String(modelInput.value || '').trim() || 'gemini-2.5-flash';
+        const timeoutMs = String(timeoutInput.value || '').trim() || '30000';
+        const apiKey = String(apiKeyInput.value || '').trim();
+
+        setGeminiBusyState(true);
+        setGeminiConfigStatus('Saving Gemini configuration...', 'info');
+        try {
+            const payload = {
+                model,
+                timeoutMs
+            };
+            if (apiKey !== '') {
+                payload.apiKey = apiKey;
+            }
+
+            const saved = SharedData.saveGeminiConfig(payload, actor);
+            applyGeminiConfig(saved);
+        } catch (error) {
+            console.error('[AdminPanel] Failed to save Gemini config.', error);
+            setGeminiConfigStatus('Failed to save Gemini config: ' + (error.message || 'Unknown error'), 'error');
+        } finally {
+            setGeminiBusyState(false);
+        }
+    });
+
+    clearBtn.addEventListener('click', () => {
+        setGeminiBusyState(true);
+        setGeminiConfigStatus('Clearing saved Gemini API key...', 'info');
+        try {
+            const saved = SharedData.saveGeminiConfig({
+                model: String(modelInput.value || '').trim() || 'gemini-2.5-flash',
+                timeoutMs: String(timeoutInput.value || '').trim() || '30000',
+                apiKey: '',
+                clearApiKey: true
+            }, actor);
+            applyGeminiConfig(saved);
+        } catch (error) {
+            console.error('[AdminPanel] Failed to clear Gemini API key.', error);
+            setGeminiConfigStatus('Failed to clear Gemini API key: ' + (error.message || 'Unknown error'), 'error');
+        } finally {
+            setGeminiBusyState(false);
+        }
+    });
+
+    loadGeminiConfig();
 }
 
 function buildBulkUserFromRow(row, rowNumber, existingUsersByEmail, fileEmailSet, campusMap, departmentMap, programMap, importSeed, importIndex) {
@@ -1406,7 +1627,7 @@ function buildBulkUserFromRow(row, rowNumber, existingUsersByEmail, fileEmailSet
     const employeeId = normalizeBulkText(row.employeeId);
     const studentNumber = normalizeBulkText(row.studentNumber);
     const yearSection = normalizeYearSection(row.yearSection);
-    const roleRequiresProgram = role === 'student' || role === 'professor';
+    const roleRequiresProgram = roleRequiresProgramAssignment(role);
     const resolvedProgram = resolveBulkProgramRecord(campus, department, row.programCode, programMap);
     const existingUser = existingUsersByEmail.get(email) || null;
 
@@ -1754,6 +1975,13 @@ function setupRoleBasedFields() {
     const deptField = document.getElementById('dept-field');
     const campusSelect = document.getElementById('new-user-campus');
     const deptSelect = document.getElementById('new-user-department');
+    const programGroup = document.getElementById('new-user-program-group');
+    const programSelect = document.getElementById('new-user-program');
+
+    const syncProgramOptions = () => {
+        if (!campusSelect || !deptSelect || !programSelect) return;
+        populateProgramOptions(programSelect, campusSelect.value, deptSelect.value, programSelect.value);
+    };
 
     if (roleSelect) {
         roleSelect.addEventListener('change', () => {
@@ -1789,6 +2017,17 @@ function setupRoleBasedFields() {
                     deptSelect.required = selectedRole !== 'hr';
                 }
             }
+
+            if (programGroup && programSelect) {
+                const requiresProgram = roleRequiresProgramAssignment(selectedRole);
+                programGroup.style.display = requiresProgram ? 'block' : 'none';
+                programSelect.required = requiresProgram;
+                if (!requiresProgram) {
+                    programSelect.value = '';
+                } else {
+                    syncProgramOptions();
+                }
+            }
         });
 
         // Trigger initial state
@@ -1798,8 +2037,10 @@ function setupRoleBasedFields() {
     if (campusSelect && deptSelect) {
         const updateDeptOptions = () => {
             populateDepartmentOptions(deptSelect, campusSelect.value);
+            syncProgramOptions();
         };
         campusSelect.addEventListener('change', updateDeptOptions);
+        deptSelect.addEventListener('change', syncProgramOptions);
         updateDeptOptions();
     }
 }
@@ -2222,6 +2463,12 @@ function refreshCampusSelects(preselectId) {
     if (addUserCampus && addUserDept) {
         populateDepartmentOptions(addUserDept, addUserCampus.value);
     }
+
+    const editUserCampus = document.getElementById('edit-user-campus');
+    const editUserDept = document.getElementById('edit-user-institute');
+    if (editUserCampus && editUserDept) {
+        populateDepartmentOptions(editUserDept, editUserCampus.value);
+    }
 }
 
 function renderCampusList() {
@@ -2331,6 +2578,25 @@ function populateDepartmentOptions(selectEl, campusId) {
     }
 }
 
+function populateProgramOptions(selectEl, campusId, departmentCode, preferredValue = '') {
+    if (!selectEl) return;
+
+    const programs = getProgramsForCampusDepartment(campusId, departmentCode);
+    if (!programs.length) {
+        selectEl.innerHTML = '<option value="">No programs available</option>';
+        selectEl.value = '';
+        return;
+    }
+
+    selectEl.innerHTML = '<option value="">Select Program</option>' + programs.map(program => (
+        `<option value="${program.programCode}">${program.programCode}${program.programName ? ` - ${program.programName}` : ''}</option>`
+    )).join('');
+
+    const preferred = normalizeProgramCode(preferredValue || selectEl.getAttribute('data-current') || '');
+    const matched = programs.find(program => normalizeProgramCode(program.programCode) === preferred);
+    selectEl.value = matched ? matched.programCode : '';
+}
+
 function renderDepartmentSections(departments) {
     const container = document.getElementById('departments-dynamic');
     if (!container) return;
@@ -2357,6 +2623,14 @@ function renderDepartmentSections(departments) {
                             <span class="role-count" id="${slug}-dean-count">0</span>
                         </div>
                         <div class="role-users" id="${slug}-deans"></div>
+                    </div>
+                    <div class="role-group">
+                        <div class="role-header" data-toggle="${slug}-procoors">
+                            <i class="fas fa-diagram-project"></i>
+                            <span>Program Coordinators</span>
+                            <span class="role-count" id="${slug}-procoor-count">0</span>
+                        </div>
+                        <div class="role-users" id="${slug}-procoors"></div>
                     </div>
                     <div class="role-group">
                         <div class="role-header" data-toggle="${slug}-professors">
@@ -2438,9 +2712,13 @@ function handleAddUser() {
 
     const departmentValue = formData.get('department') || '';
     const role = formData.get('role');
+    const programCode = normalizeProgramCode(formData.get('programCode'));
     const studentNumber = normalizeBulkText(formData.get('studentNumber'));
     const rawYearSection = formData.get('yearSection') || '';
     const yearSection = normalizeYearSection(rawYearSection);
+    const selectedProgram = roleRequiresProgramAssignment(role)
+        ? resolveBulkProgramRecord(formData.get('campus'), departmentValue, programCode, buildBulkProgramMap())
+        : null;
 
     if (role === 'student') {
         if (!studentNumber) {
@@ -2451,6 +2729,11 @@ function handleAddUser() {
             alert('Year & Section must use Y-S format (e.g., 3-1).');
             return;
         }
+    }
+
+    if (roleRequiresProgramAssignment(role) && !selectedProgram) {
+        alert('A valid program is required for this role.');
+        return;
     }
 
     const userData = {
@@ -2464,6 +2747,8 @@ function handleAddUser() {
         yearSection: role === 'student' ? yearSection : '',
         studentNumber: role === 'student' ? studentNumber : '',
         employeeId: formData.get('employeeId') || '',
+        programCode: selectedProgram ? selectedProgram.programCode : '',
+        programName: selectedProgram ? selectedProgram.programName : '',
         status: 'active',
         id: 'u' + Date.now() // Generate local ID
     };
@@ -2685,7 +2970,7 @@ function getAdminAnalyticsContext() {
     });
     const supervisorUsers = (Array.isArray(users) ? users : []).filter(user => {
         const role = normalizeAdminAnalyticsToken(user && user.role);
-        return role === 'dean' || role === 'hr' || role === 'supervisor' || role === 'vpaa';
+        return role === 'dean' || role === 'procoor' || role === 'hr' || role === 'supervisor' || role === 'vpaa';
     });
 
     const professorIdSet = new Set();
@@ -2729,7 +3014,7 @@ function getAdminEvaluationTypeKey(evaluation) {
     const role = normalizeAdminAnalyticsToken(evaluation && (evaluation.evaluatorRole || evaluation.evaluationType));
     if (role === 'student' || role === 'student-to-professor') return 'student';
     if (role === 'professor' || role === 'peer' || role === 'professor-to-professor') return 'peer';
-    if (role === 'dean' || role === 'hr' || role === 'supervisor' || role === 'vpaa' || role === 'supervisor-to-professor') return 'supervisor';
+    if (role === 'dean' || role === 'procoor' || role === 'hr' || role === 'supervisor' || role === 'vpaa' || role === 'supervisor-to-professor') return 'supervisor';
     return '';
 }
 
@@ -2886,6 +3171,74 @@ function buildAdminDashboardEvaluationOverview(context) {
     };
 }
 
+function buildAdminStudentsEvaluatedCountMap(context, semesterId) {
+    const countsByProfessor = {};
+    const expectedPairsByProfessor = new Map();
+    const completedPairsByProfessor = new Map();
+    const fallbackPairsByProfessor = new Map();
+
+    const ensureSet = (map, key) => {
+        if (!map.has(key)) map.set(key, new Set());
+        return map.get(key);
+    };
+
+    (context.enrollments || []).forEach(enrollment => {
+        if (!enrollment) return;
+        if (normalizeAdminAnalyticsToken(enrollment.status) !== 'enrolled') return;
+
+        const offeringId = String(enrollment.courseOfferingId || '').trim();
+        const offering = context.offeringsById[offeringId];
+        if (!offering || !offering.isActive) return;
+        if (!isAdminEvaluationInSemester({ semesterId: offering.semesterSlug || '' }, semesterId)) return;
+
+        const professorId = resolveAdminProfessorIdToken(offering.professorUserId, context);
+        if (!professorId) return;
+
+        const studentToken = normalizeAdminAnalyticsToken(enrollment.studentUserId || enrollment.studentId || enrollment.studentNumber || enrollment.studentName);
+        const offeringToken = normalizeAdminAnalyticsToken(offeringId);
+        if (!studentToken || !offeringToken) return;
+
+        ensureSet(expectedPairsByProfessor, professorId).add(`${studentToken}|${offeringToken}`);
+    });
+
+    (context.evaluations || []).forEach(evaluation => {
+        if (getAdminEvaluationTypeKey(evaluation) !== 'student') return;
+        if (!isAdminEvaluationInSemester(evaluation, semesterId)) return;
+
+        const professorId = resolveAdminEvaluationTargetProfessorId(evaluation, 'student', context);
+        if (!professorId) return;
+
+        const studentToken = normalizeAdminAnalyticsToken(
+            evaluation.studentUserId || evaluation.studentId || evaluation.evaluatorId || evaluation.evaluatorUsername
+        );
+        if (!studentToken) return;
+
+        const offeringToken = normalizeAdminAnalyticsToken(evaluation.courseOfferingId);
+        const expectedPairs = expectedPairsByProfessor.get(professorId);
+        if (expectedPairs && expectedPairs.size > 0 && offeringToken) {
+            const pairKey = `${studentToken}|${offeringToken}`;
+            if (expectedPairs.has(pairKey)) {
+                ensureSet(completedPairsByProfessor, professorId).add(pairKey);
+            }
+            return;
+        }
+
+        ensureSet(fallbackPairsByProfessor, professorId).add(`${studentToken}|${offeringToken || 'direct'}`);
+    });
+
+    (context.professorUsers || []).forEach(user => {
+        const professorId = normalizeAdminUserIdToken(user && user.id);
+        if (!professorId) return;
+
+        const expectedCount = (expectedPairsByProfessor.get(professorId) || new Set()).size;
+        const completedCount = (completedPairsByProfessor.get(professorId) || new Set()).size;
+        const fallbackCount = (fallbackPairsByProfessor.get(professorId) || new Set()).size;
+        countsByProfessor[professorId] = expectedCount > 0 ? completedCount : fallbackCount;
+    });
+
+    return countsByProfessor;
+}
+
 function getAdminLatestSemestersForTrend(context, limit = 4) {
     const desired = Number(limit) > 0 ? Number(limit) : 4;
     const orderedSemesters = [];
@@ -3008,28 +3361,12 @@ function renderAdminEvaluationOverviewChart(data) {
     const evaluationCtx = document.getElementById('evaluation-chart');
     if (!evaluationCtx) return;
 
-    if (adminEvaluationOverviewChartInstance) {
-        adminEvaluationOverviewChartInstance.destroy();
-        adminEvaluationOverviewChartInstance = null;
-    }
-
-    adminEvaluationOverviewChartInstance = new Chart(evaluationCtx, {
-        type: 'doughnut',
-        data: {
-            labels: data.labels,
-            datasets: [{
-                data: data.values,
-                backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
-                borderWidth: 0
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { position: 'bottom' }
-            }
-        }
+    adminEvaluationOverviewChartInstance = window.AppChartDesign.renderDoughnutMetricChart(evaluationCtx, {
+        labels: data.labels,
+        values: data.values,
+        colors: ['#059669', '#f59e0b', '#ef4444'],
+        centerTitle: String((Array.isArray(data.values) ? data.values : []).reduce((sum, value) => sum + (Number(value) || 0), 0)),
+        centerSubtitle: 'Evaluations'
     });
 }
 
@@ -3038,40 +3375,14 @@ function renderAdminSemestralPerformanceChart(data) {
     const performanceCtx = document.getElementById('performance-chart');
     if (!performanceCtx) return;
 
-    if (adminSemestralPerformanceChartInstance) {
-        adminSemestralPerformanceChartInstance.destroy();
-        adminSemestralPerformanceChartInstance = null;
-    }
-
-    adminSemestralPerformanceChartInstance = new Chart(performanceCtx, {
-        type: 'bar',
-        data: {
-            labels: data.labels,
-            datasets: [{
-                label: 'Students Completed',
-                data: data.values,
-                backgroundColor: ['#667eea', '#7c8df0', '#5f78dd', '#4d66cf'],
-                borderRadius: 8
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
-            },
-            scales: {
-                y: { beginAtZero: true },
-                x: {
-                    ticks: {
-                        maxRotation: 0,
-                        minRotation: 0,
-                        autoSkip: true,
-                        maxTicksLimit: 6
-                    }
-                }
-            }
-        }
+    adminSemestralPerformanceChartInstance = renderAdminBarChart(performanceCtx, {
+        labels: data.labels,
+        values: data.values,
+        label: 'Students Completed',
+        colors: ['#4f46e5', '#06b6d4'],
+        showLegend: false,
+        autoSkipX: true,
+        maxTicksLimit: 6
     });
 }
 
@@ -3140,7 +3451,7 @@ function loadActivityLog() {
     };
     const formatTimestamp = value => {
         const parsed = parseTimestamp(value);
-        return parsed ? parsed.toLocaleString() : String(value || '-');
+        return parsed ? SharedData.formatDateTimeInPhilippines(parsed) : String(value || '-');
     };
     const renderPrompt = message => {
         tbody.innerHTML = `
@@ -3401,7 +3712,7 @@ function renderOrganizationView(campusFilter = 'all') {
     const configuredDepartments = getDepartmentsForCampus(campusFilter).map(dept => normalizeDepartmentCode(dept));
     const departmentSet = new Set(configuredDepartments.map(dept => dept.toLowerCase()));
     const departments = [...configuredDepartments];
-    const academicRoles = new Set(['dean', 'professor', 'student']);
+    const academicRoles = new Set(['dean', 'procoor', 'professor', 'student']);
 
     filteredUsers.forEach(user => {
         if (!academicRoles.has(normalizeRoleCode(user.role))) return;
@@ -3427,6 +3738,14 @@ function renderOrganizationView(campusFilter = 'all') {
         if (deanCount) deanCount.textContent = deans.filter(u => isUserActiveForOrganizationCount(u, semesterContext)).length;
         const deanContainer = document.getElementById(`${slug}-deans`);
         if (deanContainer) deanContainer.innerHTML = deans.length > 0 ? deans.map(u => createUserCard(u)).join('') : createEmptyState('No deans');
+
+        // Program Coordinators
+        let coordinators = deptUsers.filter(u => normalizeRoleCode(u.role) === 'procoor');
+        coordinators = sortUsersByStatusAndName(coordinators);
+        const coordinatorCount = document.getElementById(`${slug}-procoor-count`);
+        if (coordinatorCount) coordinatorCount.textContent = coordinators.filter(u => isUserActiveForOrganizationCount(u, semesterContext)).length;
+        const coordinatorContainer = document.getElementById(`${slug}-procoors`);
+        if (coordinatorContainer) coordinatorContainer.innerHTML = coordinators.length > 0 ? coordinators.map(u => createUserCard(u)).join('') : createEmptyState('No program coordinators');
 
         // Professors
         let profs = deptUsers.filter(u => normalizeRoleCode(u.role) === 'professor');
@@ -3538,6 +3857,22 @@ function toggleEditUserStudentFields(isStudent) {
     }
 }
 
+function toggleEditUserProgramField(role) {
+    const programGroup = document.getElementById('edit-user-program-group');
+    const programInput = document.getElementById('edit-user-program');
+    const requiresProgram = roleRequiresProgramAssignment(role);
+
+    if (programGroup) {
+        programGroup.style.display = requiresProgram ? 'block' : 'none';
+    }
+    if (programInput) {
+        programInput.required = requiresProgram;
+        if (!requiresProgram) {
+            programInput.value = '';
+        }
+    }
+}
+
 function getInstituteLabel(user) {
     const role = normalizeRoleCode(user.role);
     if (user.institute) {
@@ -3557,6 +3892,7 @@ function getInstituteLabel(user) {
     if (role === 'vpaa') return 'VPAA';
     if (role === 'osa') return 'OSA';
     if (role === 'dean') return 'Dean Office';
+    if (role === 'procoor') return 'Program Coordinator Office';
     return BULK_UNASSIGNED_DEPARTMENT;
 }
 function getDepartmentLabel(dept) {
@@ -3571,6 +3907,7 @@ function getRoleLabel(role) {
         hr: 'HR Staff',
         admin: 'Administrator',
         dean: 'Dean',
+        procoor: 'Program Coordinator',
         osa: 'OSA',
         vpaa: 'VPAA',
         professor: 'Professor',
@@ -3583,6 +3920,9 @@ function setupEditUserModal() {
     const closeBtn = document.getElementById('close-edit-user-modal');
     const cancelBtn = document.getElementById('cancel-edit-user-form');
     const form = document.getElementById('edit-user-form');
+    const campusInput = document.getElementById('edit-user-campus');
+    const instituteInput = document.getElementById('edit-user-institute');
+    const programInput = document.getElementById('edit-user-program');
 
     if (closeBtn) {
         closeBtn.addEventListener('click', closeEditUserModal);
@@ -3595,6 +3935,17 @@ function setupEditUserModal() {
             event.preventDefault();
             handleEditUserSave();
         });
+    }
+    const syncEditPrograms = () => {
+        if (!campusInput || !instituteInput || !programInput) return;
+        populateProgramOptions(programInput, campusInput.value, instituteInput.value, programInput.value);
+    };
+    if (campusInput && instituteInput) {
+        campusInput.addEventListener('change', () => {
+            populateDepartmentOptions(instituteInput, campusInput.value);
+            syncEditPrograms();
+        });
+        instituteInput.addEventListener('change', syncEditPrograms);
     }
     if (modal) {
         modal.addEventListener('click', (event) => {
@@ -3638,7 +3989,16 @@ function openEditUserModal(userId) {
     const campusInput = document.getElementById('edit-user-campus');
     if (campusInput) campusInput.value = user.campus || 'basa';
     const instituteInput = document.getElementById('edit-user-institute');
-    if (instituteInput) instituteInput.value = user.institute || getInstituteLabel(user);
+    if (campusInput && instituteInput) {
+        instituteInput.setAttribute('data-current', user.department || user.institute || '');
+        populateDepartmentOptions(instituteInput, campusInput.value);
+    }
+    const programInput = document.getElementById('edit-user-program');
+    if (programInput && campusInput && instituteInput) {
+        programInput.setAttribute('data-current', user.programCode || '');
+        populateProgramOptions(programInput, campusInput.value, instituteInput.value, user.programCode || '');
+    }
+    toggleEditUserProgramField(user.role);
     const employmentTypeInput = document.getElementById('edit-user-employment-type');
     if (employmentTypeInput) employmentTypeInput.value = user.employmentType || (isStudent ? 'Student' : 'Regular');
     const positionInput = document.getElementById('edit-user-position');
@@ -3666,6 +4026,7 @@ function handleEditUserSave() {
     const passwordInput = document.getElementById('edit-user-password');
     const campusInput = document.getElementById('edit-user-campus');
     const instituteInput = document.getElementById('edit-user-institute');
+    const programInput = document.getElementById('edit-user-program');
     const employmentTypeInput = document.getElementById('edit-user-employment-type');
     const positionInput = document.getElementById('edit-user-position');
     const statusInput = document.getElementById('edit-user-status');
@@ -3696,6 +4057,23 @@ function handleEditUserSave() {
     if (instituteInput) {
         user.institute = instituteInput.value.trim();
         user.department = instituteInput.value.trim(); // Sync department to institute for consistency
+    }
+    if (roleRequiresProgramAssignment(user.role)) {
+        const selectedProgram = resolveBulkProgramRecord(
+            user.campus,
+            user.department,
+            programInput ? programInput.value : '',
+            buildBulkProgramMap()
+        );
+        if (!selectedProgram) {
+            alert('A valid program is required for this role.');
+            return;
+        }
+        user.programCode = selectedProgram.programCode;
+        user.programName = selectedProgram.programName;
+    } else {
+        user.programCode = '';
+        user.programName = '';
     }
     if (normalizeRoleCode(user.role) === 'student') {
         user.employmentType = '';
@@ -3969,7 +4347,7 @@ function handleAnnouncementComposeSubmit(event) {
     }
 
     const session = getUserSession() || SharedData.getSession() || {};
-    const createdAt = new Date().toISOString();
+    const createdAt = SharedData.getNowIsoString();
     const audience = {
         role: role,
         campus: campus,
@@ -3990,24 +4368,6 @@ function handleAnnouncementComposeSubmit(event) {
             createdByUserId: String(session.userId || '').trim(),
             read: false,
         });
-
-        if (SharedData.addActivityLogEntry) {
-            const targetDetails = [
-                role,
-                campus ? `campus:${campus}` : '',
-                programCode ? `program:${programCode}` : '',
-                role === 'student' ? `completion:${audience.studentCompletion}` : ''
-            ].filter(Boolean).join(', ');
-
-            SharedData.addActivityLogEntry({
-                action: 'Announcement Published',
-                description: `Published announcement "${title}" for ${targetDetails}.`,
-                type: 'announcement',
-                userId: String(session.userId || '').trim(),
-                username: String(session.username || '').trim(),
-                role: String(session.role || 'admin').trim(),
-            });
-        }
 
         closeAnnouncementComposerModal();
         alert('Announcement published successfully.');
@@ -4200,6 +4560,8 @@ function setupSubjectManagement() {
     const bulkSubjectImportInput = document.getElementById('bulk-subject-import-input');
     const bulkOfferingImportBtn = document.getElementById('bulk-offering-import-btn');
     const bulkOfferingImportInput = document.getElementById('bulk-offering-import-input');
+    const bulkExcessLoadImportBtn = document.getElementById('bulk-excess-load-import-btn');
+    const bulkExcessLoadImportInput = document.getElementById('bulk-excess-load-import-input');
     const offeringForm = document.getElementById('offering-form');
     const offeringCampus = document.getElementById('offering-campus');
     const offeringDepartment = document.getElementById('offering-department');
@@ -4263,6 +4625,10 @@ function setupSubjectManagement() {
     if (bulkOfferingImportBtn && bulkOfferingImportInput) {
         bulkOfferingImportBtn.addEventListener('click', () => bulkOfferingImportInput.click());
         bulkOfferingImportInput.addEventListener('change', handleBulkOfferingImport);
+    }
+    if (bulkExcessLoadImportBtn && bulkExcessLoadImportInput) {
+        bulkExcessLoadImportBtn.addEventListener('click', () => bulkExcessLoadImportInput.click());
+        bulkExcessLoadImportInput.addEventListener('change', handleBulkExcessLoadImport);
     }
 
     if (offeringCampus) {
@@ -4689,6 +5055,90 @@ function mapOfferingBulkRow(rawRow) {
     return mapped;
 }
 
+function buildOfferingBulkPayloadRows(rows) {
+    const users = SharedData.getUsers() || [];
+    const existingUsers = Array.isArray(users) ? users : [];
+    const campusMap = buildBulkCampusMap(existingUsers);
+    const departmentMap = buildBulkDepartmentMap(existingUsers);
+    const programMap = buildBulkProgramMap();
+    const currentSemester = String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : '').trim();
+    const semesterSelect = document.getElementById('offering-semester');
+    const targetSemester = String(semesterSelect && semesterSelect.value || currentSemester).trim();
+
+    const payloadRows = [];
+    const rowErrors = [];
+    let usedSpreadsheetSemesterOverride = false;
+
+    if (!targetSemester) {
+        throw new Error('No active semester is selected for offering import.');
+    }
+
+    rows.forEach((rawRow, index) => {
+        const rowNumber = index + 2;
+        const mapped = mapOfferingBulkRow(rawRow);
+        const hasAnyValue = Object.values(mapped).some(Boolean);
+        if (!hasAnyValue) return;
+
+        const spreadsheetSemester = normalizeBulkText(mapped.semesterSlug);
+        if (spreadsheetSemester && spreadsheetSemester !== targetSemester) {
+            usedSpreadsheetSemesterOverride = true;
+        }
+
+        const campusSlug = campusMap.get(normalizeBulkLookupKey(mapped.campusSlug));
+        if (!campusSlug) {
+            rowErrors.push(`Row ${rowNumber}: unknown campus "${mapped.campusSlug}".`);
+            return;
+        }
+
+        const departmentCode = normalizeBulkDepartment(mapped.departmentCode, campusSlug, departmentMap);
+        if (!departmentCode || departmentCode === BULK_UNASSIGNED_DEPARTMENT) {
+            rowErrors.push(`Row ${rowNumber}: unknown department "${mapped.departmentCode}".`);
+            return;
+        }
+
+        const programRecord = resolveBulkProgramRecord(campusSlug, departmentCode, mapped.programCode, programMap);
+        if (!programRecord) {
+            rowErrors.push(`Row ${rowNumber}: unknown program "${mapped.programCode}" for ${campusSlug}/${departmentCode}.`);
+            return;
+        }
+
+        const subjectCode = normalizeBulkText(mapped.subjectCode).toUpperCase();
+        if (!subjectCode) {
+            rowErrors.push(`Row ${rowNumber}: subject_code is required.`);
+            return;
+        }
+
+        const sectionName = normalizeOfferingSection(mapped.sectionName);
+        if (!sectionName) {
+            rowErrors.push(`Row ${rowNumber}: section must be in Y/S format (example: 3/1; 3-1 is accepted).`);
+            return;
+        }
+
+        const professorEmployeeId = normalizeBulkProfessorEmployeeId(mapped.professorEmployeeId);
+        if (!professorEmployeeId) {
+            rowErrors.push(`Row ${rowNumber}: professor_employee_id is required.`);
+            return;
+        }
+
+        payloadRows.push({
+            semesterSlug: targetSemester,
+            campusSlug,
+            departmentCode,
+            programCode: programRecord.programCode,
+            subjectCode,
+            sectionName,
+            professorEmployeeId,
+        });
+    });
+
+    return {
+        payloadRows,
+        rowErrors,
+        usedSpreadsheetSemesterOverride,
+        targetSemester,
+    };
+}
+
 async function handleBulkOfferingImport(event) {
     const input = event.target;
     const file = input && input.files && input.files[0];
@@ -4705,80 +5155,11 @@ async function handleBulkOfferingImport(event) {
             return;
         }
 
-        const users = SharedData.getUsers() || [];
-        const existingUsers = Array.isArray(users) ? users : [];
-        const campusMap = buildBulkCampusMap(existingUsers);
-        const departmentMap = buildBulkDepartmentMap(existingUsers);
-        const programMap = buildBulkProgramMap();
-        const currentSemester = String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : '').trim();
-        const semesterSelect = document.getElementById('offering-semester');
-        const targetSemester = String(semesterSelect && semesterSelect.value || currentSemester).trim();
-
-        const payloadRows = [];
-        const rowErrors = [];
-        let usedSpreadsheetSemesterOverride = false;
-
-        if (!targetSemester) {
-            throw new Error('No active semester is selected for offering import.');
-        }
-
-        rows.forEach((rawRow, index) => {
-            const rowNumber = index + 2;
-            const mapped = mapOfferingBulkRow(rawRow);
-            const hasAnyValue = Object.values(mapped).some(Boolean);
-            if (!hasAnyValue) return;
-
-            const spreadsheetSemester = normalizeBulkText(mapped.semesterSlug);
-            if (spreadsheetSemester && spreadsheetSemester !== targetSemester) {
-                usedSpreadsheetSemesterOverride = true;
-            }
-
-            const campusSlug = campusMap.get(normalizeBulkLookupKey(mapped.campusSlug));
-            if (!campusSlug) {
-                rowErrors.push(`Row ${rowNumber}: unknown campus "${mapped.campusSlug}".`);
-                return;
-            }
-
-            const departmentCode = normalizeBulkDepartment(mapped.departmentCode, campusSlug, departmentMap);
-            if (!departmentCode || departmentCode === BULK_UNASSIGNED_DEPARTMENT) {
-                rowErrors.push(`Row ${rowNumber}: unknown department "${mapped.departmentCode}".`);
-                return;
-            }
-
-            const programRecord = resolveBulkProgramRecord(campusSlug, departmentCode, mapped.programCode, programMap);
-            if (!programRecord) {
-                rowErrors.push(`Row ${rowNumber}: unknown program "${mapped.programCode}" for ${campusSlug}/${departmentCode}.`);
-                return;
-            }
-
-            const subjectCode = normalizeBulkText(mapped.subjectCode).toUpperCase();
-            if (!subjectCode) {
-                rowErrors.push(`Row ${rowNumber}: subject_code is required.`);
-                return;
-            }
-
-            const sectionName = normalizeOfferingSection(mapped.sectionName);
-            if (!sectionName) {
-                rowErrors.push(`Row ${rowNumber}: section must be in Y/S format (example: 3/1; 3-1 is accepted).`);
-                return;
-            }
-
-            const professorEmployeeId = normalizeBulkProfessorEmployeeId(mapped.professorEmployeeId);
-            if (!professorEmployeeId) {
-                rowErrors.push(`Row ${rowNumber}: professor_employee_id is required.`);
-                return;
-            }
-
-            payloadRows.push({
-                semesterSlug: targetSemester,
-                campusSlug,
-                departmentCode,
-                programCode: programRecord.programCode,
-                subjectCode,
-                sectionName,
-                professorEmployeeId,
-            });
-        });
+        const prepared = buildOfferingBulkPayloadRows(rows);
+        const payloadRows = prepared.payloadRows;
+        const rowErrors = prepared.rowErrors;
+        const usedSpreadsheetSemesterOverride = prepared.usedSpreadsheetSemesterOverride;
+        const targetSemester = prepared.targetSemester;
 
         if (!payloadRows.length) {
             const prefix = rowErrors.length ? 'No valid rows found.\n' : '';
@@ -4811,6 +5192,67 @@ async function handleBulkOfferingImport(event) {
         alert(summaryLines.join('\n'));
     } catch (error) {
         alert('Bulk offering import failed: ' + (error.message || 'Unknown error'));
+    } finally {
+        if (input) input.value = '';
+    }
+}
+
+async function handleBulkExcessLoadImport(event) {
+    const input = event.target;
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+
+    try {
+        if (!getExcelParser()) {
+            throw new Error('Excel parser is not loaded.');
+        }
+        if (typeof SharedData.markExcessCourseOfferings !== 'function') {
+            throw new Error('Excess load import API is not available.');
+        }
+
+        const rows = await readExcelRows(file);
+        if (!rows.length) {
+            alert('No importable rows found in the first worksheet.');
+            return;
+        }
+
+        const prepared = buildOfferingBulkPayloadRows(rows);
+        const payloadRows = prepared.payloadRows;
+        const rowErrors = prepared.rowErrors;
+        const usedSpreadsheetSemesterOverride = prepared.usedSpreadsheetSemesterOverride;
+        const targetSemester = prepared.targetSemester;
+
+        if (!payloadRows.length) {
+            const prefix = rowErrors.length ? 'No valid rows found.\n' : '';
+            alert(prefix + rowErrors.join('\n'));
+            return;
+        }
+
+        const result = SharedData.markExcessCourseOfferings(payloadRows);
+        refreshSubjectManagementView();
+        updateOverviewCards();
+
+        const summaryLines = [
+            'Excess load import complete.',
+            `Matched Rows: ${result.matchedRows || 0}`,
+            `Marked Excess: ${result.markedExcess || 0}`,
+            `Reset to Main Load: ${result.resetMain || 0}`,
+            `Failed: ${(result.failed || 0) + rowErrors.length}`,
+        ];
+
+        const backendErrors = Array.isArray(result.errors) ? result.errors : [];
+        const combinedErrors = rowErrors.concat(backendErrors);
+        if (combinedErrors.length) {
+            summaryLines.push('', 'Errors:');
+            combinedErrors.forEach(msg => summaryLines.push('- ' + msg));
+        }
+        if (usedSpreadsheetSemesterOverride) {
+            summaryLines.push('', `Note: spreadsheet semester_slug values were ignored. Excess load was applied to current semester "${targetSemester}".`);
+        }
+
+        alert(summaryLines.join('\n'));
+    } catch (error) {
+        alert('Bulk excess load import failed: ' + (error.message || 'Unknown error'));
     } finally {
         if (input) input.value = '';
     }
@@ -4984,6 +5426,14 @@ function handleOfferingFormSubmit(event) {
     }
 }
 
+function normalizeOfferingLoadType(value) {
+    return String(value || '').trim().toLowerCase() === 'excess' ? 'excess' : 'main';
+}
+
+function getOfferingLoadTypeLabel(value) {
+    return normalizeOfferingLoadType(value) === 'excess' ? 'Excess Load' : 'Main Load';
+}
+
 function renderOfferingsTable() {
     const body = document.getElementById('offering-list-body');
     const semesterSelect = document.getElementById('offering-semester');
@@ -5030,7 +5480,7 @@ function renderOfferingsTable() {
     if (!offerings.length) {
         body.innerHTML = `
             <tr>
-                <td colspan="8" style="text-align:center; padding:18px;">${searchTerm ? 'No matching offerings found.' : 'No offerings assigned for this semester.'}</td>
+                <td colspan="9" style="text-align:center; padding:18px;">${searchTerm ? 'No matching offerings found.' : 'No offerings assigned for this semester.'}</td>
             </tr>
         `;
         return;
@@ -5039,6 +5489,7 @@ function renderOfferingsTable() {
     body.innerHTML = offerings.map(offering => {
         const offeringId = String(offering.id);
         const assignedStudents = enrollmentCountByOffering[offeringId] || 0;
+        const loadType = normalizeOfferingLoadType(offering.loadType || offering.load_type);
         return `
             <tr class="${offering.isActive ? '' : 'inactive'}">
                 <td>${offering.subjectCode} - ${offering.subjectName}</td>
@@ -5047,6 +5498,11 @@ function renderOfferingsTable() {
                 <td>${offering.professorEmployeeId || '-'}</td>
                 <td>${offering.programCode || '-'}</td>
                 <td>${String(offering.campusSlug || '').toUpperCase()} / ${String(offering.departmentCode || '').toUpperCase()}</td>
+                <td>
+                    <span class="status-pill load-${loadType}">
+                        ${getOfferingLoadTypeLabel(loadType)}
+                    </span>
+                </td>
                 <td>
                     <span class="status-pill ${offering.isActive ? 'active' : 'inactive'}">
                         ${offering.isActive ? 'Active' : 'Inactive'}
@@ -5653,9 +6109,13 @@ function handleAdminProfilePasswordChange() {
 let professorsData = [];
 let currentEditingProfessorId = null;
 let currentDepartmentFilter = 'all';
+let currentProfessorCampusFilter = 'all';
+let lastProfessorSearchTerm = '';
+let hasProfessorSearchRun = false;
 let currentAnalyticsSemester = 'all';
 let currentAnalyticsEvaluationType = 'student';
 let professorManagementDataSyncBound = false;
+let professorManagementRefreshQueued = false;
 
 const DEFAULT_SEMESTER_OPTIONS = [
     { id: 'all', label: 'All Semesters' },
@@ -5697,6 +6157,12 @@ const EVALUATION_TYPE_OPTIONS = [
 function generateEmployeeId() {
     // Generate a simple unique employee ID based on timestamp
     return `EMP-${Date.now().toString().slice(-6)}`;
+}
+
+function deriveEmployeeIdFallback(userId) {
+    const digits = String(userId || '').replace(/\D/g, '');
+    const base = digits ? digits.slice(-4) : String(Date.now()).slice(-4);
+    return `EMP-${base.padStart(4, '0')}`;
 }
 
 function formatEmploymentType(type) {
@@ -5896,7 +6362,7 @@ function calculateAggregatedMetrics(evaluations, semesterId) {
                 qualitativeResponses.push({
                     id: ev.id,
                     text: combinedText,
-                    date: new Date(ev.submittedAt || Date.now()).toLocaleDateString(),
+                    date: SharedData.formatDateInPhilippines(ev.submittedAt || SharedData.getNowDate()),
                     studentName: ev.evaluatorName || 'Anonymous',
                     studentNumber: ev.evaluatorId || ev.evaluatorUsername || 'N/A',
                     role: ev.evaluatorRole || ev.evaluationType || 'unknown',
@@ -5908,7 +6374,7 @@ function calculateAggregatedMetrics(evaluations, semesterId) {
 
     return {
         evaluatedCount: filtered.length,
-        averageRating: ratingCount > 0 ? parseFloat((totalRatings / ratingCount).toFixed(1)) : 0,
+        averageRating: ratingCount > 0 ? parseFloat((totalRatings / ratingCount).toFixed(2)) : 0,
         qualitativeResponses: qualitativeResponses
     };
 }
@@ -5917,7 +6383,7 @@ function normalizeResponse(response, semesterId) {
     const normalized = { ...response };
     if (!normalized.id) normalized.id = Date.now() + '_' + Math.floor(Math.random() * 10000);
     if (!normalized.text) normalized.text = '';
-    if (!normalized.date) normalized.date = new Date().toLocaleDateString();
+    if (!normalized.date) normalized.date = SharedData.formatDateInPhilippines(SharedData.getCurrentPhilippineDateYmd());
     if (!normalized.studentName) normalized.studentName = 'Anonymous';
     if (!normalized.studentNumber) normalized.studentNumber = 'N/A';
     if (!normalized.semesterId) normalized.semesterId = semesterId || 'all';
@@ -6371,62 +6837,39 @@ if (typeof saveProfessorsToSharedData !== 'function') {
 function loadProfessorsData() {
     // Always load from the canonical shared user snapshot.
     // Using filtered adminUsers can drop professors when later persisted.
-    const sourceUsers = SharedData.getUsers();
+    const sourceUsers = SharedData.getUsers ? SharedData.getUsers() : [];
     professorsData = sourceUsers.filter(function (u) {
         return String(u.role || '').toLowerCase() === 'professor';
     });
-    let didUpdate = false;
-    // Migrate old data to include analytics fields
+
     professorsData = professorsData.map(professor => {
-        let updated = { ...professor };
-        let changed = false;
+        const updated = { ...professor };
 
         if (!updated.employeeId) {
-            updated.employeeId = generateEmployeeId();
-            changed = true;
+            updated.employeeId = deriveEmployeeIdFallback(updated.id);
         }
 
         if (!updated.employmentType) {
             updated.employmentType = 'Regular';
-            changed = true;
         }
 
         if (!updated.department && updated.institute) {
             updated.department = updated.institute;
-            changed = true;
         }
         if (updated.department) {
-            const normalizedDepartment = String(updated.department).toUpperCase();
-            if (updated.department !== normalizedDepartment) {
-                updated.department = normalizedDepartment;
-                changed = true;
-            }
+            updated.department = String(updated.department).toUpperCase();
         }
 
         if (typeof updated.isActive !== 'boolean') {
             const normalizedStatus = String(updated.status || '').toLowerCase();
             updated.isActive = normalizedStatus === 'inactive' ? false : true;
-            changed = true;
         }
         if (!updated.status) {
             updated.status = updated.isActive ? 'active' : 'inactive';
-            changed = true;
-        }
-
-        if (ensureProfessorSemesterData(updated)) {
-            changed = true;
-        }
-
-        if (changed) {
-            didUpdate = true;
         }
 
         return updated;
     });
-
-    if (didUpdate) {
-        saveProfessorsToSharedData();
-    }
 }
 
 /**
@@ -6450,24 +6893,72 @@ function limitProfessorsPerDepartment() {
     }
 }
 
+function normalizeProfessorFilterToken(value) {
+    return String(value == null ? '' : value).trim().toLowerCase();
+}
+
+function renderProfessorSearchPrompt(message) {
+    const professorsList = document.getElementById('professors-list');
+    if (!professorsList) return;
+
+    professorsList.innerHTML = `
+        <div class="empty-state professor-search-gate">
+            <i class="fas fa-search"></i>
+            <p>${message}</p>
+        </div>
+    `;
+}
+
+function runProfessorSearch() {
+    const searchInput = document.getElementById('professor-search');
+    const campusSelect = document.getElementById('professor-campus-filter');
+
+    lastProfessorSearchTerm = normalizeProfessorFilterToken(searchInput ? searchInput.value : '');
+    currentProfessorCampusFilter = campusSelect ? campusSelect.value || 'all' : 'all';
+    hasProfessorSearchRun = Boolean(lastProfessorSearchTerm);
+    renderProfessors();
+}
+
+function clearProfessorSearchFilters() {
+    const searchInput = document.getElementById('professor-search');
+    const campusSelect = document.getElementById('professor-campus-filter');
+
+    if (searchInput) searchInput.value = '';
+    if (campusSelect) campusSelect.value = 'all';
+    currentProfessorCampusFilter = 'all';
+    currentDepartmentFilter = 'all';
+    lastProfessorSearchTerm = '';
+    hasProfessorSearchRun = false;
+    renderProfessorDepartmentTabs();
+    renderProfessors();
+}
+
 /**
  * Setup professor management functionality
  */
 function setupProfessorManagement() {
     // Load professor data from SharedData
     loadProfessorsData();
+    populateProfessorCampusFilter();
 
     if (!professorManagementDataSyncBound && SharedData.onDataChange) {
         professorManagementDataSyncBound = true;
         SharedData.onDataChange(function (key) {
             if (
+                key === SharedData.KEYS.USERS ||
+                key === SharedData.KEYS.CAMPUSES ||
                 key === SharedData.KEYS.EVALUATIONS ||
                 key === SharedData.KEYS.SUBJECT_MANAGEMENT ||
                 key === SharedData.KEYS.CURRENT_SEMESTER ||
                 key === SharedData.KEYS.SEMESTER_LIST
             ) {
                 loadProfessorsData();
-                renderProfessors();
+                if (isContentViewVisible('hr-professors-view')) {
+                    populateProfessorCampusFilter();
+                    renderProfessorDepartmentOptions();
+                    renderProfessorDepartmentTabs();
+                    renderProfessors();
+                }
             }
         });
     }
@@ -6491,7 +6982,30 @@ function setupProfessorManagement() {
 
     const searchInput = document.getElementById('professor-search');
     if (searchInput) {
-        searchInput.addEventListener('input', renderProfessors);
+        searchInput.addEventListener('input', function () {
+            if (normalizeProfessorFilterToken(this.value) !== lastProfessorSearchTerm) {
+                hasProfessorSearchRun = false;
+                renderProfessors();
+            }
+        });
+    }
+
+    const campusFilter = document.getElementById('professor-campus-filter');
+    if (campusFilter) {
+        campusFilter.addEventListener('change', function () {
+            currentProfessorCampusFilter = this.value || 'all';
+            renderProfessors();
+        });
+    }
+
+    const professorSearchBtn = document.getElementById('professor-search-btn');
+    if (professorSearchBtn) {
+        professorSearchBtn.addEventListener('click', runProfessorSearch);
+    }
+
+    const professorClearBtn = document.getElementById('professor-clear-btn');
+    if (professorClearBtn) {
+        professorClearBtn.addEventListener('click', clearProfessorSearchFilters);
     }
 
     // Modal close buttons
@@ -6553,11 +7067,29 @@ function setupProfessorManagement() {
  * Load user management view
  */
 function loadUserManagement() {
-    fetchUsersFromApi('all', '')
-        .finally(() => {
-            loadProfessorsData();
-            renderProfessors();
-        });
+    loadProfessorsData();
+    renderProfessors();
+
+    if (professorManagementRefreshQueued) {
+        return;
+    }
+    professorManagementRefreshQueued = true;
+    setTimeout(() => {
+        fetchUsersFromApi('all', '')
+            .catch(error => {
+                console.warn('[AdminPanel] Failed to refresh professor management users.', error);
+            })
+            .finally(() => {
+                professorManagementRefreshQueued = false;
+                if (!isContentViewVisible('hr-professors-view')) {
+                    return;
+                }
+                loadProfessorsData();
+                renderProfessorDepartmentTabs();
+                populateProfessorCampusFilter();
+                renderProfessors();
+            });
+    }, 0);
 }
 
 /**
@@ -6567,22 +7099,32 @@ function renderProfessors() {
     const professorsList = document.getElementById('professors-list');
     if (!professorsList) return;
 
-    const searchInput = document.getElementById('professor-search');
-    const searchTerm = searchInput ? searchInput.value.trim().toLowerCase() : '';
+    const searchTerm = normalizeProfessorFilterToken(lastProfessorSearchTerm);
+    if (!hasProfessorSearchRun || !searchTerm) {
+        renderProfessorSearchPrompt('Search by name or employee ID to show professors.');
+        return;
+    }
 
-    // Filter professors by department
+    const analyticsContext = getAdminAnalyticsContext();
+    const studentsEvaluatedCountMap = buildAdminStudentsEvaluatedCountMap(analyticsContext, 'all');
+
     let filteredProfessors = professorsData;
     if (currentDepartmentFilter !== 'all') {
-        filteredProfessors = professorsData.filter(t => t.department === currentDepartmentFilter);
+        filteredProfessors = filteredProfessors.filter(t => t.department === currentDepartmentFilter);
     }
 
-    if (searchTerm) {
+    const campusFilter = normalizeProfessorFilterToken(currentProfessorCampusFilter);
+    if (campusFilter && campusFilter !== 'all') {
         filteredProfessors = filteredProfessors.filter(professor => {
-            const nameMatch = (professor.name || '').toLowerCase().includes(searchTerm);
-            const employeeMatch = (professor.employeeId || '').toLowerCase().includes(searchTerm);
-            return nameMatch || employeeMatch;
+            return normalizeProfessorFilterToken(professor.campus || professor.campusSlug) === campusFilter;
         });
     }
+
+    filteredProfessors = filteredProfessors.filter(professor => {
+        const nameMatch = normalizeProfessorFilterToken(professor.name).includes(searchTerm);
+        const employeeMatch = normalizeProfessorFilterToken(professor.employeeId).includes(searchTerm);
+        return nameMatch || employeeMatch;
+    });
 
     filteredProfessors = filteredProfessors
         .slice()
@@ -6594,14 +7136,10 @@ function renderProfessors() {
         });
 
     if (filteredProfessors.length === 0) {
-        let emptyMessage = 'No professors found in this department';
-        if (searchTerm) {
-            emptyMessage = 'No professors match your search';
-        }
         professorsList.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-user-slash"></i>
-                <p>${emptyMessage}</p>
+                <p>No professors match your search</p>
             </div>
         `;
         return;
@@ -6624,7 +7162,15 @@ function renderProfessors() {
                     </tr>
                 </thead>
                 <tbody>
-                    ${filteredProfessors.map(professor => `
+                    ${filteredProfessors.map(professor => {
+                        const professorToken = normalizeAdminUserIdToken(professor.id);
+                        const studentsEvaluated = Number(
+                            studentsEvaluatedCountMap[professorToken]
+                            ?? professor.evaluatedCount
+                            ?? professor.evaluationsCount
+                        ) || 0;
+
+                        return `
                         <tr class="${professor.isActive === false ? 'inactive' : ''}" data-id="${professor.id}">
                             <td>
                                 <div class="professor-table-name">
@@ -6637,7 +7183,7 @@ function renderProfessors() {
                             <td><span class="dept-badge dept-${professor.department}">${professor.department || 'N/A'}</span></td>
                             <td>${professor.position || 'Professor'}</td>
                             <td>${formatEmploymentType(professor.employmentType)}</td>
-                            <td>${professor.evaluatedCount || professor.evaluationsCount || 0}</td>
+                            <td>${studentsEvaluated}</td>
                             <td>
                                 <span class="status-pill ${professor.isActive ? 'active' : 'inactive'}">
                                     ${professor.isActive ? 'Active' : 'Inactive'}
@@ -6657,7 +7203,8 @@ function renderProfessors() {
                                 </div>
                             </td>
                         </tr>
-                    `).join('')}
+                    `;
+                    }).join('')}
                 </tbody>
             </table>
         </div>
@@ -6981,9 +7528,7 @@ function viewProfessorAnalytics(professorId) {
             return;
         }
 
-        if (ensureProfessorSemesterData(professor)) {
-            saveProfessorsToSharedData();
-        }
+        ensureProfessorSemesterData(professor);
 
         const semesterOptions = getSemesterOptions();
         const selectedSemester = currentAnalyticsSemester || 'all';
@@ -7343,7 +7888,7 @@ function normalizeAdminAiAnalyticsSourceLabel(value) {
     if (!token) return 'General';
     if (token.includes('student')) return 'Student to Professor';
     if (token.includes('peer') || token.includes('professor')) return 'Professor to Professor';
-    if (token.includes('supervisor') || token.includes('dean') || token.includes('vpaa') || token.includes('hr')) return 'Supervisor to Professor';
+    if (token.includes('supervisor') || token.includes('dean') || token.includes('procoor') || token.includes('vpaa') || token.includes('hr')) return 'Supervisor to Professor';
     return 'General';
 }
 
@@ -7771,10 +8316,14 @@ function normalizeAdminAiInsightData(rawInsight, fallbackInsight) {
 function renderAdminAiInsightState(outputEl, stateType, message) {
     if (!outputEl) return;
     const type = String(stateType || 'info').toLowerCase();
+    const safeMessage = escapeAdminAnalyticsHtml(message || 'No data available.');
+    const stateContent = type === 'loading'
+        ? `${window.AppHourglassMarkup ? window.AppHourglassMarkup('small') : ''}<span>${safeMessage}</span>`
+        : safeMessage;
     outputEl.classList.add('visible');
     outputEl.innerHTML = `
         <div class="admin-ai-note">AI Analytics uses all comment sources (student, peer, supervisor).</div>
-        <div class="admin-ai-state ${escapeAdminAnalyticsHtml(type)}">${escapeAdminAnalyticsHtml(message || 'No data available.')}</div>
+        <div class="admin-ai-state ${escapeAdminAnalyticsHtml(type)}">${stateContent}</div>
     `;
 }
 
@@ -7882,7 +8431,7 @@ function runAdminAiAnalyticsForProfessor(professorId, semesterId, outputEl, btnE
     const originalText = btnEl ? btnEl.innerHTML : '';
     if (btnEl) {
         btnEl.disabled = true;
-        btnEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
+        btnEl.textContent = 'Analyzing...';
     }
 
     const executeAnalysis = function () {
@@ -8087,7 +8636,7 @@ function aggregateAdminEvaluationTypeData(typeKey, context, semesterId) {
         const stat = categoryStats[category] || { sum: 0, count: 0 };
         return {
             category,
-            score: stat.count > 0 ? parseFloat((stat.sum / stat.count).toFixed(1)) : 0,
+            score: stat.count > 0 ? parseFloat((stat.sum / stat.count).toFixed(2)) : 0,
         };
     });
     if (categoryScores.length === 0) {
@@ -8097,7 +8646,7 @@ function aggregateAdminEvaluationTypeData(typeKey, context, semesterId) {
     return {
         categoryScores,
         ratingDistribution,
-        averageRating: totalRatingCount > 0 ? parseFloat((totalRatingValue / totalRatingCount).toFixed(1)) : 0,
+        averageRating: totalRatingCount > 0 ? parseFloat((totalRatingValue / totalRatingCount).toFixed(2)) : 0,
         totalEvaluations,
         evaluatedCount: uniqueTargets.size,
     };
@@ -8107,7 +8656,7 @@ function generateEvaluationTypeData(type, contextInput, semesterIdInput) {
     const typeToken = normalizeAdminAnalyticsToken(type);
     let typeKey = 'student';
     if (typeToken === 'peer' || typeToken.includes('professor')) typeKey = 'peer';
-    if (typeToken === 'supervisor' || typeToken.includes('dean') || typeToken.includes('hr')) typeKey = 'supervisor';
+    if (typeToken === 'supervisor' || typeToken.includes('dean') || typeToken.includes('procoor') || typeToken.includes('hr')) typeKey = 'supervisor';
 
     const context = contextInput || getAdminAnalyticsContext();
     const semesterId = semesterIdInput || context.currentSemester || 'all';
@@ -8147,6 +8696,142 @@ function updateOverallStatus(data) {
     if (rateEl) rateEl.textContent = data.overall.completionRate + '%';
 }
 
+function renderAdminRatingDistributionChart(canvas, data) {
+    return window.AppChartDesign.renderRatingDistributionChart(canvas, {
+        ratingDistribution: data && data.ratingDistribution,
+        averageRating: data && data.averageRating
+    });
+}
+
+function createAdminBarGradient(context, colors) {
+    const chart = context.chart;
+    const chartArea = chart.chartArea;
+    if (!chartArea) return colors[0];
+
+    const gradient = chart.ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+    gradient.addColorStop(0, colors[0]);
+    gradient.addColorStop(1, colors[1]);
+    return gradient;
+}
+
+function renderAdminBarChart(canvas, config) {
+    if (!canvas || typeof Chart === 'undefined') return null;
+
+    const existingChart = Chart.getChart(canvas);
+    if (existingChart) existingChart.destroy();
+
+    const chartConfig = config || {};
+    const labels = Array.isArray(chartConfig.labels) && chartConfig.labels.length ? chartConfig.labels : ['No data'];
+    const values = Array.isArray(chartConfig.values) && chartConfig.values.length ? chartConfig.values : [0];
+    const colors = chartConfig.colors || ['#4f46e5', '#22c55e'];
+    const maxValue = Number(chartConfig.maxValue);
+    const stepSize = Number(chartConfig.stepSize);
+
+    return new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [{
+                label: chartConfig.label || 'Value',
+                data: values,
+                backgroundColor: context => createAdminBarGradient(context, colors),
+                borderColor: colors[1],
+                borderWidth: 1,
+                borderRadius: 12,
+                borderSkipped: false,
+                hoverBackgroundColor: colors[1],
+                barPercentage: 0.72,
+                categoryPercentage: 0.64
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: {
+                padding: { top: 8, right: 12, bottom: 12, left: 4 }
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    border: { display: false },
+                    ticks: {
+                        maxRotation: 0,
+                        minRotation: 0,
+                        autoSkip: Boolean(chartConfig.autoSkipX),
+                        maxTicksLimit: chartConfig.maxTicksLimit || 6,
+                        padding: 6,
+                        color: '#64748b',
+                        font: { size: 11, weight: 600 }
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    max: Number.isFinite(maxValue) ? maxValue : undefined,
+                    grid: {
+                        color: 'rgba(148, 163, 184, 0.22)',
+                        drawTicks: false
+                    },
+                    border: { display: false },
+                    ticks: {
+                        stepSize: Number.isFinite(stepSize) ? stepSize : undefined,
+                        color: '#64748b',
+                        padding: 8,
+                        font: { size: 11, weight: 600 }
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: chartConfig.showLegend !== false,
+                    position: 'bottom',
+                    labels: {
+                        usePointStyle: true,
+                        pointStyle: 'rectRounded',
+                        boxWidth: 10,
+                        boxHeight: 10,
+                        padding: 16,
+                        color: '#475569',
+                        font: { size: 12, weight: 600 }
+                    }
+                },
+                tooltip: {
+                    backgroundColor: '#111827',
+                    borderColor: 'rgba(255, 255, 255, 0.18)',
+                    borderWidth: 1,
+                    padding: 12,
+                    displayColors: true,
+                    callbacks: {
+                        title(items) {
+                            const item = Array.isArray(items) && items.length ? items[0] : null;
+                            const index = item ? item.dataIndex : -1;
+                            return chartConfig.fullLabels && chartConfig.fullLabels[index]
+                                ? chartConfig.fullLabels[index]
+                                : (item ? item.label : '');
+                        },
+                        label(context) {
+                            const value = Number(context.parsed.y) || 0;
+                            const suffix = chartConfig.valueSuffix || '';
+                            const decimals = Number(chartConfig.tooltipDecimals);
+                            const displayValue = Number.isFinite(decimals)
+                                ? value.toFixed(Math.max(0, decimals))
+                                : String(value);
+                            return `${context.dataset.label}: ${displayValue}${suffix}`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function buildAdminSectionLabels(items) {
+    return (Array.isArray(items) ? items : []).map((item, index) => ({
+        display: `Section ${String.fromCharCode(65 + index)}`,
+        full: item && item.category ? item.category : `Section ${String.fromCharCode(65 + index)}`,
+        value: item && Number.isFinite(Number(item.score)) ? Number(item.score) : 0
+    }));
+}
+
 /**
  * Render Student to Professor charts
  */
@@ -8156,87 +8841,21 @@ function renderStudentProfessorCharts(data) {
     const pieCtx = document.getElementById('student-professor-pie-chart');
 
     if (barCtx) {
-        const existingBarChart = Chart.getChart(barCtx);
-        if (existingBarChart) existingBarChart.destroy();
-
-        new Chart(barCtx, {
-            type: 'bar',
-            data: {
-                labels: data.categoryScores.map(c => c.category),
-                datasets: [{
-                    label: 'Average Score',
-                    data: data.categoryScores.map(c => c.score),
-                    backgroundColor: 'rgba(102, 126, 234, 0.8)',
-                    borderColor: 'rgba(102, 126, 234, 1)',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        ticks: {
-                            maxRotation: 0,
-                            minRotation: 0,
-                            autoSkip: false,
-                            font: { size: 11 }
-                        }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        max: 5,
-                        ticks: {
-                            stepSize: 1
-                        }
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'bottom'
-                    }
-                }
-            }
+        const sectionLabels = buildAdminSectionLabels(data.categoryScores);
+        renderAdminBarChart(barCtx, {
+            labels: sectionLabels.map(item => item.display),
+            values: sectionLabels.map(item => item.value),
+            fullLabels: sectionLabels.map(item => item.full),
+            label: 'Average Score',
+            colors: ['#4f46e5', '#22c55e'],
+            maxValue: 5,
+            stepSize: 1,
+            tooltipDecimals: 2
         });
     }
 
     if (pieCtx) {
-        const existingPieChart = Chart.getChart(pieCtx);
-        if (existingPieChart) existingPieChart.destroy();
-
-        new Chart(pieCtx, {
-            type: 'pie',
-            data: {
-                labels: ['5 Stars', '4 Stars', '3 Stars', '2 Stars', '1 Star'],
-                datasets: [{
-                    data: [
-                        data.ratingDistribution[5],
-                        data.ratingDistribution[4],
-                        data.ratingDistribution[3],
-                        data.ratingDistribution[2],
-                        data.ratingDistribution[1]
-                    ],
-                    backgroundColor: [
-                        '#10b981',
-                        '#34d399',
-                        '#fbbf24',
-                        '#f97316',
-                        '#ef4444'
-                    ]
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'bottom'
-                    }
-                }
-            }
-        });
+        renderAdminRatingDistributionChart(pieCtx, data);
     }
 
     // Update stats
@@ -8253,87 +8872,21 @@ function renderProfessorProfessorCharts(data) {
     const pieCtx = document.getElementById('professor-professor-pie-chart');
 
     if (barCtx) {
-        const existingBarChart = Chart.getChart(barCtx);
-        if (existingBarChart) existingBarChart.destroy();
-
-        new Chart(barCtx, {
-            type: 'bar',
-            data: {
-                labels: data.categoryScores.map(c => c.category),
-                datasets: [{
-                    label: 'Average Score',
-                    data: data.categoryScores.map(c => c.score),
-                    backgroundColor: 'rgba(59, 130, 246, 0.8)',
-                    borderColor: 'rgba(59, 130, 246, 1)',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        ticks: {
-                            maxRotation: 0,
-                            minRotation: 0,
-                            autoSkip: false,
-                            font: { size: 11 }
-                        }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        max: 5,
-                        ticks: {
-                            stepSize: 1
-                        }
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'bottom'
-                    }
-                }
-            }
+        const sectionLabels = buildAdminSectionLabels(data.categoryScores);
+        renderAdminBarChart(barCtx, {
+            labels: sectionLabels.map(item => item.display),
+            values: sectionLabels.map(item => item.value),
+            fullLabels: sectionLabels.map(item => item.full),
+            label: 'Average Score',
+            colors: ['#2563eb', '#14b8a6'],
+            maxValue: 5,
+            stepSize: 1,
+            tooltipDecimals: 2
         });
     }
 
     if (pieCtx) {
-        const existingPieChart = Chart.getChart(pieCtx);
-        if (existingPieChart) existingPieChart.destroy();
-
-        new Chart(pieCtx, {
-            type: 'pie',
-            data: {
-                labels: ['5 Stars', '4 Stars', '3 Stars', '2 Stars', '1 Star'],
-                datasets: [{
-                    data: [
-                        data.ratingDistribution[5],
-                        data.ratingDistribution[4],
-                        data.ratingDistribution[3],
-                        data.ratingDistribution[2],
-                        data.ratingDistribution[1]
-                    ],
-                    backgroundColor: [
-                        '#10b981',
-                        '#34d399',
-                        '#fbbf24',
-                        '#f97316',
-                        '#ef4444'
-                    ]
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'bottom'
-                    }
-                }
-            }
-        });
+        renderAdminRatingDistributionChart(pieCtx, data);
     }
 
     // Update stats
@@ -8350,87 +8903,21 @@ function renderSupervisorProfessorCharts(data) {
     const pieCtx = document.getElementById('supervisor-professor-pie-chart');
 
     if (barCtx) {
-        const existingBarChart = Chart.getChart(barCtx);
-        if (existingBarChart) existingBarChart.destroy();
-
-        new Chart(barCtx, {
-            type: 'bar',
-            data: {
-                labels: data.categoryScores.map(c => c.category),
-                datasets: [{
-                    label: 'Average Score',
-                    data: data.categoryScores.map(c => c.score),
-                    backgroundColor: 'rgba(139, 92, 246, 0.8)',
-                    borderColor: 'rgba(139, 92, 246, 1)',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        ticks: {
-                            maxRotation: 0,
-                            minRotation: 0,
-                            autoSkip: false,
-                            font: { size: 11 }
-                        }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        max: 5,
-                        ticks: {
-                            stepSize: 1
-                        }
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'bottom'
-                    }
-                }
-            }
+        const sectionLabels = buildAdminSectionLabels(data.categoryScores);
+        renderAdminBarChart(barCtx, {
+            labels: sectionLabels.map(item => item.display),
+            values: sectionLabels.map(item => item.value),
+            fullLabels: sectionLabels.map(item => item.full),
+            label: 'Average Score',
+            colors: ['#7c3aed', '#06b6d4'],
+            maxValue: 5,
+            stepSize: 1,
+            tooltipDecimals: 2
         });
     }
 
     if (pieCtx) {
-        const existingPieChart = Chart.getChart(pieCtx);
-        if (existingPieChart) existingPieChart.destroy();
-
-        new Chart(pieCtx, {
-            type: 'pie',
-            data: {
-                labels: ['5 Stars', '4 Stars', '3 Stars', '2 Stars', '1 Star'],
-                datasets: [{
-                    data: [
-                        data.ratingDistribution[5],
-                        data.ratingDistribution[4],
-                        data.ratingDistribution[3],
-                        data.ratingDistribution[2],
-                        data.ratingDistribution[1]
-                    ],
-                    backgroundColor: [
-                        '#10b981',
-                        '#34d399',
-                        '#fbbf24',
-                        '#f97316',
-                        '#ef4444'
-                    ]
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'bottom'
-                    }
-                }
-            }
-        });
+        renderAdminRatingDistributionChart(pieCtx, data);
     }
 
     // Update stats
@@ -8495,6 +8982,7 @@ function setupQuestionnaire() {
         questionnaireTypeSelect.value = currentQuestionnaireType;
         updateFormHeader(currentQuestionnaireType);
     }
+    syncSectionDescriptionRequirement();
     setupFormHeaderEditing();
 
     // Add section button
@@ -8774,7 +9262,7 @@ function setupSemesterSettings() {
 
     const getYearChoices = () => {
         const years = new Set();
-        const nowYear = new Date().getFullYear();
+        const nowYear = SharedData.getCurrentPhilippineYear();
         for (let year = nowYear - 3; year <= nowYear + 8; year += 1) {
             years.add(year);
         }
@@ -8805,7 +9293,7 @@ function setupSemesterSettings() {
             yearEndSelect.appendChild(endOption);
         });
 
-        const nowYear = new Date().getFullYear();
+        const nowYear = SharedData.getCurrentPhilippineYear();
         const fallbackStart = String(nowYear);
         const fallbackEnd = String(nowYear + 1);
         const startValue = preferredStart || fallbackStart;
@@ -9121,6 +9609,7 @@ function handleQuestionnaireTypeChange() {
     if (select) {
         currentQuestionnaireType = select.value;
         updateFormHeader(currentQuestionnaireType);
+        syncSectionDescriptionRequirement();
         renderQuestions();
     }
 }
@@ -9136,6 +9625,29 @@ function updateFormHeader(type) {
 
     if (titleEl) titleEl.textContent = header.title;
     if (descEl) descEl.textContent = header.description;
+}
+
+function isSectionDescriptionRequired(type) {
+    return type === 'student-to-professor';
+}
+
+function syncSectionDescriptionRequirement() {
+    const descriptionInput = document.getElementById('section-description');
+    const descriptionLabel = document.getElementById('section-description-label');
+    const descriptionHint = document.getElementById('section-description-hint');
+    const required = isSectionDescriptionRequired(currentQuestionnaireType);
+
+    if (descriptionInput) {
+        descriptionInput.required = required;
+    }
+    if (descriptionLabel) {
+        descriptionLabel.textContent = required ? 'Section Description' : 'Section Description (Optional)';
+    }
+    if (descriptionHint) {
+        descriptionHint.textContent = required
+            ? 'Required for student-to-professor questionnaires.'
+            : 'Optional for professor-to-professor and supervisor-to-professor questionnaires.';
+    }
 }
 
 function getQuestionnaireHeader(type) {
@@ -9706,6 +10218,7 @@ function openAddSectionModal() {
     if (modal && modalTitle && form) {
         modalTitle.textContent = 'Add Section';
         form.reset();
+        syncSectionDescriptionRequirement();
         currentEditingSectionId = null;
         modal.style.display = 'flex';
         // Focus on first input after a brief delay
@@ -9815,6 +10328,7 @@ function editSection(sectionId) {
         document.getElementById('section-letter').value = section.letter;
         document.getElementById('section-title').value = section.title;
         document.getElementById('section-description').value = section.description;
+        syncSectionDescriptionRequirement();
         currentEditingSectionId = sectionId;
         modal.style.display = 'flex';
         // Focus on first input after a brief delay

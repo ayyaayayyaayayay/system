@@ -31,20 +31,20 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') {
     sendFileJsonError('Method not allowed', 405);
 }
 
-$session = requireNaapAuthenticatedSession();
+$session = requireNaapAuthenticatedSession($pdo);
 $sessionUser = buildUserSnapshotById($pdo, $session['userId'], false);
 if (!$sessionUser) {
-    destroyNaapSession();
+    destroyNaapSession($pdo);
     sendFileJsonError('Authentication required.', 401);
 }
 if (strtolower(trim((string) ($sessionUser['status'] ?? 'active'))) === 'inactive') {
-    destroyNaapSession();
+    destroyNaapSession($pdo);
     sendFileJsonError('Account is inactive.', 403);
 }
 
 $actorRole = strtolower(trim((string) ($sessionUser['role'] ?? '')));
 $actorUserId = trim((string) ($sessionUser['id'] ?? ''));
-if ($actorRole !== 'professor' && $actorRole !== 'dean') {
+if (!in_array($actorRole, ['professor', 'dean', 'procoor', 'hr'], true)) {
     sendFileJsonError('Permission denied.', 403);
 }
 
@@ -77,7 +77,7 @@ if (!$paper) {
     sendFileJsonError('Paper not found.', 404);
 }
 
-if (!facultyPdfCanAccessStoredFile($paper, $actorRole, $actorUserId)) {
+if (!facultyPdfCanAccessStoredFile($paper, $actorRole, $actorUserId, $sessionUser)) {
     sendFileJsonError('Permission denied.', 403);
 }
 

@@ -17,6 +17,7 @@ INSERT IGNORE INTO `roles` (`code`, `label`) VALUES
     ('osa', 'Office of Student Affairs'),
     ('vpaa', 'Vice President for Academic Affairs'),
     ('dean', 'Dean'),
+    ('procoor', 'Program Coordinator'),
     ('professor', 'Professor'),
     ('student', 'Student');
 

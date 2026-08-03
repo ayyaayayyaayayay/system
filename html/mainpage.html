@@ -7,8 +7,8 @@
       National Aviation Academy of the Philippines - Student Professor
       Evaluation System
     </title>
-    <link rel="stylesheet" href="../css/panel-theme.css" />
-    <link rel="stylesheet" href="../css/mainpage.css" />
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260729c" />
+    <link rel="stylesheet" href="../css/mainpage.css?v=20260729c" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   </head>
 
@@ -24,16 +24,6 @@
           academic portal.
         </p>
 
-        <div class="brand-highlights">
-          <article class="brand-highlight-card">
-            <h2>Role-based access</h2>
-            <p>Student, professor, dean, HR, OSA, VPAA, and admin access in one system.</p>
-          </article>
-          <article class="brand-highlight-card">
-            <h2>Semestral readiness</h2>
-            <p>OTP login, evaluation periods, and structured questionnaire delivery.</p>
-          </article>
-        </div>
       </section>
 
       <section class="auth-panel" aria-label="Login form">
@@ -112,17 +102,6 @@
             academic portal.
           </p>
 
-          <div class="brand-highlights">
-            <article class="brand-highlight-card">
-              <h2>Role-based access</h2>
-              <p>Student, professor, dean, HR, OSA, VPAA, and admin access in one system.</p>
-            </article>
-            <article class="brand-highlight-card">
-              <h2>Semestral readiness</h2>
-              <p>OTP login, evaluation periods, and structured questionnaire delivery.</p>
-            </article>
-          </div>
-
           <div class="auth-actions auth-actions--about">
             <button
               type="button"
@@ -146,9 +125,9 @@
         <div class="auth-modal-header">
           <p class="auth-eyebrow">Account recovery</p>
           <h2>Reset Password</h2>
-          <p>
-            Enter your Gmail address and the system will prepare a password reset
-            link.
+          <p id="forgotPasswordIntro">
+            Enter your saved account email and student number or employee ID to
+            receive a password reset link.
           </p>
         </div>
         <div
@@ -157,18 +136,52 @@
           aria-live="polite"
           hidden
         ></div>
-        <div class="form-group">
-          <label for="resetEmail">Gmail Address</label>
-          <input
-            type="email"
-            id="resetEmail"
-            placeholder="e.g., yourname@gmail.com"
-            autocomplete="email"
-          />
+        <div id="passwordResetRequestView">
+          <div class="form-group">
+            <label for="resetEmail">Account Email</label>
+            <input
+              type="email"
+              id="resetEmail"
+              placeholder="Enter your saved account email"
+              autocomplete="email"
+            />
+          </div>
+          <div class="form-group">
+            <label for="resetIdentifier">Student Number / Employee ID</label>
+            <input
+              type="text"
+              id="resetIdentifier"
+              placeholder="Enter your student number or employee ID"
+              autocomplete="username"
+            />
+          </div>
+          <button id="sendResetLinkBtn" class="login-button">
+            <span>Send Reset Link</span>
+          </button>
         </div>
-        <button id="sendResetLinkBtn" class="login-button">
-          <span>Send Reset Link</span>
-        </button>
+        <div id="passwordResetConfirmView" hidden>
+          <div class="form-group">
+            <label for="newResetPassword">New Password</label>
+            <input
+              type="password"
+              id="newResetPassword"
+              placeholder="Enter new password"
+              autocomplete="new-password"
+            />
+          </div>
+          <div class="form-group">
+            <label for="confirmResetPassword">Confirm New Password</label>
+            <input
+              type="password"
+              id="confirmResetPassword"
+              placeholder="Re-enter new password"
+              autocomplete="new-password"
+            />
+          </div>
+          <button id="resetPasswordBtn" class="login-button">
+            <span>Reset Password</span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -207,7 +220,7 @@
       </div>
     </div>
 
-    <script src="../JsScrip/db-data.js?v=20260414d"></script>
-    <script src="../JsScrip/mainpage.js?v=20260414d"></script>
+    <script src="../JsScrip/db-data.js?v=20260729c"></script>
+    <script src="../JsScrip/mainpage.js?v=20260726a"></script>
   </body>
 </html>

@@ -12,6 +12,30 @@
     const NETWORK_MESSAGE = 'Processing request...';
     const DEDICATED_OVERLAY_IDS = ['bulk-register-loading', 'credential-distributor-loading'];
 
+    function buildHourglassMarkup(size) {
+        const normalizedSize = String(size || 'compact').trim().toLowerCase();
+        const allowedSize = ['compact', 'small', 'tiny'].indexOf(normalizedSize) !== -1
+            ? normalizedSize
+            : 'compact';
+        return [
+            '<div class="loading-hourglass-frame loading-hourglass-frame--' + allowedSize + '">',
+            '  <div class="hourglassBackground">',
+            '    <div class="hourglassContainer">',
+            '      <div class="hourglassCurves"></div>',
+            '      <div class="hourglassCapTop"></div>',
+            '      <div class="hourglassGlassTop"></div>',
+            '      <div class="hourglassSand"></div>',
+            '      <div class="hourglassSandStream"></div>',
+            '      <div class="hourglassCapBottom"></div>',
+            '      <div class="hourglassGlass"></div>',
+            '    </div>',
+            '  </div>',
+            '</div>'
+        ].join('');
+    }
+
+    const HOURGLASS_MARKUP = buildHourglassMarkup('compact');
+
     const state = {
         manualInFlight: 0,
         networkInFlight: 0,
@@ -51,7 +75,7 @@
             overlayEl.setAttribute('aria-hidden', 'true');
             overlayEl.innerHTML = [
                 '<div class="app-loading-overlay-card" role="status" aria-live="polite" aria-label="Loading in progress">',
-                '  <div class="app-loading-overlay-spinner" aria-hidden="true"></div>',
+                HOURGLASS_MARKUP,
                 '  <p class="app-loading-overlay-text" id="app-global-loading-text">Loading, please wait...</p>',
                 '</div>'
             ].join('');
@@ -130,6 +154,9 @@
         }
         try {
             const parsed = new URL(raw, window.location.href);
+            if (parsed.searchParams.get('_heartbeat') === '1') {
+                return false;
+            }
             return /\/api\//i.test(parsed.pathname);
         } catch (_error) {
             return /\/api\//i.test(raw);
@@ -282,6 +309,7 @@
         _trackNetworkStart: beginNetworkRequest,
         _trackNetworkEnd: endNetworkRequest,
     };
+    window.AppHourglassMarkup = buildHourglassMarkup;
 
     patchFetch();
     patchXmlHttpRequest();
@@ -297,6 +325,472 @@
         watchDedicatedOverlays();
         renderOverlay();
     }
+})();
+
+window.AppChartDesign = window.AppChartDesign || (() => {
+    const RATING_LABELS = ['5 Stars', '4 Stars', '3 Stars', '2 Stars', '1 Star'];
+    const RATING_COLORS = ['#059669', '#22c55e', '#f59e0b', '#f97316', '#ef4444'];
+
+    const centerTextPlugin = {
+        id: 'appRatingDistributionCenterText',
+        afterDraw(chart, args, pluginOptions) {
+            const chartArea = chart.chartArea;
+            if (!chartArea) return;
+
+            const ctx = chart.ctx;
+            const centerX = (chartArea.left + chartArea.right) / 2;
+            const centerY = (chartArea.top + chartArea.bottom) / 2;
+            const title = pluginOptions && pluginOptions.title ? pluginOptions.title : 'No data';
+            const subtitle = pluginOptions && pluginOptions.subtitle ? pluginOptions.subtitle : '0 ratings';
+            const muted = Boolean(pluginOptions && pluginOptions.muted);
+
+            ctx.save();
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = muted ? '#94a3b8' : '#111827';
+            ctx.font = '700 24px Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+            ctx.fillText(title, centerX, centerY - 8);
+            ctx.fillStyle = muted ? '#cbd5e1' : '#64748b';
+            ctx.font = '600 11px Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+            ctx.fillText(subtitle, centerX, centerY + 14);
+            ctx.restore();
+        }
+    };
+
+    function renderRatingDistributionChart(canvas, options) {
+        if (!canvas || typeof Chart === 'undefined') return null;
+
+        const config = options || {};
+        const existingChart = Chart.getChart(canvas);
+        if (existingChart) existingChart.destroy();
+
+        const sourceDistribution = config.ratingDistribution || {};
+        const values = Array.isArray(config.values)
+            ? config.values.map(value => Number(value) || 0)
+            : [5, 4, 3, 2, 1].map(rating => Number(sourceDistribution[rating]) || 0);
+        const total = values.reduce((sum, value) => sum + value, 0);
+        const hasData = total > 0;
+        const averageRating = Number(config.averageRating) || 0;
+        const labels = config.labels || RATING_LABELS;
+        const colors = config.colors || RATING_COLORS;
+        const totalLabel = config.totalLabel || 'rating';
+
+        return new Chart(canvas, {
+            type: 'doughnut',
+            data: {
+                labels: hasData ? labels : ['No ratings yet'],
+                datasets: [{
+                    data: hasData ? values : [1],
+                    backgroundColor: hasData ? colors : ['#e5e7eb'],
+                    borderColor: '#ffffff',
+                    borderWidth: 4,
+                    borderRadius: hasData ? 10 : 0,
+                    hoverBorderWidth: 4,
+                    hoverOffset: hasData ? 12 : 0,
+                    spacing: hasData ? 3 : 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '64%',
+                radius: '86%',
+                rotation: -90,
+                layout: {
+                    padding: { top: 8, right: 14, bottom: 4, left: 14 }
+                },
+                plugins: {
+                    appRatingDistributionCenterText: {
+                        title: hasData && averageRating > 0 ? averageRating.toFixed(2) : 'No data',
+                        subtitle: `${total} ${total === 1 ? totalLabel : totalLabel + 's'}`,
+                        muted: !hasData
+                    },
+                    legend: {
+                        display: hasData,
+                        position: 'bottom',
+                        labels: {
+                            usePointStyle: true,
+                            pointStyle: 'rectRounded',
+                            boxWidth: 10,
+                            boxHeight: 10,
+                            padding: 16,
+                            color: '#475569',
+                            font: { size: 12, weight: 600 }
+                        }
+                    },
+                    tooltip: {
+                        enabled: hasData,
+                        backgroundColor: '#111827',
+                        borderColor: 'rgba(255, 255, 255, 0.18)',
+                        borderWidth: 1,
+                        padding: 12,
+                        displayColors: true,
+                        callbacks: {
+                            label(context) {
+                                const value = Number(context.parsed) || 0;
+                                const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
+                                return `${context.label}: ${value} (${percentage}%)`;
+                            }
+                        }
+                    }
+                }
+            },
+            plugins: [centerTextPlugin]
+        });
+    }
+
+    function renderDoughnutMetricChart(canvas, options) {
+        if (!canvas || typeof Chart === 'undefined') return null;
+
+        const config = options || {};
+        const existingChart = Chart.getChart(canvas);
+        if (existingChart) existingChart.destroy();
+
+        const values = Array.isArray(config.values) ? config.values.map(value => Number(value) || 0) : [];
+        const total = values.reduce((sum, value) => sum + value, 0);
+        const hasData = total > 0;
+        const labels = Array.isArray(config.labels) && config.labels.length ? config.labels : ['No data'];
+        const colors = Array.isArray(config.colors) && config.colors.length
+            ? config.colors
+            : ['#059669', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6'];
+        const title = config.centerTitle || String(total || 0);
+        const subtitle = config.centerSubtitle || 'Total';
+
+        return new Chart(canvas, {
+            type: 'doughnut',
+            data: {
+                labels: hasData ? labels : ['No data'],
+                datasets: [{
+                    data: hasData ? values : [1],
+                    backgroundColor: hasData ? colors : ['#e5e7eb'],
+                    borderColor: '#ffffff',
+                    borderWidth: 4,
+                    borderRadius: hasData ? 10 : 0,
+                    hoverBorderWidth: 4,
+                    hoverOffset: hasData ? 12 : 0,
+                    spacing: hasData ? 3 : 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '64%',
+                radius: '86%',
+                rotation: -90,
+                layout: {
+                    padding: { top: 8, right: 14, bottom: 4, left: 14 }
+                },
+                plugins: {
+                    appRatingDistributionCenterText: {
+                        title: hasData ? title : 'No data',
+                        subtitle,
+                        muted: !hasData
+                    },
+                    legend: {
+                        display: hasData,
+                        position: 'bottom',
+                        labels: {
+                            usePointStyle: true,
+                            pointStyle: 'rectRounded',
+                            boxWidth: 10,
+                            boxHeight: 10,
+                            padding: 16,
+                            color: '#475569',
+                            font: { size: 12, weight: 600 }
+                        }
+                    },
+                    tooltip: {
+                        enabled: hasData,
+                        backgroundColor: '#111827',
+                        borderColor: 'rgba(255, 255, 255, 0.18)',
+                        borderWidth: 1,
+                        padding: 12,
+                        displayColors: true,
+                        callbacks: {
+                            label(context) {
+                                const value = Number(context.parsed) || 0;
+                                const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
+                                return `${context.label}: ${value} (${percentage}%)`;
+                            }
+                        }
+                    }
+                }
+            },
+            plugins: [centerTextPlugin]
+        });
+    }
+
+    function createBarGradient(context, colors) {
+        const chart = context.chart;
+        const chartArea = chart.chartArea;
+        if (!chartArea) return colors[0];
+
+        const gradient = chart.ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+        gradient.addColorStop(0, colors[0]);
+        gradient.addColorStop(1, colors[1]);
+        return gradient;
+    }
+
+    function renderBarChart(canvas, options) {
+        if (!canvas || typeof Chart === 'undefined') return null;
+
+        const config = options || {};
+        const existingChart = Chart.getChart(canvas);
+        if (existingChart) existingChart.destroy();
+
+        const labels = Array.isArray(config.labels) && config.labels.length ? config.labels : ['No data'];
+        const values = Array.isArray(config.values) && config.values.length
+            ? config.values.map(value => Number(value) || 0)
+            : [0];
+        const colors = config.colors || ['#4f46e5', '#22c55e'];
+        const maxValue = Number(config.maxValue);
+        const stepSize = Number(config.stepSize);
+
+        return new Chart(canvas, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    label: config.label || 'Value',
+                    data: values,
+                    backgroundColor: context => createBarGradient(context, colors),
+                    borderColor: colors[1],
+                    borderWidth: 1,
+                    borderRadius: 12,
+                    borderSkipped: false,
+                    hoverBackgroundColor: colors[1],
+                    barPercentage: 0.72,
+                    categoryPercentage: 0.64
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                layout: {
+                    padding: { top: 8, right: 12, bottom: 2, left: 4 }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        border: { display: false },
+                        ticks: {
+                            maxRotation: 0,
+                            minRotation: 0,
+                            autoSkip: Boolean(config.autoSkipX),
+                            maxTicksLimit: config.maxTicksLimit || 6,
+                            color: '#64748b',
+                            font: { size: 11, weight: 600 }
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        max: Number.isFinite(maxValue) ? maxValue : undefined,
+                        grid: {
+                            color: 'rgba(148, 163, 184, 0.22)',
+                            drawTicks: false
+                        },
+                        border: { display: false },
+                        ticks: {
+                            stepSize: Number.isFinite(stepSize) ? stepSize : undefined,
+                            color: '#64748b',
+                            padding: 8,
+                            font: { size: 11, weight: 600 }
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: config.showLegend !== false,
+                        position: 'bottom',
+                        labels: {
+                            usePointStyle: true,
+                            pointStyle: 'rectRounded',
+                            boxWidth: 10,
+                            boxHeight: 10,
+                            padding: 16,
+                            color: '#475569',
+                            font: { size: 12, weight: 600 }
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: '#111827',
+                        borderColor: 'rgba(255, 255, 255, 0.18)',
+                        borderWidth: 1,
+                        padding: 12,
+                        displayColors: true,
+                        callbacks: {
+                            title(items) {
+                                const item = Array.isArray(items) && items.length ? items[0] : null;
+                                const index = item ? item.dataIndex : -1;
+                                return config.fullLabels && config.fullLabels[index]
+                                    ? config.fullLabels[index]
+                                    : (item ? item.label : '');
+                            },
+                            label(context) {
+                                const value = Number(context.parsed.y) || 0;
+                                const suffix = config.valueSuffix || '';
+                                const decimals = Number(config.tooltipDecimals);
+                                const displayValue = Number.isFinite(decimals)
+                                    ? value.toFixed(Math.max(0, decimals))
+                                    : String(value);
+                                return `${context.dataset.label}: ${displayValue}${suffix}`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function buildSectionSeries(items, options) {
+        const config = options || {};
+        const labelKey = config.labelKey || 'category';
+        const valueKey = config.valueKey || 'score';
+        const source = Array.isArray(items) && items.length ? items : [{ [labelKey]: 'No data', [valueKey]: 0 }];
+        const offset = Number(config.startIndex) || 0;
+
+        const entries = source.map((item, index) => {
+            const sectionIndex = index + offset;
+            const sectionName = `Section ${String.fromCharCode(65 + sectionIndex)}`;
+            return {
+                display: sectionName,
+                full: item && item[labelKey] ? item[labelKey] : sectionName,
+                value: item && Number.isFinite(Number(item[valueKey])) ? Number(item[valueKey]) : 0
+            };
+        });
+
+        return {
+            labels: entries.map(item => item.display),
+            fullLabels: entries.map(item => item.full),
+            values: entries.map(item => item.value)
+        };
+    }
+
+    function createLineGradient(context, color) {
+        const chart = context.chart;
+        const chartArea = chart.chartArea;
+        if (!chartArea) return color;
+
+        const gradient = chart.ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+        gradient.addColorStop(0, color);
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        return gradient;
+    }
+
+    function renderLineChart(canvas, options) {
+        if (!canvas || typeof Chart === 'undefined') return null;
+
+        const config = options || {};
+        const existingChart = Chart.getChart(canvas);
+        if (existingChart) existingChart.destroy();
+
+        const labels = Array.isArray(config.labels) && config.labels.length ? config.labels : ['No data'];
+        const values = Array.isArray(config.values) && config.values.length
+            ? config.values.map(value => Number(value) || 0)
+            : [0];
+        const lineColor = config.lineColor || '#4f46e5';
+        const fillColor = config.fillColor || 'rgba(79, 70, 229, 0.18)';
+        const maxValue = Number(config.maxValue);
+        const stepSize = Number(config.stepSize);
+
+        return new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [{
+                    label: config.label || 'Value',
+                    data: values,
+                    borderColor: lineColor,
+                    backgroundColor: context => createLineGradient(context, fillColor),
+                    fill: true,
+                    tension: 0.35,
+                    borderWidth: 3,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    pointBackgroundColor: '#ffffff',
+                    pointBorderColor: lineColor,
+                    pointBorderWidth: 3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                layout: {
+                    padding: { top: 8, right: 12, bottom: 2, left: 4 }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        border: { display: false },
+                        ticks: {
+                            maxRotation: 0,
+                            minRotation: 0,
+                            autoSkip: true,
+                            maxTicksLimit: config.maxTicksLimit || 6,
+                            color: '#64748b',
+                            font: { size: 11, weight: 600 }
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        max: Number.isFinite(maxValue) ? maxValue : undefined,
+                        grid: {
+                            color: 'rgba(148, 163, 184, 0.22)',
+                            drawTicks: false
+                        },
+                        border: { display: false },
+                        ticks: {
+                            stepSize: Number.isFinite(stepSize) ? stepSize : undefined,
+                            color: '#64748b',
+                            padding: 8,
+                            font: { size: 11, weight: 600 }
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: config.showLegend !== false,
+                        position: 'bottom',
+                        labels: {
+                            usePointStyle: true,
+                            pointStyle: 'rectRounded',
+                            boxWidth: 10,
+                            boxHeight: 10,
+                            padding: 16,
+                            color: '#475569',
+                            font: { size: 12, weight: 600 }
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: '#111827',
+                        borderColor: 'rgba(255, 255, 255, 0.18)',
+                        borderWidth: 1,
+                        padding: 12,
+                        displayColors: true,
+                        callbacks: {
+                            label(context) {
+                                const value = Number(context.parsed.y) || 0;
+                                const suffix = config.valueSuffix || '';
+                                const decimals = Number(config.tooltipDecimals);
+                                const displayValue = Number.isFinite(decimals)
+                                    ? value.toFixed(Math.max(0, decimals))
+                                    : String(value);
+                                return `${context.dataset.label}: ${displayValue}${suffix}`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    return {
+        renderRatingDistributionChart,
+        renderDoughnutMetricChart,
+        renderBarChart,
+        renderLineChart,
+        buildSectionSeries
+    };
 })();
 
 const SharedData = (() => {
@@ -323,9 +817,14 @@ const SharedData = (() => {
 
     const API_URL = '../api/app_state.php';
     const LOGIN_API_URL = '../api/login.php';
+    const HEARTBEAT_API_URL = LOGIN_API_URL + '?_heartbeat=1';
     const SESSION_URL = LOGIN_API_URL + '?action=session';
     const PROFILE_IMAGE_UPLOAD_URL = '../api/profile_image_upload.php';
     const USERS_CACHE_TTL_MS = 30000;
+    const PHILIPPINE_TIMEZONE = 'Asia/Manila';
+    const SESSION_HEARTBEAT_INTERVAL_MS = 60000;
+    const SESSION_HEARTBEAT_CHECK_MS = 15000;
+    const SESSION_IDLE_WINDOW_MS = 5 * 60 * 1000;
 
     const state = {
         users: [],
@@ -364,9 +863,165 @@ const SharedData = (() => {
 
     let initialized = false;
     let usersLastSyncedAt = 0;
+    let lastUserActivityAt = Date.now();
+    let lastHeartbeatSentAt = 0;
+    let heartbeatTimerId = null;
+    let heartbeatInFlight = false;
+    let heartbeatListenersAttached = false;
+    const clockState = {
+        baseUnixMs: null,
+        capturedAtMs: 0,
+        source: 'browser',
+        timezone: PHILIPPINE_TIMEZONE,
+    };
 
     function deepClone(value) {
         return value == null ? value : JSON.parse(JSON.stringify(value));
+    }
+
+    function getMonotonicNow() {
+        return typeof performance !== 'undefined' && performance && typeof performance.now === 'function'
+            ? performance.now()
+            : Date.now();
+    }
+
+    function resolveClockPayload(payload) {
+        if (!payload || typeof payload !== 'object') {
+            return null;
+        }
+        if (payload.clock && typeof payload.clock === 'object') {
+            return payload.clock;
+        }
+        if (payload.user && typeof payload.user === 'object' && payload.user.clock && typeof payload.user.clock === 'object') {
+            return payload.user.clock;
+        }
+        return null;
+    }
+
+    function setClockReference(payload) {
+        const clock = resolveClockPayload(payload) || (payload && typeof payload === 'object' ? payload : null);
+        if (!clock || typeof clock !== 'object') {
+            return false;
+        }
+
+        let baseUnixMs = Number(clock.unixMs);
+        if (!Number.isFinite(baseUnixMs)) {
+            const iso = String(clock.iso || '').trim();
+            const parsed = iso ? Date.parse(iso) : NaN;
+            if (Number.isFinite(parsed)) {
+                baseUnixMs = parsed;
+            }
+        }
+
+        if (!Number.isFinite(baseUnixMs)) {
+            return false;
+        }
+
+        clockState.baseUnixMs = baseUnixMs;
+        clockState.capturedAtMs = getMonotonicNow();
+        clockState.source = String(clock.source || 'server').trim() || 'server';
+        clockState.timezone = String(clock.timezone || PHILIPPINE_TIMEZONE).trim() || PHILIPPINE_TIMEZONE;
+        return true;
+    }
+
+    function getNowMs() {
+        if (!Number.isFinite(clockState.baseUnixMs)) {
+            return Date.now();
+        }
+        return clockState.baseUnixMs + (getMonotonicNow() - clockState.capturedAtMs);
+    }
+
+    function getNowDate() {
+        return new Date(getNowMs());
+    }
+
+    function getNowIsoString() {
+        return new Date(getNowMs()).toISOString();
+    }
+
+    function getPhilippineDateParts(value) {
+        const date = value instanceof Date ? value : getNowDate();
+        const formatter = new Intl.DateTimeFormat('en-US', {
+            timeZone: clockState.timezone || PHILIPPINE_TIMEZONE,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+        });
+        const parts = formatter.formatToParts(date);
+        const map = {};
+        parts.forEach(function (part) {
+            if (part.type !== 'literal') {
+                map[part.type] = part.value;
+            }
+        });
+        return {
+            year: String(map.year || ''),
+            month: String(map.month || ''),
+            day: String(map.day || ''),
+        };
+    }
+
+    function getCurrentPhilippineDateYmd() {
+        const parts = getPhilippineDateParts(getNowDate());
+        if (!parts.year || !parts.month || !parts.day) {
+            return '';
+        }
+        return `${parts.year}-${parts.month}-${parts.day}`;
+    }
+
+    function getCurrentPhilippineYear() {
+        return parseInt(getPhilippineDateParts(getNowDate()).year || '0', 10) || getNowDate().getUTCFullYear();
+    }
+
+    function parsePhilippineDateBoundary(dateString, boundary) {
+        const raw = String(dateString || '').trim();
+        if (!raw) return null;
+        const suffix = boundary === 'end' ? 'T23:59:59+08:00' : 'T00:00:00+08:00';
+        const parsed = new Date(raw + suffix);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function resolveDateValue(value, options) {
+        if (value instanceof Date) {
+            return Number.isNaN(value.getTime()) ? null : value;
+        }
+
+        const raw = String(value || '').trim();
+        if (!raw) {
+            return null;
+        }
+
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+            return parsePhilippineDateBoundary(raw, options && options.boundary === 'end' ? 'end' : 'start');
+        }
+
+        const parsed = new Date(raw);
+        if (!Number.isNaN(parsed.getTime())) {
+            return parsed;
+        }
+
+        const altParsed = new Date(raw.replace(' ', 'T'));
+        return Number.isNaN(altParsed.getTime()) ? null : altParsed;
+    }
+
+    function formatDateTimeInPhilippines(value, locale, options) {
+        const parsed = resolveDateValue(value, options);
+        if (!parsed) return String(value || '');
+        const formatOptions = Object.assign({
+            timeZone: clockState.timezone || PHILIPPINE_TIMEZONE,
+        }, options || {});
+        delete formatOptions.boundary;
+        return parsed.toLocaleString(locale || undefined, formatOptions);
+    }
+
+    function formatDateInPhilippines(value, locale, options) {
+        const parsed = resolveDateValue(value, options);
+        if (!parsed) return String(value || '');
+        const formatOptions = Object.assign({
+            timeZone: clockState.timezone || PHILIPPINE_TIMEZONE,
+        }, options || {});
+        delete formatOptions.boundary;
+        return parsed.toLocaleDateString(locale || undefined, formatOptions);
     }
 
     function dispatchChange(key, value) {
@@ -405,22 +1060,212 @@ const SharedData = (() => {
             profileImage: String(source.profileImage || '').trim(),
             profileImageUrl: String(source.profileImageUrl || source.profilePhoto || '').trim(),
             csrfToken: String(source.csrfToken || '').trim(),
-            loginTime: String(source.loginTime || new Date().toISOString()).trim(),
+            loginTime: String(source.loginTime || getNowIsoString()).trim(),
             isAuthenticated: true,
         };
     }
 
     function storeSessionPayload(payload) {
+        setClockReference(payload);
         const session = normalizeSessionPayload(payload);
         if (!session) {
             return null;
         }
         setJSON(KEYS.USER_SESSION, session);
+        startSessionHeartbeat();
         return session;
     }
 
     function clearSessionCache() {
         remove(KEYS.USER_SESSION);
+        stopSessionHeartbeat();
+    }
+
+    function resolveLoginRedirectPath() {
+        if (typeof window === 'undefined' || !window.location) {
+            return 'mainpage.html';
+        }
+        const path = String(window.location.pathname || '').toLowerCase();
+        if (path.indexOf('/html/') !== -1 || path.endsWith('/html')) {
+            return 'mainpage.html';
+        }
+        return 'html/mainpage.html';
+    }
+
+    function handleServerEndedSession() {
+        initialized = false;
+        usersLastSyncedAt = 0;
+        clearSessionCache();
+        clearProfilePhotoState();
+
+        if (typeof window === 'undefined' || !window.location) {
+            return;
+        }
+        const currentPath = String(window.location.pathname || '').toLowerCase();
+        if (currentPath.endsWith('/mainpage.html')) {
+            return;
+        }
+        window.location.href = resolveLoginRedirectPath();
+    }
+
+    function stopSessionHeartbeat() {
+        if (heartbeatTimerId !== null && typeof window !== 'undefined') {
+            window.clearInterval(heartbeatTimerId);
+        }
+        heartbeatTimerId = null;
+        heartbeatInFlight = false;
+    }
+
+    function attachHeartbeatActivityListeners() {
+        if (heartbeatListenersAttached || typeof document === 'undefined') {
+            return;
+        }
+
+        const activityEvents = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'];
+        activityEvents.forEach(function (eventName) {
+            document.addEventListener(eventName, recordUserActivity, {
+                passive: true,
+                capture: true,
+            });
+        });
+        document.addEventListener('visibilitychange', function () {
+            if (!document.hidden) {
+                recordUserActivity();
+            }
+        });
+
+        heartbeatListenersAttached = true;
+    }
+
+    function recordUserActivity() {
+        lastUserActivityAt = Date.now();
+        if (isAuthenticated()) {
+            startSessionHeartbeat();
+            sendSessionHeartbeat(false);
+        }
+    }
+
+    function startSessionHeartbeat() {
+        if (typeof window === 'undefined') {
+            return;
+        }
+        if (!isAuthenticated()) {
+            stopSessionHeartbeat();
+            return;
+        }
+
+        attachHeartbeatActivityListeners();
+        if (heartbeatTimerId !== null) {
+            return;
+        }
+
+        heartbeatTimerId = window.setInterval(function () {
+            sendSessionHeartbeat(false);
+        }, SESSION_HEARTBEAT_CHECK_MS);
+    }
+
+    function sendSessionHeartbeat(force) {
+        const session = getSession();
+        if (!session || session.isAuthenticated !== true || !session.csrfToken) {
+            stopSessionHeartbeat();
+            return;
+        }
+
+        const now = Date.now();
+        if (!force) {
+            if ((now - lastHeartbeatSentAt) < SESSION_HEARTBEAT_INTERVAL_MS) {
+                return;
+            }
+            if (lastHeartbeatSentAt > 0 && lastUserActivityAt <= lastHeartbeatSentAt) {
+                return;
+            }
+            if ((now - lastUserActivityAt) > SESSION_IDLE_WINDOW_MS) {
+                return;
+            }
+        }
+        if (heartbeatInFlight) {
+            return;
+        }
+
+        heartbeatInFlight = true;
+        lastHeartbeatSentAt = now;
+
+        const payload = JSON.stringify({ action: 'heartbeat' });
+        const headers = {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': session.csrfToken,
+        };
+
+        if (typeof fetch === 'function') {
+            fetch(HEARTBEAT_API_URL, {
+                method: 'POST',
+                headers: headers,
+                body: payload,
+                credentials: 'same-origin',
+            })
+                .then(function (response) {
+                    return response.text().then(function (text) {
+                        let data = {};
+                        if (text) {
+                            try {
+                                data = JSON.parse(text);
+                            } catch (_error) {
+                                data = {};
+                            }
+                        }
+                        return {
+                            ok: response.ok,
+                            status: response.status,
+                            data: data,
+                        };
+                    });
+                })
+                .then(function (result) {
+                    if (result.ok && result.data && result.data.session) {
+                        storeSessionPayload(result.data.session);
+                        return;
+                    }
+                    if (result.status === 401 || result.status === 403) {
+                        handleServerEndedSession();
+                    }
+                })
+                .catch(function () {
+                    // Network loss should not clear the local session by itself.
+                })
+                .finally(function () {
+                    heartbeatInFlight = false;
+                });
+            return;
+        }
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', HEARTBEAT_API_URL, true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.setRequestHeader('X-CSRF-Token', session.csrfToken);
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) {
+                return;
+            }
+            heartbeatInFlight = false;
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    const response = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+                    if (response && response.session) {
+                        storeSessionPayload(response.session);
+                    }
+                } catch (_error) {
+                    // Ignore malformed heartbeat responses.
+                }
+                return;
+            }
+            if (xhr.status === 401 || xhr.status === 403) {
+                handleServerEndedSession();
+            }
+        };
+        xhr.onerror = function () {
+            heartbeatInFlight = false;
+        };
+        xhr.send(payload);
     }
 
     function syncRequest(method, action, payload) {
@@ -461,6 +1306,7 @@ const SharedData = (() => {
         }
 
         const response = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+        setClockReference(response);
         if (response && response.session) {
             storeSessionPayload(response.session);
         }
@@ -468,6 +1314,7 @@ const SharedData = (() => {
     }
 
     function applyBootstrap(snapshot) {
+        setClockReference(snapshot);
         state.users = Array.isArray(snapshot.users) ? snapshot.users : [];
         usersLastSyncedAt = state.users.length ? Date.now() : 0;
         state.programs = Array.isArray(snapshot.programs) ? snapshot.programs : [];
@@ -648,6 +1495,7 @@ const SharedData = (() => {
 
         if (xhr.status >= 200 && xhr.status < 300) {
             const payload = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+            setClockReference(payload);
             return storeSessionPayload(payload);
         }
 
@@ -754,7 +1602,7 @@ const SharedData = (() => {
         const session = Object.assign({
             username,
             role,
-            loginTime: new Date().toISOString(),
+            loginTime: getNowIsoString(),
             isAuthenticated: true,
         }, extra);
         return storeSessionPayload(session);
@@ -1239,6 +2087,15 @@ const SharedData = (() => {
         return response;
     }
 
+    function markExcessCourseOfferings(rows) {
+        bootstrap();
+        const response = syncRequest('POST', 'markExcessCourseOfferings', {
+            rows: Array.isArray(rows) ? rows : [],
+        });
+        applySubjectManagementSnapshot(response);
+        return response;
+    }
+
     function setCourseOfferingStudents(courseOfferingId, studentUserIds) {
         bootstrap();
         const response = syncRequest('POST', 'setCourseOfferingStudents', {
@@ -1305,9 +2162,16 @@ const SharedData = (() => {
         const response = syncRequest('POST', 'getCredentialDistributorConfig', body);
         const config = response && response.config ? response.config : {};
         return {
-            senderEmail: String(config.senderEmail || ''),
-            senderName: String(config.senderName || ''),
-            hasAppPassword: !!config.hasAppPassword,
+            host: String(config.host || ''),
+            port: Number(config.port || 0),
+            encryption: String(config.encryption || 'tls'),
+            auth: config.auth !== false,
+            username: String(config.username || ''),
+            fromEmail: String(config.fromEmail || config.senderEmail || ''),
+            fromName: String(config.fromName || config.senderName || ''),
+            timeout: Number(config.timeout || 20),
+            hasPassword: !!(config.hasPassword || config.hasAppPassword),
+            source: String(config.source || 'database'),
         };
     }
 
@@ -1319,9 +2183,44 @@ const SharedData = (() => {
         const response = syncRequest('POST', 'saveCredentialDistributorConfig', body);
         const savedConfig = response && response.config ? response.config : {};
         return {
-            senderEmail: String(savedConfig.senderEmail || ''),
-            senderName: String(savedConfig.senderName || ''),
-            hasAppPassword: !!savedConfig.hasAppPassword,
+            host: String(savedConfig.host || ''),
+            port: Number(savedConfig.port || 0),
+            encryption: String(savedConfig.encryption || 'tls'),
+            auth: savedConfig.auth !== false,
+            username: String(savedConfig.username || ''),
+            fromEmail: String(savedConfig.fromEmail || savedConfig.senderEmail || ''),
+            fromName: String(savedConfig.fromName || savedConfig.senderName || ''),
+            timeout: Number(savedConfig.timeout || 20),
+            hasPassword: !!(savedConfig.hasPassword || savedConfig.hasAppPassword),
+            source: String(savedConfig.source || 'database'),
+        };
+    }
+
+    function getGeminiConfig(actor) {
+        bootstrap();
+        const body = buildActorPayload(actor || {});
+        const response = syncRequest('POST', 'getGeminiConfig', body);
+        const config = response && response.config ? response.config : {};
+        return {
+            model: String(config.model || 'gemini-2.5-flash'),
+            timeoutMs: Number(config.timeoutMs || 30000),
+            hasApiKey: !!config.hasApiKey,
+            source: String(config.source || 'database'),
+        };
+    }
+
+    function saveGeminiConfig(config, actor) {
+        bootstrap();
+        const body = Object.assign({}, buildActorPayload(actor || {}), {
+            config: Object.assign({}, config || {}),
+        });
+        const response = syncRequest('POST', 'saveGeminiConfig', body);
+        const savedConfig = response && response.config ? response.config : {};
+        return {
+            model: String(savedConfig.model || 'gemini-2.5-flash'),
+            timeoutMs: Number(savedConfig.timeoutMs || 30000),
+            hasApiKey: !!savedConfig.hasApiKey,
+            source: String(savedConfig.source || 'database'),
         };
     }
 
@@ -1347,6 +2246,20 @@ const SharedData = (() => {
         return {
             summary: response && response.summary ? response.summary : { total: 0, sent: 0, failed: 0 },
             failures: Array.isArray(response && response.failures) ? response.failures : [],
+        };
+    }
+
+    function sendTestSmtpEmail(recipientEmail, subject, message, actor) {
+        bootstrap();
+        const body = Object.assign({}, buildActorPayload(actor || {}), {
+            recipientEmail: String(recipientEmail || ''),
+            subject: String(subject || ''),
+            message: String(message || ''),
+        });
+        const response = syncRequest('POST', 'sendTestSmtpEmail', body);
+        return {
+            success: response && response.success === true,
+            message: String(response && response.message || ''),
         };
     }
 
@@ -1696,7 +2609,7 @@ const SharedData = (() => {
     function addAnnouncement(announcement) {
         bootstrap();
         const session = getSession() || {};
-        const nowIso = new Date().toISOString();
+        const nowIso = getNowIsoString();
         const entry = Object.assign({
             id: 'ANN-' + Date.now(),
             timestamp: nowIso,
@@ -1781,11 +2694,8 @@ const SharedData = (() => {
         const period = periods[type];
         if (!period || !period.start || !period.end) return false;
 
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const start = new Date(period.start + 'T00:00:00');
-        const end = new Date(period.end + 'T23:59:59');
-        return today >= start && today <= end;
+        const today = getCurrentPhilippineDateYmd();
+        return today !== '' && today >= period.start && today <= period.end;
     }
 
     function getEvalPeriodDates(type) {
@@ -1904,6 +2814,40 @@ const SharedData = (() => {
         };
     }
 
+    function generateDeanProgramPeerAssignments(payload) {
+        bootstrap();
+        const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
+        return syncRequest('POST', 'generateDeanProgramPeerAssignments', body);
+    }
+
+    function generateCoordinatorProgramPeerAssignments(payload) {
+        bootstrap();
+        const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
+        return syncRequest('POST', 'generateCoordinatorProgramPeerAssignments', body);
+    }
+
+    function listDeanProgramPeerAssignmentsCurrent(actor) {
+        bootstrap();
+        return syncRequest('POST', 'listDeanProgramPeerAssignmentsCurrent', buildActorPayload(actor || {}));
+    }
+
+    function listCoordinatorProgramPeerAssignmentsCurrent(actor) {
+        bootstrap();
+        return syncRequest('POST', 'listCoordinatorProgramPeerAssignmentsCurrent', buildActorPayload(actor || {}));
+    }
+
+    function listDeanProgramPeerAssignmentDetailsCurrent(payload) {
+        bootstrap();
+        const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
+        return syncRequest('POST', 'listDeanProgramPeerAssignmentDetailsCurrent', body);
+    }
+
+    function listCoordinatorProgramPeerAssignmentDetailsCurrent(payload) {
+        bootstrap();
+        const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
+        return syncRequest('POST', 'listCoordinatorProgramPeerAssignmentDetailsCurrent', body);
+    }
+
     function autoGeneratePeerRoom(payload) {
         bootstrap();
         const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
@@ -1955,6 +2899,11 @@ const SharedData = (() => {
         const response = syncRequest('POST', 'listFacultyPapers', {});
         state.facultyAcknowledgementPapers = Array.isArray(response.papers) ? response.papers : [];
         dispatchChange(KEYS.FACULTY_PAPERS, deepClone(state.facultyAcknowledgementPapers));
+        return deepClone(state.facultyAcknowledgementPapers);
+    }
+
+    function getFacultyPapers() {
+        bootstrap();
         return deepClone(state.facultyAcknowledgementPapers);
     }
 
@@ -2019,6 +2968,13 @@ const SharedData = (() => {
         setJSON,
         remove,
         getSession,
+        getNowDate,
+        getNowIsoString,
+        getCurrentPhilippineDateYmd,
+        getCurrentPhilippineYear,
+        parsePhilippineDateBoundary,
+        formatDateTimeInPhilippines,
+        formatDateInPhilippines,
         refreshSession,
         requireSession,
         setSession,
@@ -2066,6 +3022,7 @@ const SharedData = (() => {
         importSubjects,
         upsertCourseOffering,
         importCourseOfferings,
+        markExcessCourseOfferings,
         setCourseOfferingStudents,
         deactivateCourseOffering,
         getActivityLog,
@@ -2073,8 +3030,11 @@ const SharedData = (() => {
         addActivityLogEntry,
         getCredentialDistributorConfig,
         saveCredentialDistributorConfig,
+        getGeminiConfig,
+        saveGeminiConfig,
         bulkDistributeCredentials,
         sendBulkTestGmail,
+        sendTestSmtpEmail,
         analyzeBiasComments,
         analyzeEvaluationExplainability,
         generateFacultyPaperSectionCRecommendations,
@@ -2094,6 +3054,12 @@ const SharedData = (() => {
         addSemester,
         changeOwnEmail,
         changeOwnPassword,
+        generateDeanProgramPeerAssignments,
+        generateCoordinatorProgramPeerAssignments,
+        listDeanProgramPeerAssignmentsCurrent,
+        listCoordinatorProgramPeerAssignmentsCurrent,
+        listDeanProgramPeerAssignmentDetailsCurrent,
+        listCoordinatorProgramPeerAssignmentDetailsCurrent,
         autoGeneratePeerRoom,
         listDeanPeerRoomsCurrent,
         listProfessorPeerAssignmentsCurrent,
@@ -2102,6 +3068,7 @@ const SharedData = (() => {
         addDeanPeerRoomMembers,
         removeDeanPeerRoomMember,
         dismantleDeanPeerRoom,
+        getFacultyPapers,
         listFacultyPapers,
         upsertFacultyPaperDraft,
         archiveFacultyPaper,

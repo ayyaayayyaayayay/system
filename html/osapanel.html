@@ -5,8 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OSA Dashboard - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/panel-theme.css">
-    <link rel="stylesheet" href="../css/osapanel.css">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260802c">
+    <link rel="stylesheet" href="../css/osapanel.css?v=20260802a">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 
@@ -128,6 +128,12 @@
                             <h2>Descriptive Analytics</h2>
                             <p>Evaluated versus not evaluated students by department and program.</p>
                         </div>
+                        <label class="analytics-campus-filter" for="analyticsCampusSelect">
+                            <span>Campus</span>
+                            <select id="analyticsCampusSelect">
+                                <option value="all">All Campuses</option>
+                            </select>
+                        </label>
                     </div>
 
                     <div class="api-info-box">
@@ -481,8 +487,9 @@
         </div>
     </div>
 
-    <script src="../JsScrip/db-data.js?v=20260414d"></script>
-    <script src="../JsScrip/osapanel.js?v=20260414d"></script>
+    <script src="../JsScrip/db-data.js?v=20260729c"></script>
+    <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
+    <script src="../JsScrip/osapanel.js?v=20260802a"></script>
 </body>
 
 </html>

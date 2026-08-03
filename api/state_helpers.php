@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/time_helper.php';
+
 function getSettingValue(PDO $pdo, $key, $default = null) {
     $stmt = $pdo->prepare('SELECT setting_value FROM system_settings WHERE setting_key = :key LIMIT 1');
     $stmt->execute([':key' => $key]);
@@ -104,6 +106,21 @@ function buildCampusSnapshot(PDO $pdo) {
     return $snapshot;
 }
 
+function persistCampusesSnapshot(PDO $pdo, array $campuses, array $actorUser = []) {
+    $before = buildCampusSnapshot($pdo);
+    setSettingJson($pdo, 'sharedCampusData', $campuses);
+    safeLogAdminFlatStateChangeSnapshot(
+        $pdo,
+        $actorUser,
+        'Campus Settings Updated',
+        'system',
+        'Campus settings',
+        buildCampusActivityFlatState($before),
+        buildCampusActivityFlatState($campuses)
+    );
+    return $campuses;
+}
+
 function buildProgramsSnapshot(PDO $pdo) {
     $stmt = $pdo->query(
         'SELECT
@@ -141,6 +158,8 @@ function getUsersBaseSelectSql() {
             u.password,
             u.profile_image,
             u.status,
+            pp.user_id AS profile_photo_user_id,
+            pp.updated_at AS profile_photo_updated_at,
             r.code AS role_code,
             c.slug AS campus_slug,
             d.code AS department_code,
@@ -159,13 +178,16 @@ function getUsersBaseSelectSql() {
          LEFT JOIN employment_types et ON et.id = sp.employment_type_id
          LEFT JOIN programs sp_program ON sp_program.id = sp.program_id
          LEFT JOIN student_profiles st ON st.user_id = u.id
-         LEFT JOIN programs st_program ON st_program.id = st.program_id';
+         LEFT JOIN programs st_program ON st_program.id = st.program_id
+         LEFT JOIN profile_photos pp ON pp.user_id = u.id';
 }
 
 function buildUserSnapshotFromDatabaseRow(array $row, $includeSensitive = false) {
     $department = $row['department_code'] ?: '';
-    $profileImagePath = normalizeStoredProfileImagePath($row['profile_image'] ?? '');
-    $profileImageUrl = resolveStoredProfileImageUrlForDisplay($profileImagePath);
+    $profileImageUrl = '';
+    if (!empty($row['profile_photo_user_id'])) {
+        $profileImageUrl = buildProfilePhotoUrlForUserId($row['id'], $row['profile_photo_updated_at'] ?? '');
+    }
     $user = [
         'id' => 'u' . $row['id'],
         'name' => $row['name'],
@@ -180,7 +202,7 @@ function buildUserSnapshotFromDatabaseRow(array $row, $includeSensitive = false)
         'yearSection' => $row['year_section'] ?: '',
         'studentNumber' => $row['student_number'] ?: '',
         'photoData' => $profileImageUrl,
-        'profileImage' => $profileImagePath,
+        'profileImage' => '',
         'profileImageUrl' => $profileImageUrl,
         'programCode' => $row['program_code'] ?: '',
         'programName' => $row['program_name'] ?: '',
@@ -210,6 +232,7 @@ function resolveStoredUserIdNumber($value) {
 
 function buildUsersFromDatabase(PDO $pdo, $includeSensitive = false) {
     ensureUsersProfileImageColumn($pdo);
+    ensureProfilePhotosTable($pdo);
     $stmt = $pdo->query(getUsersBaseSelectSql() . ' ORDER BY u.name ASC');
 
     $users = [];
@@ -227,6 +250,7 @@ function buildUserSnapshotById(PDO $pdo, $userId, $includeSensitive = false) {
     }
 
     ensureUsersProfileImageColumn($pdo);
+    ensureProfilePhotosTable($pdo);
     $stmt = $pdo->prepare(getUsersBaseSelectSql() . ' WHERE u.id = :id LIMIT 1');
     $stmt->execute([':id' => $numericUserId]);
     $row = $stmt->fetch();
@@ -336,6 +360,7 @@ function ensureRoleLookupSeed(PDO $pdo) {
         'osa' => 'Office of Student Affairs',
         'vpaa' => 'Vice President for Academic Affairs',
         'dean' => 'Dean',
+        'procoor' => 'Program Coordinator',
         'professor' => 'Professor',
         'student' => 'Student',
     ];
@@ -684,7 +709,7 @@ function persistManagedUserProfiles(
             ':user_id' => $userId,
             ':employee_id' => $employeeId,
             ':employment_type_id' => $employmentTypeId,
-            ':program_id' => $roleCode === 'professor' ? $programId : null,
+            ':program_id' => in_array($roleCode, ['professor', 'procoor'], true) ? $programId : null,
             ':position' => $position,
         ]);
     } else {
@@ -707,6 +732,21 @@ function persistUsersSnapshot(PDO $pdo, array $users, array $options = []) {
     $allowedRoles = array_values(array_filter(array_map('normalizeLookupValue', $options['allowed_roles'] ?? [])));
     $requireExisting = !empty($options['require_existing']);
     $requireNew = !empty($options['require_new']);
+    $activityActor = is_array($options['activity_actor'] ?? null) ? $options['activity_actor'] : [];
+    $activityAction = trim((string) ($options['activity_action'] ?? ''));
+    $activityType = trim((string) ($options['activity_type'] ?? 'user')) ?: 'user';
+    $shouldLogActivity = $activityAction !== '' && count($users) > 0;
+    $beforeUsersSnapshot = $shouldLogActivity ? buildUsersSnapshot($pdo) : [];
+    $beforeUsersById = [];
+    foreach ($beforeUsersSnapshot as $snapshotUser) {
+        if (!is_array($snapshotUser)) {
+            continue;
+        }
+        $snapshotUserId = trim((string) ($snapshotUser['id'] ?? ''));
+        if ($snapshotUserId !== '') {
+            $beforeUsersById[$snapshotUserId] = $snapshotUser;
+        }
+    }
 
     $insertUser = $pdo->prepare(
         'INSERT INTO users (role_id, campus_id, department_id, name, email, password, status)
@@ -743,6 +783,7 @@ function persistUsersSnapshot(PDO $pdo, array $users, array $options = []) {
             year_section = VALUES(year_section)'
     );
     $savedUserIds = [];
+    $activityMutations = [];
 
     $pdo->beginTransaction();
     try {
@@ -774,6 +815,11 @@ function persistUsersSnapshot(PDO $pdo, array $users, array $options = []) {
             }
             validateManagedUserRoleScope($allowedRoles, $user, $existingRecord['role_code'] ?? '');
 
+            $beforeUserSnapshot = null;
+            if ($existingRecord) {
+                $beforeUserSnapshot = $beforeUsersById['u' . (int) $existingRecord['id']] ?? null;
+            }
+
             $departmentCode = normalizeLookupValue($user['department'] ?? '');
             if ($departmentCode === '') {
                 $departmentCode = normalizeLookupValue($user['institute'] ?? '');
@@ -788,15 +834,24 @@ function persistUsersSnapshot(PDO $pdo, array $users, array $options = []) {
             }
             $programCode = strtoupper($programCodeRaw);
             $programId = resolveManagedUserProgramId($programLookup, $campusSlug, $departmentCode, $programCode, $email);
+            if (in_array($roleCode, ['student', 'professor', 'procoor'], true) && $programId === null) {
+                throw new RuntimeException('Role "' . $roleCode . '" requires a valid program for user "' . $email . '".');
+            }
 
             $passwordValue = null;
+            $passwordChanged = false;
             if ($existingRecord) {
                 $passwordInput = array_key_exists('password', $user) ? (string) ($user['password'] ?? '') : null;
                 $passwordValue = ($passwordInput === null || $passwordInput === '')
                     ? (string) ($existingRecord['password'] ?? '')
                     : normalizePasswordForStorage($passwordInput);
+                if ($passwordInput !== null && $passwordInput !== '') {
+                    $verifyPassword = verifyPasswordForLogin($passwordInput, (string) ($existingRecord['password'] ?? ''));
+                    $passwordChanged = empty($verifyPassword['matched']);
+                }
             } else {
                 $passwordValue = normalizePasswordForStorage($user['password'] ?? '');
+                $passwordChanged = $passwordValue !== '';
             }
 
             $params = [
@@ -844,12 +899,58 @@ function persistUsersSnapshot(PDO $pdo, array $users, array $options = []) {
             ];
             $existingMaps['byId'][$userId] = $updatedRecord;
             $existingMaps['byEmail'][normalizeLookupValue($email)] = $updatedRecord;
+
+            if ($shouldLogActivity) {
+                $activityMutations[] = [
+                    'user_id' => $userId,
+                    'before' => is_array($beforeUserSnapshot) ? $beforeUserSnapshot : [],
+                    'created' => !$existingRecord,
+                    'password_changed' => $passwordChanged,
+                ];
+            }
         }
 
         $pdo->commit();
     } catch (Throwable $e) {
         $pdo->rollBack();
         throw $e;
+    }
+
+    if ($shouldLogActivity && count($activityMutations) > 0) {
+        $afterUsersSnapshot = buildUsersSnapshot($pdo);
+        $afterUsersById = [];
+        foreach ($afterUsersSnapshot as $snapshotUser) {
+            if (!is_array($snapshotUser)) {
+                continue;
+            }
+            $snapshotUserId = trim((string) ($snapshotUser['id'] ?? ''));
+            if ($snapshotUserId !== '') {
+                $afterUsersById[$snapshotUserId] = $snapshotUser;
+            }
+        }
+
+        $beforeFlat = [];
+        $afterFlat = [];
+        foreach ($activityMutations as $mutation) {
+            $userIdToken = 'u' . (int) ($mutation['user_id'] ?? 0);
+            $beforeUser = is_array($mutation['before'] ?? null) ? $mutation['before'] : [];
+            $afterUser = is_array($afterUsersById[$userIdToken] ?? null) ? $afterUsersById[$userIdToken] : [];
+            $beforeOptions = ['userId' => $userIdToken];
+            $afterOptions = ['userId' => $userIdToken];
+
+            if (!empty($mutation['password_changed'])) {
+                $beforeOptions['passwordMarker'] = !empty($mutation['created']) ? '' : '[stored]';
+                $afterOptions['passwordMarker'] = !empty($mutation['created']) ? '[set]' : '[updated]';
+            }
+
+            $beforeFlat = array_merge($beforeFlat, buildUserActivityFlatState($beforeUser, $beforeOptions));
+            $afterFlat = array_merge($afterFlat, buildUserActivityFlatState($afterUser, $afterOptions));
+        }
+
+        $entityLabel = count($activityMutations) === 1
+            ? ('User u' . (int) ($activityMutations[0]['user_id'] ?? 0))
+            : (count($activityMutations) . ' user records');
+        safeLogAdminFlatStateChangeSnapshot($pdo, $activityActor, $activityAction, $activityType, $entityLabel, $beforeFlat, $afterFlat);
     }
 
     return buildUsersSnapshot($pdo, true);
@@ -934,10 +1035,30 @@ function deleteUserSnapshot(PDO $pdo, $userId, array $options = []) {
         }
     }
 
+    $beforeUserSnapshot = buildUserSnapshotById($pdo, $numericUserId, false);
+
     $stmt = $pdo->prepare('DELETE FROM users WHERE id = :id');
     $stmt->execute([':id' => $numericUserId]);
     if ($stmt->rowCount() === 0) {
         throw new RuntimeException('User not found.');
+    }
+
+    $activityActor = is_array($options['activity_actor'] ?? null) ? $options['activity_actor'] : [];
+    $activityAction = trim((string) ($options['activity_action'] ?? ''));
+    $activityType = trim((string) ($options['activity_type'] ?? 'user')) ?: 'user';
+    if ($activityAction !== '') {
+        $beforeFlat = is_array($beforeUserSnapshot)
+            ? buildUserActivityFlatState($beforeUserSnapshot, ['userId' => 'u' . $numericUserId])
+            : [];
+        safeLogAdminFlatStateChangeSnapshot(
+            $pdo,
+            $activityActor,
+            $activityAction,
+            $activityType,
+            'User u' . $numericUserId,
+            $beforeFlat,
+            []
+        );
     }
 
     return buildUsersSnapshot($pdo);
@@ -946,6 +1067,22 @@ function deleteUserSnapshot(PDO $pdo, $userId, array $options = []) {
 function buildSettingsSnapshot(PDO $pdo) {
     $stored = getSettingJson($pdo, 'sharedSettings', []);
     return array_merge(getDefaultSettings(), is_array($stored) ? $stored : []);
+}
+
+function persistSettingsSnapshot(PDO $pdo, array $settings, array $actorUser = []) {
+    $before = buildSettingsSnapshot($pdo);
+    $updated = array_merge(getDefaultSettings(), $settings);
+    setSettingJson($pdo, 'sharedSettings', $updated);
+    safeLogAdminFlatStateChangeSnapshot(
+        $pdo,
+        $actorUser,
+        'System Settings Updated',
+        'system',
+        'System settings',
+        buildSettingsActivityFlatState($before),
+        buildSettingsActivityFlatState($updated)
+    );
+    return $updated;
 }
 
 function buildEvalPeriodsSnapshot(PDO $pdo) {
@@ -1006,7 +1143,8 @@ function getCurrentSemesterSnapshot(PDO $pdo) {
     return $value;
 }
 
-function setCurrentSemesterSnapshot(PDO $pdo, $value) {
+function setCurrentSemesterSnapshot(PDO $pdo, $value, array $actorUser = []) {
+    $beforeValue = getCurrentSemesterSnapshot($pdo);
     $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare('UPDATE semesters SET is_current = CASE WHEN slug = :slug THEN 1 ELSE 0 END');
@@ -1017,9 +1155,20 @@ function setCurrentSemesterSnapshot(PDO $pdo, $value) {
         $pdo->rollBack();
         throw $e;
     }
+
+    safeLogAdminFlatStateChangeSnapshot(
+        $pdo,
+        $actorUser,
+        'Current Semester Updated',
+        'system',
+        'Current semester',
+        ['Current Semester' => $beforeValue],
+        ['Current Semester' => (string) $value]
+    );
 }
 
-function addSemesterSnapshot(PDO $pdo, $value, $label) {
+function addSemesterSnapshot(PDO $pdo, $value, $label, array $actorUser = []) {
+    $beforeList = buildSemesterListSnapshot($pdo);
     $academicYear = '';
     if (preg_match('/(\d{4}-\d{4})/', $label, $matches)) {
         $academicYear = $matches[1];
@@ -1038,22 +1187,44 @@ function addSemesterSnapshot(PDO $pdo, $value, $label) {
 
     $list = buildSemesterListSnapshot($pdo);
     $exists = false;
-    foreach ($list as $item) {
+    foreach ($list as $index => $item) {
         if (($item['value'] ?? '') === $value) {
             $exists = true;
+            $list[$index]['label'] = $label;
             break;
         }
     }
     if (!$exists) {
         $list[] = ['value' => $value, 'label' => $label];
-        setSettingJson($pdo, 'sharedSemesterList', $list);
     }
+    setSettingJson($pdo, 'sharedSemesterList', $list);
+
+    $afterList = buildSemesterListSnapshot($pdo);
+    safeLogAdminFlatStateChangeSnapshot(
+        $pdo,
+        $actorUser,
+        'Semester Saved',
+        'system',
+        'Semester list',
+        buildSemesterListActivityFlatState($beforeList),
+        buildSemesterListActivityFlatState($afterList)
+    );
 }
 
-function persistEvalPeriods(PDO $pdo, array $periods) {
+function persistEvalPeriods(PDO $pdo, array $periods, array $actorUser = []) {
+    $beforePeriods = buildEvalPeriodsSnapshot($pdo);
     setSettingJson($pdo, 'sharedEvalPeriods', $periods);
     $currentSemester = getCurrentSemesterSnapshot($pdo);
     if ($currentSemester === '') {
+        safeLogAdminFlatStateChangeSnapshot(
+            $pdo,
+            $actorUser,
+            'Evaluation Periods Updated',
+            'system',
+            'Evaluation periods',
+            buildEvalPeriodsActivityFlatState($beforePeriods),
+            buildEvalPeriodsActivityFlatState($periods)
+        );
         return;
     }
 
@@ -1081,6 +1252,16 @@ function persistEvalPeriods(PDO $pdo, array $periods) {
             ':end_date' => $data['end'] !== '' ? $data['end'] : null,
         ]);
     }
+
+    safeLogAdminFlatStateChangeSnapshot(
+        $pdo,
+        $actorUser,
+        'Evaluation Periods Updated',
+        'system',
+        'Evaluation periods',
+        buildEvalPeriodsActivityFlatState($beforePeriods),
+        buildEvalPeriodsActivityFlatState($periods)
+    );
 }
 
 function getDefaultQuestionnaireHeaders() {
@@ -1577,16 +1758,278 @@ function buildQuestionnairesSnapshot(PDO $pdo) {
     return [];
 }
 
-function persistQuestionnairesSnapshot(PDO $pdo, array $data) {
+function persistQuestionnairesSnapshot(PDO $pdo, array $data, array $actorUser = []) {
+    $before = buildQuestionnairesSnapshot($pdo);
     syncQuestionnairesSnapshotToTables($pdo, $data);
     $normalized = buildQuestionnairesSnapshotFromTables($pdo);
     setSettingJson($pdo, 'questionnairesBySemester', $normalized);
+    safeLogAdminFlatStateChangeSnapshot(
+        $pdo,
+        $actorUser,
+        'Questionnaire Updated',
+        'system',
+        'Questionnaire configuration',
+        buildQuestionnairesActivityFlatState($before),
+        buildQuestionnairesActivityFlatState($normalized)
+    );
     return $normalized;
 }
 
+function mapEvaluationTypeCodeToSnapshotType($value) {
+    $token = strtolower(trim((string) $value));
+    if ($token === 'student-professor' || $token === 'student-to-professor' || $token === 'student') {
+        return 'student';
+    }
+    if ($token === 'professor-professor' || $token === 'professor-to-professor' || $token === 'peer' || $token === 'professor') {
+        return 'peer';
+    }
+    if ($token === 'supervisor-professor' || $token === 'supervisor-to-professor' || $token === 'supervisor') {
+        return 'supervisor';
+    }
+    return $token;
+}
+
+function formatEvaluationSnapshotDateTime($value) {
+    $raw = trim((string) $value);
+    if ($raw === '') {
+        return '';
+    }
+
+    try {
+        $date = new DateTimeImmutable($raw, new DateTimeZone('Asia/Manila'));
+        return $date->format(DateTimeInterface::ATOM);
+    } catch (Throwable $e) {
+        return $raw;
+    }
+}
+
+function formatEvaluationSnapshotRatingValue($value) {
+    if ($value === null || $value === '') {
+        return '';
+    }
+    if (!is_numeric($value)) {
+        return trim((string) $value);
+    }
+
+    $numeric = (float) $value;
+    if (!is_finite($numeric)) {
+        return '';
+    }
+
+    if (abs($numeric - round($numeric)) < 0.00001) {
+        return (string) ((int) round($numeric));
+    }
+
+    return rtrim(rtrim(number_format($numeric, 2, '.', ''), '0'), '.');
+}
+
+function buildEvaluationSnapshotMergeKey(array $evaluation) {
+    $evaluationKey = strtolower(trim((string) ($evaluation['evaluationKey'] ?? '')));
+    if ($evaluationKey !== '') {
+        return 'key:' . $evaluationKey;
+    }
+
+    $parts = [
+        strtolower(trim((string) ($evaluation['evaluatorRole'] ?? ''))),
+        strtolower(trim((string) ($evaluation['studentUserId'] ?? ''))),
+        strtolower(trim((string) ($evaluation['evaluatorUserId'] ?? ''))),
+        strtolower(trim((string) ($evaluation['semesterId'] ?? ''))),
+        strtolower(trim((string) ($evaluation['courseOfferingId'] ?? ''))),
+        strtolower(trim((string) ($evaluation['evaluateeUserId'] ?? ''))),
+        strtolower(trim((string) ($evaluation['submittedAt'] ?? ($evaluation['timestamp'] ?? '')))),
+    ];
+
+    return implode('|', $parts);
+}
+
+function buildEvaluationsSnapshotFromTables(PDO $pdo) {
+    $stmt = $pdo->query(
+        'SELECT
+            e.id,
+            e.semester_id,
+            sem.slug AS semester_slug,
+            e.questionnaire_id,
+            e.evaluation_type_id,
+            et.code AS evaluation_type_code,
+            e.evaluator_user_id,
+            evaluator.name AS evaluator_name,
+            evaluator.email AS evaluator_email,
+            evaluator_role.code AS evaluator_role_code,
+            sp.student_number AS evaluator_student_number,
+            estaff.employee_id AS evaluator_employee_id,
+            e.evaluatee_user_id,
+            evaluatee.name AS evaluatee_name,
+            e.course_offering_id,
+            subj.subject_code,
+            e.general_comments,
+            e.submitted_at,
+            e.status
+         FROM evaluations e
+         JOIN evaluation_types et ON et.id = e.evaluation_type_id
+         JOIN semesters sem ON sem.id = e.semester_id
+         LEFT JOIN users evaluator ON evaluator.id = e.evaluator_user_id
+         LEFT JOIN roles evaluator_role ON evaluator_role.id = evaluator.role_id
+         LEFT JOIN student_profiles sp ON sp.user_id = evaluator.id
+         LEFT JOIN staff_profiles estaff ON estaff.user_id = evaluator.id
+         LEFT JOIN users evaluatee ON evaluatee.id = e.evaluatee_user_id
+         LEFT JOIN course_offerings co ON co.id = e.course_offering_id
+         LEFT JOIN subjects subj ON subj.id = co.subject_id
+         ORDER BY e.submitted_at ASC, e.id ASC'
+    );
+
+    $rows = $stmt->fetchAll();
+    if (count($rows) === 0) {
+        return [];
+    }
+
+    $snapshotByEvaluationId = [];
+    foreach ($rows as $row) {
+        $evaluationId = (int) ($row['id'] ?? 0);
+        if ($evaluationId <= 0) {
+            continue;
+        }
+
+        $evaluatorRoleCode = strtolower(trim((string) ($row['evaluator_role_code'] ?? '')));
+        $snapshotType = mapEvaluationTypeCodeToSnapshotType($row['evaluation_type_code'] ?? $evaluatorRoleCode);
+        $semesterId = trim((string) ($row['semester_slug'] ?? ''));
+        if ($semesterId === '') {
+            $semesterId = trim((string) ($row['semester_id'] ?? ''));
+        }
+
+        $courseOfferingId = (int) ($row['course_offering_id'] ?? 0);
+        $courseOfferingToken = $courseOfferingId > 0 ? (string) $courseOfferingId : '';
+        $evaluatorUserId = (int) ($row['evaluator_user_id'] ?? 0);
+        $evaluatorUserToken = $evaluatorUserId > 0 ? ('u' . $evaluatorUserId) : '';
+        $evaluateeUserId = (int) ($row['evaluatee_user_id'] ?? 0);
+        $evaluateeUserToken = $evaluateeUserId > 0 ? ('u' . $evaluateeUserId) : '';
+        $studentNumber = trim((string) ($row['evaluator_student_number'] ?? ''));
+        $subjectCode = trim((string) ($row['subject_code'] ?? ''));
+        $targetProfessor = trim((string) ($row['evaluatee_name'] ?? ''));
+        $submittedAt = formatEvaluationSnapshotDateTime($row['submitted_at'] ?? '');
+        $professorSubject = $targetProfessor;
+        if ($professorSubject !== '' && $subjectCode !== '') {
+            $professorSubject .= ' - ' . $subjectCode;
+        } elseif ($professorSubject === '') {
+            $professorSubject = $subjectCode;
+        }
+
+        $evaluationKey = '';
+        if ($snapshotType === 'student' && $semesterId !== '' && $courseOfferingToken !== '') {
+            $identityToken = $studentNumber !== ''
+                ? $studentNumber
+                : ($evaluatorUserToken !== '' ? $evaluatorUserToken : trim((string) ($row['evaluator_email'] ?? '')));
+            if ($identityToken !== '') {
+                $evaluationKey = $identityToken . '|' . $semesterId . '|' . $courseOfferingToken;
+            }
+        }
+        if ($evaluationKey === '' && $semesterId !== '') {
+            $identityToken = $evaluatorUserToken !== '' ? $evaluatorUserToken : trim((string) ($row['evaluator_email'] ?? ''));
+            $targetToken = $courseOfferingToken !== '' ? $courseOfferingToken : ($evaluateeUserToken !== '' ? $evaluateeUserToken : (string) $evaluationId);
+            if ($identityToken !== '' && $targetToken !== '') {
+                $evaluationKey = $snapshotType . '|' . $semesterId . '|' . $targetToken . '|' . $identityToken;
+            }
+        }
+
+        $snapshotByEvaluationId[$evaluationId] = [
+            'id' => 'db-eval-' . $evaluationId,
+            'databaseEvaluationId' => $evaluationId,
+            'questionnaireId' => (int) ($row['questionnaire_id'] ?? 0),
+            'evaluationTypeId' => (int) ($row['evaluation_type_id'] ?? 0),
+            'evaluatorRole' => $evaluatorRoleCode !== '' ? $evaluatorRoleCode : $snapshotType,
+            'evaluatorName' => trim((string) ($row['evaluator_name'] ?? '')),
+            'evaluatorUsername' => trim((string) ($row['evaluator_name'] ?? '')),
+            'evaluationType' => $snapshotType,
+            'professorSubject' => $professorSubject,
+            'evaluationKey' => $evaluationKey,
+            'targetProfessor' => $targetProfessor,
+            'targetProfessorId' => $evaluateeUserToken,
+            'targetSubjectCode' => $subjectCode,
+            'semesterId' => $semesterId,
+            'courseOfferingId' => $courseOfferingToken,
+            'ratings' => [],
+            'qualitative' => [],
+            'comments' => trim((string) ($row['general_comments'] ?? '')),
+            'submittedAt' => $submittedAt,
+            'status' => strtolower(trim((string) ($row['status'] ?? 'submitted'))),
+            'studentId' => $evaluatorRoleCode === 'student' ? $studentNumber : '',
+            'studentUserId' => $evaluatorRoleCode === 'student' ? $evaluatorUserToken : '',
+            'evaluatorUserId' => $evaluatorUserToken,
+            'evaluatorEmail' => trim((string) ($row['evaluator_email'] ?? '')),
+            'evaluatorStudentNumber' => $studentNumber,
+            'evaluatorEmployeeId' => trim((string) ($row['evaluator_employee_id'] ?? '')),
+            'evaluateeUserId' => $evaluateeUserToken,
+            'timestamp' => $submittedAt,
+        ];
+    }
+
+    if (count($snapshotByEvaluationId) === 0) {
+        return [];
+    }
+
+    $responseStmt = $pdo->query(
+        'SELECT
+            evaluation_id,
+            question_id,
+            rating_value,
+            text_value
+         FROM evaluation_responses
+         ORDER BY evaluation_id ASC, display_order ASC, id ASC'
+    );
+
+    foreach ($responseStmt->fetchAll() as $row) {
+        $evaluationId = (int) ($row['evaluation_id'] ?? 0);
+        if ($evaluationId <= 0 || !isset($snapshotByEvaluationId[$evaluationId])) {
+            continue;
+        }
+
+        $questionId = trim((string) ($row['question_id'] ?? ''));
+        if ($questionId === '') {
+            continue;
+        }
+
+        $textValue = trim((string) ($row['text_value'] ?? ''));
+        if ($textValue !== '') {
+            $snapshotByEvaluationId[$evaluationId]['qualitative'][$questionId] = $textValue;
+            continue;
+        }
+
+        $ratingValue = formatEvaluationSnapshotRatingValue($row['rating_value'] ?? null);
+        if ($ratingValue !== '') {
+            $snapshotByEvaluationId[$evaluationId]['ratings'][$questionId] = $ratingValue;
+        }
+    }
+
+    return array_values($snapshotByEvaluationId);
+}
+
 function buildEvaluationsSnapshot(PDO $pdo) {
-    $snapshot = getSettingJson($pdo, 'sharedEvaluations', []);
-    return is_array($snapshot) ? $snapshot : [];
+    $settingsSnapshot = getSettingJson($pdo, 'sharedEvaluations', []);
+    $settingsList = is_array($settingsSnapshot) ? $settingsSnapshot : [];
+    $tableList = buildEvaluationsSnapshotFromTables($pdo);
+
+    if (count($tableList) === 0) {
+        return $settingsList;
+    }
+
+    $merged = [];
+    $seen = [];
+    foreach (array_merge($tableList, $settingsList) as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+
+        $mergeKey = buildEvaluationSnapshotMergeKey($item);
+        if ($mergeKey !== '' && isset($seen[$mergeKey])) {
+            continue;
+        }
+        if ($mergeKey !== '') {
+            $seen[$mergeKey] = true;
+        }
+
+        $merged[] = $item;
+    }
+
+    return array_values($merged);
 }
 
 function persistEvaluationsSnapshot(PDO $pdo, array $data) {
@@ -1661,7 +2104,7 @@ function normalizeStudentEvaluationDraftSnapshotRow(array $draft) {
     }
 
     if ($normalized['updatedAt'] === '') {
-        $normalized['updatedAt'] = date('c');
+        $normalized['updatedAt'] = getAuthoritativePhilippineIso8601();
     }
 
     return $normalized;
@@ -1737,7 +2180,7 @@ function upsertStudentEvaluationDraftSnapshot(PDO $pdo, array $draft) {
     $draftKeyToken = normalizeStudentEvaluationDraftToken($row['draftKey']);
     $studentUserIdToken = normalizeStudentEvaluationDraftToken($row['studentUserId']);
     $studentIdToken = normalizeStudentEvaluationDraftToken($row['studentId']);
-    $row['updatedAt'] = date('c');
+    $row['updatedAt'] = getAuthoritativePhilippineIso8601();
 
     $matched = false;
     foreach ($rows as $index => $existing) {
@@ -1816,7 +2259,7 @@ function normalizeOsaStudentClearanceSnapshotRow(array $record) {
     ];
 
     if ($normalized['notedAt'] === '') {
-        $normalized['notedAt'] = date('c');
+        $normalized['notedAt'] = getAuthoritativePhilippineIso8601();
     }
     if (strlen($normalized['reason']) > 2000) {
         $normalized['reason'] = substr($normalized['reason'], 0, 2000);
@@ -1916,7 +2359,7 @@ function upsertOsaStudentClearanceSnapshot(PDO $pdo, array $record) {
     $semesterToken = normalizeOsaStudentClearanceToken($row['semesterId']);
     $studentUserToken = normalizeOsaStudentClearanceToken($row['studentUserId']);
     $studentNumberToken = normalizeOsaStudentClearanceToken($row['studentNumber']);
-    $row['notedAt'] = date('c');
+    $row['notedAt'] = getAuthoritativePhilippineIso8601();
 
     foreach ($rows as $existing) {
         if (!osaStudentClearanceIdentityMatches($existing, $studentUserToken, $studentNumberToken, $semesterToken)) {
@@ -2002,10 +2445,10 @@ function normalizeStudentEvaluationProofSnapshotRow(array $record) {
     ];
 
     if ($row['id'] === '') {
-        $row['id'] = 'proof_' . time() . '_' . mt_rand(1000, 9999);
+        $row['id'] = 'proof_' . getAuthoritativePhilippineUnixTimestamp() . '_' . mt_rand(1000, 9999);
     }
     if ($row['submittedAt'] === '') {
-        $row['submittedAt'] = date('c');
+        $row['submittedAt'] = getAuthoritativePhilippineIso8601();
     }
     if ($row['submittedBy'] === '') {
         $row['submittedBy'] = 'Student';
@@ -2114,7 +2557,7 @@ function submitStudentEvaluationProofSnapshot(PDO $pdo, array $record) {
     $studentUserToken = normalizeStudentEvaluationProofToken($row['studentUserId']);
     $studentNumberToken = normalizeStudentEvaluationProofToken($row['studentNumber']);
     $row['status'] = 'pending';
-    $row['submittedAt'] = date('c');
+    $row['submittedAt'] = getAuthoritativePhilippineIso8601();
     $row['reviewedAt'] = '';
     $row['reviewedBy'] = '';
     $row['reviewNote'] = '';
@@ -2186,7 +2629,7 @@ function reviewStudentEvaluationProofSnapshot(PDO $pdo, array $payload) {
 
     $row = normalizeStudentEvaluationProofSnapshotRow($rows[$targetIndex]);
     $row['status'] = $decision;
-    $row['reviewedAt'] = date('c');
+    $row['reviewedAt'] = getAuthoritativePhilippineIso8601();
     $row['reviewedBy'] = trim((string) ($payload['reviewedBy'] ?? 'OSA'));
     $row['reviewNote'] = $reviewNote;
 
@@ -2249,7 +2692,42 @@ function normalizeProgramCodeValue($value) {
     return strtoupper(trim((string) $value));
 }
 
+function normalizeCourseOfferingLoadType($value) {
+    $token = strtolower(trim((string) $value));
+    return $token === 'excess' ? 'excess' : 'main';
+}
+
+function ensureCourseOfferingLoadTypeSchema(PDO $pdo) {
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+
+    if (!tableExistsInCurrentSchema($pdo, 'course_offerings')) {
+        $checked = true;
+        return;
+    }
+
+    if (!columnExistsInCurrentSchema($pdo, 'course_offerings', 'load_type')) {
+        $pdo->exec(
+            "ALTER TABLE course_offerings
+             ADD COLUMN load_type VARCHAR(20) NOT NULL DEFAULT 'main' AFTER is_active"
+        );
+    }
+
+    $pdo->exec(
+        "UPDATE course_offerings
+         SET load_type = 'main'
+         WHERE load_type IS NULL
+            OR LOWER(TRIM(load_type)) NOT IN ('main', 'excess')"
+    );
+
+    $checked = true;
+}
+
 function buildSubjectManagementSnapshot(PDO $pdo) {
+    ensureCourseOfferingLoadTypeSchema($pdo);
+
     $subjects = [];
     $subjectRows = $pdo->query(
         'SELECT
@@ -2301,7 +2779,8 @@ function buildSubjectManagementSnapshot(PDO $pdo) {
             prof_program.name AS program_name,
             c.slug AS campus_slug,
             d.code AS department_code,
-            co.is_active
+            co.is_active,
+            co.load_type
          FROM course_offerings co
          JOIN semesters sem ON sem.id = co.semester_id
          JOIN subjects sub ON sub.id = co.subject_id
@@ -2331,6 +2810,7 @@ function buildSubjectManagementSnapshot(PDO $pdo) {
             'campusSlug' => $row['campus_slug'],
             'departmentCode' => $row['department_code'],
             'isActive' => (int) $row['is_active'] === 1,
+            'loadType' => normalizeCourseOfferingLoadType($row['load_type'] ?? 'main'),
         ];
     }
 
@@ -2393,7 +2873,8 @@ function resolveDepartmentIdByCampusAndCode(PDO $pdo, $campusSlug, $departmentCo
     return $row ? (int) $row['id'] : null;
 }
 
-function upsertProgramSnapshot(PDO $pdo, array $program) {
+function upsertProgramSnapshot(PDO $pdo, array $program, array $actorUser = []) {
+    $beforePrograms = buildProgramsSnapshot($pdo);
     $programId = normalizeEntityId($program['id'] ?? null);
     $campusSlug = normalizeLookupValue($program['campusSlug'] ?? '');
     $departmentCode = normalizeLookupValue($program['departmentCode'] ?? '');
@@ -2461,10 +2942,22 @@ function upsertProgramSnapshot(PDO $pdo, array $program) {
         throw $e;
     }
 
-    return buildProgramsSnapshot($pdo);
+    $afterPrograms = buildProgramsSnapshot($pdo);
+    safeLogAdminFlatStateChangeSnapshot(
+        $pdo,
+        $actorUser,
+        'Program Saved',
+        'system',
+        'Program catalog',
+        buildProgramsActivityFlatState($beforePrograms),
+        buildProgramsActivityFlatState($afterPrograms)
+    );
+
+    return $afterPrograms;
 }
 
-function deleteProgramSnapshot(PDO $pdo, $programId) {
+function deleteProgramSnapshot(PDO $pdo, $programId, array $actorUser = []) {
+    $beforePrograms = buildProgramsSnapshot($pdo);
     $normalizedProgramId = normalizeEntityId($programId);
     if ($normalizedProgramId === null) {
         throw new RuntimeException('programId is required.');
@@ -2476,10 +2969,22 @@ function deleteProgramSnapshot(PDO $pdo, $programId) {
         throw new RuntimeException('Program not found.');
     }
 
-    return buildProgramsSnapshot($pdo);
+    $afterPrograms = buildProgramsSnapshot($pdo);
+    safeLogAdminFlatStateChangeSnapshot(
+        $pdo,
+        $actorUser,
+        'Program Deleted',
+        'system',
+        'Program catalog',
+        buildProgramsActivityFlatState($beforePrograms),
+        buildProgramsActivityFlatState($afterPrograms)
+    );
+
+    return $afterPrograms;
 }
 
-function upsertSubjectSnapshot(PDO $pdo, array $subject) {
+function upsertSubjectSnapshot(PDO $pdo, array $subject, array $actorUser = []) {
+    $beforeSubjects = buildSubjectManagementSnapshot($pdo);
     $campusSlug = normalizeLookupValue($subject['campusSlug'] ?? '');
     $departmentCode = normalizeLookupValue($subject['departmentCode'] ?? '');
     $subjectCode = normalizeSubjectCodeValue($subject['subjectCode'] ?? '');
@@ -2562,7 +3067,7 @@ function upsertSubjectSnapshot(PDO $pdo, array $subject) {
         throw new RuntimeException('Failed to load saved subject.');
     }
 
-    return [
+    $savedSubject = [
         'id' => (int) $row['id'],
         'campusSlug' => $row['campus_slug'],
         'campusName' => $row['campus_name'],
@@ -2570,9 +3075,23 @@ function upsertSubjectSnapshot(PDO $pdo, array $subject) {
         'subjectCode' => $row['subject_code'],
         'subjectName' => $row['subject_name'],
     ];
+
+    $afterSubjects = buildSubjectManagementSnapshot($pdo);
+    safeLogAdminFlatStateChangeSnapshot(
+        $pdo,
+        $actorUser,
+        'Subject Saved',
+        'system',
+        'Subject catalog',
+        buildSubjectActivityFlatState($beforeSubjects['subjects'] ?? []),
+        buildSubjectActivityFlatState($afterSubjects['subjects'] ?? [])
+    );
+
+    return $savedSubject;
 }
 
-function importSubjectsSnapshot(PDO $pdo, array $rows) {
+function importSubjectsSnapshot(PDO $pdo, array $rows, array $actorUser = []) {
+    $beforeSubjects = buildSubjectManagementSnapshot($pdo);
     $created = 0;
     $updated = 0;
     $failed = 0;
@@ -2639,12 +3158,23 @@ function importSubjectsSnapshot(PDO $pdo, array $rows) {
         }
     }
 
+    $afterSubjects = buildSubjectManagementSnapshot($pdo);
+    safeLogAdminFlatStateChangeSnapshot(
+        $pdo,
+        $actorUser,
+        'Subjects Imported',
+        'system',
+        'Subject import',
+        buildSubjectActivityFlatState($beforeSubjects['subjects'] ?? []),
+        buildSubjectActivityFlatState($afterSubjects['subjects'] ?? [])
+    );
+
     return [
         'created' => $created,
         'updated' => $updated,
         'failed' => $failed,
         'errors' => $errors,
-        'subjectManagement' => buildSubjectManagementSnapshot($pdo),
+        'subjectManagement' => $afterSubjects,
     ];
 }
 
@@ -2715,7 +3245,10 @@ function resolveProgramIdByCampusDepartmentAndCode(PDO $pdo, $campusSlug, $depar
     return $row ? (int) $row['id'] : null;
 }
 
-function upsertCourseOfferingRecord(PDO $pdo, $subjectId, $semesterId, $professorUserId, $sectionName, $isActive = 1) {
+function upsertCourseOfferingRecord(PDO $pdo, $subjectId, $semesterId, $professorUserId, $sectionName, $isActive = 1, $loadType = 'main') {
+    ensureCourseOfferingLoadTypeSchema($pdo);
+    $normalizedLoadType = normalizeCourseOfferingLoadType($loadType);
+
     $lookupStmt = $pdo->prepare(
         'SELECT id
          FROM course_offerings
@@ -2737,11 +3270,13 @@ function upsertCourseOfferingRecord(PDO $pdo, $subjectId, $semesterId, $professo
         $offeringId = (int) $existing['id'];
         $updateStmt = $pdo->prepare(
             'UPDATE course_offerings
-             SET is_active = :is_active
+             SET is_active = :is_active,
+                 load_type = :load_type
              WHERE id = :id'
         );
         $updateStmt->execute([
             ':is_active' => $isActive ? 1 : 0,
+            ':load_type' => $normalizedLoadType,
             ':id' => $offeringId,
         ]);
 
@@ -2752,8 +3287,8 @@ function upsertCourseOfferingRecord(PDO $pdo, $subjectId, $semesterId, $professo
     }
 
     $insertStmt = $pdo->prepare(
-        'INSERT INTO course_offerings (subject_id, semester_id, professor_id, section_name, is_active)
-         VALUES (:subject_id, :semester_id, :professor_id, :section_name, :is_active)'
+        'INSERT INTO course_offerings (subject_id, semester_id, professor_id, section_name, is_active, load_type)
+         VALUES (:subject_id, :semester_id, :professor_id, :section_name, :is_active, :load_type)'
     );
     $insertStmt->execute([
         ':subject_id' => $subjectId,
@@ -2761,6 +3296,7 @@ function upsertCourseOfferingRecord(PDO $pdo, $subjectId, $semesterId, $professo
         ':professor_id' => $professorUserId,
         ':section_name' => $sectionName,
         ':is_active' => $isActive ? 1 : 0,
+        ':load_type' => $normalizedLoadType,
     ]);
 
     return [
@@ -2946,7 +3482,10 @@ function getValidActiveStudentIds(PDO $pdo, array $studentIds) {
     return $valid;
 }
 
-function upsertCourseOfferingSnapshot(PDO $pdo, array $offering) {
+function upsertCourseOfferingSnapshot(PDO $pdo, array $offering, array $actorUser = []) {
+    ensureCourseOfferingLoadTypeSchema($pdo);
+
+    $beforeSubjectManagement = buildSubjectManagementSnapshot($pdo);
     $offeringId = normalizeEntityId($offering['id'] ?? null);
     $subjectId = normalizeEntityId($offering['subjectId'] ?? null);
     $professorEmployeeId = trim((string) ($offering['professorEmployeeId'] ?? ''));
@@ -3012,7 +3551,8 @@ function upsertCourseOfferingSnapshot(PDO $pdo, array $offering) {
                      semester_id = :semester_id,
                      professor_id = :professor_id,
                      section_name = :section_name,
-                     is_active = :is_active
+                     is_active = :is_active,
+                     load_type = :load_type
                  WHERE id = :id'
             );
             $update->execute([
@@ -3021,6 +3561,7 @@ function upsertCourseOfferingSnapshot(PDO $pdo, array $offering) {
                 ':professor_id' => $professorUserId,
                 ':section_name' => $sectionName,
                 ':is_active' => $isActive,
+                ':load_type' => 'main',
                 ':id' => $offeringId,
             ]);
 
@@ -3033,10 +3574,11 @@ function upsertCourseOfferingSnapshot(PDO $pdo, array $offering) {
             }
         } else {
             $insert = $pdo->prepare(
-                'INSERT INTO course_offerings (subject_id, semester_id, professor_id, section_name, is_active)
-                 VALUES (:subject_id, :semester_id, :professor_id, :section_name, :is_active)
+                'INSERT INTO course_offerings (subject_id, semester_id, professor_id, section_name, is_active, load_type)
+                 VALUES (:subject_id, :semester_id, :professor_id, :section_name, :is_active, :load_type)
                  ON DUPLICATE KEY UPDATE
                     is_active = VALUES(is_active),
+                    load_type = VALUES(load_type),
                     id = LAST_INSERT_ID(id)'
             );
             $insert->execute([
@@ -3045,6 +3587,7 @@ function upsertCourseOfferingSnapshot(PDO $pdo, array $offering) {
                 ':professor_id' => $professorUserId,
                 ':section_name' => $sectionName,
                 ':is_active' => $isActive,
+                ':load_type' => 'main',
             ]);
             $offeringId = (int) $pdo->lastInsertId();
         }
@@ -3056,13 +3599,25 @@ function upsertCourseOfferingSnapshot(PDO $pdo, array $offering) {
         throw $e;
     }
 
+    $afterSubjectManagement = buildSubjectManagementSnapshot($pdo);
+    safeLogAdminFlatStateChangeSnapshot(
+        $pdo,
+        $actorUser,
+        'Course Offering Saved',
+        'system',
+        'Course offering catalog',
+        buildOfferingActivityFlatState($beforeSubjectManagement['offerings'] ?? []),
+        buildOfferingActivityFlatState($afterSubjectManagement['offerings'] ?? [])
+    );
+
     return [
         'offeringId' => $offeringId,
-        'subjectManagement' => buildSubjectManagementSnapshot($pdo),
+        'subjectManagement' => $afterSubjectManagement,
     ];
 }
 
-function importCourseOfferingsSnapshot(PDO $pdo, array $rows, $replaceExisting = false) {
+function importCourseOfferingsSnapshot(PDO $pdo, array $rows, $replaceExisting = false, array $actorUser = []) {
+    $beforeSubjectManagement = buildSubjectManagementSnapshot($pdo);
     $createdOfferings = 0;
     $updatedOfferings = 0;
     $autoEnrolledStudents = 0;
@@ -3212,17 +3767,212 @@ function importCourseOfferingsSnapshot(PDO $pdo, array $rows, $replaceExisting =
         }
     }
 
+    $afterSubjectManagement = buildSubjectManagementSnapshot($pdo);
+    safeLogAdminFlatStateChangeSnapshot(
+        $pdo,
+        $actorUser,
+        'Course Offerings Imported',
+        'system',
+        'Course offering import',
+        array_merge(
+            buildOfferingActivityFlatState($beforeSubjectManagement['offerings'] ?? []),
+            buildEnrollmentActivityFlatState($beforeSubjectManagement['enrollments'] ?? [])
+        ),
+        array_merge(
+            buildOfferingActivityFlatState($afterSubjectManagement['offerings'] ?? []),
+            buildEnrollmentActivityFlatState($afterSubjectManagement['enrollments'] ?? [])
+        )
+    );
+
     return [
         'createdOfferings' => $createdOfferings,
         'updatedOfferings' => $updatedOfferings,
         'autoEnrolledStudents' => $autoEnrolledStudents,
         'failed' => $failed,
         'errors' => $errors,
-        'subjectManagement' => buildSubjectManagementSnapshot($pdo),
+        'subjectManagement' => $afterSubjectManagement,
     ];
 }
 
-function setCourseOfferingStudentsSnapshot(PDO $pdo, $courseOfferingId, array $studentUserIds) {
+function markExcessCourseOfferingsSnapshot(PDO $pdo, array $rows, array $actorUser = []) {
+    ensureCourseOfferingLoadTypeSchema($pdo);
+
+    $beforeSubjectManagement = buildSubjectManagementSnapshot($pdo);
+    $matchedRows = 0;
+    $markedExcess = 0;
+    $resetMain = 0;
+    $failed = 0;
+    $errors = [];
+    $matchedOfferingIds = [];
+    $semesterIdsToReplace = [];
+
+    $matchStmt = $pdo->prepare(
+        'SELECT co.id
+         FROM course_offerings co
+         WHERE co.semester_id = :semester_id
+           AND co.subject_id = :subject_id
+           AND co.professor_id = :professor_id
+           AND co.section_name = :section_name
+           AND co.is_active = 1
+         LIMIT 1'
+    );
+
+    foreach (array_values($rows) as $index => $row) {
+        $rowNumber = $index + 2;
+        if (!is_array($row)) {
+            $failed++;
+            $errors[] = 'Row ' . $rowNumber . ': invalid row payload.';
+            continue;
+        }
+
+        try {
+            $semesterSlug = trim((string) ($row['semesterSlug'] ?? ''));
+            $campusSlug = normalizeLookupValue($row['campusSlug'] ?? '');
+            $departmentCode = normalizeLookupValue($row['departmentCode'] ?? '');
+            $programCode = strtoupper(trim((string) ($row['programCode'] ?? '')));
+            $subjectCode = normalizeSubjectCodeValue($row['subjectCode'] ?? '');
+            $sectionRaw = trim((string) ($row['sectionName'] ?? ''));
+            $sectionName = normalizeOfferingSectionValue($sectionRaw);
+            $professorEmployeeId = trim((string) ($row['professorEmployeeId'] ?? ''));
+
+            if ($sectionRaw !== '' && $sectionName === '') {
+                throw new RuntimeException('Invalid sectionName format. Expected Y/S (example: 3/1).');
+            }
+            if (
+                $semesterSlug === '' ||
+                $campusSlug === '' ||
+                $departmentCode === '' ||
+                $programCode === '' ||
+                $subjectCode === '' ||
+                $sectionName === '' ||
+                $professorEmployeeId === ''
+            ) {
+                throw new RuntimeException('semesterSlug, campusSlug, departmentCode, programCode, subjectCode, sectionName, and professor_employee_id are required.');
+            }
+
+            $semesterId = resolveSemesterIdBySlug($pdo, $semesterSlug);
+            if ($semesterId === null) {
+                throw new RuntimeException('Invalid semesterSlug.');
+            }
+
+            $subjectId = resolveSubjectIdByCampusDepartmentAndCode($pdo, $campusSlug, $departmentCode, $subjectCode);
+            if ($subjectId === null) {
+                throw new RuntimeException('Unknown subject for provided campus/department/subject_code.');
+            }
+
+            $programId = resolveProgramIdByCampusDepartmentAndCode($pdo, $campusSlug, $departmentCode, $programCode);
+            if ($programId === null) {
+                throw new RuntimeException('Unknown program_code for provided campus/department.');
+            }
+
+            $professorUserId = resolveActiveProfessorUserIdByEmployeeId(
+                $pdo,
+                $professorEmployeeId,
+                $campusSlug,
+                $departmentCode,
+                $programId
+            );
+            if ($professorUserId === null) {
+                throw new RuntimeException('professor_employee_id is invalid, inactive, or not under the selected campus/department/program.');
+            }
+
+            $matchStmt->execute([
+                ':semester_id' => $semesterId,
+                ':subject_id' => $subjectId,
+                ':professor_id' => $professorUserId,
+                ':section_name' => $sectionName,
+            ]);
+            $match = $matchStmt->fetch();
+            if (!$match) {
+                throw new RuntimeException('Matching active course offering was not found. Excess import only marks existing offerings.');
+            }
+
+            $matchedRows++;
+            $offeringId = (int) $match['id'];
+            $matchedOfferingIds[$offeringId] = $offeringId;
+            $semesterIdsToReplace[$semesterId] = $semesterId;
+        } catch (Throwable $e) {
+            $failed++;
+            $errors[] = 'Row ' . $rowNumber . ': ' . $e->getMessage();
+        }
+    }
+
+    if (count($matchedOfferingIds) > 0) {
+        $pdo->beginTransaction();
+        try {
+            $semesterIds = array_values($semesterIdsToReplace);
+            $semesterPlaceholders = [];
+            $semesterParams = [];
+            foreach ($semesterIds as $idx => $semesterIdValue) {
+                $key = ':semester_id_' . $idx;
+                $semesterPlaceholders[] = $key;
+                $semesterParams[$key] = (int) $semesterIdValue;
+            }
+
+            $resetStmt = $pdo->prepare(
+                "UPDATE course_offerings
+                 SET load_type = 'main'
+                 WHERE is_active = 1
+                   AND semester_id IN (" . implode(', ', $semesterPlaceholders) . ')'
+            );
+            $resetStmt->execute($semesterParams);
+            $resetMain = $resetStmt->rowCount();
+
+            $offeringIds = array_values($matchedOfferingIds);
+            $offeringPlaceholders = [];
+            $offeringParams = [];
+            foreach ($offeringIds as $idx => $offeringIdValue) {
+                $key = ':offering_id_' . $idx;
+                $offeringPlaceholders[] = $key;
+                $offeringParams[$key] = (int) $offeringIdValue;
+            }
+
+            $markStmt = $pdo->prepare(
+                "UPDATE course_offerings
+                 SET load_type = 'excess'
+                 WHERE is_active = 1
+                   AND id IN (" . implode(', ', $offeringPlaceholders) . ')'
+            );
+            $markStmt->execute($offeringParams);
+            $markedExcess = count($offeringIds);
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            $failed += count($matchedOfferingIds);
+            $matchedRows = 0;
+            $markedExcess = 0;
+            $resetMain = 0;
+            $errors[] = 'Excess load import aborted: ' . $e->getMessage();
+        }
+    }
+
+    $afterSubjectManagement = buildSubjectManagementSnapshot($pdo);
+    safeLogAdminFlatStateChangeSnapshot(
+        $pdo,
+        $actorUser,
+        'Excess Load Imported',
+        'system',
+        'Course offering excess load import',
+        buildOfferingActivityFlatState($beforeSubjectManagement['offerings'] ?? []),
+        buildOfferingActivityFlatState($afterSubjectManagement['offerings'] ?? [])
+    );
+
+    return [
+        'matchedRows' => $matchedRows,
+        'markedExcess' => $markedExcess,
+        'resetMain' => $resetMain,
+        'failed' => $failed,
+        'errors' => $errors,
+        'subjectManagement' => $afterSubjectManagement,
+    ];
+}
+
+function setCourseOfferingStudentsSnapshot(PDO $pdo, $courseOfferingId, array $studentUserIds, array $actorUser = []) {
+    $beforeSubjectManagement = buildSubjectManagementSnapshot($pdo);
     $normalizedOfferingId = normalizeEntityId($courseOfferingId);
     if ($normalizedOfferingId === null) {
         throw new RuntimeException('courseOfferingId is required.');
@@ -3307,13 +4057,25 @@ function setCourseOfferingStudentsSnapshot(PDO $pdo, $courseOfferingId, array $s
         throw $e;
     }
 
+    $afterSubjectManagement = buildSubjectManagementSnapshot($pdo);
+    safeLogAdminFlatStateChangeSnapshot(
+        $pdo,
+        $actorUser,
+        'Offering Students Updated',
+        'system',
+        'Offering ' . $normalizedOfferingId . ' students',
+        buildOfferingEnrollmentActivityFlatState($beforeSubjectManagement['enrollments'] ?? [], $normalizedOfferingId),
+        buildOfferingEnrollmentActivityFlatState($afterSubjectManagement['enrollments'] ?? [], $normalizedOfferingId)
+    );
+
     return [
         'courseOfferingId' => $normalizedOfferingId,
-        'subjectManagement' => buildSubjectManagementSnapshot($pdo),
+        'subjectManagement' => $afterSubjectManagement,
     ];
 }
 
-function deactivateCourseOfferingSnapshot(PDO $pdo, $courseOfferingId) {
+function deactivateCourseOfferingSnapshot(PDO $pdo, $courseOfferingId, array $actorUser = []) {
+    $beforeSubjectManagement = buildSubjectManagementSnapshot($pdo);
     $normalizedOfferingId = normalizeEntityId($courseOfferingId);
     if ($normalizedOfferingId === null) {
         throw new RuntimeException('courseOfferingId is required.');
@@ -3334,9 +4096,20 @@ function deactivateCourseOfferingSnapshot(PDO $pdo, $courseOfferingId) {
         }
     }
 
+    $afterSubjectManagement = buildSubjectManagementSnapshot($pdo);
+    safeLogAdminFlatStateChangeSnapshot(
+        $pdo,
+        $actorUser,
+        'Course Offering Deactivated',
+        'system',
+        'Course offering catalog',
+        buildOfferingActivityFlatState($beforeSubjectManagement['offerings'] ?? []),
+        buildOfferingActivityFlatState($afterSubjectManagement['offerings'] ?? [])
+    );
+
     return [
         'courseOfferingId' => $normalizedOfferingId,
-        'subjectManagement' => buildSubjectManagementSnapshot($pdo),
+        'subjectManagement' => $afterSubjectManagement,
     ];
 }
 
@@ -3368,6 +4141,39 @@ function columnExistsInCurrentSchema(PDO $pdo, $tableName, $columnName) {
     return ((int) ($row['total'] ?? 0)) > 0;
 }
 
+function getColumnDataTypeInCurrentSchema(PDO $pdo, $tableName, $columnName) {
+    $stmt = $pdo->prepare(
+        'SELECT DATA_TYPE AS data_type
+         FROM information_schema.columns
+         WHERE table_schema = DATABASE()
+           AND table_name = :table_name
+           AND column_name = :column_name
+         LIMIT 1'
+    );
+    $stmt->execute([
+        ':table_name' => (string) $tableName,
+        ':column_name' => (string) $columnName,
+    ]);
+    $row = $stmt->fetch();
+    return $row ? strtolower(trim((string) ($row['data_type'] ?? ''))) : '';
+}
+
+function indexExistsInCurrentSchema(PDO $pdo, $tableName, $indexName) {
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) AS total
+         FROM information_schema.statistics
+         WHERE table_schema = DATABASE()
+           AND table_name = :table_name
+           AND index_name = :index_name'
+    );
+    $stmt->execute([
+        ':table_name' => (string) $tableName,
+        ':index_name' => (string) $indexName,
+    ]);
+    $row = $stmt->fetch();
+    return ((int) ($row['total'] ?? 0)) > 0;
+}
+
 function ensurePeerEvaluationSchema(PDO $pdo) {
     if (!tableExistsInCurrentSchema($pdo, 'peer_evaluation_rooms')) {
         throw new RuntimeException('peer_evaluation_rooms table is not available. Please import database/datacode.txt first.');
@@ -3385,6 +4191,13 @@ function ensurePeerEvaluationSchema(PDO $pdo) {
         $pdo->exec(
             'ALTER TABLE peer_evaluation_rooms
              ADD INDEX idx_peer_evaluation_rooms_program_id (program_id)'
+        );
+    }
+
+    if (!columnExistsInCurrentSchema($pdo, 'peer_evaluation_rooms', 'requested_peer_count')) {
+        $pdo->exec(
+            'ALTER TABLE peer_evaluation_rooms
+             ADD COLUMN requested_peer_count INT UNSIGNED NOT NULL DEFAULT 5 AFTER program_id'
         );
     }
 
@@ -3449,7 +4262,7 @@ function resolveCurrentSemesterRowSnapshot(PDO $pdo) {
 
 function resolveActiveDeanScopeRow(PDO $pdo, $deanUserId) {
     $stmt = $pdo->prepare(
-        'SELECT u.id, u.department_id, d.code AS department_code
+        'SELECT u.id, u.name, u.department_id, d.code AS department_code
          FROM users u
          JOIN roles r ON r.id = u.role_id
          LEFT JOIN departments d ON d.id = u.department_id
@@ -3469,6 +4282,33 @@ function resolveActiveDeanScopeRow(PDO $pdo, $deanUserId) {
 
     return [
         'user_id' => (int) $row['id'],
+        'name' => (string) ($row['name'] ?? ''),
+        'department_id' => (int) $row['department_id'],
+        'department_code' => strtoupper(trim((string) ($row['department_code'] ?? ''))),
+    ];
+}
+
+function resolveActiveDeanScopeRowByDepartmentId(PDO $pdo, $departmentId) {
+    $stmt = $pdo->prepare(
+        'SELECT u.id, u.name, u.department_id, d.code AS department_code
+         FROM users u
+         JOIN roles r ON r.id = u.role_id
+         LEFT JOIN departments d ON d.id = u.department_id
+         WHERE u.department_id = :department_id
+           AND r.code = \'dean\'
+           AND u.status = \'active\'
+         ORDER BY u.id ASC
+         LIMIT 1'
+    );
+    $stmt->execute([':department_id' => (int) $departmentId]);
+    $row = $stmt->fetch();
+    if (!$row || empty($row['department_id'])) {
+        return null;
+    }
+
+    return [
+        'user_id' => (int) $row['id'],
+        'name' => (string) ($row['name'] ?? ''),
         'department_id' => (int) $row['department_id'],
         'department_code' => strtoupper(trim((string) ($row['department_code'] ?? ''))),
     ];
@@ -3500,6 +4340,149 @@ function resolveDeanScopedProgramRow(PDO $pdo, $departmentId, $programCode) {
         'id' => (int) $row['id'],
         'program_code' => (string) $row['program_code'],
         'program_name' => (string) $row['program_name'],
+    ];
+}
+
+function resolveStaffProgramScopeRowByUserId(PDO $pdo, $userId) {
+    $stmt = $pdo->prepare(
+        'SELECT
+            u.id,
+            COALESCE(u.department_id, p.department_id) AS department_id,
+            d.code AS department_code,
+            sp.program_id,
+            p.code AS program_code,
+            p.name AS program_name
+         FROM users u
+         JOIN staff_profiles sp ON sp.user_id = u.id
+         JOIN programs p ON p.id = sp.program_id
+         LEFT JOIN departments d ON d.id = p.department_id
+         WHERE u.id = :user_id
+         LIMIT 1'
+    );
+    $stmt->execute([':user_id' => (int) $userId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        return null;
+    }
+
+    $departmentId = (int) ($row['department_id'] ?? 0);
+    $programId = (int) ($row['program_id'] ?? 0);
+    if ($departmentId <= 0 || $programId <= 0) {
+        return null;
+    }
+
+    return [
+        'user_id' => (int) ($row['id'] ?? 0),
+        'department_id' => $departmentId,
+        'department_code' => strtoupper(trim((string) ($row['department_code'] ?? ''))),
+        'program_id' => $programId,
+        'program_code' => strtoupper(trim((string) ($row['program_code'] ?? ''))),
+        'program_name' => (string) ($row['program_name'] ?? ''),
+    ];
+}
+
+function resolveActiveCoordinatorScopeRow(PDO $pdo, $coordinatorUserId) {
+    $stmt = $pdo->prepare(
+        'SELECT
+            u.id,
+            u.name,
+            COALESCE(u.department_id, p.department_id) AS department_id,
+            d.code AS department_code,
+            sp.program_id,
+            p.code AS program_code,
+            p.name AS program_name
+         FROM users u
+         JOIN roles r ON r.id = u.role_id
+         JOIN staff_profiles sp ON sp.user_id = u.id
+         JOIN programs p ON p.id = sp.program_id
+         LEFT JOIN departments d ON d.id = p.department_id
+         WHERE u.id = :user_id
+           AND r.code = \'procoor\'
+           AND u.status = \'active\'
+         LIMIT 1'
+    );
+    $stmt->execute([':user_id' => (int) $coordinatorUserId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        return null;
+    }
+
+    $departmentId = (int) ($row['department_id'] ?? 0);
+    $programId = (int) ($row['program_id'] ?? 0);
+    if ($departmentId <= 0 || $programId <= 0) {
+        return null;
+    }
+
+    return [
+        'user_id' => (int) ($row['id'] ?? 0),
+        'name' => (string) ($row['name'] ?? ''),
+        'department_id' => $departmentId,
+        'department_code' => strtoupper(trim((string) ($row['department_code'] ?? ''))),
+        'program_id' => $programId,
+        'program_code' => strtoupper(trim((string) ($row['program_code'] ?? ''))),
+        'program_name' => (string) ($row['program_name'] ?? ''),
+    ];
+}
+
+function resolveActiveCoordinatorScopeRowByProgramId(PDO $pdo, $programId) {
+    $stmt = $pdo->prepare(
+        'SELECT
+            u.id,
+            u.name,
+            COALESCE(u.department_id, p.department_id) AS department_id,
+            d.code AS department_code,
+            sp.program_id,
+            p.code AS program_code,
+            p.name AS program_name
+         FROM users u
+         JOIN roles r ON r.id = u.role_id
+         JOIN staff_profiles sp ON sp.user_id = u.id
+         JOIN programs p ON p.id = sp.program_id
+         LEFT JOIN departments d ON d.id = p.department_id
+         WHERE sp.program_id = :program_id
+           AND r.code = \'procoor\'
+           AND u.status = \'active\'
+         ORDER BY u.id ASC
+         LIMIT 1'
+    );
+    $stmt->execute([':program_id' => (int) $programId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        return null;
+    }
+
+    $departmentId = (int) ($row['department_id'] ?? 0);
+    $resolvedProgramId = (int) ($row['program_id'] ?? 0);
+    if ($departmentId <= 0 || $resolvedProgramId <= 0) {
+        return null;
+    }
+
+    return [
+        'user_id' => (int) ($row['id'] ?? 0),
+        'name' => (string) ($row['name'] ?? ''),
+        'department_id' => $departmentId,
+        'department_code' => strtoupper(trim((string) ($row['department_code'] ?? ''))),
+        'program_id' => $resolvedProgramId,
+        'program_code' => strtoupper(trim((string) ($row['program_code'] ?? ''))),
+        'program_name' => (string) ($row['program_name'] ?? ''),
+    ];
+}
+
+function resolveCoordinatorScopedProgramRow(PDO $pdo, $coordinatorUserId, $programCode = '') {
+    $scope = resolveActiveCoordinatorScopeRow($pdo, $coordinatorUserId);
+    if (!$scope) {
+        return null;
+    }
+
+    $selectedProgramCode = normalizeProgramCodeValue($programCode);
+    if ($selectedProgramCode !== '' && $selectedProgramCode !== (string) $scope['program_code']) {
+        return null;
+    }
+
+    return [
+        'id' => (int) $scope['program_id'],
+        'program_code' => (string) $scope['program_code'],
+        'program_name' => (string) $scope['program_name'],
     ];
 }
 
@@ -4535,6 +5518,1124 @@ function dismantleDeanPeerRoomSnapshot(PDO $pdo, $deanUserId, $roomId) {
     ];
 }
 
+function fetchDeanScopedProgramsSnapshot(PDO $pdo, $departmentId) {
+    $stmt = $pdo->prepare(
+        'SELECT id, code AS program_code, name AS program_name
+         FROM programs
+         WHERE department_id = :department_id
+         ORDER BY code ASC, id ASC'
+    );
+    $stmt->execute([
+        ':department_id' => (int) $departmentId,
+    ]);
+
+    $programs = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $programs[] = [
+            'id' => (int) ($row['id'] ?? 0),
+            'program_code' => strtoupper(trim((string) ($row['program_code'] ?? ''))),
+            'program_name' => (string) ($row['program_name'] ?? ''),
+        ];
+    }
+
+    return $programs;
+}
+
+function fetchActiveProfessorsForPeerProgramSnapshot(PDO $pdo, $departmentId, $programId) {
+    $stmt = $pdo->prepare(
+        'SELECT
+            u.id,
+            u.name,
+            u.email,
+            sp.employee_id
+         FROM users u
+         JOIN roles r ON r.id = u.role_id
+         JOIN staff_profiles sp ON sp.user_id = u.id
+         WHERE r.code = \'professor\'
+           AND u.status = \'active\'
+           AND u.department_id = :department_id
+           AND sp.program_id = :program_id
+         ORDER BY u.name ASC, u.id ASC'
+    );
+    $stmt->execute([
+        ':department_id' => (int) $departmentId,
+        ':program_id' => (int) $programId,
+    ]);
+
+    $professors = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $professors[] = [
+            'id' => (int) ($row['id'] ?? 0),
+            'name' => (string) ($row['name'] ?? ''),
+            'email' => (string) ($row['email'] ?? ''),
+            'employee_id' => (string) ($row['employee_id'] ?? ''),
+        ];
+    }
+
+    return $professors;
+}
+
+function computeProgramPeerActualCount($requestedPeerCount, $professorCount) {
+    $requested = (int) $requestedPeerCount;
+    $total = (int) $professorCount;
+    if ($requested <= 0 || $total <= 0) {
+        return 0;
+    }
+
+    $maxNonReciprocal = intdiv(max($total - 1, 0), 2);
+    if ($maxNonReciprocal <= 0) {
+        return 0;
+    }
+
+    return min($requested, $maxNonReciprocal);
+}
+
+function fetchDeanProgramPeerBatchRowsCurrentSnapshot(PDO $pdo, $semesterId, $deanUserId, $programId = null) {
+    $sql = 'SELECT
+                room.id,
+                room.program_id,
+                room.coordinator_user_id,
+                room.room_name,
+                room.requested_peer_count,
+                room.created_at,
+                room.updated_at,
+                p.code AS program_code,
+                p.name AS program_name,
+                coordinator.name AS coordinator_name
+            FROM peer_evaluation_rooms room
+            LEFT JOIN programs p ON p.id = room.program_id
+            LEFT JOIN users coordinator ON coordinator.id = room.coordinator_user_id
+            WHERE room.semester_id = :semester_id
+              AND room.dean_user_id = :dean_user_id';
+    $params = [
+        ':semester_id' => (int) $semesterId,
+        ':dean_user_id' => (int) $deanUserId,
+    ];
+
+    if ($programId !== null) {
+        $sql .= ' AND room.program_id = :program_id';
+        $params[':program_id'] = (int) $programId;
+    }
+
+    $sql .= ' ORDER BY room.updated_at DESC, room.id DESC';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    $rows = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $rows[] = [
+            'id' => (int) ($row['id'] ?? 0),
+            'program_id' => (int) ($row['program_id'] ?? 0),
+            'coordinator_user_id' => (int) ($row['coordinator_user_id'] ?? 0),
+            'room_name' => (string) ($row['room_name'] ?? ''),
+            'requested_peer_count' => (int) ($row['requested_peer_count'] ?? 0),
+            'created_at' => (string) ($row['created_at'] ?? ''),
+            'updated_at' => (string) ($row['updated_at'] ?? ''),
+            'program_code' => strtoupper(trim((string) ($row['program_code'] ?? ''))),
+            'program_name' => (string) ($row['program_name'] ?? ''),
+            'coordinator_name' => (string) ($row['coordinator_name'] ?? ''),
+        ];
+    }
+
+    return $rows;
+}
+
+function fetchCoordinatorProgramPeerBatchRowsCurrentSnapshot(PDO $pdo, $semesterId, $coordinatorUserId, $programId = null, $includeLegacyDeanRows = true) {
+    $scope = resolveActiveCoordinatorScopeRow($pdo, $coordinatorUserId);
+    if (!$scope) {
+        return [];
+    }
+
+    $resolvedProgramId = $programId !== null ? (int) $programId : (int) $scope['program_id'];
+    $sql = 'SELECT
+                room.id,
+                room.program_id,
+                room.coordinator_user_id,
+                room.room_name,
+                room.requested_peer_count,
+                room.created_at,
+                room.updated_at,
+                p.code AS program_code,
+                p.name AS program_name,
+                coordinator.name AS coordinator_name
+            FROM peer_evaluation_rooms room
+            LEFT JOIN programs p ON p.id = room.program_id
+            LEFT JOIN users coordinator ON coordinator.id = room.coordinator_user_id
+            WHERE room.semester_id = :semester_id
+              AND room.program_id = :program_id';
+    $params = [
+        ':semester_id' => (int) $semesterId,
+        ':program_id' => $resolvedProgramId,
+    ];
+
+    if ($includeLegacyDeanRows) {
+        $sql .= ' AND (room.coordinator_user_id = :coordinator_user_id OR room.coordinator_user_id IS NULL)';
+    } else {
+        $sql .= ' AND room.coordinator_user_id = :coordinator_user_id';
+    }
+    $params[':coordinator_user_id'] = (int) $scope['user_id'];
+
+    $sql .= ' ORDER BY room.updated_at DESC, room.id DESC';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    $rows = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $rows[] = [
+            'id' => (int) ($row['id'] ?? 0),
+            'program_id' => (int) ($row['program_id'] ?? 0),
+            'coordinator_user_id' => (int) ($row['coordinator_user_id'] ?? 0),
+            'room_name' => (string) ($row['room_name'] ?? ''),
+            'requested_peer_count' => (int) ($row['requested_peer_count'] ?? 0),
+            'created_at' => (string) ($row['created_at'] ?? ''),
+            'updated_at' => (string) ($row['updated_at'] ?? ''),
+            'program_code' => strtoupper(trim((string) ($row['program_code'] ?? ''))),
+            'program_name' => (string) ($row['program_name'] ?? ''),
+            'coordinator_name' => (string) ($row['coordinator_name'] ?? ''),
+        ];
+    }
+
+    return $rows;
+}
+
+function buildPeerBatchIdListSnapshot(array $batchRows) {
+    $ids = [];
+    foreach ($batchRows as $row) {
+        $batchId = (int) ($row['id'] ?? 0);
+        if ($batchId > 0) {
+            $ids[] = $batchId;
+        }
+    }
+    return $ids;
+}
+
+function fetchPeerAssignmentStatsByBatchIdsSnapshot(PDO $pdo, array $batchIds) {
+    if (count($batchIds) === 0) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($batchIds), '?'));
+    $stmt = $pdo->prepare(
+        'SELECT
+            room_id,
+            COUNT(*) AS total_assignments,
+            SUM(CASE WHEN status = \'pending\' THEN 1 ELSE 0 END) AS pending_assignments,
+            SUM(CASE WHEN status = \'submitted\' THEN 1 ELSE 0 END) AS submitted_assignments
+         FROM peer_evaluation_assignments
+         WHERE room_id IN (' . $placeholders . ')
+         GROUP BY room_id'
+    );
+    $stmt->execute(array_values($batchIds));
+
+    $statsMap = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $statsMap[(int) ($row['room_id'] ?? 0)] = [
+            'totalAssignments' => (int) ($row['total_assignments'] ?? 0),
+            'pendingAssignments' => (int) ($row['pending_assignments'] ?? 0),
+            'submittedAssignments' => (int) ($row['submitted_assignments'] ?? 0),
+        ];
+    }
+
+    return $statsMap;
+}
+
+function countSubmittedPeerAssignmentsByBatchIdsSnapshot(PDO $pdo, array $batchIds) {
+    if (count($batchIds) === 0) {
+        return 0;
+    }
+
+    $placeholders = implode(',', array_fill(0, count($batchIds), '?'));
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) AS total
+         FROM peer_evaluation_assignments
+         WHERE room_id IN (' . $placeholders . ')
+           AND status = \'submitted\''
+    );
+    $stmt->execute(array_values($batchIds));
+
+    return (int) (($stmt->fetch()['total'] ?? 0));
+}
+
+function deletePeerBatchRowsSnapshot(PDO $pdo, array $batchIds) {
+    if (count($batchIds) === 0) {
+        return;
+    }
+
+    $placeholders = implode(',', array_fill(0, count($batchIds), '?'));
+
+    $deleteAssignments = $pdo->prepare(
+        'DELETE FROM peer_evaluation_assignments
+         WHERE room_id IN (' . $placeholders . ')'
+    );
+    $deleteAssignments->execute(array_values($batchIds));
+
+    $deleteMembers = $pdo->prepare(
+        'DELETE FROM peer_evaluation_room_members
+         WHERE room_id IN (' . $placeholders . ')'
+    );
+    $deleteMembers->execute(array_values($batchIds));
+
+    $deleteBatches = $pdo->prepare(
+        'DELETE FROM peer_evaluation_rooms
+         WHERE id IN (' . $placeholders . ')'
+    );
+    $deleteBatches->execute(array_values($batchIds));
+}
+
+function buildDeanProgramPeerAssignmentSummaryEntrySnapshot(array $program, array $professors, array $batchRows, array $assignmentStatsMap) {
+    $batchIds = buildPeerBatchIdListSnapshot($batchRows);
+    $requestedPeerCount = count($batchRows) > 0
+        ? (int) ($batchRows[0]['requested_peer_count'] ?? 0)
+        : 0;
+    $professorCount = count($professors);
+    $actualPeerCount = computeProgramPeerActualCount($requestedPeerCount, $professorCount);
+
+    $totalAssignments = 0;
+    $pendingAssignments = 0;
+    $submittedAssignments = 0;
+    foreach ($batchIds as $batchId) {
+        $stats = $assignmentStatsMap[$batchId] ?? [
+            'totalAssignments' => 0,
+            'pendingAssignments' => 0,
+            'submittedAssignments' => 0,
+        ];
+        $totalAssignments += (int) $stats['totalAssignments'];
+        $pendingAssignments += (int) $stats['pendingAssignments'];
+        $submittedAssignments += (int) $stats['submittedAssignments'];
+    }
+
+    $status = 'generated';
+    $statusMessage = 'Peer assignments are ready for this program.';
+    if ($professorCount <= 0) {
+        $status = 'no-professors';
+        $statusMessage = 'No active professors are available in this program.';
+    } elseif (count($batchRows) === 0) {
+        $status = 'not-generated';
+        $statusMessage = 'Peer assignments have not been generated yet.';
+    } elseif ($actualPeerCount <= 0) {
+        $status = 'insufficient-professors';
+        $statusMessage = 'This program has too few professors to create non-reciprocal peer assignments.';
+    } elseif ($submittedAssignments > 0) {
+        $status = 'submitted-locked';
+        $statusMessage = 'Assignments are locked because submissions already exist.';
+    } elseif ($requestedPeerCount > $actualPeerCount) {
+        $statusMessage = 'Requested peer count was auto-capped to ' . $actualPeerCount . '.';
+    }
+
+    $generatedAt = '';
+    if (count($batchRows) > 0) {
+        $generatedAt = trim((string) ($batchRows[0]['updated_at'] ?? ''));
+        if ($generatedAt === '') {
+            $generatedAt = (string) ($batchRows[0]['created_at'] ?? '');
+        }
+    }
+
+    $coordinatorUserId = count($batchRows) > 0
+        ? (int) ($batchRows[0]['coordinator_user_id'] ?? 0)
+        : 0;
+    $coordinatorName = count($batchRows) > 0
+        ? (string) ($batchRows[0]['coordinator_name'] ?? '')
+        : '';
+    $ownerRole = $coordinatorUserId > 0 ? 'procoor' : 'dean';
+
+    return [
+        'programCode' => strtoupper(trim((string) ($program['program_code'] ?? ''))),
+        'programName' => (string) ($program['program_name'] ?? ''),
+        'professorCount' => $professorCount,
+        'requestedPeerCount' => $requestedPeerCount,
+        'actualPeerCount' => $actualPeerCount,
+        'totalAssignments' => $totalAssignments,
+        'pendingAssignments' => $pendingAssignments,
+        'submittedAssignments' => $submittedAssignments,
+        'generatedAt' => $generatedAt,
+        'status' => $status,
+        'statusMessage' => $statusMessage,
+        'hasBatch' => count($batchRows) > 0,
+        'autoCapped' => $requestedPeerCount > 0 && $actualPeerCount > 0 && $requestedPeerCount > $actualPeerCount,
+        'ownerRole' => $ownerRole,
+        'coordinatorUserId' => $coordinatorUserId > 0 ? ('u' . $coordinatorUserId) : '',
+        'coordinatorName' => $coordinatorName,
+        'readOnlyForDean' => $coordinatorUserId > 0,
+    ];
+}
+
+function fetchPeerAssignmentsByBatchIdsSnapshot(PDO $pdo, array $batchIds) {
+    if (count($batchIds) === 0) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($batchIds), '?'));
+    $stmt = $pdo->prepare(
+        'SELECT
+            a.room_id,
+            a.evaluator_user_id,
+            evaluator.name AS evaluator_name,
+            a.evaluatee_user_id,
+            evaluatee.name AS evaluatee_name,
+            a.status
+         FROM peer_evaluation_assignments a
+         JOIN users evaluator ON evaluator.id = a.evaluator_user_id
+         JOIN users evaluatee ON evaluatee.id = a.evaluatee_user_id
+         WHERE a.room_id IN (' . $placeholders . ')
+         ORDER BY evaluator.name ASC, evaluatee.name ASC, a.id ASC'
+    );
+    $stmt->execute(array_values($batchIds));
+
+    return $stmt->fetchAll();
+}
+
+function generateDeanProgramPeerAssignmentsSnapshot(PDO $pdo, $deanUserId, $programCode, $peerCount) {
+    ensurePeerEvaluationSchema($pdo);
+
+    $requestedPeerCount = (int) $peerCount;
+    if ($requestedPeerCount < 1) {
+        throw new RuntimeException('Peer count must be at least 1.');
+    }
+
+    $semester = resolveCurrentSemesterRowSnapshot($pdo);
+    if (!$semester) {
+        throw new RuntimeException('No current semester is configured.');
+    }
+
+    $deanScope = resolveActiveDeanScopeRow($pdo, $deanUserId);
+    if (!$deanScope) {
+        throw new RuntimeException('Active dean scope could not be resolved.');
+    }
+
+    $program = resolveDeanScopedProgramRow($pdo, $deanScope['department_id'], $programCode);
+    if (!$program) {
+        throw new RuntimeException('Invalid programCode for your department scope.');
+    }
+    $activeCoordinator = resolveActiveCoordinatorScopeRowByProgramId($pdo, (int) $program['id']);
+    if ($activeCoordinator) {
+        throw new RuntimeException('This program is assigned to an active Program Coordinator. Dean peer assignment generation is read-only for this program.');
+    }
+
+    $professors = fetchActiveProfessorsForPeerProgramSnapshot(
+        $pdo,
+        (int) $deanScope['department_id'],
+        (int) $program['id']
+    );
+    $professorCount = count($professors);
+    $actualPeerCount = computeProgramPeerActualCount($requestedPeerCount, $professorCount);
+
+    $existingBatchRows = fetchDeanProgramPeerBatchRowsCurrentSnapshot(
+        $pdo,
+        (int) $semester['id'],
+        (int) $deanScope['user_id'],
+        (int) $program['id']
+    );
+    $existingBatchIds = buildPeerBatchIdListSnapshot($existingBatchRows);
+    if (countSubmittedPeerAssignmentsByBatchIdsSnapshot($pdo, $existingBatchIds) > 0) {
+        throw new RuntimeException('Peer assignments for this program already have submitted evaluations and cannot be regenerated.');
+    }
+
+    $batchId = 0;
+    $pdo->beginTransaction();
+    try {
+        deletePeerBatchRowsSnapshot($pdo, $existingBatchIds);
+
+        if ($professorCount > 0) {
+            $batchName = buildUniquePeerRoomName(
+                $pdo,
+                (int) $semester['id'],
+                (int) $deanScope['user_id'],
+                'Peer Program Assignment ' . strtoupper(trim((string) $program['program_code'])),
+                $program['program_code']
+            );
+
+            $insertBatch = $pdo->prepare(
+                'INSERT INTO peer_evaluation_rooms (
+                    semester_id,
+                    dean_user_id,
+                    program_id,
+                    requested_peer_count,
+                    room_name,
+                    coordinator_user_id
+                 ) VALUES (
+                    :semester_id,
+                    :dean_user_id,
+                    :program_id,
+                    :requested_peer_count,
+                    :room_name,
+                    :coordinator_user_id
+                 )'
+            );
+            $insertBatch->execute([
+                ':semester_id' => (int) $semester['id'],
+                ':dean_user_id' => (int) $deanScope['user_id'],
+                ':program_id' => (int) $program['id'],
+                ':requested_peer_count' => $requestedPeerCount,
+                ':room_name' => $batchName,
+                ':coordinator_user_id' => null,
+            ]);
+            $batchId = (int) $pdo->lastInsertId();
+
+            $insertMember = $pdo->prepare(
+                'INSERT INTO peer_evaluation_room_members (room_id, professor_user_id)
+                 VALUES (:room_id, :professor_user_id)'
+            );
+            foreach ($professors as $professor) {
+                $insertMember->execute([
+                    ':room_id' => $batchId,
+                    ':professor_user_id' => (int) ($professor['id'] ?? 0),
+                ]);
+            }
+
+            if ($actualPeerCount > 0) {
+                $shuffledProfessors = $professors;
+                shuffle($shuffledProfessors);
+                $orderedIds = array_values(array_map(function ($row) {
+                    return (int) ($row['id'] ?? 0);
+                }, $shuffledProfessors));
+                $orderedIds = array_values(array_filter($orderedIds, function ($id) {
+                    return $id > 0;
+                }));
+
+                $insertAssignment = $pdo->prepare(
+                    'INSERT INTO peer_evaluation_assignments (
+                        semester_id,
+                        room_id,
+                        evaluator_user_id,
+                        evaluatee_user_id,
+                        status,
+                        submitted_evaluation_id
+                     ) VALUES (
+                        :semester_id,
+                        :room_id,
+                        :evaluator_user_id,
+                        :evaluatee_user_id,
+                        :status,
+                        :submitted_evaluation_id
+                     )'
+                );
+
+                $orderedCount = count($orderedIds);
+                for ($offset = 1; $offset <= $actualPeerCount; $offset += 1) {
+                    for ($index = 0; $index < $orderedCount; $index += 1) {
+                        $evaluatorUserId = (int) $orderedIds[$index];
+                        $evaluateeUserId = (int) $orderedIds[($index + $offset) % $orderedCount];
+                        if ($evaluatorUserId <= 0 || $evaluateeUserId <= 0 || $evaluatorUserId === $evaluateeUserId) {
+                            continue;
+                        }
+
+                        $insertAssignment->execute([
+                            ':semester_id' => (int) $semester['id'],
+                            ':room_id' => $batchId,
+                            ':evaluator_user_id' => $evaluatorUserId,
+                            ':evaluatee_user_id' => $evaluateeUserId,
+                            ':status' => 'pending',
+                            ':submitted_evaluation_id' => null,
+                        ]);
+                    }
+                }
+            }
+        }
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+
+    $batchRows = $batchId > 0
+        ? fetchDeanProgramPeerBatchRowsCurrentSnapshot($pdo, (int) $semester['id'], (int) $deanScope['user_id'], (int) $program['id'])
+        : [];
+    $statsMap = fetchPeerAssignmentStatsByBatchIdsSnapshot($pdo, buildPeerBatchIdListSnapshot($batchRows));
+    $summary = buildDeanProgramPeerAssignmentSummaryEntrySnapshot($program, $professors, $batchRows, $statsMap);
+
+    return [
+        'currentSemester' => (string) $semester['slug'],
+        'program' => [
+            'programCode' => (string) $program['program_code'],
+            'programName' => (string) $program['program_name'],
+        ],
+        'summary' => $summary,
+    ];
+}
+
+function listDeanProgramPeerAssignmentsCurrentSnapshot(PDO $pdo, $deanUserId) {
+    ensurePeerEvaluationSchema($pdo);
+
+    $semester = resolveCurrentSemesterRowSnapshot($pdo);
+    if (!$semester) {
+        return [
+            'currentSemester' => '',
+            'programs' => [],
+        ];
+    }
+
+    $deanScope = resolveActiveDeanScopeRow($pdo, $deanUserId);
+    if (!$deanScope) {
+        throw new RuntimeException('Active dean scope could not be resolved.');
+    }
+
+    $programs = fetchDeanScopedProgramsSnapshot($pdo, (int) $deanScope['department_id']);
+    if (count($programs) === 0) {
+        return [
+            'currentSemester' => (string) $semester['slug'],
+            'programs' => [],
+        ];
+    }
+
+    $batchRows = fetchDeanProgramPeerBatchRowsCurrentSnapshot(
+        $pdo,
+        (int) $semester['id'],
+        (int) $deanScope['user_id']
+    );
+    $batchIds = buildPeerBatchIdListSnapshot($batchRows);
+    $statsMap = fetchPeerAssignmentStatsByBatchIdsSnapshot($pdo, $batchIds);
+
+    $batchRowsByProgramId = [];
+    foreach ($batchRows as $row) {
+        $programId = (int) ($row['program_id'] ?? 0);
+        if (!isset($batchRowsByProgramId[$programId])) {
+            $batchRowsByProgramId[$programId] = [];
+        }
+        $batchRowsByProgramId[$programId][] = $row;
+    }
+
+    $programSummaries = [];
+    foreach ($programs as $program) {
+        $programId = (int) ($program['id'] ?? 0);
+        $programProfessors = fetchActiveProfessorsForPeerProgramSnapshot(
+            $pdo,
+            (int) $deanScope['department_id'],
+            $programId
+        );
+        $programBatchRows = $batchRowsByProgramId[$programId] ?? [];
+        $summary = buildDeanProgramPeerAssignmentSummaryEntrySnapshot(
+            $program,
+            $programProfessors,
+            $programBatchRows,
+            $statsMap
+        );
+        $activeCoordinator = $programId > 0 ? resolveActiveCoordinatorScopeRowByProgramId($pdo, $programId) : null;
+        if ($activeCoordinator) {
+            $summary['ownerRole'] = 'procoor';
+            $summary['coordinatorUserId'] = 'u' . (int) $activeCoordinator['user_id'];
+            $summary['coordinatorName'] = (string) ($activeCoordinator['name'] ?? '');
+            $summary['readOnlyForDean'] = true;
+        }
+        $programSummaries[] = $summary;
+    }
+
+    return [
+        'currentSemester' => (string) $semester['slug'],
+        'programs' => $programSummaries,
+    ];
+}
+
+function listDeanProgramPeerAssignmentDetailsCurrentSnapshot(PDO $pdo, $deanUserId, $programCode = '') {
+    ensurePeerEvaluationSchema($pdo);
+
+    $semester = resolveCurrentSemesterRowSnapshot($pdo);
+    if (!$semester) {
+        return [
+            'currentSemester' => '',
+            'programs' => [],
+            'program' => null,
+            'professors' => [],
+            'summary' => null,
+        ];
+    }
+
+    $deanScope = resolveActiveDeanScopeRow($pdo, $deanUserId);
+    if (!$deanScope) {
+        throw new RuntimeException('Active dean scope could not be resolved.');
+    }
+
+    $selectedProgramCode = normalizeProgramCodeValue($programCode);
+    if ($selectedProgramCode !== '') {
+        $selectedProgram = resolveDeanScopedProgramRow($pdo, $deanScope['department_id'], $selectedProgramCode);
+        if (!$selectedProgram) {
+            throw new RuntimeException('Invalid programCode for your department scope.');
+        }
+        $programs = [$selectedProgram];
+    } else {
+        $programs = fetchDeanScopedProgramsSnapshot($pdo, (int) $deanScope['department_id']);
+    }
+
+    $programDetails = [];
+    foreach ($programs as $program) {
+        $programProfessors = fetchActiveProfessorsForPeerProgramSnapshot(
+            $pdo,
+            (int) $deanScope['department_id'],
+            (int) $program['id']
+        );
+        $programBatchRows = fetchDeanProgramPeerBatchRowsCurrentSnapshot(
+            $pdo,
+            (int) $semester['id'],
+            (int) $deanScope['user_id'],
+            (int) $program['id']
+        );
+        $programBatchIds = buildPeerBatchIdListSnapshot($programBatchRows);
+        $statsMap = fetchPeerAssignmentStatsByBatchIdsSnapshot($pdo, $programBatchIds);
+        $summary = buildDeanProgramPeerAssignmentSummaryEntrySnapshot(
+            $program,
+            $programProfessors,
+            $programBatchRows,
+            $statsMap
+        );
+        $activeCoordinator = resolveActiveCoordinatorScopeRowByProgramId($pdo, (int) ($program['id'] ?? 0));
+        if ($activeCoordinator) {
+            $summary['ownerRole'] = 'procoor';
+            $summary['coordinatorUserId'] = 'u' . (int) $activeCoordinator['user_id'];
+            $summary['coordinatorName'] = (string) ($activeCoordinator['name'] ?? '');
+            $summary['readOnlyForDean'] = true;
+        }
+
+        $assignments = fetchPeerAssignmentsByBatchIdsSnapshot($pdo, $programBatchIds);
+        $outgoingMap = [];
+        $incomingMap = [];
+        foreach ($assignments as $assignment) {
+            $evaluatorUserId = (int) ($assignment['evaluator_user_id'] ?? 0);
+            $evaluateeUserId = (int) ($assignment['evaluatee_user_id'] ?? 0);
+            if ($evaluatorUserId <= 0 || $evaluateeUserId <= 0) {
+                continue;
+            }
+
+            $status = strtolower(trim((string) ($assignment['status'] ?? 'pending')));
+            if ($status !== 'submitted') {
+                $status = 'pending';
+            }
+
+            $outgoingMap[$evaluatorUserId][] = [
+                'userId' => 'u' . $evaluateeUserId,
+                'name' => (string) ($assignment['evaluatee_name'] ?? ''),
+                'status' => $status,
+            ];
+            $incomingMap[$evaluateeUserId][] = [
+                'userId' => 'u' . $evaluatorUserId,
+                'name' => (string) ($assignment['evaluator_name'] ?? ''),
+                'status' => $status,
+            ];
+        }
+
+        $professorRows = [];
+        foreach ($programProfessors as $professor) {
+            $professorId = (int) ($professor['id'] ?? 0);
+            $outgoing = $outgoingMap[$professorId] ?? [];
+            $incoming = $incomingMap[$professorId] ?? [];
+
+            usort($outgoing, function ($left, $right) {
+                return strcasecmp((string) ($left['name'] ?? ''), (string) ($right['name'] ?? ''));
+            });
+            usort($incoming, function ($left, $right) {
+                return strcasecmp((string) ($left['name'] ?? ''), (string) ($right['name'] ?? ''));
+            });
+
+            $pendingCount = 0;
+            $submittedCount = 0;
+            foreach ($outgoing as $assignment) {
+                if (($assignment['status'] ?? 'pending') === 'submitted') {
+                    $submittedCount += 1;
+                } else {
+                    $pendingCount += 1;
+                }
+            }
+
+            $professorRows[] = [
+                'userId' => 'u' . $professorId,
+                'name' => (string) ($professor['name'] ?? ''),
+                'email' => (string) ($professor['email'] ?? ''),
+                'employeeId' => (string) ($professor['employee_id'] ?? ''),
+                'willEvaluate' => $outgoing,
+                'willBeEvaluatedBy' => $incoming,
+                'outgoingCount' => count($outgoing),
+                'incomingCount' => count($incoming),
+                'pendingCount' => $pendingCount,
+                'submittedCount' => $submittedCount,
+            ];
+        }
+
+        $programDetails[] = [
+            'programCode' => (string) $program['program_code'],
+            'programName' => (string) $program['program_name'],
+            'summary' => $summary,
+            'professors' => $professorRows,
+        ];
+    }
+
+    $selectedProgramPayload = null;
+    $selectedSummary = null;
+    $selectedProfessors = [];
+    if ($selectedProgramCode !== '' && count($programDetails) > 0) {
+        $selectedProgramPayload = [
+            'programCode' => (string) ($programDetails[0]['programCode'] ?? ''),
+            'programName' => (string) ($programDetails[0]['programName'] ?? ''),
+        ];
+        $selectedSummary = $programDetails[0]['summary'] ?? null;
+        $selectedProfessors = $programDetails[0]['professors'] ?? [];
+    }
+
+    return [
+        'currentSemester' => (string) $semester['slug'],
+        'programs' => $programDetails,
+        'program' => $selectedProgramPayload,
+        'summary' => $selectedSummary,
+        'professors' => $selectedProfessors,
+    ];
+}
+
+function generateCoordinatorProgramPeerAssignmentsSnapshot(PDO $pdo, $coordinatorUserId, $programCode, $peerCount) {
+    ensurePeerEvaluationSchema($pdo);
+
+    $requestedPeerCount = (int) $peerCount;
+    if ($requestedPeerCount < 1) {
+        throw new RuntimeException('Peer count must be at least 1.');
+    }
+
+    $semester = resolveCurrentSemesterRowSnapshot($pdo);
+    if (!$semester) {
+        throw new RuntimeException('No current semester is configured.');
+    }
+
+    $coordinatorScope = resolveActiveCoordinatorScopeRow($pdo, $coordinatorUserId);
+    if (!$coordinatorScope) {
+        throw new RuntimeException('Active coordinator scope could not be resolved.');
+    }
+
+    $program = resolveCoordinatorScopedProgramRow($pdo, $coordinatorUserId, $programCode);
+    if (!$program) {
+        throw new RuntimeException('Invalid programCode for your coordinator scope.');
+    }
+
+    $professors = fetchActiveProfessorsForPeerProgramSnapshot(
+        $pdo,
+        (int) $coordinatorScope['department_id'],
+        (int) $program['id']
+    );
+    $professorCount = count($professors);
+    $actualPeerCount = computeProgramPeerActualCount($requestedPeerCount, $professorCount);
+    $oversightDean = resolveActiveDeanScopeRowByDepartmentId($pdo, (int) $coordinatorScope['department_id']);
+
+    $existingBatchRows = fetchCoordinatorProgramPeerBatchRowsCurrentSnapshot(
+        $pdo,
+        (int) $semester['id'],
+        (int) $coordinatorScope['user_id'],
+        (int) $program['id'],
+        true
+    );
+    $existingBatchIds = buildPeerBatchIdListSnapshot($existingBatchRows);
+    if (countSubmittedPeerAssignmentsByBatchIdsSnapshot($pdo, $existingBatchIds) > 0) {
+        throw new RuntimeException('Peer assignments for this program already have submitted evaluations and cannot be regenerated.');
+    }
+
+    $batchId = 0;
+    $pdo->beginTransaction();
+    try {
+        deletePeerBatchRowsSnapshot($pdo, $existingBatchIds);
+
+        if ($professorCount > 0) {
+            $batchName = buildUniquePeerRoomName(
+                $pdo,
+                (int) $semester['id'],
+                (int) (($oversightDean['user_id'] ?? 0) ?: $coordinatorScope['user_id']),
+                'Peer Program Assignment ' . strtoupper(trim((string) $program['program_code'])),
+                $program['program_code']
+            );
+
+            $insertBatch = $pdo->prepare(
+                'INSERT INTO peer_evaluation_rooms (
+                    semester_id,
+                    dean_user_id,
+                    program_id,
+                    requested_peer_count,
+                    room_name,
+                    coordinator_user_id
+                 ) VALUES (
+                    :semester_id,
+                    :dean_user_id,
+                    :program_id,
+                    :requested_peer_count,
+                    :room_name,
+                    :coordinator_user_id
+                 )'
+            );
+            $insertBatch->execute([
+                ':semester_id' => (int) $semester['id'],
+                ':dean_user_id' => $oversightDean ? (int) $oversightDean['user_id'] : null,
+                ':program_id' => (int) $program['id'],
+                ':requested_peer_count' => $requestedPeerCount,
+                ':room_name' => $batchName,
+                ':coordinator_user_id' => (int) $coordinatorScope['user_id'],
+            ]);
+            $batchId = (int) $pdo->lastInsertId();
+
+            $insertMember = $pdo->prepare(
+                'INSERT INTO peer_evaluation_room_members (room_id, professor_user_id)
+                 VALUES (:room_id, :professor_user_id)'
+            );
+            foreach ($professors as $professor) {
+                $insertMember->execute([
+                    ':room_id' => $batchId,
+                    ':professor_user_id' => (int) ($professor['id'] ?? 0),
+                ]);
+            }
+
+            if ($actualPeerCount > 0) {
+                $shuffledProfessors = $professors;
+                shuffle($shuffledProfessors);
+                $orderedIds = array_values(array_map(function ($row) {
+                    return (int) ($row['id'] ?? 0);
+                }, $shuffledProfessors));
+                $orderedIds = array_values(array_filter($orderedIds, function ($id) {
+                    return $id > 0;
+                }));
+
+                $insertAssignment = $pdo->prepare(
+                    'INSERT INTO peer_evaluation_assignments (
+                        semester_id,
+                        room_id,
+                        evaluator_user_id,
+                        evaluatee_user_id,
+                        status,
+                        submitted_evaluation_id
+                     ) VALUES (
+                        :semester_id,
+                        :room_id,
+                        :evaluator_user_id,
+                        :evaluatee_user_id,
+                        :status,
+                        :submitted_evaluation_id
+                     )'
+                );
+
+                $orderedCount = count($orderedIds);
+                for ($offset = 1; $offset <= $actualPeerCount; $offset += 1) {
+                    for ($index = 0; $index < $orderedCount; $index += 1) {
+                        $evaluatorUserId = (int) $orderedIds[$index];
+                        $evaluateeUserId = (int) $orderedIds[($index + $offset) % $orderedCount];
+                        if ($evaluatorUserId <= 0 || $evaluateeUserId <= 0 || $evaluatorUserId === $evaluateeUserId) {
+                            continue;
+                        }
+
+                        $insertAssignment->execute([
+                            ':semester_id' => (int) $semester['id'],
+                            ':room_id' => $batchId,
+                            ':evaluator_user_id' => $evaluatorUserId,
+                            ':evaluatee_user_id' => $evaluateeUserId,
+                            ':status' => 'pending',
+                            ':submitted_evaluation_id' => null,
+                        ]);
+                    }
+                }
+            }
+        }
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+
+    $batchRows = $batchId > 0
+        ? fetchCoordinatorProgramPeerBatchRowsCurrentSnapshot($pdo, (int) $semester['id'], (int) $coordinatorScope['user_id'], (int) $program['id'], false)
+        : [];
+    $statsMap = fetchPeerAssignmentStatsByBatchIdsSnapshot($pdo, buildPeerBatchIdListSnapshot($batchRows));
+    $summary = buildDeanProgramPeerAssignmentSummaryEntrySnapshot($program, $professors, $batchRows, $statsMap);
+    $summary['ownerRole'] = 'procoor';
+    $summary['coordinatorUserId'] = 'u' . (int) $coordinatorScope['user_id'];
+    $summary['coordinatorName'] = (string) ($coordinatorScope['name'] ?? '');
+    $summary['readOnlyForDean'] = true;
+
+    return [
+        'currentSemester' => (string) $semester['slug'],
+        'program' => [
+            'programCode' => (string) $program['program_code'],
+            'programName' => (string) $program['program_name'],
+        ],
+        'summary' => $summary,
+    ];
+}
+
+function listCoordinatorProgramPeerAssignmentsCurrentSnapshot(PDO $pdo, $coordinatorUserId) {
+    ensurePeerEvaluationSchema($pdo);
+
+    $semester = resolveCurrentSemesterRowSnapshot($pdo);
+    if (!$semester) {
+        return [
+            'currentSemester' => '',
+            'programs' => [],
+        ];
+    }
+
+    $coordinatorScope = resolveActiveCoordinatorScopeRow($pdo, $coordinatorUserId);
+    if (!$coordinatorScope) {
+        throw new RuntimeException('Active coordinator scope could not be resolved.');
+    }
+
+    $program = resolveCoordinatorScopedProgramRow($pdo, $coordinatorUserId, (string) ($coordinatorScope['program_code'] ?? ''));
+    if (!$program) {
+        return [
+            'currentSemester' => (string) $semester['slug'],
+            'programs' => [],
+        ];
+    }
+
+    $professors = fetchActiveProfessorsForPeerProgramSnapshot(
+        $pdo,
+        (int) $coordinatorScope['department_id'],
+        (int) $program['id']
+    );
+    $batchRows = fetchCoordinatorProgramPeerBatchRowsCurrentSnapshot(
+        $pdo,
+        (int) $semester['id'],
+        (int) $coordinatorScope['user_id'],
+        (int) $program['id'],
+        true
+    );
+    $statsMap = fetchPeerAssignmentStatsByBatchIdsSnapshot($pdo, buildPeerBatchIdListSnapshot($batchRows));
+    $summary = buildDeanProgramPeerAssignmentSummaryEntrySnapshot($program, $professors, $batchRows, $statsMap);
+    $summary['ownerRole'] = 'procoor';
+    $summary['coordinatorUserId'] = 'u' . (int) $coordinatorScope['user_id'];
+    $summary['coordinatorName'] = (string) ($coordinatorScope['name'] ?? '');
+    $summary['readOnlyForDean'] = true;
+
+    return [
+        'currentSemester' => (string) $semester['slug'],
+        'programs' => [$summary],
+    ];
+}
+
+function listCoordinatorProgramPeerAssignmentDetailsCurrentSnapshot(PDO $pdo, $coordinatorUserId, $programCode = '') {
+    ensurePeerEvaluationSchema($pdo);
+
+    $semester = resolveCurrentSemesterRowSnapshot($pdo);
+    if (!$semester) {
+        return [
+            'currentSemester' => '',
+            'programs' => [],
+            'program' => null,
+            'professors' => [],
+            'summary' => null,
+        ];
+    }
+
+    $coordinatorScope = resolveActiveCoordinatorScopeRow($pdo, $coordinatorUserId);
+    if (!$coordinatorScope) {
+        throw new RuntimeException('Active coordinator scope could not be resolved.');
+    }
+
+    $program = resolveCoordinatorScopedProgramRow($pdo, $coordinatorUserId, $programCode);
+    if (!$program) {
+        throw new RuntimeException('Invalid programCode for your coordinator scope.');
+    }
+
+    $programProfessors = fetchActiveProfessorsForPeerProgramSnapshot(
+        $pdo,
+        (int) $coordinatorScope['department_id'],
+        (int) $program['id']
+    );
+    $programBatchRows = fetchCoordinatorProgramPeerBatchRowsCurrentSnapshot(
+        $pdo,
+        (int) $semester['id'],
+        (int) $coordinatorScope['user_id'],
+        (int) $program['id'],
+        true
+    );
+    $programBatchIds = buildPeerBatchIdListSnapshot($programBatchRows);
+    $statsMap = fetchPeerAssignmentStatsByBatchIdsSnapshot($pdo, $programBatchIds);
+    $summary = buildDeanProgramPeerAssignmentSummaryEntrySnapshot(
+        $program,
+        $programProfessors,
+        $programBatchRows,
+        $statsMap
+    );
+    $summary['ownerRole'] = 'procoor';
+    $summary['coordinatorUserId'] = 'u' . (int) $coordinatorScope['user_id'];
+    $summary['coordinatorName'] = (string) ($coordinatorScope['name'] ?? '');
+    $summary['readOnlyForDean'] = true;
+
+    $assignments = fetchPeerAssignmentsByBatchIdsSnapshot($pdo, $programBatchIds);
+    $outgoingMap = [];
+    $incomingMap = [];
+    foreach ($assignments as $assignment) {
+        $evaluatorUserId = (int) ($assignment['evaluator_user_id'] ?? 0);
+        $evaluateeUserId = (int) ($assignment['evaluatee_user_id'] ?? 0);
+        if ($evaluatorUserId <= 0 || $evaluateeUserId <= 0) {
+            continue;
+        }
+
+        $status = strtolower(trim((string) ($assignment['status'] ?? 'pending')));
+        if ($status !== 'submitted') {
+            $status = 'pending';
+        }
+
+        $outgoingMap[$evaluatorUserId][] = [
+            'userId' => 'u' . $evaluateeUserId,
+            'name' => (string) ($assignment['evaluatee_name'] ?? ''),
+            'status' => $status,
+        ];
+        $incomingMap[$evaluateeUserId][] = [
+            'userId' => 'u' . $evaluatorUserId,
+            'name' => (string) ($assignment['evaluator_name'] ?? ''),
+            'status' => $status,
+        ];
+    }
+
+    $professorRows = [];
+    foreach ($programProfessors as $professor) {
+        $professorId = (int) ($professor['id'] ?? 0);
+        $outgoing = $outgoingMap[$professorId] ?? [];
+        $incoming = $incomingMap[$professorId] ?? [];
+
+        usort($outgoing, function ($left, $right) {
+            return strcasecmp((string) ($left['name'] ?? ''), (string) ($right['name'] ?? ''));
+        });
+        usort($incoming, function ($left, $right) {
+            return strcasecmp((string) ($left['name'] ?? ''), (string) ($right['name'] ?? ''));
+        });
+
+        $pendingCount = 0;
+        $submittedCount = 0;
+        foreach ($outgoing as $assignment) {
+            if (($assignment['status'] ?? 'pending') === 'submitted') {
+                $submittedCount += 1;
+            } else {
+                $pendingCount += 1;
+            }
+        }
+
+        $professorRows[] = [
+            'userId' => 'u' . $professorId,
+            'name' => (string) ($professor['name'] ?? ''),
+            'email' => (string) ($professor['email'] ?? ''),
+            'employeeId' => (string) ($professor['employee_id'] ?? ''),
+            'willEvaluate' => $outgoing,
+            'willBeEvaluatedBy' => $incoming,
+            'outgoingCount' => count($outgoing),
+            'incomingCount' => count($incoming),
+            'pendingCount' => $pendingCount,
+            'submittedCount' => $submittedCount,
+        ];
+    }
+
+    $programPayload = [
+        'programCode' => (string) $program['program_code'],
+        'programName' => (string) $program['program_name'],
+    ];
+    $programDetails = [[
+        'programCode' => (string) $program['program_code'],
+        'programName' => (string) $program['program_name'],
+        'summary' => $summary,
+        'professors' => $professorRows,
+    ]];
+
+    return [
+        'currentSemester' => (string) $semester['slug'],
+        'programs' => $programDetails,
+        'program' => $programPayload,
+        'summary' => $summary,
+        'professors' => $professorRows,
+    ];
+}
+
 function buildProfessorPeerAssignmentsCurrentSnapshot(PDO $pdo, $professorUserId) {
     ensurePeerEvaluationSchema($pdo);
 
@@ -4711,6 +6812,493 @@ function completeProfessorPeerAssignmentForEvaluation(PDO $pdo, $evaluatorUserId
     }
 
     throw new RuntimeException('Peer evaluation assignment could not be updated.');
+}
+
+function isAdminActivitySequentialArray(array $items) {
+    $expectedIndex = 0;
+    foreach ($items as $key => $_value) {
+        if ($key !== $expectedIndex) {
+            return false;
+        }
+        $expectedIndex++;
+    }
+    return true;
+}
+
+function normalizeAdminActivityComparableValue($value) {
+    if ($value === null) {
+        return '';
+    }
+    if (is_bool($value)) {
+        return $value ? 'Yes' : 'No';
+    }
+    if (is_int($value) || is_float($value)) {
+        return (string) $value;
+    }
+    if (is_array($value)) {
+        if (count($value) === 0) {
+            return '';
+        }
+        if (isAdminActivitySequentialArray($value)) {
+            $parts = [];
+            foreach ($value as $item) {
+                $text = normalizeAdminActivityComparableValue($item);
+                if ($text !== '') {
+                    $parts[] = $text;
+                }
+            }
+            return implode(', ', $parts);
+        }
+
+        $normalized = [];
+        $keys = array_keys($value);
+        sort($keys, SORT_STRING);
+        foreach ($keys as $key) {
+            $text = normalizeAdminActivityComparableValue($value[$key]);
+            $normalized[] = $key . ':' . $text;
+        }
+        return implode(', ', $normalized);
+    }
+
+    $text = trim((string) $value);
+    if ($text === '') {
+        return '';
+    }
+
+    $text = preg_replace('/\s+/', ' ', $text) ?: $text;
+    return $text;
+}
+
+function formatAdminActivityDisplayValue($value, $mode = 'normal') {
+    $text = normalizeAdminActivityComparableValue($value);
+    if ($mode === 'removed') {
+        return $text !== '' ? $text : '[removed]';
+    }
+    if ($text === '') {
+        return '[empty]';
+    }
+    if (strlen($text) > 160) {
+        return substr($text, 0, 157) . '...';
+    }
+    return $text;
+}
+
+function buildAdminActivityChangeTexts(array $beforeFlat, array $afterFlat) {
+    $keys = array_values(array_unique(array_merge(array_keys($beforeFlat), array_keys($afterFlat))));
+    sort($keys, SORT_STRING);
+
+    $changes = [];
+    foreach ($keys as $key) {
+        $hasBefore = array_key_exists($key, $beforeFlat);
+        $hasAfter = array_key_exists($key, $afterFlat);
+        $beforeValue = $hasBefore ? normalizeAdminActivityComparableValue($beforeFlat[$key]) : '';
+        $afterValue = $hasAfter ? normalizeAdminActivityComparableValue($afterFlat[$key]) : '';
+
+        if ($hasBefore && $hasAfter && $beforeValue === $afterValue) {
+            continue;
+        }
+
+        $changes[] = $key . ': '
+            . formatAdminActivityDisplayValue($hasBefore ? $beforeFlat[$key] : '', $hasBefore ? 'normal' : 'empty')
+            . ' -> '
+            . formatAdminActivityDisplayValue($hasAfter ? $afterFlat[$key] : '', $hasAfter ? 'normal' : 'removed');
+    }
+
+    return $changes;
+}
+
+function buildAdminActivityDescription($entityLabel, array $changes, $maxLength = 2000) {
+    $label = sanitizeActivityLogTextValue($entityLabel, 250);
+    $prefix = $label !== '' ? ($label . ' changed: ') : 'Data changed: ';
+    $description = $prefix;
+    $appended = 0;
+    $total = count($changes);
+
+    foreach ($changes as $index => $change) {
+        $segment = ($appended > 0 ? '; ' : '') . $change;
+        $remaining = $total - ($index + 1);
+        $suffix = $remaining > 0 ? '; (+' . $remaining . ' more changes)' : '';
+        if (strlen($description . $segment . $suffix) > $maxLength) {
+            if ($appended === 0) {
+                $available = max(0, $maxLength - strlen($description) - strlen($suffix));
+                if ($available > 0) {
+                    $description .= substr($change, 0, max(0, $available - 3)) . ($available >= 3 ? '...' : '');
+                    $appended++;
+                }
+            }
+            if ($remaining >= 0) {
+                $summarySuffix = '; (+' . ($total - $appended) . ' more changes)';
+                $available = $maxLength - strlen($description);
+                if ($available > 0) {
+                    $description .= substr($summarySuffix, 0, $available);
+                }
+            }
+            break;
+        }
+
+        $description .= $segment;
+        $appended++;
+    }
+
+    return sanitizeActivityLogTextValue($description, $maxLength);
+}
+
+function logAdminFlatStateChangeSnapshot(PDO $pdo, array $actorUser, $action, $type, $entityLabel, array $beforeFlat, array $afterFlat) {
+    $changes = buildAdminActivityChangeTexts($beforeFlat, $afterFlat);
+    if (count($changes) === 0) {
+        return null;
+    }
+
+    return addActivityLogEntrySnapshot($pdo, [
+        'action' => $action,
+        'description' => buildAdminActivityDescription($entityLabel, $changes, 2000),
+        'type' => $type,
+        'userId' => $actorUser['id'] ?? ($actorUser['userId'] ?? ''),
+        'email' => $actorUser['email'] ?? '',
+        'user' => $actorUser['name'] ?? ($actorUser['fullName'] ?? ($actorUser['username'] ?? '')),
+        'role' => $actorUser['role'] ?? '',
+    ]);
+}
+
+function safeLogAdminFlatStateChangeSnapshot(PDO $pdo, array $actorUser, $action, $type, $entityLabel, array $beforeFlat, array $afterFlat) {
+    try {
+        return logAdminFlatStateChangeSnapshot($pdo, $actorUser, $action, $type, $entityLabel, $beforeFlat, $afterFlat);
+    } catch (Throwable $error) {
+        return null;
+    }
+}
+
+function buildUserActivityFlatState(array $user, array $options = []) {
+    if (count($user) === 0) {
+        return [];
+    }
+
+    $userId = trim((string) ($options['userId'] ?? ($user['id'] ?? '')));
+    $prefix = $userId !== '' ? ('User ' . $userId) : 'User';
+    $state = [
+        $prefix . ' Name' => (string) ($user['name'] ?? ''),
+        $prefix . ' Email' => (string) ($user['email'] ?? ''),
+        $prefix . ' Role' => (string) ($user['role'] ?? ''),
+        $prefix . ' Campus' => (string) ($user['campus'] ?? ''),
+        $prefix . ' Department' => (string) ($user['department'] ?? ($user['institute'] ?? '')),
+        $prefix . ' Program Code' => (string) ($user['programCode'] ?? ''),
+        $prefix . ' Program Name' => (string) ($user['programName'] ?? ''),
+        $prefix . ' Employee ID' => (string) ($user['employeeId'] ?? ''),
+        $prefix . ' Student Number' => (string) ($user['studentNumber'] ?? ''),
+        $prefix . ' Year Section' => (string) ($user['yearSection'] ?? ''),
+        $prefix . ' Employment Type' => (string) ($user['employmentType'] ?? ''),
+        $prefix . ' Position' => (string) ($user['position'] ?? ''),
+        $prefix . ' Status' => (string) ($user['status'] ?? ''),
+    ];
+
+    if (array_key_exists('passwordMarker', $options)) {
+        $state[$prefix . ' Password'] = (string) $options['passwordMarker'];
+    }
+
+    return $state;
+}
+
+function buildSettingsActivityFlatState(array $settings) {
+    $state = [];
+    $keys = array_keys($settings);
+    sort($keys, SORT_STRING);
+    foreach ($keys as $key) {
+        $label = ucwords(trim(preg_replace('/[_-]+/', ' ', (string) $key) ?: (string) $key));
+        $state['Setting ' . $label] = $settings[$key];
+    }
+    return $state;
+}
+
+function buildEvalPeriodsActivityFlatState(array $periods) {
+    $state = [];
+    $types = array_keys($periods);
+    sort($types, SORT_STRING);
+    foreach ($types as $type) {
+        $prefix = 'Evaluation Period ' . $type;
+        $state[$prefix . ' Start'] = $periods[$type]['start'] ?? '';
+        $state[$prefix . ' End'] = $periods[$type]['end'] ?? '';
+    }
+    return $state;
+}
+
+function buildSemesterListActivityFlatState(array $semesters) {
+    $state = [];
+    foreach ($semesters as $semester) {
+        if (!is_array($semester)) {
+            continue;
+        }
+        $value = trim((string) ($semester['value'] ?? ''));
+        if ($value === '') {
+            continue;
+        }
+        $state['Semester ' . $value . ' Label'] = (string) ($semester['label'] ?? '');
+    }
+    ksort($state, SORT_STRING);
+    return $state;
+}
+
+function buildProgramsActivityFlatState(array $programs) {
+    $state = [];
+    foreach ($programs as $program) {
+        if (!is_array($program)) {
+            continue;
+        }
+        $programId = trim((string) ($program['id'] ?? ''));
+        if ($programId === '') {
+            continue;
+        }
+        $prefix = 'Program ' . $programId;
+        $state[$prefix . ' Campus'] = (string) ($program['campusSlug'] ?? '');
+        $state[$prefix . ' Department'] = (string) ($program['departmentCode'] ?? '');
+        $state[$prefix . ' Code'] = (string) ($program['programCode'] ?? '');
+        $state[$prefix . ' Name'] = (string) ($program['programName'] ?? '');
+    }
+    ksort($state, SORT_STRING);
+    return $state;
+}
+
+function buildCampusActivityFlatState(array $campuses) {
+    $state = [];
+    foreach ($campuses as $campus) {
+        if (!is_array($campus)) {
+            continue;
+        }
+        $campusId = strtolower(trim((string) ($campus['id'] ?? '')));
+        if ($campusId === '') {
+            continue;
+        }
+        $prefix = 'Campus ' . $campusId;
+        $departments = is_array($campus['departments'] ?? null) ? $campus['departments'] : [];
+        $normalizedDepartments = [];
+        foreach ($departments as $department) {
+            $departmentText = trim((string) $department);
+            if ($departmentText !== '') {
+                $normalizedDepartments[] = strtoupper($departmentText);
+            }
+        }
+        sort($normalizedDepartments, SORT_STRING);
+        $state[$prefix . ' Name'] = (string) ($campus['name'] ?? '');
+        $state[$prefix . ' Departments'] = implode(', ', $normalizedDepartments);
+    }
+    ksort($state, SORT_STRING);
+    return $state;
+}
+
+function buildSubjectActivityFlatState(array $subjects) {
+    $state = [];
+    foreach ($subjects as $subject) {
+        if (!is_array($subject)) {
+            continue;
+        }
+        $subjectId = trim((string) ($subject['id'] ?? ''));
+        if ($subjectId === '') {
+            continue;
+        }
+        $prefix = 'Subject ' . $subjectId;
+        $state[$prefix . ' Campus'] = (string) ($subject['campusSlug'] ?? '');
+        $state[$prefix . ' Department'] = (string) ($subject['departmentCode'] ?? '');
+        $state[$prefix . ' Code'] = (string) ($subject['subjectCode'] ?? '');
+        $state[$prefix . ' Name'] = (string) ($subject['subjectName'] ?? '');
+    }
+    ksort($state, SORT_STRING);
+    return $state;
+}
+
+function buildOfferingActivityFlatState(array $offerings) {
+    $state = [];
+    foreach ($offerings as $offering) {
+        if (!is_array($offering)) {
+            continue;
+        }
+        $offeringId = trim((string) ($offering['id'] ?? ''));
+        if ($offeringId === '') {
+            continue;
+        }
+        $prefix = 'Offering ' . $offeringId;
+        $state[$prefix . ' Semester'] = (string) ($offering['semesterSlug'] ?? '');
+        $state[$prefix . ' Subject ID'] = (string) ($offering['subjectId'] ?? '');
+        $state[$prefix . ' Subject Code'] = (string) ($offering['subjectCode'] ?? '');
+        $state[$prefix . ' Subject Name'] = (string) ($offering['subjectName'] ?? '');
+        $state[$prefix . ' Section'] = (string) ($offering['sectionName'] ?? '');
+        $state[$prefix . ' Professor User'] = (string) ($offering['professorUserId'] ?? '');
+        $state[$prefix . ' Professor Employee ID'] = (string) ($offering['professorEmployeeId'] ?? '');
+        $state[$prefix . ' Professor Name'] = (string) ($offering['professorName'] ?? '');
+        $state[$prefix . ' Program Code'] = (string) ($offering['programCode'] ?? '');
+        $state[$prefix . ' Campus'] = (string) ($offering['campusSlug'] ?? '');
+        $state[$prefix . ' Department'] = (string) ($offering['departmentCode'] ?? '');
+        $state[$prefix . ' Load Type'] = normalizeCourseOfferingLoadType($offering['loadType'] ?? 'main');
+        $state[$prefix . ' Active'] = !empty($offering['isActive']) ? 'Yes' : 'No';
+    }
+    ksort($state, SORT_STRING);
+    return $state;
+}
+
+function buildOfferingEnrollmentActivityFlatState(array $enrollments, $courseOfferingId) {
+    $normalizedOfferingId = normalizeEntityId($courseOfferingId);
+    if ($normalizedOfferingId === null) {
+        return [];
+    }
+
+    $students = [];
+    foreach ($enrollments as $enrollment) {
+        if (!is_array($enrollment)) {
+            continue;
+        }
+        if ((int) ($enrollment['courseOfferingId'] ?? 0) !== $normalizedOfferingId) {
+            continue;
+        }
+        if (strtolower(trim((string) ($enrollment['status'] ?? ''))) !== 'enrolled') {
+            continue;
+        }
+        $students[] = trim((string) ($enrollment['studentNumber'] ?? '')) !== ''
+            ? (string) $enrollment['studentNumber']
+            : (string) ($enrollment['studentUserId'] ?? '');
+    }
+
+    sort($students, SORT_STRING);
+    return [
+        'Offering ' . $normalizedOfferingId . ' Students' => implode(', ', $students),
+    ];
+}
+
+function buildEnrollmentActivityFlatState(array $enrollments) {
+    $state = [];
+    $grouped = [];
+    foreach ($enrollments as $enrollment) {
+        if (!is_array($enrollment)) {
+            continue;
+        }
+        $offeringId = (int) ($enrollment['courseOfferingId'] ?? 0);
+        if ($offeringId <= 0) {
+            continue;
+        }
+        if (!isset($grouped[$offeringId])) {
+            $grouped[$offeringId] = [];
+        }
+        if (strtolower(trim((string) ($enrollment['status'] ?? ''))) !== 'enrolled') {
+            continue;
+        }
+        $grouped[$offeringId][] = trim((string) ($enrollment['studentNumber'] ?? '')) !== ''
+            ? (string) $enrollment['studentNumber']
+            : (string) ($enrollment['studentUserId'] ?? '');
+    }
+
+    ksort($grouped, SORT_NUMERIC);
+    foreach ($grouped as $offeringId => $students) {
+        sort($students, SORT_STRING);
+        $state['Offering ' . $offeringId . ' Students'] = implode(', ', $students);
+    }
+    return $state;
+}
+
+function buildQuestionnaireSectionActivityKey($semesterSlug, $typeCode, array $section, $index) {
+    $sectionId = trim((string) ($section['id'] ?? ''));
+    if ($sectionId !== '' && preg_match('/^\d+$/', $sectionId)) {
+        return $semesterSlug . ' ' . $typeCode . ' Section ' . $sectionId;
+    }
+
+    $letter = trim((string) ($section['letter'] ?? ''));
+    if ($letter !== '') {
+        return $semesterSlug . ' ' . $typeCode . ' Section ' . strtoupper($letter);
+    }
+
+    return $semesterSlug . ' ' . $typeCode . ' Section ' . ((int) $index + 1);
+}
+
+function buildQuestionnaireQuestionActivityKey($semesterSlug, $typeCode, array $question, $index) {
+    $questionId = trim((string) ($question['id'] ?? ''));
+    if ($questionId !== '' && preg_match('/^\d+$/', $questionId)) {
+        return $semesterSlug . ' ' . $typeCode . ' Question ' . $questionId;
+    }
+
+    $sectionId = trim((string) ($question['sectionId'] ?? ''));
+    $order = (int) ($question['order'] ?? ($index + 1));
+    $questionType = trim((string) ($question['type'] ?? 'question'));
+
+    return $semesterSlug . ' ' . $typeCode . ' Question '
+        . ($sectionId !== '' ? $sectionId : 'root')
+        . '-' . $order . '-' . $questionType;
+}
+
+function buildQuestionnairesActivityFlatState(array $data) {
+    $state = [];
+    $semesterSlugs = array_keys($data);
+    sort($semesterSlugs, SORT_STRING);
+
+    foreach ($semesterSlugs as $semesterSlug) {
+        $semesterData = is_array($data[$semesterSlug] ?? null) ? $data[$semesterSlug] : [];
+        $typeCodes = array_keys($semesterData);
+        sort($typeCodes, SORT_STRING);
+
+        foreach ($typeCodes as $typeCode) {
+            $entry = is_array($semesterData[$typeCode] ?? null) ? $semesterData[$typeCode] : [];
+            $header = is_array($entry['header'] ?? null) ? $entry['header'] : [];
+            $prefix = $semesterSlug . ' ' . $typeCode;
+            $state[$prefix . ' Title'] = (string) ($header['title'] ?? '');
+            $state[$prefix . ' Description'] = (string) ($header['description'] ?? '');
+
+            $sections = is_array($entry['sections'] ?? null) ? array_values($entry['sections']) : [];
+            foreach ($sections as $index => $section) {
+                if (!is_array($section)) {
+                    continue;
+                }
+                $sectionPrefix = buildQuestionnaireSectionActivityKey($semesterSlug, $typeCode, $section, $index);
+                $state[$sectionPrefix . ' Letter'] = (string) ($section['letter'] ?? '');
+                $state[$sectionPrefix . ' Title'] = (string) ($section['title'] ?? '');
+                $state[$sectionPrefix . ' Description'] = (string) ($section['description'] ?? '');
+                $state[$sectionPrefix . ' Order'] = (string) ($section['order'] ?? '');
+            }
+
+            $questions = is_array($entry['questions'] ?? null) ? array_values($entry['questions']) : [];
+            foreach ($questions as $index => $question) {
+                if (!is_array($question)) {
+                    continue;
+                }
+                $questionPrefix = buildQuestionnaireQuestionActivityKey($semesterSlug, $typeCode, $question, $index);
+                $state[$questionPrefix . ' Text'] = (string) ($question['text'] ?? '');
+                $state[$questionPrefix . ' Type'] = (string) ($question['type'] ?? '');
+                $state[$questionPrefix . ' Required'] = !empty($question['required']) ? 'Yes' : 'No';
+                $state[$questionPrefix . ' Exception Reporting'] = !empty($question['exceptionReporting']) ? 'Yes' : 'No';
+                $state[$questionPrefix . ' Section'] = (string) ($question['sectionId'] ?? '');
+                $state[$questionPrefix . ' Order'] = (string) ($question['order'] ?? '');
+                if (($question['type'] ?? '') === 'rating') {
+                    $state[$questionPrefix . ' Rating Scale'] = (string) ($question['ratingScale'] ?? ('1-' . (string) ($question['ratingMax'] ?? '5')));
+                } else {
+                    $state[$questionPrefix . ' Max Length'] = (string) ($question['maxLength'] ?? '');
+                }
+            }
+        }
+    }
+
+    ksort($state, SORT_STRING);
+    return $state;
+}
+
+function buildAnnouncementsActivityFlatState(array $items) {
+    $state = [];
+    foreach ($items as $index => $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        $announcementId = trim((string) ($item['id'] ?? ''));
+        if ($announcementId === '') {
+            $announcementId = 'announcement-' . ($index + 1);
+        }
+        $prefix = 'Announcement ' . $announcementId;
+        $audience = is_array($item['audience'] ?? null) ? $item['audience'] : [];
+        $state[$prefix . ' Title'] = (string) ($item['title'] ?? '');
+        $state[$prefix . ' Message'] = (string) ($item['message'] ?? '');
+        $state[$prefix . ' Timestamp'] = (string) ($item['timestamp'] ?? ($item['createdAt'] ?? ''));
+        $state[$prefix . ' Created By Role'] = (string) ($item['createdByRole'] ?? '');
+        $state[$prefix . ' Created By User'] = (string) ($item['createdByUserId'] ?? '');
+        $state[$prefix . ' Audience Role'] = (string) ($audience['role'] ?? '');
+        $state[$prefix . ' Audience Campus'] = (string) ($audience['campus'] ?? '');
+        $state[$prefix . ' Audience Program'] = (string) ($audience['programCode'] ?? '');
+        $state[$prefix . ' Audience Student Completion'] = (string) ($audience['studentCompletion'] ?? '');
+        $state[$prefix . ' Read'] = !empty($item['read']) ? 'Yes' : 'No';
+    }
+    ksort($state, SORT_STRING);
+    return $state;
 }
 
 function normalizeActivityLogEntryType($value) {
@@ -4923,7 +7511,7 @@ function inferActivityLogRow(array $row) {
 
     $timestamp = trim((string) ($row['happened_at'] ?? $row['timestamp'] ?? ''));
     if ($timestamp === '') {
-        $timestamp = date('c');
+        $timestamp = getAuthoritativePhilippineIso8601();
     }
 
     return [
@@ -5099,7 +7687,7 @@ function addActivityLogEntrySnapshot(PDO $pdo, array $entry) {
 
         return [
             'id' => $logCode,
-            'timestamp' => date('c'),
+            'timestamp' => getAuthoritativePhilippineIso8601(),
             'description' => $description,
             'action' => $action,
             'role' => '',
@@ -5135,7 +7723,7 @@ function buildAnnouncementsSnapshot(PDO $pdo) {
     foreach ($stmt->fetchAll() as $row) {
         $items[] = [
             'id' => 'ANN-' . $row['id'],
-            'timestamp' => $row['created_at'] ?? date('c'),
+            'timestamp' => $row['created_at'] ?? getAuthoritativePhilippineIso8601(),
             'read' => false,
             'title' => $row['title'],
             'message' => $row['message'],
@@ -5145,8 +7733,18 @@ function buildAnnouncementsSnapshot(PDO $pdo) {
     return $items;
 }
 
-function persistAnnouncementsSnapshot(PDO $pdo, array $items) {
+function persistAnnouncementsSnapshot(PDO $pdo, array $items, array $actorUser = []) {
+    $before = buildAnnouncementsSnapshot($pdo);
     setSettingJson($pdo, 'sharedAnnouncements', $items);
+    safeLogAdminFlatStateChangeSnapshot(
+        $pdo,
+        $actorUser,
+        'Announcement Saved',
+        'system',
+        'Announcements',
+        buildAnnouncementsActivityFlatState($before),
+        buildAnnouncementsActivityFlatState($items)
+    );
 }
 
 function normalizeLoginSecurityUserKey($value) {
@@ -5258,90 +7856,464 @@ function maskLoginSecurityEmail($email) {
     return $maskedLocal . '@' . $domain;
 }
 
-function getCredentialDistributorRawConfig(PDO $pdo) {
-    $stored = getSettingJson($pdo, 'credentialDistributorConfig', []);
-    $envSenderEmail = trim((string) (getenv('NAAP_SMTP_EMAIL') ?: ''));
-    $envSenderName = trim((string) (getenv('NAAP_SMTP_NAME') ?: ''));
-    $envAppPassword = trim((string) (getenv('NAAP_SMTP_APP_PASSWORD') ?: ''));
-
-    $senderEmail = $envSenderEmail !== ''
-        ? $envSenderEmail
-        : trim((string) ($stored['senderEmail'] ?? ''));
-
-    $senderName = $envSenderName !== ''
-        ? $envSenderName
-        : trim((string) ($stored['senderName'] ?? ''));
-
-    if ($senderName === '') {
-        $senderName = 'NAAP Evaluation System';
+function getCredentialDistributorOptionalEnvValue(string $name): ?string
+{
+    $value = getenv($name);
+    if ($value === false) {
+        return null;
     }
 
-    $appPassword = $envAppPassword !== ''
-        ? $envAppPassword
-        : trim((string) ($stored['appPassword'] ?? ''));
+    return trim((string) $value);
+}
 
-    $appPassword = preg_replace('/\s+/', '', $appPassword ?? '');
+function getGeminiOptionalEnvValue(string $name): ?string
+{
+    $value = getenv($name);
+    if ($value === false) {
+        return null;
+    }
+
+    return trim((string) $value);
+}
+
+function normalizeCredentialDistributorSmtpEncryptionValue($value, string $default = 'tls'): string
+{
+    $token = strtolower(trim((string) $value));
+    if ($token === '') {
+        return $default;
+    }
+    if ($token === 'tls' || $token === 'starttls') {
+        return 'tls';
+    }
+    if ($token === 'ssl' || $token === 'smtps') {
+        return 'ssl';
+    }
+    if ($token === 'none' || $token === 'off' || $token === 'plain' || $token === 'false' || $token === '0') {
+        return '';
+    }
+
+    return $default;
+}
+
+function normalizeCredentialDistributorSmtpAuthValue($value, bool $default = true): bool
+{
+    if (is_bool($value)) {
+        return $value;
+    }
+
+    $token = strtolower(trim((string) $value));
+    if ($token === '') {
+        return $default;
+    }
+    if ($token === '1' || $token === 'true' || $token === 'yes' || $token === 'on' || $token === 'enabled') {
+        return true;
+    }
+    if ($token === '0' || $token === 'false' || $token === 'no' || $token === 'off' || $token === 'disabled') {
+        return false;
+    }
+
+    return $default;
+}
+
+function normalizeCredentialDistributorSmtpPortValue($value, int $default = 587): int
+{
+    $port = (int) $value;
+    if ($port < 1 || $port > 65535) {
+        return $default;
+    }
+
+    return $port;
+}
+
+function normalizeCredentialDistributorSmtpTimeoutValue($value, int $default = 20): int
+{
+    $timeout = (int) $value;
+    if ($timeout < 5) {
+        return $default;
+    }
+    if ($timeout > 120) {
+        return 120;
+    }
+
+    return $timeout;
+}
+
+function normalizeGeminiModelValue($value, string $default = 'gemini-2.5-flash'): string
+{
+    $model = trim((string) $value);
+    if ($model === '') {
+        return $default;
+    }
+    if (strlen($model) > 120) {
+        $model = substr($model, 0, 120);
+    }
+
+    return $model;
+}
+
+function normalizeGeminiTimeoutMsValue($value, int $default = 30000): int
+{
+    $timeout = (int) $value;
+    if ($timeout <= 0) {
+        $timeout = $default;
+    }
+
+    return max(5000, min($timeout, 60000));
+}
+
+function inferCredentialDistributorSmtpPortDefault(string $encryption): int
+{
+    return $encryption === 'ssl' ? 465 : 587;
+}
+
+function isCredentialDistributorSmtpConfigComplete(array $config): bool
+{
+    $host = trim((string) ($config['host'] ?? ''));
+    $port = (int) ($config['port'] ?? 0);
+    $fromEmail = trim((string) ($config['fromEmail'] ?? ''));
+    $auth = !empty($config['auth']);
+    $username = trim((string) ($config['username'] ?? ''));
+    $password = trim((string) ($config['password'] ?? ''));
+
+    if ($host === '' || $port < 1 || $port > 65535) {
+        return false;
+    }
+    if ($fromEmail === '' || !filter_var($fromEmail, FILTER_VALIDATE_EMAIL)) {
+        return false;
+    }
+    if ($auth && ($username === '' || $password === '')) {
+        return false;
+    }
+
+    return true;
+}
+
+function getCredentialDistributorRawConfig(PDO $pdo) {
+    $stored = getSettingJson($pdo, 'credentialDistributorConfig', []);
+    $stored = is_array($stored) ? $stored : [];
+
+    $legacyStoredEmail = trim((string) ($stored['senderEmail'] ?? ''));
+    $legacyStoredName = trim((string) ($stored['senderName'] ?? ''));
+    $legacyStoredPassword = trim((string) ($stored['appPassword'] ?? ''));
+    $storedHostFallback = ($legacyStoredEmail !== '' || $legacyStoredPassword !== '') ? 'smtp.gmail.com' : '';
+    $storedEncryption = normalizeCredentialDistributorSmtpEncryptionValue(
+        $stored['encryption'] ?? (($storedHostFallback !== '') ? 'tls' : 'tls'),
+        'tls'
+    );
+    $storedPort = normalizeCredentialDistributorSmtpPortValue(
+        $stored['port'] ?? '',
+        inferCredentialDistributorSmtpPortDefault($storedEncryption)
+    );
+    $storedAuth = normalizeCredentialDistributorSmtpAuthValue($stored['auth'] ?? true, true);
+    $storedTimeout = normalizeCredentialDistributorSmtpTimeoutValue($stored['timeout'] ?? 20, 20);
+    $storedHost = trim((string) ($stored['host'] ?? $storedHostFallback));
+    $storedUsername = trim((string) ($stored['username'] ?? $legacyStoredEmail));
+    $storedPassword = trim((string) ($stored['password'] ?? $legacyStoredPassword));
+    $storedFromEmail = trim((string) ($stored['fromEmail'] ?? $legacyStoredEmail));
+    $storedFromName = trim((string) ($stored['fromName'] ?? $legacyStoredName));
+
+    $envHostRaw = getCredentialDistributorOptionalEnvValue('NAAP_SMTP_HOST');
+    $envPortRaw = getCredentialDistributorOptionalEnvValue('NAAP_SMTP_PORT');
+    $envEncryptionRaw = getCredentialDistributorOptionalEnvValue('NAAP_SMTP_ENCRYPTION');
+    $envAuthRaw = getCredentialDistributorOptionalEnvValue('NAAP_SMTP_AUTH');
+    $envUsernameRaw = getCredentialDistributorOptionalEnvValue('NAAP_SMTP_USERNAME');
+    $envPasswordRaw = getCredentialDistributorOptionalEnvValue('NAAP_SMTP_PASSWORD');
+    $envFromEmailRaw = getCredentialDistributorOptionalEnvValue('NAAP_SMTP_FROM_EMAIL');
+    $envFromNameRaw = getCredentialDistributorOptionalEnvValue('NAAP_SMTP_FROM_NAME');
+    $envTimeoutRaw = getCredentialDistributorOptionalEnvValue('NAAP_SMTP_TIMEOUT');
+    $legacyEnvEmail = getCredentialDistributorOptionalEnvValue('NAAP_SMTP_EMAIL');
+    $legacyEnvName = getCredentialDistributorOptionalEnvValue('NAAP_SMTP_NAME');
+    $legacyEnvPassword = getCredentialDistributorOptionalEnvValue('NAAP_SMTP_APP_PASSWORD');
+
+    $hasEnvOverride =
+        $envHostRaw !== null ||
+        $envPortRaw !== null ||
+        $envEncryptionRaw !== null ||
+        $envAuthRaw !== null ||
+        $envUsernameRaw !== null ||
+        $envPasswordRaw !== null ||
+        $envFromEmailRaw !== null ||
+        $envFromNameRaw !== null ||
+        $envTimeoutRaw !== null ||
+        $legacyEnvEmail !== null ||
+        $legacyEnvName !== null ||
+        $legacyEnvPassword !== null;
+
+    $hasLegacyEnvFallback = $legacyEnvEmail !== null || $legacyEnvName !== null || $legacyEnvPassword !== null;
+    $envEncryption = $envEncryptionRaw !== null
+        ? normalizeCredentialDistributorSmtpEncryptionValue($envEncryptionRaw, 'tls')
+        : ($hasLegacyEnvFallback ? 'tls' : '');
+    $envHost = $envHostRaw !== null
+        ? trim((string) $envHostRaw)
+        : ($hasLegacyEnvFallback ? 'smtp.gmail.com' : '');
+    $envPort = $envPortRaw !== null
+        ? normalizeCredentialDistributorSmtpPortValue($envPortRaw, inferCredentialDistributorSmtpPortDefault($envEncryption))
+        : ($hasLegacyEnvFallback ? inferCredentialDistributorSmtpPortDefault($envEncryption) : 0);
+    $envAuth = $envAuthRaw !== null
+        ? normalizeCredentialDistributorSmtpAuthValue($envAuthRaw, true)
+        : ($hasLegacyEnvFallback ? true : false);
+    $envUsername = $envUsernameRaw !== null
+        ? trim((string) $envUsernameRaw)
+        : trim((string) ($legacyEnvEmail ?? ''));
+    $envPassword = $envPasswordRaw !== null
+        ? trim((string) $envPasswordRaw)
+        : trim((string) ($legacyEnvPassword ?? ''));
+    $envFromEmail = $envFromEmailRaw !== null
+        ? trim((string) $envFromEmailRaw)
+        : trim((string) ($legacyEnvEmail ?? ''));
+    $envFromName = $envFromNameRaw !== null
+        ? trim((string) $envFromNameRaw)
+        : trim((string) ($legacyEnvName ?? ''));
+    $envTimeout = $envTimeoutRaw !== null
+        ? normalizeCredentialDistributorSmtpTimeoutValue($envTimeoutRaw, 20)
+        : 0;
+
+    $host = ($hasEnvOverride && $envHost !== '') ? $envHost : $storedHost;
+    $encryption = ($hasEnvOverride && ($envEncryptionRaw !== null || $hasLegacyEnvFallback))
+        ? $envEncryption
+        : $storedEncryption;
+    $port = ($hasEnvOverride && $envPort > 0)
+        ? $envPort
+        : $storedPort;
+    $auth = ($hasEnvOverride && ($envAuthRaw !== null || $hasLegacyEnvFallback))
+        ? $envAuth
+        : $storedAuth;
+    $username = ($hasEnvOverride && $envUsername !== '')
+        ? $envUsername
+        : $storedUsername;
+    $password = ($hasEnvOverride && $envPassword !== '')
+        ? $envPassword
+        : $storedPassword;
+    $fromEmail = ($hasEnvOverride && $envFromEmail !== '')
+        ? $envFromEmail
+        : $storedFromEmail;
+    $fromName = ($hasEnvOverride && $envFromName !== '')
+        ? $envFromName
+        : $storedFromName;
+    $timeout = ($hasEnvOverride && $envTimeout > 0)
+        ? $envTimeout
+        : $storedTimeout;
+
+    if ($fromName === '') {
+        $fromName = 'NAAP Evaluation System';
+    }
+
+    $password = preg_replace('/\s+/', '', $password ?? '') ?? '';
+    $source = $hasEnvOverride ? 'env' : 'database';
 
     return [
-        'senderEmail' => $senderEmail,
-        'senderName' => $senderName,
-        'appPassword' => $appPassword,
+        'host' => $host,
+        'port' => $port,
+        'encryption' => $encryption,
+        'auth' => $auth,
+        'username' => $username,
+        'password' => $password,
+        'fromEmail' => $fromEmail,
+        'fromName' => $fromName,
+        'timeout' => $timeout,
+        'source' => $source,
+        'senderEmail' => $fromEmail,
+        'senderName' => $fromName,
+        'appPassword' => $password,
     ];
 }
 
 function buildCredentialDistributorConfigSnapshot(PDO $pdo) {
     $raw = getCredentialDistributorRawConfig($pdo);
     return [
-        'senderEmail' => $raw['senderEmail'],
-        'senderName' => $raw['senderName'],
-        'hasAppPassword' => $raw['appPassword'] !== '',
+        'host' => (string) ($raw['host'] ?? ''),
+        'port' => (int) ($raw['port'] ?? 0),
+        'encryption' => (string) ($raw['encryption'] ?? 'tls'),
+        'auth' => !empty($raw['auth']),
+        'username' => (string) ($raw['username'] ?? ''),
+        'fromEmail' => (string) ($raw['fromEmail'] ?? ''),
+        'fromName' => (string) ($raw['fromName'] ?? ''),
+        'timeout' => (int) ($raw['timeout'] ?? 20),
+        'hasPassword' => trim((string) ($raw['password'] ?? '')) !== '',
+        'source' => (string) ($raw['source'] ?? 'database'),
+        'senderEmail' => (string) ($raw['fromEmail'] ?? ''),
+        'senderName' => (string) ($raw['fromName'] ?? ''),
+        'hasAppPassword' => trim((string) ($raw['password'] ?? '')) !== '',
     ];
+}
+
+function getGeminiRawConfig(PDO $pdo): array
+{
+    $stored = getSettingJson($pdo, 'geminiConfig', []);
+    $stored = is_array($stored) ? $stored : [];
+
+    $storedApiKey = trim((string) ($stored['apiKey'] ?? ''));
+    $storedModel = normalizeGeminiModelValue($stored['model'] ?? 'gemini-2.5-flash', 'gemini-2.5-flash');
+    $storedTimeoutMs = normalizeGeminiTimeoutMsValue($stored['timeoutMs'] ?? 30000, 30000);
+
+    $envApiKey = getGeminiOptionalEnvValue('NAAP_GEMINI_API_KEY');
+    $envModel = getGeminiOptionalEnvValue('NAAP_GEMINI_MODEL');
+    $envTimeoutMs = getGeminiOptionalEnvValue('NAAP_GEMINI_TIMEOUT_MS');
+
+    $hasEnvOverride = $envApiKey !== null || $envModel !== null || $envTimeoutMs !== null;
+
+    $apiKey = ($hasEnvOverride && $envApiKey !== null)
+        ? trim((string) $envApiKey)
+        : $storedApiKey;
+    $model = ($hasEnvOverride && $envModel !== null)
+        ? normalizeGeminiModelValue($envModel, 'gemini-2.5-flash')
+        : $storedModel;
+    $timeoutMs = ($hasEnvOverride && $envTimeoutMs !== null)
+        ? normalizeGeminiTimeoutMsValue($envTimeoutMs, 30000)
+        : $storedTimeoutMs;
+
+    return [
+        'apiKey' => $apiKey,
+        'model' => $model,
+        'timeoutMs' => $timeoutMs,
+        'source' => $hasEnvOverride ? 'env' : 'database',
+    ];
+}
+
+function buildGeminiConfigSnapshot(PDO $pdo): array
+{
+    $raw = getGeminiRawConfig($pdo);
+
+    return [
+        'model' => (string) ($raw['model'] ?? 'gemini-2.5-flash'),
+        'timeoutMs' => (int) ($raw['timeoutMs'] ?? 30000),
+        'hasApiKey' => trim((string) ($raw['apiKey'] ?? '')) !== '',
+        'source' => (string) ($raw['source'] ?? 'database'),
+    ];
+}
+
+function persistGeminiConfigSnapshot(PDO $pdo, array $input): array
+{
+    $current = getGeminiRawConfig($pdo);
+
+    $model = normalizeGeminiModelValue(
+        $input['model'] ?? ($current['model'] ?? 'gemini-2.5-flash'),
+        'gemini-2.5-flash'
+    );
+    $timeoutMs = normalizeGeminiTimeoutMsValue(
+        $input['timeoutMs'] ?? ($current['timeoutMs'] ?? 30000),
+        30000
+    );
+
+    $apiKey = trim((string) ($current['apiKey'] ?? ''));
+    if (array_key_exists('apiKey', $input)) {
+        $incomingApiKey = trim((string) ($input['apiKey'] ?? ''));
+        if ($incomingApiKey !== '') {
+            $apiKey = preg_replace('/\s+/', '', $incomingApiKey ?? '') ?? '';
+        } elseif (!empty($input['clearApiKey'])) {
+            $apiKey = '';
+        }
+    }
+
+    setSettingJson($pdo, 'geminiConfig', [
+        'apiKey' => $apiKey,
+        'model' => $model,
+        'timeoutMs' => $timeoutMs,
+        'updatedAt' => getAuthoritativePhilippineIso8601(),
+    ]);
+
+    return buildGeminiConfigSnapshot($pdo);
 }
 
 function persistCredentialDistributorConfigSnapshot(PDO $pdo, array $input) {
     $current = getCredentialDistributorRawConfig($pdo);
 
-    $senderEmail = trim((string) ($input['senderEmail'] ?? $current['senderEmail']));
-    $senderName = trim((string) ($input['senderName'] ?? $current['senderName']));
-    if ($senderName === '') {
-        $senderName = 'NAAP Evaluation System';
+    $legacySenderEmail = trim((string) ($input['senderEmail'] ?? ''));
+    $host = trim((string) ($input['host'] ?? ''));
+    if ($host === '' && $legacySenderEmail !== '') {
+        $host = 'smtp.gmail.com';
     }
-    if (strlen($senderName) > 150) {
-        $senderName = substr($senderName, 0, 150);
-    }
-
-    if ($senderEmail === '') {
-        throw new RuntimeException('Sender Gmail is required.');
-    }
-    if (!filter_var($senderEmail, FILTER_VALIDATE_EMAIL)) {
-        throw new RuntimeException('Sender Gmail format is invalid.');
-    }
-    if (substr_compare(strtolower($senderEmail), '@gmail.com', -10) !== 0) {
-        throw new RuntimeException('Sender Gmail must end with @gmail.com.');
+    if ($host === '') {
+        $host = trim((string) ($current['host'] ?? ''));
     }
 
-    $appPassword = $current['appPassword'];
-    if (array_key_exists('appPassword', $input)) {
-        $incomingPassword = trim((string) ($input['appPassword'] ?? ''));
+    $encryption = normalizeCredentialDistributorSmtpEncryptionValue(
+        $input['encryption'] ?? (($legacySenderEmail !== '') ? 'tls' : ($current['encryption'] ?? 'tls')),
+        'tls'
+    );
+    $port = normalizeCredentialDistributorSmtpPortValue(
+        $input['port'] ?? ($current['port'] ?? inferCredentialDistributorSmtpPortDefault($encryption)),
+        inferCredentialDistributorSmtpPortDefault($encryption)
+    );
+    $auth = normalizeCredentialDistributorSmtpAuthValue(
+        $input['auth'] ?? ($legacySenderEmail !== '' ? true : ($current['auth'] ?? true)),
+        true
+    );
+    $username = trim((string) ($input['username'] ?? ''));
+    if ($username === '' && $legacySenderEmail !== '') {
+        $username = $legacySenderEmail;
+    }
+    if ($username === '') {
+        $username = trim((string) ($current['username'] ?? ''));
+    }
+
+    $fromEmail = trim((string) ($input['fromEmail'] ?? ''));
+    if ($fromEmail === '' && $legacySenderEmail !== '') {
+        $fromEmail = $legacySenderEmail;
+    }
+    if ($fromEmail === '') {
+        $fromEmail = trim((string) ($current['fromEmail'] ?? ''));
+    }
+
+    $fromName = trim((string) ($input['fromName'] ?? ($input['senderName'] ?? '')));
+    if ($fromName === '') {
+        $fromName = trim((string) ($current['fromName'] ?? ''));
+    }
+    if ($fromName === '') {
+        $fromName = 'NAAP Evaluation System';
+    }
+    if (strlen($fromName) > 150) {
+        $fromName = substr($fromName, 0, 150);
+    }
+
+    if ($host === '') {
+        throw new RuntimeException('SMTP host is required.');
+    }
+    if (strlen($host) > 255) {
+        $host = substr($host, 0, 255);
+    }
+    if ($fromEmail === '') {
+        throw new RuntimeException('SMTP from email is required.');
+    }
+    if (!filter_var($fromEmail, FILTER_VALIDATE_EMAIL)) {
+        throw new RuntimeException('SMTP from email format is invalid.');
+    }
+
+    $timeout = normalizeCredentialDistributorSmtpTimeoutValue($input['timeout'] ?? ($current['timeout'] ?? 20), 20);
+
+    $password = trim((string) ($current['password'] ?? ''));
+    if (array_key_exists('password', $input)) {
+        $incomingPassword = trim((string) ($input['password'] ?? ''));
         if ($incomingPassword !== '') {
-            $appPassword = $incomingPassword;
+            $password = $incomingPassword;
+        } elseif (!empty($input['clearPassword'])) {
+            $password = '';
+        }
+    } elseif (array_key_exists('appPassword', $input)) {
+        $incomingLegacyPassword = trim((string) ($input['appPassword'] ?? ''));
+        if ($incomingLegacyPassword !== '') {
+            $password = $incomingLegacyPassword;
         } elseif (!empty($input['clearAppPassword'])) {
-            $appPassword = '';
+            $password = '';
         }
     }
 
+    $password = preg_replace('/\s+/', '', $password ?? '') ?? '';
+
     setSettingJson($pdo, 'credentialDistributorConfig', [
-        'senderEmail' => $senderEmail,
-        'senderName' => $senderName,
-        'appPassword' => $appPassword,
-        'updatedAt' => date('c'),
+        'host' => $host,
+        'port' => $port,
+        'encryption' => $encryption,
+        'auth' => $auth,
+        'username' => $username,
+        'password' => $password,
+        'fromEmail' => $fromEmail,
+        'fromName' => $fromName,
+        'timeout' => $timeout,
+        'updatedAt' => getAuthoritativePhilippineIso8601(),
     ]);
 
-    return [
-        'senderEmail' => $senderEmail,
-        'senderName' => $senderName,
-        'hasAppPassword' => $appPassword !== '',
-    ];
+    return buildCredentialDistributorConfigSnapshot($pdo);
 }
 
 function generateCredentialDistributorRandomPassword($length = 10) {
@@ -5363,10 +8335,7 @@ function bulkDistributeCredentialsSnapshot(PDO $pdo, array $rows, array $actorUs
     $limitedRows = $rows;
     $totalRows = count($limitedRows);
 
-    $config = getCredentialDistributorRawConfig($pdo);
-    if ($config['senderEmail'] === '' || $config['appPassword'] === '') {
-        throw new RuntimeException('Credential distributor SMTP is not fully configured.');
-    }
+    $config = getCredentialDistributorSmtpConfigSnapshot($pdo);
 
     if (!function_exists('credentialMailerSendCredentials')) {
         throw new RuntimeException('Credential mailer helper is unavailable.');
@@ -5556,8 +8525,8 @@ function parseManilaDateYmd($value, DateTimeZone $timezone) {
 
 function getCredentialDistributorSmtpConfigSnapshot(PDO $pdo) {
     $config = getCredentialDistributorRawConfig($pdo);
-    if ($config['senderEmail'] === '' || $config['appPassword'] === '') {
-        throw new RuntimeException('Credential distributor SMTP is not fully configured.');
+    if (!isCredentialDistributorSmtpConfigComplete($config)) {
+        throw new RuntimeException('SMTP is not fully configured. Required: host, port, from email, and authentication credentials when auth is enabled.');
     }
     return $config;
 }
@@ -5655,6 +8624,72 @@ function buildActiveEmailRecipientTargetsSnapshot(PDO $pdo, $roleCode = '') {
         'recipients' => $recipients,
         'invalidFailures' => $invalidFailures,
         'totalActiveUsers' => $totalActiveUsers,
+    ];
+}
+
+function sendTestSmtpEmailSnapshot(PDO $pdo, $recipientEmail, $subject, $message, array $actorUser = []) {
+    if (!function_exists('credentialMailerSendCustomMessage')) {
+        throw new RuntimeException('Credential mailer helper is unavailable.');
+    }
+
+    $cleanRecipient = strtolower(trim((string) $recipientEmail));
+    $cleanSubject = sanitizeBulkNotificationText($subject, 150);
+    $cleanMessage = sanitizeBulkNotificationText($message, 6000);
+    if ($cleanRecipient === '' || !filter_var($cleanRecipient, FILTER_VALIDATE_EMAIL)) {
+        throw new RuntimeException('Recipient email is required and must be valid.');
+    }
+    if ($cleanSubject === '') {
+        $cleanSubject = 'NAAP SMTP Test Email';
+    }
+    if ($cleanMessage === '') {
+        $cleanMessage = 'This is a test email from the NAAP Evaluation System SMTP configuration.';
+    }
+
+    $config = getCredentialDistributorSmtpConfigSnapshot($pdo);
+
+    try {
+        credentialMailerSendCustomMessage($config, [
+            'recipientEmail' => $cleanRecipient,
+            'recipientName' => '',
+            'subject' => $cleanSubject,
+            'message' => $cleanMessage,
+            'intro' => 'This is a one-recipient SMTP verification email from the NAAP Evaluation System admin panel.',
+        ]);
+    } catch (Throwable $error) {
+        try {
+            addActivityLogEntrySnapshot($pdo, [
+                'action' => 'SMTP Test Email',
+                'description' => sprintf(
+                    'SMTP test email failed for %s: %s',
+                    $cleanRecipient,
+                    $error->getMessage()
+                ),
+                'type' => 'system',
+                'userId' => $actorUser['id'] ?? '',
+                'email' => $actorUser['email'] ?? '',
+            ]);
+        } catch (Throwable $loggingError) {
+            // Logging should not block primary response.
+        }
+
+        throw new RuntimeException($error->getMessage());
+    }
+
+    try {
+        addActivityLogEntrySnapshot($pdo, [
+            'action' => 'SMTP Test Email',
+            'description' => sprintf('SMTP test email sent successfully to %s.', $cleanRecipient),
+            'type' => 'system',
+            'userId' => $actorUser['id'] ?? '',
+            'email' => $actorUser['email'] ?? '',
+        ]);
+    } catch (Throwable $loggingError) {
+        // Logging should not block primary response.
+    }
+
+    return [
+        'success' => true,
+        'message' => 'Test email sent successfully to ' . $cleanRecipient . '.',
     ];
 }
 
@@ -5758,8 +8793,8 @@ function sendBulkTestGmailSnapshot(PDO $pdo, $subject, $message, array $actorUse
 }
 
 function runStudentEvaluationReminderJobSnapshot(PDO $pdo) {
-    $manilaTimezone = new DateTimeZone('Asia/Manila');
-    $now = new DateTimeImmutable('now', $manilaTimezone);
+    $manilaTimezone = getAuthoritativePhilippineTimezone();
+    $now = getAuthoritativePhilippineDateTime();
     $today = $now->format('Y-m-d');
 
     $state = getSettingJson($pdo, 'studentEvalReminderJobState', []);
@@ -5945,10 +8980,6 @@ function runStudentEvaluationReminderJobSnapshot(PDO $pdo) {
     ];
 }
 
-function getManagedProfileImageRelativeDirectory() {
-    return 'uploads/profiles';
-}
-
 function ensureUsersProfileImageColumn(PDO $pdo) {
     if (columnExistsInCurrentSchema($pdo, 'users', 'profile_image')) {
         return;
@@ -5959,6 +8990,50 @@ function ensureUsersProfileImageColumn(PDO $pdo) {
          ADD COLUMN profile_image VARCHAR(255) NULL DEFAULT NULL
          AFTER password'
     );
+}
+
+function ensureProfilePhotosTable(PDO $pdo) {
+    if (!tableExistsInCurrentSchema($pdo, 'profile_photos')) {
+        $pdo->exec(
+            'CREATE TABLE profile_photos (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                user_id BIGINT UNSIGNED NOT NULL,
+                photo_data LONGBLOB NOT NULL,
+                mime_type VARCHAR(100) DEFAULT NULL,
+                uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
+                UNIQUE KEY uq_profile_photos_user (user_id),
+                CONSTRAINT fk_profile_photos_user
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                    ON UPDATE CASCADE
+                    ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+        );
+        return;
+    }
+
+    if (!columnExistsInCurrentSchema($pdo, 'profile_photos', 'photo_data')) {
+        $pdo->exec('ALTER TABLE profile_photos ADD COLUMN photo_data LONGBLOB NOT NULL AFTER user_id');
+    } elseif (getColumnDataTypeInCurrentSchema($pdo, 'profile_photos', 'photo_data') !== 'longblob') {
+        $pdo->exec('ALTER TABLE profile_photos MODIFY COLUMN photo_data LONGBLOB NOT NULL');
+    }
+
+    if (!columnExistsInCurrentSchema($pdo, 'profile_photos', 'mime_type')) {
+        $pdo->exec('ALTER TABLE profile_photos ADD COLUMN mime_type VARCHAR(100) DEFAULT NULL AFTER photo_data');
+    }
+
+    if (!columnExistsInCurrentSchema($pdo, 'profile_photos', 'uploaded_at')) {
+        $pdo->exec('ALTER TABLE profile_photos ADD COLUMN uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER mime_type');
+    }
+
+    if (!columnExistsInCurrentSchema($pdo, 'profile_photos', 'updated_at')) {
+        $pdo->exec('ALTER TABLE profile_photos ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER uploaded_at');
+    }
+
+    if (!indexExistsInCurrentSchema($pdo, 'profile_photos', 'uq_profile_photos_user')) {
+        $pdo->exec('ALTER TABLE profile_photos ADD UNIQUE KEY uq_profile_photos_user (user_id)');
+    }
 }
 
 function normalizeStoredProfileImagePath($value) {
@@ -5978,23 +9053,6 @@ function normalizeStoredProfileImagePath($value) {
 
 function getProjectRootAbsolutePath() {
     return dirname(__DIR__);
-}
-
-function getManagedProfileImageAbsoluteDirectory() {
-    return getProjectRootAbsolutePath() . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'profiles';
-}
-
-function ensureManagedProfileImageDirectoryExists() {
-    $directory = getManagedProfileImageAbsoluteDirectory();
-    if (is_dir($directory)) {
-        return $directory;
-    }
-
-    if (!mkdir($directory, 0775, true) && !is_dir($directory)) {
-        throw new RuntimeException('Unable to create the profile upload directory.');
-    }
-
-    return $directory;
 }
 
 function buildApplicationBasePath() {
@@ -6020,14 +9078,103 @@ function buildApplicationBasePath() {
     return $scriptDirectory === '' ? '' : '/' . $scriptDirectory;
 }
 
-function buildPublicProfileImageUrl($storedPath) {
-    $normalizedPath = normalizeStoredProfileImagePath($storedPath);
-    if ($normalizedPath === '') {
+function normalizeProfileImageMimeType($mimeType) {
+    $mime = strtolower(trim((string) $mimeType));
+    return in_array($mime, ['image/jpeg', 'image/png', 'image/webp'], true) ? $mime : '';
+}
+
+function mapProfileImageMimeTypeToExtension($mimeType) {
+    $mime = normalizeProfileImageMimeType($mimeType);
+    switch ($mime) {
+        case 'image/jpeg':
+            return 'jpg';
+        case 'image/png':
+            return 'png';
+        case 'image/webp':
+            return 'webp';
+        default:
+            return '';
+    }
+}
+
+function buildProfilePhotoUrlForUserId($userId, $version = '') {
+    $numericUserId = resolveStoredUserIdNumber($userId);
+    if ($numericUserId <= 0) {
         return '';
     }
 
     $basePath = rtrim(buildApplicationBasePath(), '/');
-    return ($basePath === '' ? '' : $basePath) . '/' . $normalizedPath;
+    $url = ($basePath === '' ? '' : $basePath) . '/api/profile_photo.php?user_id=u' . $numericUserId;
+    $versionValue = trim((string) $version);
+    if ($versionValue !== '') {
+        $url .= '&v=' . rawurlencode($versionValue);
+    }
+    return $url;
+}
+
+function getUserProfilePhotoMetadata(PDO $pdo, $userId) {
+    ensureProfilePhotosTable($pdo);
+
+    $numericUserId = resolveStoredUserIdNumber($userId);
+    if ($numericUserId <= 0) {
+        return null;
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT user_id, mime_type, updated_at
+         FROM profile_photos
+         WHERE user_id = :user_id
+         LIMIT 1'
+    );
+    $stmt->execute([':user_id' => $numericUserId]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+function readUserProfilePhotoRecord(PDO $pdo, $userId) {
+    ensureProfilePhotosTable($pdo);
+
+    $numericUserId = resolveStoredUserIdNumber($userId);
+    if ($numericUserId <= 0) {
+        return null;
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT user_id, photo_data, mime_type, updated_at
+         FROM profile_photos
+         WHERE user_id = :user_id
+         LIMIT 1'
+    );
+    $stmt->execute([':user_id' => $numericUserId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        return null;
+    }
+
+    $binary = (string) ($row['photo_data'] ?? '');
+    if ($binary === '') {
+        return null;
+    }
+
+    $imageInfo = @getimagesizefromstring($binary);
+    if ($imageInfo === false) {
+        return null;
+    }
+
+    $mimeType = normalizeProfileImageMimeType($row['mime_type'] ?? ($imageInfo['mime'] ?? ''));
+    if ($mimeType === '') {
+        $mimeType = normalizeProfileImageMimeType($imageInfo['mime'] ?? '');
+    }
+    if ($mimeType === '') {
+        return null;
+    }
+
+    return [
+        'user_id' => (int) ($row['user_id'] ?? $numericUserId),
+        'photo_data' => $binary,
+        'mime_type' => $mimeType,
+        'updated_at' => $row['updated_at'] ?? '',
+    ];
 }
 
 function resolveManagedProfileImageAbsolutePath($storedPath) {
@@ -6042,19 +9189,6 @@ function resolveManagedProfileImageAbsolutePath($storedPath) {
 function managedProfileImageFileExists($storedPath) {
     $absolutePath = resolveManagedProfileImageAbsolutePath($storedPath);
     return $absolutePath !== '' && is_file($absolutePath);
-}
-
-function resolveStoredProfileImageUrlForDisplay($storedPath) {
-    $normalizedPath = normalizeStoredProfileImagePath($storedPath);
-    if ($normalizedPath === '') {
-        return '';
-    }
-
-    if (!managedProfileImageFileExists($normalizedPath)) {
-        return '';
-    }
-
-    return buildPublicProfileImageUrl($normalizedPath);
 }
 
 function getUserProfileImagePath(PDO $pdo, $userId) {
@@ -6094,67 +9228,68 @@ function setUserProfileImagePath(PDO $pdo, $userId, $storedPath) {
     return $normalizedPath;
 }
 
-function deleteManagedProfileImageFile($storedPath) {
-    $absolutePath = resolveManagedProfileImageAbsolutePath($storedPath);
-    if ($absolutePath === '' || !is_file($absolutePath)) {
-        return;
-    }
-
-    @unlink($absolutePath);
-}
-
-function buildProfileImageSaveResult($storedPath) {
-    $normalizedPath = normalizeStoredProfileImagePath($storedPath);
-    $publicUrl = resolveStoredProfileImageUrlForDisplay($normalizedPath);
+function buildProfileImageSaveResult(PDO $pdo, $userId) {
+    $publicUrl = getUserProfilePhoto($pdo, $userId);
 
     return [
-        'path' => $normalizedPath,
+        'path' => '',
         'url' => $publicUrl,
         'photoData' => $publicUrl,
     ];
 }
 
-function mapProfileImageMimeTypeToExtension($mimeType) {
-    $mime = strtolower(trim((string) $mimeType));
-    switch ($mime) {
-        case 'image/jpeg':
-            return 'jpg';
-        case 'image/png':
-            return 'png';
-        case 'image/webp':
-            return 'webp';
-        default:
-            return '';
-    }
-}
-
-function buildUniqueProfileImageFilename($userId, $extension) {
-    $numericUserId = max(0, (int) resolveStoredUserIdNumber($userId));
-    $safeExtension = strtolower(trim((string) $extension));
-    if ($safeExtension === '') {
-        throw new RuntimeException('Unable to resolve the image file extension.');
-    }
-
-    return sprintf(
-        'user_%d_%s_%s.%s',
-        $numericUserId,
-        date('YmdHis'),
-        bin2hex(random_bytes(8)),
-        $safeExtension
-    );
-}
-
 function clearUserProfileImage(PDO $pdo, $userId) {
-    $currentPath = getUserProfileImagePath($pdo, $userId);
-    setUserProfileImagePath($pdo, $userId, '');
-    if ($currentPath !== '') {
-        deleteManagedProfileImageFile($currentPath);
+    ensureProfilePhotosTable($pdo);
+    ensureUsersProfileImageColumn($pdo);
+
+    $numericUserId = resolveStoredUserIdNumber($userId);
+    if ($numericUserId <= 0) {
+        throw new RuntimeException('Unable to resolve profile owner.');
     }
 
-    return buildProfileImageSaveResult('');
+    $stmt = $pdo->prepare('DELETE FROM profile_photos WHERE user_id = :user_id');
+    $stmt->execute([':user_id' => $numericUserId]);
+    setUserProfileImagePath($pdo, $userId, '');
+
+    return buildProfileImageSaveResult($pdo, $numericUserId);
 }
 
-function persistUserProfileImageBinary(PDO $pdo, $userId, $binaryData, $extension) {
+function inspectProfileImageBinary($binaryData) {
+    $imageBinary = (string) $binaryData;
+    if ($imageBinary === '') {
+        return null;
+    }
+
+    $imageInfo = @getimagesizefromstring($imageBinary);
+    if ($imageInfo === false) {
+        return null;
+    }
+
+    $mimeType = normalizeProfileImageMimeType($imageInfo['mime'] ?? '');
+    if ($mimeType === '') {
+        return null;
+    }
+
+    return [
+        'binary' => $imageBinary,
+        'mime' => $mimeType,
+        'extension' => mapProfileImageMimeTypeToExtension($mimeType),
+    ];
+}
+
+function normalizeProfileImagePayloadToBinary($value) {
+    $binary = inspectProfileImageBinary($value);
+    if ($binary) {
+        return $binary;
+    }
+
+    return decodeLegacyProfileImagePayload($value);
+}
+
+function persistUserProfileImageBinary(PDO $pdo, $userId, $binaryData, $mimeType = '', $clearLegacyPath = true) {
+    ensureProfilePhotosTable($pdo);
+    ensureUsersProfileImageColumn($pdo);
+
     $numericUserId = resolveStoredUserIdNumber($userId);
     if ($numericUserId <= 0) {
         throw new RuntimeException('Unable to resolve profile owner.');
@@ -6165,28 +9300,33 @@ function persistUserProfileImageBinary(PDO $pdo, $userId, $binaryData, $extensio
         throw new RuntimeException('The uploaded image is empty.');
     }
 
-    $directory = ensureManagedProfileImageDirectoryExists();
-    $previousPath = getUserProfileImagePath($pdo, $numericUserId);
-    $fileName = buildUniqueProfileImageFilename($numericUserId, $extension);
-    $relativePath = getManagedProfileImageRelativeDirectory() . '/' . $fileName;
-    $absolutePath = $directory . DIRECTORY_SEPARATOR . $fileName;
-
-    if (file_put_contents($absolutePath, $imageBinary) === false) {
-        throw new RuntimeException('Unable to save the uploaded profile image.');
+    $inspected = inspectProfileImageBinary($imageBinary);
+    if (!$inspected) {
+        throw new RuntimeException('The uploaded file is not a valid image.');
     }
 
-    try {
-        setUserProfileImagePath($pdo, $numericUserId, $relativePath);
-    } catch (Throwable $error) {
-        @unlink($absolutePath);
-        throw $error;
+    $normalizedMimeType = normalizeProfileImageMimeType($mimeType);
+    if ($normalizedMimeType === '') {
+        $normalizedMimeType = $inspected['mime'];
     }
 
-    if ($previousPath !== '' && $previousPath !== $relativePath) {
-        deleteManagedProfileImageFile($previousPath);
+    $stmt = $pdo->prepare(
+        'INSERT INTO profile_photos (user_id, photo_data, mime_type)
+         VALUES (:user_id, :photo_data, :mime_type)
+         ON DUPLICATE KEY UPDATE
+            photo_data = VALUES(photo_data),
+            mime_type = VALUES(mime_type)'
+    );
+    $stmt->bindValue(':user_id', $numericUserId, PDO::PARAM_INT);
+    $stmt->bindValue(':photo_data', $imageBinary, PDO::PARAM_LOB);
+    $stmt->bindValue(':mime_type', $normalizedMimeType);
+    $stmt->execute();
+
+    if ($clearLegacyPath) {
+        setUserProfileImagePath($pdo, $numericUserId, '');
     }
 
-    return buildProfileImageSaveResult($relativePath);
+    return buildProfileImageSaveResult($pdo, $numericUserId);
 }
 
 function decodeLegacyProfileImagePayload($value) {
@@ -6229,7 +9369,7 @@ function saveUserProfileImageFromLegacyPayload(PDO $pdo, $userId, $value) {
         throw new RuntimeException('Unable to decode the legacy profile image payload.');
     }
 
-    return persistUserProfileImageBinary($pdo, $userId, $decoded['binary'], $decoded['extension']);
+    return persistUserProfileImageBinary($pdo, $userId, $decoded['binary'], $decoded['mime']);
 }
 
 function validateUploadedProfileImageFile(array $file) {
@@ -6278,6 +9418,7 @@ function validateUploadedProfileImageFile(array $file) {
 
     return [
         'tmp_name' => $temporaryPath,
+        'mime' => $mimeType,
         'extension' => $normalizedExtension,
     ];
 }
@@ -6290,28 +9431,12 @@ function saveUploadedUserProfileImage(PDO $pdo, $userId, array $file) {
         throw new RuntimeException('Unable to resolve profile owner.');
     }
 
-    $directory = ensureManagedProfileImageDirectoryExists();
-    $previousPath = getUserProfileImagePath($pdo, $numericUserId);
-    $fileName = buildUniqueProfileImageFilename($numericUserId, $validated['extension']);
-    $relativePath = getManagedProfileImageRelativeDirectory() . '/' . $fileName;
-    $absolutePath = $directory . DIRECTORY_SEPARATOR . $fileName;
-
-    if (!move_uploaded_file($validated['tmp_name'], $absolutePath)) {
-        throw new RuntimeException('Unable to move the uploaded image into the profiles folder.');
+    $imageBinary = file_get_contents($validated['tmp_name']);
+    if ($imageBinary === false || $imageBinary === '') {
+        throw new RuntimeException('Unable to read the uploaded profile image.');
     }
 
-    try {
-        setUserProfileImagePath($pdo, $numericUserId, $relativePath);
-    } catch (Throwable $error) {
-        @unlink($absolutePath);
-        throw $error;
-    }
-
-    if ($previousPath !== '' && $previousPath !== $relativePath) {
-        deleteManagedProfileImageFile($previousPath);
-    }
-
-    return buildProfileImageSaveResult($relativePath);
+    return persistUserProfileImageBinary($pdo, $numericUserId, $imageBinary, $validated['mime']);
 }
 
 function getLegacyRoleProfileData(PDO $pdo, $role) {
@@ -6385,7 +9510,12 @@ function setUserProfileData(PDO $pdo, $userId, $data) {
 }
 
 function getUserProfilePhoto(PDO $pdo, $userId) {
-    return resolveStoredProfileImageUrlForDisplay(getUserProfileImagePath($pdo, $userId));
+    $metadata = getUserProfilePhotoMetadata($pdo, $userId);
+    if (!$metadata) {
+        return '';
+    }
+
+    return buildProfilePhotoUrlForUserId($metadata['user_id'] ?? $userId, $metadata['updated_at'] ?? '');
 }
 
 function setUserProfilePhoto(PDO $pdo, $userId, $photoData) {
@@ -6408,7 +9538,7 @@ function migrateLegacyRoleProfilesIfNeeded(PDO $pdo) {
         return;
     }
 
-    $roles = ['admin', 'hr', 'dean', 'professor', 'vpaa', 'osa', 'student'];
+    $roles = ['admin', 'hr', 'dean', 'procoor', 'professor', 'vpaa', 'osa', 'student'];
     $users = buildUsersFromDatabase($pdo, false);
     $activeUsersByRole = [];
     foreach ($users as $user) {
@@ -6446,8 +9576,8 @@ function migrateLegacyRoleProfilesIfNeeded(PDO $pdo) {
             }
 
             if ($hasLegacyPhoto) {
-                $currentPhotoPath = getUserProfileImagePath($pdo, $userId);
-                if ($currentPhotoPath === '') {
+                $currentPhoto = getUserProfilePhotoMetadata($pdo, $userId);
+                if (!$currentPhoto) {
                     try {
                         saveUserProfileImageFromLegacyPayload($pdo, $userId, $legacyPhoto);
                     } catch (Throwable $error) {
@@ -6473,21 +9603,17 @@ function migrateLegacyRoleProfilesIfNeeded(PDO $pdo) {
     setSettingValue($pdo, 'userProfileDataMigrationV2', 'done');
 }
 
-function migrateLegacyDatabaseProfilePhotosToFilesystemIfNeeded(PDO $pdo) {
+function migrateProfilePhotosToDatabaseIfNeeded(PDO $pdo) {
+    ensureProfilePhotosTable($pdo);
     ensureUsersProfileImageColumn($pdo);
 
-    $completed = trim((string) getSettingValue($pdo, 'profileImageFilesystemMigrationV1', ''));
+    $completed = trim((string) getSettingValue($pdo, 'profileImageDatabaseBlobMigrationV1', ''));
     if ($completed === 'done') {
         return;
     }
 
-    if (!tableExistsInCurrentSchema($pdo, 'profile_photos')) {
-        setSettingValue($pdo, 'profileImageFilesystemMigrationV1', 'done');
-        return;
-    }
-
     $stmt = $pdo->query(
-        'SELECT user_id, photo_data
+        'SELECT user_id, photo_data, mime_type
          FROM profile_photos
          ORDER BY user_id ASC'
     );
@@ -6498,32 +9624,84 @@ function migrateLegacyDatabaseProfilePhotosToFilesystemIfNeeded(PDO $pdo) {
             continue;
         }
 
-        $currentPath = getUserProfileImagePath($pdo, $userId);
-        if ($currentPath !== '' && managedProfileImageFileExists($currentPath)) {
+        $photoData = (string) ($row['photo_data'] ?? '');
+        if ($photoData === '') {
             continue;
         }
 
-        $legacyPhoto = trim((string) ($row['photo_data'] ?? ''));
-        if ($legacyPhoto === '') {
+        $normalized = normalizeProfileImagePayloadToBinary($photoData);
+        if ($normalized) {
+            try {
+                persistUserProfileImageBinary($pdo, $userId, $normalized['binary'], $normalized['mime'], false);
+            } catch (Throwable $error) {
+                // Leave the existing DB photo in place and continue with other users.
+            }
+        }
+    }
+
+    $stmt = $pdo->query(
+        "SELECT id, profile_image
+         FROM users
+         WHERE profile_image IS NOT NULL
+           AND TRIM(profile_image) <> ''
+         ORDER BY id ASC"
+    );
+
+    foreach ($stmt->fetchAll() as $row) {
+        $userId = (int) ($row['id'] ?? 0);
+        if ($userId <= 0) {
+            continue;
+        }
+
+        $storedPath = normalizeStoredProfileImagePath($row['profile_image'] ?? '');
+        if ($storedPath === '' || !managedProfileImageFileExists($storedPath)) {
+            continue;
+        }
+
+        $absolutePath = resolveManagedProfileImageAbsolutePath($storedPath);
+        $imageBinary = $absolutePath !== '' ? file_get_contents($absolutePath) : false;
+        if ($imageBinary === false || $imageBinary === '') {
+            continue;
+        }
+
+        $normalized = inspectProfileImageBinary($imageBinary);
+        if (!$normalized) {
             continue;
         }
 
         try {
-            saveUserProfileImageFromLegacyPayload($pdo, $userId, $legacyPhoto);
+            persistUserProfileImageBinary($pdo, $userId, $normalized['binary'], $normalized['mime']);
         } catch (Throwable $error) {
-            // Leave the legacy DB photo in place and continue with other users.
+            // Keep the legacy filesystem path when import fails.
         }
     }
 
-    setSettingValue($pdo, 'profileImageFilesystemMigrationV1', 'done');
+    setSettingValue($pdo, 'profileImageDatabaseBlobMigrationV1', 'done');
 }
 
 function runProfileImageMigrationsIfNeeded(PDO $pdo) {
     migrateLegacyRoleProfilesIfNeeded($pdo);
-    migrateLegacyDatabaseProfilePhotosToFilesystemIfNeeded($pdo);
+    migrateProfilePhotosToDatabaseIfNeeded($pdo);
 }
 
 function normalizeFacultyPaperSnapshotRow(array $paper) {
+    $paper['load_type'] = normalizeCourseOfferingLoadType($paper['load_type'] ?? ($paper['loadType'] ?? 'main'));
+    $paper['recipient_dean_user_id'] = trim((string) ($paper['recipient_dean_user_id'] ?? ''));
+    $paper['recipient_dean_name'] = trim((string) ($paper['recipient_dean_name'] ?? ''));
+    $paper['recipient_user_id'] = trim((string) ($paper['recipient_user_id'] ?? ''));
+    $paper['recipient_name'] = trim((string) ($paper['recipient_name'] ?? ''));
+    $paper['recipient_role'] = strtolower(trim((string) ($paper['recipient_role'] ?? '')));
+    if ($paper['recipient_user_id'] === '' && $paper['recipient_dean_user_id'] !== '') {
+        $paper['recipient_user_id'] = $paper['recipient_dean_user_id'];
+    }
+    if ($paper['recipient_name'] === '' && $paper['recipient_dean_name'] !== '') {
+        $paper['recipient_name'] = $paper['recipient_dean_name'];
+    }
+    if ($paper['recipient_role'] === '' && $paper['recipient_user_id'] !== '') {
+        $paper['recipient_role'] = 'dean';
+    }
+    $paper['section_c_saved_by_role'] = strtolower(trim((string) ($paper['section_c_saved_by_role'] ?? '')));
+    $paper['section_c_saved_by_user_id'] = trim((string) ($paper['section_c_saved_by_user_id'] ?? ''));
     $paper['latest_file_path'] = trim((string) ($paper['latest_file_path'] ?? ''));
     $paper['latest_file_name'] = trim((string) ($paper['latest_file_name'] ?? ''));
     $paper['latest_file_created_at'] = $paper['latest_file_created_at'] ?? null;
@@ -6544,6 +9722,7 @@ function normalizeFacultyPaperSnapshotRow(array $paper) {
             'file_path' => trim((string) ($version['file_path'] ?? '')),
             'file_name' => trim((string) ($version['file_name'] ?? '')),
             'status_snapshot' => trim((string) ($version['status_snapshot'] ?? '')),
+            'load_type' => normalizeCourseOfferingLoadType($version['load_type'] ?? ($paper['load_type'] ?? 'main')),
             'created_at' => trim((string) ($version['created_at'] ?? '')),
             'created_by_role' => trim((string) ($version['created_by_role'] ?? '')),
             'created_by_user_id' => trim((string) ($version['created_by_user_id'] ?? '')),
@@ -6599,10 +9778,8 @@ function buildBootstrapPayload(PDO $pdo, $currentUserId = '') {
     runProfileImageMigrationsIfNeeded($pdo);
     $profileData = null;
     $profilePhoto = '';
-    $profileImagePath = '';
     if (resolveStoredUserIdNumber($currentUserId) > 0) {
         $profileData = getUserProfileData($pdo, $currentUserId);
-        $profileImagePath = getUserProfileImagePath($pdo, $currentUserId);
         $profilePhoto = getUserProfilePhoto($pdo, $currentUserId);
     }
 
@@ -6623,8 +9800,9 @@ function buildBootstrapPayload(PDO $pdo, $currentUserId = '') {
         'studentEvaluationProofRequests' => buildStudentEvaluationProofRequestsSnapshot($pdo),
         'subjectManagement' => buildSubjectManagementSnapshot($pdo),
         'facultyAcknowledgementPapers' => buildFacultyAcknowledgementPapersSnapshot($pdo),
+        'clock' => getAuthoritativePhilippineTimePayload(),
         'currentUserProfileData' => $profileData,
-        'currentUserProfileImage' => $profileImagePath,
+        'currentUserProfileImage' => '',
         'currentUserProfileImageUrl' => $profilePhoto,
         'currentUserProfilePhoto' => $profilePhoto,
     ];

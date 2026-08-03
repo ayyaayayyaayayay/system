@@ -1,0 +1,5 @@
+@import url('./daenpanel.css');
+
+body.procoor-panel .dashboard-container {
+    min-height: 100vh;
+}

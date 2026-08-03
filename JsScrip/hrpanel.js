@@ -35,7 +35,7 @@ const HR_VIEW_META = {
         context: 'Monitor evaluation operations, manage records, and keep the current semester aligned.',
     },
     users: {
-        title: 'User Management',
+        title: 'Professor Management',
         context: 'Manage account records, professor assignments, and role-based access in one place.',
     },
     'activity-log': {
@@ -240,6 +240,34 @@ function renderProfessorDepartmentOptions() {
     });
 }
 
+function populateProfessorCampusFilter() {
+    const campusSelect = document.getElementById('professor-campus-filter');
+    if (!campusSelect) return;
+
+    const campuses = SharedData.getCampuses ? SharedData.getCampuses() : [];
+    const campusList = Array.isArray(campuses) ? campuses : [];
+    const previous = normalizeHrToken(currentProfessorCampusFilter || campusSelect.value || 'all') || 'all';
+    const realCampuses = campusList.filter(campus => {
+        const id = normalizeHrToken(campus && campus.id);
+        return id && id !== 'all';
+    });
+
+    campusSelect.innerHTML = '<option value="all">All Campuses</option>';
+    realCampuses.forEach(campus => {
+        const id = String(campus && campus.id || '').trim();
+        if (!id) return;
+        const label = String(campus && (campus.name || campus.id) || id).trim() || id;
+        const option = document.createElement('option');
+        option.value = id;
+        option.textContent = label;
+        campusSelect.appendChild(option);
+    });
+
+    const hasPrevious = previous === 'all' || realCampuses.some(campus => normalizeHrToken(campus && campus.id) === previous);
+    currentProfessorCampusFilter = hasPrevious ? previous : 'all';
+    campusSelect.value = currentProfessorCampusFilter;
+}
+
 /**
  * Dynamically populated filtering tabs for Professor Management.
  */
@@ -247,15 +275,19 @@ function renderProfessorDepartmentTabs() {
     const tabsContainer = document.querySelector('.department-tabs');
     if (!tabsContainer) return;
 
+    const departments = SharedData.getAllDepartments();
+    const selectedDepartment = currentDepartmentFilter !== 'all' && departments.includes(currentDepartmentFilter)
+        ? currentDepartmentFilter
+        : 'all';
+    currentDepartmentFilter = selectedDepartment;
+
     // Always preserve "all" tab
     tabsContainer.innerHTML = `
-        <button class="dept-tab active" data-department="all">
+        <button class="dept-tab ${selectedDepartment === 'all' ? 'active' : ''}" data-department="all">
             <i class="fas fa-users"></i>
             All Departments
         </button>
     `;
-
-    const departments = SharedData.getAllDepartments();
 
     const icons = {
         'ICS': 'fa-laptop-code',
@@ -267,7 +299,7 @@ function renderProfessorDepartmentTabs() {
     departments.forEach(dept => {
         const iconClass = icons[dept] || icons['DEFAULT'];
         const btn = document.createElement('button');
-        btn.className = 'dept-tab';
+        btn.className = `dept-tab${dept === selectedDepartment ? ' active' : ''}`;
         btn.setAttribute('data-department', dept);
         btn.innerHTML = `<i class="fas ${iconClass}"></i> ${dept}`;
         tabsContainer.appendChild(btn);
@@ -470,6 +502,7 @@ function setupAiInsightsView() {
     const biasBtn = document.getElementById('hr-run-bias-detection-btn');
     const discrepancyBtn = document.getElementById('hr-run-discrepancy-analysis-btn');
     const credibilityBtn = document.getElementById('hr-run-credibility-analysis-btn');
+    const printBtn = document.getElementById('hr-print-ai-insights-btn');
     const behaviorSemester = document.getElementById('hr-ai-behavior-semester');
     const biasSemester = document.getElementById('hr-ai-bias-semester');
     const discrepancySemester = document.getElementById('hr-ai-discrepancy-semester');
@@ -522,6 +555,12 @@ function setupAiInsightsView() {
         });
     }
 
+    if (printBtn) {
+        printBtn.addEventListener('click', function () {
+            runAllAiInsightsThenPrint(printBtn);
+        });
+    }
+
     hrAiInsightsReady = true;
 }
 
@@ -534,6 +573,514 @@ function resetAiInsightsBehaviorAnalysisPrompt() {
     feedbackEl.textContent = 'Click "Run Behavior Analysis" to load behavior score results.';
     renderHrResponsiveTablePrompt(studentBody, 4, 'Run analysis to view student aggregate scores.', 'hr-mobile-card-empty--center');
     renderHrResponsiveTablePrompt(submissionBody, 6, 'No submission analysis yet.', 'hr-mobile-card-empty--center');
+}
+
+function cleanHrAiInsightsReportText(value) {
+    return String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
+}
+
+function getHrAiInsightsElementText(id) {
+    const element = document.getElementById(id);
+    return cleanHrAiInsightsReportText(element ? element.textContent : '');
+}
+
+function getHrAiInsightsTableResultCount(bodyId) {
+    const body = document.getElementById(bodyId);
+    if (!body || body.querySelector('.hr-mobile-card-empty')) return 0;
+
+    const mobileCards = body.querySelectorAll('.hr-mobile-data-card');
+    if (mobileCards.length > 0) return mobileCards.length;
+
+    return Array.from(body.querySelectorAll('tr')).filter(function (row) {
+        return !row.querySelector('[colspan]') && cleanHrAiInsightsReportText(row.textContent);
+    }).length;
+}
+
+function getHrAiInsightsTablePrompt(bodyId) {
+    const body = document.getElementById(bodyId);
+    if (!body) return '';
+    if (getHrAiInsightsTableResultCount(bodyId) > 0) return '';
+    return cleanHrAiInsightsReportText(body.textContent);
+}
+
+function parseHrAiInsightsNumber(value) {
+    const match = String(value == null ? '' : value).replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
+    if (!match) return null;
+    const numeric = Number(match[0]);
+    return Number.isFinite(numeric) ? numeric : null;
+}
+
+function formatHrAiInsightsNumber(value, fractionDigits) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 'N/A';
+    const digits = Number.isFinite(Number(fractionDigits)) ? Number(fractionDigits) : 0;
+    return numeric.toFixed(digits);
+}
+
+function getHrAiInsightsMobileFieldText(card, label) {
+    const targetLabel = cleanHrAiInsightsReportText(label).toLowerCase();
+    const fields = Array.from(card ? card.querySelectorAll('.hr-mobile-card-field') : []);
+    for (let index = 0; index < fields.length; index += 1) {
+        const field = fields[index];
+        const labelEl = field.querySelector('.hr-mobile-card-label');
+        const valueEl = field.querySelector('.hr-mobile-card-value');
+        if (cleanHrAiInsightsReportText(labelEl ? labelEl.textContent : '').toLowerCase() === targetLabel) {
+            return cleanHrAiInsightsReportText(valueEl ? valueEl.textContent : '');
+        }
+    }
+    return '';
+}
+
+function getHrAiInsightsBehaviorAggregate() {
+    const body = document.getElementById('hr-ai-student-aggregate-body');
+    const result = {
+        formsAnalyzed: 0,
+        averageScore: null,
+        assessmentLevel: 'N/A',
+    };
+    if (!body || body.querySelector('.hr-mobile-card-empty')) return result;
+
+    const rows = [];
+    const mobileCards = Array.from(body.querySelectorAll('.hr-mobile-data-card'));
+    if (mobileCards.length > 0) {
+        mobileCards.forEach(function (card) {
+            rows.push({
+                forms: parseHrAiInsightsNumber(getHrAiInsightsMobileFieldText(card, 'Forms Analyzed')),
+                score: parseHrAiInsightsNumber(getHrAiInsightsMobileFieldText(card, 'Avg Behavior Score')),
+            });
+        });
+    } else {
+        Array.from(body.querySelectorAll('tr')).forEach(function (row) {
+            const cells = row.querySelectorAll('td');
+            if (cells.length < 4 || row.querySelector('[colspan]')) return;
+            rows.push({
+                forms: parseHrAiInsightsNumber(cells[1].textContent),
+                score: parseHrAiInsightsNumber(cells[2].textContent),
+            });
+        });
+    }
+
+    let weightedTotal = 0;
+    let weightedForms = 0;
+    let simpleTotal = 0;
+    let simpleCount = 0;
+    rows.forEach(function (row) {
+        const forms = Number(row.forms);
+        const score = Number(row.score);
+        if (Number.isFinite(forms) && forms > 0) {
+            result.formsAnalyzed += forms;
+        }
+        if (Number.isFinite(score)) {
+            simpleTotal += score;
+            simpleCount += 1;
+            if (Number.isFinite(forms) && forms > 0) {
+                weightedTotal += score * forms;
+                weightedForms += forms;
+            }
+        }
+    });
+
+    if (weightedForms > 0) {
+        result.averageScore = weightedTotal / weightedForms;
+    } else if (simpleCount > 0) {
+        result.averageScore = simpleTotal / simpleCount;
+    }
+    result.assessmentLevel = Number.isFinite(result.averageScore) ? getBehaviorRiskLevel(result.averageScore) : 'N/A';
+    return result;
+}
+
+function getHrAiInsightsSummaryNumber(summaryText, label) {
+    const escapedLabel = String(label || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`${escapedLabel}\\s*:\\s*(-?\\d+(?:\\.\\d+)?)`, 'i');
+    const match = String(summaryText || '').match(regex);
+    if (!match) return 0;
+    const numeric = Number(match[1]);
+    return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function getHrAiInsightsCredibilityChartData() {
+    const summary = getHrAiInsightsElementText('hr-ai-credibility-summary');
+    const highlyReliable = getHrAiInsightsSummaryNumber(summary, 'Highly reliable');
+    const acceptable = getHrAiInsightsSummaryNumber(summary, 'Acceptable');
+    const needsReview = getHrAiInsightsSummaryNumber(summary, 'Needs review');
+    const totalFromSummary = getHrAiInsightsSummaryNumber(summary, 'Total');
+    const categoryTotal = highlyReliable + acceptable + needsReview;
+    return {
+        total: categoryTotal > 0 ? categoryTotal : totalFromSummary,
+        highlyReliable,
+        acceptable,
+        needsReview,
+    };
+}
+
+function buildHrAiInsightsCredibilityChartHtml(chartData) {
+    const data = chartData || {};
+    const highlyReliable = Math.max(0, Number(data.highlyReliable) || 0);
+    const acceptable = Math.max(0, Number(data.acceptable) || 0);
+    const needsReview = Math.max(0, Number(data.needsReview) || 0);
+    const total = Math.max(0, Number(data.total) || 0);
+    const chartTotal = highlyReliable + acceptable + needsReview;
+    if (total <= 0 || chartTotal <= 0) {
+        return '<p class="chart-empty">No credibility results available for charting.</p>';
+    }
+
+    const reliableEnd = (highlyReliable / chartTotal) * 360;
+    const acceptableEnd = reliableEnd + ((acceptable / chartTotal) * 360);
+    const chartStyle = [
+        '#059669 0deg',
+        `#059669 ${reliableEnd.toFixed(2)}deg`,
+        `#f59e0b ${reliableEnd.toFixed(2)}deg`,
+        `#f59e0b ${acceptableEnd.toFixed(2)}deg`,
+        `#ef4444 ${acceptableEnd.toFixed(2)}deg`,
+        '#ef4444 360deg',
+    ].join(', ');
+
+    return `
+        <div class="chart-block">
+            <div class="pie-chart" style="background: conic-gradient(${chartStyle});">
+                <span>Total<strong>${escapeHrHtml(total)}</strong></span>
+            </div>
+            <div class="chart-legend">
+                <div><span class="legend-dot reliable"></span>Highly reliable <strong>${escapeHrHtml(highlyReliable)}</strong></div>
+                <div><span class="legend-dot acceptable"></span>Acceptable <strong>${escapeHrHtml(acceptable)}</strong></div>
+                <div><span class="legend-dot review"></span>Needs review <strong>${escapeHrHtml(needsReview)}</strong></div>
+            </div>
+        </div>
+    `;
+}
+
+function getHrAiInsightsSelectedSemesterLabel() {
+    const semesterSelect = document.getElementById('hr-ai-behavior-semester')
+        || document.getElementById('hr-ai-bias-semester')
+        || document.getElementById('hr-ai-discrepancy-semester')
+        || document.getElementById('hr-ai-credibility-semester');
+    if (!semesterSelect) return 'All Semesters';
+
+    const selected = semesterSelect.options && semesterSelect.selectedIndex >= 0
+        ? semesterSelect.options[semesterSelect.selectedIndex]
+        : null;
+    const selectedLabel = cleanHrAiInsightsReportText(selected ? selected.textContent : '');
+    return selectedLabel || getSemesterLabel(String(semesterSelect.value || 'all').trim() || 'all') || 'All Semesters';
+}
+
+function getHrAiInsightsGeneratedAtLabel() {
+    const nowValue = SharedData && typeof SharedData.getNowIsoString === 'function'
+        ? SharedData.getNowIsoString()
+        : new Date().toISOString();
+    if (SharedData && typeof SharedData.formatDateTimeInPhilippines === 'function') {
+        return SharedData.formatDateTimeInPhilippines(nowValue) || nowValue;
+    }
+    return new Date(nowValue).toLocaleString();
+}
+
+function buildHrAiInsightsMetricHtml(metrics) {
+    return (Array.isArray(metrics) ? metrics : []).map(function (metric) {
+        return `
+            <div class="metric">
+                <span>${escapeHrHtml(metric.label)}</span>
+                <strong>${escapeHrHtml(metric.value)}</strong>
+            </div>
+        `;
+    }).join('');
+}
+
+function buildHrAiInsightsReportSectionHtml(section) {
+    const summary = cleanHrAiInsightsReportText(section.summary);
+    const status = cleanHrAiInsightsReportText(section.status);
+    const fallback = cleanHrAiInsightsReportText(section.fallback);
+    const chartHtml = String(section.chartHtml || '').trim();
+
+    return `
+        <section class="report-section">
+            <h2>${escapeHrHtml(section.title)}</h2>
+            ${summary ? `<p class="summary">${escapeHrHtml(summary)}</p>` : ''}
+            ${status ? `<p class="status">${escapeHrHtml(status)}</p>` : ''}
+            ${!summary && !status && fallback ? `<p class="status">${escapeHrHtml(fallback)}</p>` : ''}
+            ${chartHtml}
+            <div class="metrics">
+                ${buildHrAiInsightsMetricHtml(section.metrics)}
+            </div>
+        </section>
+    `;
+}
+
+function buildHrAiInsightsPrintableReportHtml() {
+    const behaviorAggregate = getHrAiInsightsBehaviorAggregate();
+    const biasCount = getHrAiInsightsTableResultCount('hr-ai-bias-body');
+    const discrepancyCount = getHrAiInsightsTableResultCount('hr-ai-discrepancy-body');
+    const credibilityCount = getHrAiInsightsTableResultCount('hr-ai-credibility-body');
+    const credibilityChartData = getHrAiInsightsCredibilityChartData();
+
+    const sections = [
+        {
+            title: 'Evaluation Behavior Score',
+            metrics: [
+                { label: 'Forms Analyzed', value: behaviorAggregate.formsAnalyzed },
+                { label: 'Avg Behavior Score', value: formatHrAiInsightsNumber(behaviorAggregate.averageScore, 1) },
+                { label: 'Average Assessment Level', value: behaviorAggregate.assessmentLevel },
+            ],
+        },
+        {
+            title: 'Bias Detection',
+            summary: getHrAiInsightsElementText('hr-ai-bias-summary'),
+            status: getHrAiInsightsElementText('hr-ai-bias-feedback') || getHrAiInsightsTablePrompt('hr-ai-bias-body'),
+            metrics: [
+                { label: 'Classified comments', value: biasCount },
+            ],
+        },
+        {
+            title: 'Cross-Source Evaluation Discrepancy',
+            summary: getHrAiInsightsElementText('hr-ai-discrepancy-summary'),
+            status: getHrAiInsightsElementText('hr-ai-discrepancy-feedback') || getHrAiInsightsTablePrompt('hr-ai-discrepancy-body'),
+            metrics: [
+                { label: 'Displayed results', value: discrepancyCount },
+            ],
+        },
+        {
+            title: 'Evaluation Credibility Score',
+            summary: getHrAiInsightsElementText('hr-ai-credibility-summary'),
+            status: getHrAiInsightsElementText('hr-ai-credibility-feedback') || getHrAiInsightsTablePrompt('hr-ai-credibility-body'),
+            chartHtml: buildHrAiInsightsCredibilityChartHtml(credibilityChartData),
+            metrics: [
+                { label: 'Displayed results', value: credibilityCount },
+            ],
+        },
+    ];
+
+    return `<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title></title>
+    <style>
+        @page { margin: 16mm; }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            color: #111827;
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 12px;
+            line-height: 1.5;
+            background: #ffffff;
+        }
+        .meta {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+            margin: 0 0 18px;
+            color: #374151;
+        }
+        .meta span {
+            display: block;
+            color: #6b7280;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .report-section {
+            page-break-inside: avoid;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+        .report-section h2 {
+            margin: 0 0 8px;
+            font-size: 15px;
+        }
+        .summary,
+        .status {
+            margin: 0 0 8px;
+            color: #374151;
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+        }
+        .metric {
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 8px;
+            background: #f9fafb;
+        }
+        .metric span {
+            display: block;
+            color: #6b7280;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .metric strong {
+            display: block;
+            margin-top: 2px;
+            color: #111827;
+            font-size: 16px;
+        }
+        .chart-block {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            margin: 10px 0 12px;
+        }
+        .pie-chart {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            flex: 0 0 auto;
+            position: relative;
+            border: 4px solid #ffffff;
+            box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+        }
+        .pie-chart::after {
+            content: "";
+            position: absolute;
+            inset: 30px;
+            border-radius: 50%;
+            background: #ffffff;
+            box-shadow: inset 0 0 0 1px #e5e7eb;
+        }
+        .pie-chart span {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: #6b7280;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .pie-chart strong {
+            color: #111827;
+            font-size: 22px;
+            line-height: 1;
+        }
+        .chart-legend {
+            display: grid;
+            gap: 7px;
+            color: #374151;
+            min-width: 180px;
+        }
+        .chart-legend div {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .chart-legend strong {
+            margin-left: auto;
+            color: #111827;
+        }
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            flex: 0 0 auto;
+        }
+        .legend-dot.reliable { background: #047857; }
+        .legend-dot.acceptable { background: #f59e0b; }
+        .legend-dot.review { background: #dc2626; }
+        .chart-empty {
+            margin: 0 0 10px;
+            color: #6b7280;
+        }
+        @media print {
+            body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <div class="meta">
+            <div><span>Generated</span>${escapeHrHtml(getHrAiInsightsGeneratedAtLabel())}</div>
+            <div><span>Semester</span>${escapeHrHtml(getHrAiInsightsSelectedSemesterLabel())}</div>
+        </div>
+        ${sections.map(buildHrAiInsightsReportSectionHtml).join('')}
+    </main>
+</body>
+</html>`;
+}
+
+function printHrAiInsightsSummary() {
+    const existingFrame = document.getElementById('hr-ai-insights-print-frame');
+    if (existingFrame && existingFrame.parentNode) {
+        existingFrame.parentNode.removeChild(existingFrame);
+    }
+
+    const iframe = document.createElement('iframe');
+    iframe.id = 'hr-ai-insights-print-frame';
+    iframe.title = 'Insights Print Frame';
+    iframe.setAttribute('aria-hidden', 'true');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    iframe.style.visibility = 'hidden';
+    document.body.appendChild(iframe);
+
+    const printWindow = iframe.contentWindow;
+    const printDocument = iframe.contentDocument || (printWindow && printWindow.document);
+    if (!printWindow || !printDocument) {
+        alert('Unable to prepare the AI Insights summary for printing.');
+        iframe.remove();
+        return;
+    }
+
+    printDocument.open();
+    printDocument.write(buildHrAiInsightsPrintableReportHtml());
+    printDocument.close();
+
+    const cleanup = function () {
+        setTimeout(function () {
+            if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+        }, 1000);
+    };
+
+    printWindow.onafterprint = cleanup;
+    setTimeout(function () {
+        try {
+            printWindow.focus();
+            printWindow.print();
+        } catch (error) {
+            console.error('[HRPanel] AI Insights print failed.', error);
+            alert('Unable to open the print dialog for AI Insights summary.');
+            cleanup();
+        }
+    }, 100);
+}
+
+async function runAllAiInsightsThenPrint(printBtn) {
+    const button = printBtn || document.getElementById('hr-print-ai-insights-btn');
+    const original = button ? button.innerHTML : '';
+    if (button) {
+        button.disabled = true;
+        button.textContent = 'Preparing Summary...';
+    }
+
+    try {
+        hrBehaviorAnalysisHasRun = true;
+        renderAiInsightsBehaviorAnalysis({ silent: false });
+        await Promise.resolve(runAiBiasDetection());
+        await Promise.resolve(runAiDiscrepancyCheck());
+        await Promise.resolve(runAiCredibilityAnalysis());
+        printHrAiInsightsSummary();
+    } catch (error) {
+        console.error('[HRPanel] Unable to prepare AI Insights print summary.', error);
+        alert('Unable to prepare the AI Insights summary for printing.');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = original;
+        }
+    }
 }
 
 function populateAiInsightsSemesterFilters() {
@@ -1153,7 +1700,7 @@ function countHrEvaluationsByType(context, semesterId, typeKey) {
 }
 
 function runHrWithGlobalLoading(message, callback) {
-    if (typeof callback !== 'function') return;
+    if (typeof callback !== 'function') return Promise.resolve();
 
     const loadingOverlay = window.AppLoadingOverlay;
     const canUseOverlay = loadingOverlay
@@ -1161,18 +1708,25 @@ function runHrWithGlobalLoading(message, callback) {
         && typeof loadingOverlay.hide === 'function';
 
     if (!canUseOverlay) {
-        callback();
-        return;
+        try {
+            return Promise.resolve(callback());
+        } catch (error) {
+            return Promise.reject(error);
+        }
     }
 
     loadingOverlay.show(message || 'Processing AI request...');
-    setTimeout(function () {
-        try {
-            callback();
-        } finally {
-            loadingOverlay.hide();
-        }
-    }, 0);
+    return new Promise(function (resolve, reject) {
+        setTimeout(function () {
+            try {
+                resolve(callback());
+            } catch (error) {
+                reject(error);
+            } finally {
+                loadingOverlay.hide();
+            }
+        }, 0);
+    });
 }
 
 function runAiBiasDetection() {
@@ -1182,22 +1736,22 @@ function runAiBiasDetection() {
     const bodyEl = document.getElementById('hr-ai-bias-body');
     const button = document.getElementById('hr-run-bias-detection-btn');
 
-    if (!semesterSelect || !feedbackEl || !summaryEl || !bodyEl || !button) return;
+    if (!semesterSelect || !feedbackEl || !summaryEl || !bodyEl || !button) return Promise.resolve(false);
 
     if (!SharedData.analyzeBiasComments) {
         feedbackEl.style.display = 'block';
         feedbackEl.textContent = 'Bias detection service is unavailable in SharedData.';
-        return;
+        return Promise.resolve(false);
     }
 
     const semesterId = String(semesterSelect.value || '').trim();
     const original = button.innerHTML;
     button.disabled = true;
-    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running...';
+    button.textContent = 'Running...';
     feedbackEl.style.display = 'block';
     feedbackEl.textContent = 'Analyzing comments...';
 
-    runHrWithGlobalLoading('Running AI bias detection...', function () {
+    return runHrWithGlobalLoading('Running AI bias detection...', function () {
         try {
             const response = SharedData.analyzeBiasComments({
                 semesterId: semesterId === 'all' ? '' : semesterId,
@@ -1274,13 +1828,13 @@ function runAiDiscrepancyCheck() {
     const bodyEl = document.getElementById('hr-ai-discrepancy-body');
     const button = document.getElementById('hr-run-discrepancy-analysis-btn');
 
-    if (!semesterSelect || !feedbackEl || !summaryEl || !bodyEl || !button) return;
+    if (!semesterSelect || !feedbackEl || !summaryEl || !bodyEl || !button) return Promise.resolve(false);
 
     const threshold = 2.0;
     const semesterId = String(semesterSelect.value || 'all').trim() || 'all';
     const original = button.innerHTML;
     button.disabled = true;
-    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running...';
+    button.textContent = 'Running...';
     feedbackEl.textContent = 'Checking cross-source discrepancies...';
 
     try {
@@ -1307,7 +1861,7 @@ function runAiDiscrepancyCheck() {
 
         if (!displayRows.length) {
             renderHrResponsiveTablePrompt(bodyEl, 6, 'No discrepancies found.', 'hr-mobile-card-empty--center');
-            return;
+            return true;
         }
 
         const rowsHtml = displayRows.map(function (row) {
@@ -1345,6 +1899,7 @@ function runAiDiscrepancyCheck() {
         button.disabled = false;
         button.innerHTML = original;
     }
+    return Promise.resolve(true);
 }
 
 function runAiCredibilityAnalysis() {
@@ -1354,15 +1909,15 @@ function runAiCredibilityAnalysis() {
     const bodyEl = document.getElementById('hr-ai-credibility-body');
     const button = document.getElementById('hr-run-credibility-analysis-btn');
 
-    if (!semesterSelect || !feedbackEl || !summaryEl || !bodyEl || !button) return;
+    if (!semesterSelect || !feedbackEl || !summaryEl || !bodyEl || !button) return Promise.resolve(false);
 
     const semesterId = String(semesterSelect.value || 'all').trim() || 'all';
     const original = button.innerHTML;
     button.disabled = true;
-    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running...';
+    button.textContent = 'Running...';
     feedbackEl.textContent = 'Computing credibility scores...';
 
-    runHrWithGlobalLoading('Running AI credibility analysis...', function () {
+    return runHrWithGlobalLoading('Running AI credibility analysis...', function () {
         try {
             const context = buildHrEvaluationContext();
             const analysis = analyzeEvaluationCredibility(context, semesterId);
@@ -1990,9 +2545,8 @@ function buildHrProfessorAvatarHtml(professor, avatarClassName) {
 function formatAiInsightsDate(value) {
     const raw = String(value || '').trim();
     if (!raw) return '-';
-    const parsed = new Date(raw);
-    if (Number.isNaN(parsed.getTime())) return raw;
-    return parsed.toLocaleString();
+    const formatted = SharedData.formatDateTimeInPhilippines(raw);
+    return formatted || raw;
 }
 
 function setHrResponsiveTableMode(bodyEl, useCards) {
@@ -2100,7 +2654,7 @@ function loadHrActivityLog() {
     };
     const formatTimestamp = value => {
         const parsed = parseTimestamp(value);
-        return parsed ? parsed.toLocaleString() : String(value || '-');
+        return parsed ? SharedData.formatDateTimeInPhilippines(parsed) : String(value || '-');
     };
     const renderPrompt = message => {
         renderHrResponsiveTablePrompt(tbody, 7, escapeHtml(message), 'hr-mobile-card-empty--center');
@@ -2199,7 +2753,7 @@ function setupNotifications() {
         const message = String(item && item.message || '').trim();
         const timestamp = String(item && item.timestamp || '').trim();
         const parsed = timestamp ? new Date(timestamp) : null;
-        const dateLabel = parsed && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleString() : timestamp;
+        const dateLabel = parsed && !Number.isNaN(parsed.getTime()) ? SharedData.formatDateTimeInPhilippines(parsed) : timestamp;
         if (message && dateLabel) return `${message} • ${dateLabel}`;
         if (message) return message;
         if (dateLabel) return dateLabel;
@@ -2387,7 +2941,7 @@ function handleHrAnnouncementComposeSubmit(event) {
     }
 
     const session = getUserSession() || SharedData.getSession() || {};
-    const createdAt = new Date().toISOString();
+    const createdAt = SharedData.getNowIsoString();
     const audience = {
         role: role,
         campus: campus,
@@ -2488,8 +3042,8 @@ function renderHrSystemNotifications() {
         'supervisor-professor': 'Supervisor to Professor',
     };
     const dayMs = 24 * 60 * 60 * 1000;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const todayYmd = SharedData.getCurrentPhilippineDateYmd();
+    const today = SharedData.parsePhilippineDateBoundary(todayYmd, 'start');
 
     const escapeHtml = value => String(value == null ? '' : value)
         .replace(/&/g, '&amp;')
@@ -2500,13 +3054,12 @@ function renderHrSystemNotifications() {
     const parseDate = value => {
         const raw = String(value || '').trim();
         if (!raw) return null;
-        const parsed = new Date(raw + 'T00:00:00');
-        return Number.isNaN(parsed.getTime()) ? null : parsed;
+        return SharedData.parsePhilippineDateBoundary(raw, 'start');
     };
     const formatDate = value => {
         const parsed = parseDate(value);
         return parsed
-            ? parsed.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+            ? SharedData.formatDateInPhilippines(parsed, undefined, { year: 'numeric', month: 'short', day: 'numeric' })
             : 'Date not set';
     };
 
@@ -2561,7 +3114,7 @@ function renderHrSystemNotifications() {
         const timestamp = String(item && item.timestamp ? item.timestamp : '').trim();
         const parsed = timestamp ? new Date(timestamp) : null;
         const dateLabel = parsed && !Number.isNaN(parsed.getTime())
-            ? parsed.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+            ? SharedData.formatDateInPhilippines(parsed, undefined, { year: 'numeric', month: 'short', day: 'numeric' })
             : 'Recent update';
         alerts.push({
             message: title,
@@ -2580,7 +3133,7 @@ function renderHrSystemNotifications() {
                 </div>
                 <div class="alert-content">
                     <div class="alert-message">No active system notifications.</div>
-                    <div class="alert-date">${today.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</div>
+                    <div class="alert-date">${SharedData.formatDateInPhilippines(todayYmd, undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</div>
                 </div>
             </div>
         `;
@@ -3163,7 +3716,7 @@ function isSessionExpired() {
     }
 
     const loginTime = new Date(session.loginTime);
-    const now = new Date();
+    const now = SharedData.getNowDate();
     const hoursDiff = (now - loginTime) / (1000 * 60 * 60);
 
     // Session expires after 8 hours
@@ -3213,6 +3766,9 @@ function saveProfessorsToSharedData() {
 }
 let currentEditingProfessorId = null;
 let currentDepartmentFilter = 'all';
+let currentProfessorCampusFilter = 'all';
+let lastProfessorSearchTerm = '';
+let hasProfessorSearchRun = false;
 let rankingDepartmentFilter = 'all';
 let rankingEmploymentFilter = 'all';
 let currentAnalyticsSemester = 'all';
@@ -3306,7 +3862,7 @@ function getHrEvaluationTypeKey(evaluation) {
     const role = normalizeHrToken(evaluation && (evaluation.evaluatorRole || evaluation.evaluationType));
     if (role === 'student' || role === 'student-to-professor') return 'student';
     if (role === 'professor' || role === 'peer' || role === 'professor-to-professor') return 'peer';
-    if (role === 'dean' || role === 'hr' || role === 'supervisor' || role === 'supervisor-to-professor') return 'supervisor';
+    if (role === 'dean' || role === 'procoor' || role === 'hr' || role === 'supervisor' || role === 'supervisor-to-professor') return 'supervisor';
     return '';
 }
 
@@ -3336,7 +3892,7 @@ function buildHrEvaluationContext() {
     const professorUsers = users.filter(user => normalizeHrToken(user && user.role) === 'professor');
     const supervisorUsers = users.filter(user => {
         const role = normalizeHrToken(user && user.role);
-        return role === 'dean' || role === 'hr' || role === 'supervisor';
+        return role === 'dean' || role === 'procoor' || role === 'hr' || role === 'supervisor';
     });
 
     const professorIdSet = new Set();
@@ -3491,8 +4047,8 @@ function collectHrQualitativeResponses(evaluation) {
     const baseDateRaw = evaluation && (evaluation.submittedAt || evaluation.timestamp || '');
     const parsedDate = baseDateRaw ? new Date(baseDateRaw) : null;
     const dateLabel = parsedDate && !Number.isNaN(parsedDate.getTime())
-        ? parsedDate.toLocaleDateString()
-        : new Date().toLocaleDateString();
+        ? SharedData.formatDateInPhilippines(parsedDate)
+        : SharedData.formatDateInPhilippines(SharedData.getCurrentPhilippineDateYmd());
     const evaluatorName = String(
         evaluation && (evaluation.evaluatorName || evaluation.studentName || evaluation.evaluatorUsername) || 'Anonymous'
     ).trim() || 'Anonymous';
@@ -3619,7 +4175,7 @@ function aggregateHrEvaluationData(options) {
         const stat = categoryStats[category] || { sum: 0, count: 0 };
         return {
             category,
-            score: stat.count > 0 ? parseFloat((stat.sum / stat.count).toFixed(1)) : 0,
+            score: stat.count > 0 ? parseFloat((stat.sum / stat.count).toFixed(2)) : 0,
         };
     });
     if (includeCategoryScores && categoryScores.length === 0) {
@@ -3627,7 +4183,7 @@ function aggregateHrEvaluationData(options) {
     }
 
     return {
-        averageRating: totalRatingCount > 0 ? parseFloat((totalRatingValue / totalRatingCount).toFixed(1)) : 0,
+        averageRating: totalRatingCount > 0 ? parseFloat((totalRatingValue / totalRatingCount).toFixed(2)) : 0,
         totalEvaluations,
         ratingDistribution,
         categoryScores,
@@ -3981,31 +4537,12 @@ function renderHrEvaluationOverviewChart(data) {
     const chartCanvas = document.getElementById('hr-evaluation-overview-chart');
     if (!chartCanvas) return;
 
-    if (hrEvaluationOverviewChartInstance) {
-        hrEvaluationOverviewChartInstance.destroy();
-        hrEvaluationOverviewChartInstance = null;
-    }
-
-    hrEvaluationOverviewChartInstance = new Chart(chartCanvas, {
-        type: 'doughnut',
-        data: {
-            labels: data.labels,
-            datasets: [{
-                data: data.values,
-                backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
-                borderWidth: 0
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: {
-                    display: true,
-                    position: 'bottom'
-                }
-            }
-        }
+    hrEvaluationOverviewChartInstance = window.AppChartDesign.renderDoughnutMetricChart(chartCanvas, {
+        labels: data.labels,
+        values: data.values,
+        colors: ['#059669', '#f59e0b', '#ef4444'],
+        centerTitle: String((Array.isArray(data.values) ? data.values : []).reduce((sum, value) => sum + (Number(value) || 0), 0)),
+        centerSubtitle: 'Evaluations'
     });
 }
 
@@ -4014,54 +4551,15 @@ function renderHrSemestralPerformanceChart(data) {
     const chartCanvas = document.getElementById('hr-semestral-performance-chart');
     if (!chartCanvas) return;
 
-    if (hrSemestralPerformanceChartInstance) {
-        hrSemestralPerformanceChartInstance.destroy();
-        hrSemestralPerformanceChartInstance = null;
-    }
-
-    hrSemestralPerformanceChartInstance = new Chart(chartCanvas, {
-        type: 'bar',
-        data: {
-            labels: data.labels,
-            datasets: [{
-                label: 'Students Completed Assigned Evaluations',
-                data: data.values,
-                backgroundColor: ['#667eea', '#7c8df0', '#5f78dd', '#4d66cf'],
-                borderRadius: 8,
-                borderWidth: 0
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: {
-                    display: false
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        precision: 0
-                    }
-                },
-                x: {
-                    ticks: {
-                        maxRotation: 0,
-                        minRotation: 0,
-                        callback: function (value) {
-                            const label = String(this.getLabelForValue(value) || '');
-                            const semesterYearMatch = label.match(/^(.*)\s(\d{4}-\d{4})$/);
-                            if (semesterYearMatch) {
-                                return [semesterYearMatch[1], semesterYearMatch[2]];
-                            }
-                            return label;
-                        }
-                    }
-                }
-            }
-        }
+    hrSemestralPerformanceChartInstance = window.AppChartDesign.renderBarChart(chartCanvas, {
+        labels: data.labels,
+        values: data.values,
+        fullLabels: data.labels,
+        label: 'Students Completed Assigned Evaluations',
+        colors: ['#4f46e5', '#06b6d4'],
+        showLegend: false,
+        autoSkipX: true,
+        maxTicksLimit: 4
     });
 }
 
@@ -4294,6 +4792,7 @@ function setupHrSharedDataBindings() {
 
         if (key === keys.USERS) {
             loadProfessorsData();
+            populateProfessorCampusFilter();
             renderProfessorDepartmentOptions();
             renderProfessorDepartmentTabs();
             if (isContentViewVisible('user-management-view')) {
@@ -4307,6 +4806,15 @@ function setupHrSharedDataBindings() {
             }
             if (isContentViewVisible('reports-view')) {
                 loadReports();
+            }
+        }
+
+        if (key === keys.CAMPUSES) {
+            populateProfessorCampusFilter();
+            renderProfessorDepartmentOptions();
+            renderProfessorDepartmentTabs();
+            if (isContentViewVisible('user-management-view')) {
+                renderProfessors();
             }
         }
 
@@ -4362,7 +4870,7 @@ function normalizeResponse(response, semesterId) {
     const normalized = { ...response };
     if (!normalized.id) normalized.id = Date.now() + '_' + Math.floor(Math.random() * 10000);
     if (!normalized.text) normalized.text = '';
-    if (!normalized.date) normalized.date = new Date().toLocaleDateString();
+    if (!normalized.date) normalized.date = SharedData.formatDateInPhilippines(SharedData.getCurrentPhilippineDateYmd());
     if (!normalized.studentName) normalized.studentName = 'Anonymous';
     if (!normalized.studentNumber) normalized.studentNumber = 'N/A';
     if (!normalized.semesterId) normalized.semesterId = semesterId || 'all';
@@ -4728,10 +5236,56 @@ function getRankingIcon(rank) {
 /**
  * Setup professor management functionality
  */
+function renderProfessorSearchPrompt(message, iconClass) {
+    const professorsList = document.getElementById('professors-list');
+    if (!professorsList) return;
+    professorsList.classList.remove('is-mobile-cards');
+    professorsList.innerHTML = `
+        <div class="empty-state professor-search-gate">
+            <i class="fas ${iconClass || 'fa-search'}"></i>
+            <p>${escapeHrHtml(message || 'Search by name or employee ID to show professors.')}</p>
+        </div>
+    `;
+}
+
+function syncProfessorDepartmentTabsToFilter() {
+    const tabs = document.querySelectorAll('.dept-tab');
+    tabs.forEach(tab => {
+        const department = String(tab.getAttribute('data-department') || 'all').trim() || 'all';
+        tab.classList.toggle('active', department === currentDepartmentFilter);
+    });
+}
+
+function runProfessorSearch() {
+    const searchInput = document.getElementById('professor-search');
+    const campusSelect = document.getElementById('professor-campus-filter');
+    const submittedTerm = String(searchInput ? searchInput.value : '').trim();
+
+    currentProfessorCampusFilter = normalizeHrToken(campusSelect ? campusSelect.value : 'all') || 'all';
+    lastProfessorSearchTerm = submittedTerm.toLowerCase();
+    hasProfessorSearchRun = submittedTerm !== '';
+    renderProfessors();
+}
+
+function clearProfessorSearchFilters() {
+    const searchInput = document.getElementById('professor-search');
+    const campusSelect = document.getElementById('professor-campus-filter');
+    if (searchInput) searchInput.value = '';
+    if (campusSelect) campusSelect.value = 'all';
+
+    currentProfessorCampusFilter = 'all';
+    currentDepartmentFilter = 'all';
+    lastProfessorSearchTerm = '';
+    hasProfessorSearchRun = false;
+    syncProfessorDepartmentTabsToFilter();
+    renderProfessors();
+}
+
 function setupProfessorManagement() {
     // Load professor data from SharedData
     loadProfessorsData();
     hrProfessorMobileMode = isHrPhoneViewport();
+    populateProfessorCampusFilter();
 
     // Department tabs
     const deptTabs = document.querySelectorAll('.dept-tab');
@@ -4752,7 +5306,31 @@ function setupProfessorManagement() {
 
     const searchInput = document.getElementById('professor-search');
     if (searchInput) {
-        searchInput.addEventListener('input', renderProfessors);
+        searchInput.addEventListener('input', function () {
+            const currentTerm = String(this.value || '').trim().toLowerCase();
+            if (currentTerm !== lastProfessorSearchTerm) {
+                hasProfessorSearchRun = false;
+                renderProfessors();
+            }
+        });
+    }
+
+    const campusSelect = document.getElementById('professor-campus-filter');
+    if (campusSelect) {
+        campusSelect.addEventListener('change', function () {
+            currentProfessorCampusFilter = normalizeHrToken(this.value) || 'all';
+            renderProfessors();
+        });
+    }
+
+    const searchButton = document.getElementById('professor-search-btn');
+    if (searchButton) {
+        searchButton.addEventListener('click', runProfessorSearch);
+    }
+
+    const clearButton = document.getElementById('professor-clear-btn');
+    if (clearButton) {
+        clearButton.addEventListener('click', clearProfessorSearchFilters);
     }
 
     if (!hrProfessorViewportBound) {
@@ -4839,25 +5417,34 @@ function loadUserManagement() {
 function renderProfessors() {
     const professorsList = document.getElementById('professors-list');
     if (!professorsList) return;
+
+    const searchTerm = String(lastProfessorSearchTerm || '').trim().toLowerCase();
+    if (!hasProfessorSearchRun || !searchTerm) {
+        renderProfessorSearchPrompt('Search by name or employee ID to show professors.', 'fa-search');
+        return;
+    }
+
     const analyticsContext = buildHrEvaluationContext();
     const studentsEvaluatedCountMap = buildHrStudentsEvaluatedCountMap(analyticsContext, 'all');
-
-    const searchInput = document.getElementById('professor-search');
-    const searchTerm = searchInput ? searchInput.value.trim().toLowerCase() : '';
 
     // Filter professors by department
     let filteredProfessors = professorsData;
     if (currentDepartmentFilter !== 'all') {
-        filteredProfessors = professorsData.filter(t => t.department === currentDepartmentFilter);
+        filteredProfessors = professorsData.filter(t => String(t.department || '') === currentDepartmentFilter);
     }
 
-    if (searchTerm) {
+    const campusFilter = normalizeHrToken(currentProfessorCampusFilter);
+    if (campusFilter && campusFilter !== 'all') {
         filteredProfessors = filteredProfessors.filter(professor => {
-            const nameMatch = (professor.name || '').toLowerCase().includes(searchTerm);
-            const employeeMatch = (professor.employeeId || '').toLowerCase().includes(searchTerm);
-            return nameMatch || employeeMatch;
+            return normalizeHrToken(professor && professor.campus) === campusFilter;
         });
     }
+
+    filteredProfessors = filteredProfessors.filter(professor => {
+        const nameMatch = (professor.name || '').toLowerCase().includes(searchTerm);
+        const employeeMatch = (professor.employeeId || '').toLowerCase().includes(searchTerm);
+        return nameMatch || employeeMatch;
+    });
 
     filteredProfessors = filteredProfessors
         .slice()
@@ -4870,13 +5457,10 @@ function renderProfessors() {
 
     if (filteredProfessors.length === 0) {
         professorsList.classList.remove('is-mobile-cards');
-        const emptyMessage = searchTerm
-            ? 'No professors match your search'
-            : 'No professors found in this department';
         professorsList.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-user-slash"></i>
-                <p>${emptyMessage}</p>
+                <p>No professors match your search</p>
             </div>
         `;
         return;
@@ -4947,6 +5531,9 @@ function buildProfessorTableMarkup(filteredProfessors, studentsEvaluatedCountMap
                                         <button class="action-btn analytics" data-action="analytics" data-professor-id="${professor.id}" title="Analytics">
                                             <i class="fas fa-chart-line"></i>
                                         </button>
+                                        <button class="action-btn file" data-action="file" data-professor-id="${professor.id}" title="Faculty Files">
+                                            <i class="fas fa-folder-open"></i>
+                                        </button>
                                         <button class="action-btn edit" data-action="edit" data-professor-id="${professor.id}" title="Edit">
                                             <i class="fas fa-edit"></i>
                                         </button>
@@ -5002,6 +5589,9 @@ function buildProfessorCardsMarkup(filteredProfessors, studentsEvaluatedCountMap
                     <button class="action-btn analytics" data-action="analytics" data-professor-id="${professor.id}" title="Analytics">
                         <i class="fas fa-chart-line"></i>
                     </button>
+                    <button class="action-btn file" data-action="file" data-professor-id="${professor.id}" title="Faculty Files">
+                        <i class="fas fa-folder-open"></i>
+                    </button>
                     <button class="action-btn edit" data-action="edit" data-professor-id="${professor.id}" title="Edit">
                         <i class="fas fa-edit"></i>
                     </button>
@@ -5038,6 +5628,9 @@ function bindProfessorActionButtons(root) {
                     console.log('Calling viewProfessorAnalytics with ID:', professorId);
                     viewProfessorAnalytics(professorId);
                     break;
+                case 'file':
+                    openHrProfessorFileOptions(professorId);
+                    break;
                 case 'edit':
                     editProfessor(professorId);
                     break;
@@ -5045,6 +5638,929 @@ function bindProfessorActionButtons(root) {
                     console.error('Unknown action:', action);
             }
         });
+    });
+}
+
+function parseHrPdfFilenameFromDisposition(headerValue) {
+    const value = String(headerValue || '').trim();
+    if (!value) return '';
+
+    const utfMatch = value.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utfMatch && utfMatch[1]) {
+        try {
+            return decodeURIComponent(String(utfMatch[1]).trim());
+        } catch (_error) {
+            return String(utfMatch[1]).replace(/["']/g, '').trim();
+        }
+    }
+
+    const simpleMatch = value.match(/filename=\"?([^\";]+)\"?/i);
+    return simpleMatch && simpleMatch[1] ? String(simpleMatch[1]).trim() : '';
+}
+
+function getHrProfessorById(professorId) {
+    const targetId = String(professorId || '').trim();
+    if (!targetId) return null;
+
+    const localMatch = professorsData.find(professor => String(professor && professor.id || '').trim() === targetId);
+    if (localMatch) return localMatch;
+
+    const sourceUsers = SharedData.getUsers ? SharedData.getUsers() : [];
+    return sourceUsers.find(user =>
+        String(user && user.id || '').trim() === targetId
+        && normalizeHrToken(user && user.role) === 'professor'
+    ) || null;
+}
+
+function getHrReportSemesterChoices() {
+    return getSemesterOptions().filter(option => option && option.id && option.id !== 'all');
+}
+
+function normalizeHrReportLoadType(value) {
+    return String(value || '').trim().toLowerCase() === 'excess' ? 'excess' : 'main';
+}
+
+function getHrReportLoadTypeLabel(value) {
+    return normalizeHrReportLoadType(value) === 'excess' ? 'Excess Load' : 'Main Load';
+}
+
+function getHrFacultyPaperSnapshot() {
+    if (typeof SharedData.getFacultyPapers === 'function') {
+        return SharedData.getFacultyPapers();
+    }
+    return [];
+}
+
+function hasHrStoredFacultyPaperFile(paper) {
+    if (!paper || typeof paper !== 'object') return false;
+    if (String(paper.latest_file_path || '').trim()) return true;
+    return Array.isArray(paper.pdf_versions) && paper.pdf_versions.some(version =>
+        String(version && version.file_path || '').trim()
+    );
+}
+
+function getHrStoredFacultyPaperVersionNo(paper) {
+    const versions = Array.isArray(paper && paper.pdf_versions) ? paper.pdf_versions : [];
+    let latest = 0;
+    versions.forEach(version => {
+        const versionNo = Number(version && version.version_no);
+        if (Number.isFinite(versionNo) && versionNo > latest) {
+            latest = versionNo;
+        }
+    });
+    return latest > 0 ? latest : null;
+}
+
+function buildHrAcknowledgementSemesterChoices(professor, loadType) {
+    const professorId = normalizeHrUserIdToken(professor && professor.id);
+    if (!professorId) return [];
+    const selectedLoadType = loadType ? normalizeHrReportLoadType(loadType) : '';
+
+    const papers = getHrFacultyPaperSnapshot();
+    const bySemester = new Map();
+
+    papers.forEach(paper => {
+        if (!paper || typeof paper !== 'object') return;
+        if (normalizeHrUserIdToken(paper.professor_user_id) !== professorId) return;
+        if (!hasHrStoredFacultyPaperFile(paper)) return;
+        const paperLoadType = normalizeHrReportLoadType(paper.load_type || paper.loadType);
+        if (selectedLoadType && paperLoadType !== selectedLoadType) return;
+
+        const semesterId = String(paper.semester_id || '').trim();
+        if (!semesterId) return;
+
+        bySemester.set(semesterId, {
+            id: semesterId,
+            label: String(paper.semester_label || getSemesterLabel(semesterId) || semesterId).trim(),
+            loadType: paperLoadType,
+            paper,
+        });
+    });
+
+    const order = getHrReportSemesterChoices().map(option => option.id);
+    return Array.from(bySemester.values()).sort((left, right) => {
+        const leftIndex = order.indexOf(left.id);
+        const rightIndex = order.indexOf(right.id);
+        if (leftIndex === -1 && rightIndex === -1) return String(left.label).localeCompare(String(right.label));
+        if (leftIndex === -1) return 1;
+        if (rightIndex === -1) return -1;
+        return leftIndex - rightIndex;
+    });
+}
+
+function buildHrIferCommentKey(source, evaluation, field, questionKey, index) {
+    return [
+        String(source || '').trim().toLowerCase(),
+        String(evaluation && evaluation.id || evaluation && evaluation.evaluationKey || '').trim() || 'unknown',
+        String(field || '').trim() || 'field',
+        String(questionKey || '').trim() || '-',
+        String(Math.max(0, Number(index) || 0))
+    ].join('|');
+}
+
+function collectHrIferEvaluationCommentItems(evaluation, source) {
+    const items = [];
+    const sourceLabel = source === 'supervisor' ? 'Supervisor Evaluation' : 'Student Evaluation';
+    const submittedAt = String(evaluation && (evaluation.submittedAt || evaluation.timestamp) || '').trim();
+    const commentText = String(evaluation && evaluation.comments || '').trim();
+    if (commentText) {
+        items.push({
+            key: buildHrIferCommentKey(source, evaluation, 'comments', '-', 0),
+            text: commentText,
+            date: submittedAt,
+            source: sourceLabel,
+        });
+    }
+
+    const qualitative = evaluation && typeof evaluation.qualitative === 'object' && evaluation.qualitative
+        ? evaluation.qualitative
+        : {};
+    let index = 0;
+    Object.keys(qualitative).forEach(questionKey => {
+        const text = String(qualitative[questionKey] || '').trim();
+        if (!text) return;
+        items.push({
+            key: buildHrIferCommentKey(source, evaluation, 'qualitative', questionKey, index),
+            text,
+            date: submittedAt,
+            source: sourceLabel,
+        });
+        index += 1;
+    });
+
+    return items;
+}
+
+function isHrIferEvaluationForProfessor(evaluation, typeKey, professor, context, targetProfessorId) {
+    const resolved = resolveHrEvaluationTargetProfessorId(evaluation, typeKey, context);
+    if (resolved && targetProfessorId && resolved === targetProfessorId) {
+        return true;
+    }
+
+    const employeeToken = normalizeHrToken(professor && professor.employeeId);
+    const professorNameToken = normalizeHrToken(professor && professor.name);
+    const idCandidates = [
+        evaluation && evaluation.targetProfessorId,
+        evaluation && evaluation.targetId,
+        evaluation && evaluation.colleagueId,
+        evaluation && evaluation.professorId,
+        evaluation && evaluation.professorUserId,
+        evaluation && evaluation.targetProfessor,
+        evaluation && evaluation.professorSubject,
+    ];
+
+    for (let index = 0; index < idCandidates.length; index += 1) {
+        const candidate = idCandidates[index];
+        const candidateId = normalizeHrUserIdToken(candidate);
+        if (candidateId && targetProfessorId && candidateId === targetProfessorId) return true;
+
+        const token = normalizeHrToken(candidate);
+        if (token && employeeToken && token === employeeToken) return true;
+        if (token && professorNameToken && token === professorNameToken) return true;
+        if (token.includes(' - ')) {
+            const head = normalizeHrToken(token.split(' - ')[0]);
+            if (head && professorNameToken && head === professorNameToken) return true;
+        }
+    }
+
+    return false;
+}
+
+function buildHrIferSelectableComments(professor, semesterId) {
+    const context = buildHrEvaluationContext();
+    const targetProfessorId = normalizeHrUserIdToken(professor && professor.id);
+    const result = {
+        student: [],
+        supervisor: [],
+    };
+    const seen = {
+        student: new Set(),
+        supervisor: new Set(),
+    };
+
+    (context.evaluations || []).forEach(evaluation => {
+        if (!isHrEvaluationInSemester(evaluation, semesterId)) return;
+
+        const typeKey = getHrEvaluationTypeKey(evaluation);
+        if (typeKey !== 'student' && typeKey !== 'supervisor') return;
+        if (!isHrIferEvaluationForProfessor(evaluation, typeKey, professor, context, targetProfessorId)) return;
+
+        collectHrIferEvaluationCommentItems(evaluation, typeKey).forEach(item => {
+            if (!item.text || seen[typeKey].has(item.key)) return;
+            seen[typeKey].add(item.key);
+            result[typeKey].push(item);
+        });
+    });
+
+    Object.keys(result).forEach(source => {
+        result[source].sort((left, right) => {
+            const leftTime = Date.parse(String(left && left.date || '')) || 0;
+            const rightTime = Date.parse(String(right && right.date || '')) || 0;
+            return rightTime - leftTime;
+        });
+    });
+
+    return result;
+}
+
+function renderHrIferCommentOptions(container, comments, source) {
+    if (!container) return;
+    if (!Array.isArray(comments) || !comments.length) {
+        container.innerHTML = '<div class="hr-ifer-comment-empty">No comments available for this source.</div>';
+        return;
+    }
+
+    container.innerHTML = comments.map((comment, index) => `
+        <label class="hr-ifer-comment-option">
+            <input type="checkbox" class="hr-ifer-comment-check" data-source="${escapeHrAttr(source)}" value="${escapeHrAttr(comment.key)}">
+            <span>
+                <strong>${escapeHrHtml(String(comment.source || 'Comment'))} ${escapeHrHtml(String(index + 1))}</strong>
+                <span>${escapeHrHtml(String(comment.text || ''))}</span>
+                <em>${escapeHrHtml(formatAiInsightsDate(comment.date))}</em>
+            </span>
+        </label>
+    `).join('');
+}
+
+function updateHrIferCommentLimitState(modal) {
+    ['student', 'supervisor'].forEach(source => {
+        const checks = Array.from(modal.querySelectorAll(`.hr-ifer-comment-check[data-source="${source}"]`));
+        const selected = checks.filter(item => item.checked);
+        checks.forEach(item => {
+            item.disabled = false;
+        });
+        const counter = modal.querySelector(`[data-hr-ifer-comment-count="${source}"]`);
+        if (counter) {
+            counter.textContent = `${selected.length} selected`;
+        }
+    });
+}
+
+function ensureHrReportSemesterModal() {
+    let modal = document.getElementById('hrReportSemesterModal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'hrReportSemesterModal';
+    modal.className = 'modal hr-report-modal';
+    modal.innerHTML = `
+        <div class="modal-content hr-report-modal-content" role="dialog" aria-modal="true" aria-label="Select report semester">
+            <div class="modal-header">
+                <h2 id="hrReportSemesterTitle">Select Semester</h2>
+                <button type="button" class="modal-close" id="hrReportSemesterCloseBtn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="hr-report-modal-body">
+                <p class="hr-report-modal-note" id="hrReportSemesterNote">Choose the semester for this report.</p>
+                <div class="form-group" id="hrReportLoadTypeGroup" style="display:none">
+                    <label for="hrReportLoadTypeSelect">Load Type</label>
+                    <select id="hrReportLoadTypeSelect"></select>
+                </div>
+                <div class="form-group">
+                    <label for="hrReportSemesterSelect">Semester</label>
+                    <select id="hrReportSemesterSelect"></select>
+                </div>
+            </div>
+            <div class="modal-actions hr-report-modal-actions">
+                <button type="button" class="btn-cancel" id="hrReportSemesterCancelBtn">Cancel</button>
+                <button type="button" class="btn-submit" id="hrReportSemesterConfirmBtn">Continue</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const close = function () {
+        modal.style.display = 'none';
+        modal._onConfirm = null;
+        modal._showLoadType = false;
+    };
+
+    modal.addEventListener('click', function (event) {
+        if (event.target === modal) close();
+    });
+
+    const closeBtn = document.getElementById('hrReportSemesterCloseBtn');
+    const cancelBtn = document.getElementById('hrReportSemesterCancelBtn');
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    if (cancelBtn) cancelBtn.addEventListener('click', close);
+
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && modal.style.display === 'flex') {
+            close();
+        }
+    });
+
+    const confirmBtn = document.getElementById('hrReportSemesterConfirmBtn');
+    if (confirmBtn) {
+        confirmBtn.addEventListener('click', function () {
+            const select = document.getElementById('hrReportSemesterSelect');
+            const loadSelect = document.getElementById('hrReportLoadTypeSelect');
+            const semesterId = String(select && select.value || '').trim();
+            const loadType = normalizeHrReportLoadType(loadSelect && loadSelect.value);
+            if (!semesterId) {
+                alert('Select a semester first.');
+                return;
+            }
+            const handler = modal._onConfirm;
+            close();
+            if (typeof handler === 'function') {
+                handler(semesterId, loadType);
+            }
+        });
+    }
+
+    return modal;
+}
+
+function openHrReportSemesterPicker(config) {
+    const modal = ensureHrReportSemesterModal();
+    const title = document.getElementById('hrReportSemesterTitle');
+    const note = document.getElementById('hrReportSemesterNote');
+    const select = document.getElementById('hrReportSemesterSelect');
+    const loadGroup = document.getElementById('hrReportLoadTypeGroup');
+    const loadSelect = document.getElementById('hrReportLoadTypeSelect');
+    const confirmBtn = document.getElementById('hrReportSemesterConfirmBtn');
+    const baseOptions = Array.isArray(config && config.options) ? config.options : [];
+    const scopedOptionsProvider = typeof (config && config.loadScopedOptionsProvider) === 'function'
+        ? config.loadScopedOptionsProvider
+        : null;
+    const preferredSemesterId = String(config && config.selectedSemesterId || '').trim();
+    const showLoadType = !!(config && config.showLoadType);
+    const preferredLoadType = normalizeHrReportLoadType(config && config.selectedLoadType);
+
+    if (loadSelect) {
+        loadSelect.innerHTML = `
+            <option value="main">Main Load</option>
+            <option value="excess">Excess Load</option>
+        `;
+        loadSelect.value = preferredLoadType;
+    }
+
+    const resolveOptions = function () {
+        const currentLoadType = normalizeHrReportLoadType(loadSelect && loadSelect.value || preferredLoadType);
+        const scoped = scopedOptionsProvider ? scopedOptionsProvider(currentLoadType) : baseOptions;
+        return Array.isArray(scoped) ? scoped : [];
+    };
+
+    if (!select || !resolveOptions().length) {
+        alert('No semester is available for this report.');
+        return;
+    }
+
+    if (title) title.textContent = String(config && config.title || 'Select Semester');
+    if (note) note.textContent = String(config && config.note || 'Choose the semester for this report.');
+    if (confirmBtn) confirmBtn.textContent = String(config && config.confirmLabel || 'Continue');
+    if (loadGroup) loadGroup.style.display = showLoadType ? '' : 'none';
+
+    const renderSemesterOptions = function () {
+        const currentOptions = resolveOptions();
+        if (!currentOptions.length) {
+            select.innerHTML = '<option value="">No stored paper for this load</option>';
+            return;
+        }
+        select.innerHTML = currentOptions.map(option => `
+            <option value="${escapeHrAttr(option.id)}">${escapeHrHtml(option.label || option.id)}</option>
+        `).join('');
+
+        const selectedOption = currentOptions.some(option => option.id === preferredSemesterId)
+            ? preferredSemesterId
+            : String(currentOptions[0].id || '').trim();
+        select.value = selectedOption;
+    };
+
+    renderSemesterOptions();
+    if (loadSelect) {
+        loadSelect.onchange = renderSemesterOptions;
+    }
+    modal._onConfirm = typeof config.onConfirm === 'function' ? config.onConfirm : null;
+    modal._showLoadType = showLoadType;
+    modal.style.display = 'flex';
+}
+
+function ensureHrReportTypeModal() {
+    let modal = document.getElementById('hrReportTypeModal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'hrReportTypeModal';
+    modal.className = 'modal hr-report-type-modal';
+    modal.innerHTML = `
+        <div class="modal-content hr-report-type-modal-content" role="dialog" aria-modal="true" aria-label="Select faculty file">
+            <div class="modal-header">
+                <h2 id="hrReportTypeTitle">Select File Type</h2>
+                <button type="button" class="modal-close" id="hrReportTypeCloseBtn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="hr-report-type-body">
+                <p class="hr-report-modal-note" id="hrReportTypeNote">Choose which faculty file to open.</p>
+                <div class="hr-report-type-grid">
+                    <button type="button" class="hr-report-type-card" data-report-type="ifer">
+                        <i class="fas fa-file-word"></i>
+                        <strong>IFER</strong>
+                        <span>Generate the Individual Faculty Evaluation Report for a selected semester.</span>
+                    </button>
+                    <button type="button" class="hr-report-type-card" data-report-type="sasr">
+                        <i class="fas fa-file-excel"></i>
+                        <strong>SASR</strong>
+                        <span>Generate the SET and SEF rating summary as an Excel file.</span>
+                    </button>
+                    <button type="button" class="hr-report-type-card" data-report-type="acknowledgement">
+                        <i class="fas fa-file-pdf"></i>
+                        <strong>Acknowledgement</strong>
+                        <span>Open the stored Faculty Evaluation and Development Acknowledgement PDF.</span>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-actions hr-report-modal-actions">
+                <button type="button" class="btn-cancel" id="hrReportTypeCancelBtn">Cancel</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const close = function () {
+        modal.style.display = 'none';
+        modal._professorId = '';
+    };
+
+    modal.addEventListener('click', function (event) {
+        if (event.target === modal) close();
+    });
+
+    const closeBtn = document.getElementById('hrReportTypeCloseBtn');
+    const cancelBtn = document.getElementById('hrReportTypeCancelBtn');
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    if (cancelBtn) cancelBtn.addEventListener('click', close);
+
+    modal.querySelectorAll('[data-report-type]').forEach(button => {
+        button.addEventListener('click', function () {
+            const reportType = String(this.getAttribute('data-report-type') || '').trim();
+            const professorId = String(modal._professorId || '').trim();
+            close();
+
+            if (!professorId || !reportType) {
+                alert('Unable to open the selected file option.');
+                return;
+            }
+
+            if (reportType === 'ifer') {
+                openHrProfessorIferFlow(professorId);
+                return;
+            }
+            if (reportType === 'sasr') {
+                openHrProfessorSasrFlow(professorId);
+                return;
+            }
+            if (reportType === 'acknowledgement') {
+                openHrProfessorAcknowledgementFlow(professorId);
+            }
+        });
+    });
+
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && modal.style.display === 'flex') {
+            close();
+        }
+    });
+
+    return modal;
+}
+
+function openHrProfessorFileOptions(professorId) {
+    const professor = getHrProfessorById(professorId);
+    if (!professor) {
+        alert('Professor not found. Please try again.');
+        return;
+    }
+
+    const modal = ensureHrReportTypeModal();
+    const title = document.getElementById('hrReportTypeTitle');
+    const note = document.getElementById('hrReportTypeNote');
+    const acknowledgementButton = modal.querySelector('[data-report-type="acknowledgement"]');
+    const acknowledgementAvailable = buildHrAcknowledgementSemesterChoices(professor).length > 0;
+
+    if (title) {
+        title.textContent = `Faculty Files for ${String(professor.name || 'Professor')}`;
+    }
+    if (note) {
+        note.textContent = acknowledgementAvailable
+            ? 'Choose which faculty file to open.'
+            : 'Choose which faculty file to open. Stored acknowledgement PDF is currently unavailable.';
+    }
+    if (acknowledgementButton) {
+        acknowledgementButton.classList.toggle('is-unavailable', !acknowledgementAvailable);
+    }
+
+    modal._professorId = String(professorId || '').trim();
+    modal.style.display = 'flex';
+}
+
+function ensureHrIferCommentModal() {
+    let modal = document.getElementById('hrIferCommentPickerModal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'hrIferCommentPickerModal';
+    modal.className = 'pdf-preview-modal hr-ifer-comment-modal';
+    modal.innerHTML = `
+        <div class="hr-ifer-comment-dialog" role="dialog" aria-modal="true" aria-label="Select IFER comments">
+            <div class="pdf-preview-toolbar">
+                <div>
+                    <h3 id="hrIferCommentPickerTitle">Select IFER Comments</h3>
+                    <div class="pdf-preview-filename" id="hrIferCommentPickerMeta">All available comments will be included automatically.</div>
+                </div>
+                <div class="pdf-preview-actions">
+                    <button type="button" class="btn-submit" id="hrIferCommentPreviewBtn">Download IFER</button>
+                    <button type="button" class="btn-cancel" id="hrIferCommentCancelBtn">Cancel</button>
+                </div>
+            </div>
+            <div class="hr-ifer-comment-grid">
+                <section class="hr-ifer-comment-group">
+                    <div class="hr-ifer-comment-group-head">
+                        <h4>Comments and Suggestions from the Students</h4>
+                        <span data-hr-ifer-comment-count="student">0 selected</span>
+                    </div>
+                    <div class="hr-ifer-comment-list" id="hrIferStudentCommentList"></div>
+                </section>
+                <section class="hr-ifer-comment-group">
+                    <div class="hr-ifer-comment-group-head">
+                        <h4>Comments and Suggestions from the Supervisor</h4>
+                        <span data-hr-ifer-comment-count="supervisor">0 selected</span>
+                    </div>
+                    <div class="hr-ifer-comment-list" id="hrIferSupervisorCommentList"></div>
+                </section>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.addEventListener('change', function (event) {
+        if (!event.target || !event.target.classList.contains('hr-ifer-comment-check')) return;
+        updateHrIferCommentLimitState(modal);
+    });
+    modal.addEventListener('click', function (event) {
+        if (event.target === modal || event.target.id === 'hrIferCommentCancelBtn') {
+            modal.classList.remove('active');
+        }
+    });
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && modal.classList.contains('active')) {
+            modal.classList.remove('active');
+        }
+    });
+
+    return modal;
+}
+
+function openHrIferCommentPicker(professor, semesterId, loadType) {
+    return openHrIferTemplatePreview(professor, semesterId, loadType);
+}
+
+function closeHrPdfPreviewModal() {
+    const modal = document.getElementById('hrPdfPreviewModal');
+    const frame = document.getElementById('hrPdfPreviewFrame');
+    if (frame) frame.src = 'about:blank';
+    if (modal) modal.classList.remove('active');
+
+    if (openHrPdfBlobPreview._blobUrl) {
+        URL.revokeObjectURL(openHrPdfBlobPreview._blobUrl);
+        openHrPdfBlobPreview._blobUrl = '';
+    }
+    openHrPdfBlobPreview._filename = '';
+}
+
+function ensureHrPdfPreviewModal() {
+    let modal = document.getElementById('hrPdfPreviewModal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'hrPdfPreviewModal';
+    modal.className = 'pdf-preview-modal';
+    modal.innerHTML = `
+        <div class="pdf-preview-dialog" role="dialog" aria-modal="true" aria-label="PDF preview">
+            <div class="pdf-preview-toolbar">
+                <div>
+                    <h3 id="hrPdfPreviewTitle">PDF Preview</h3>
+                    <div class="pdf-preview-filename" id="hrPdfPreviewFilename">report.pdf</div>
+                </div>
+                <div class="pdf-preview-actions">
+                    <button type="button" class="btn-submit pdf-preview-download-btn" id="hrPdfPreviewDownloadBtn">Download</button>
+                    <button type="button" class="btn-cancel pdf-preview-close-btn" id="hrPdfPreviewCloseBtn">Close</button>
+                </div>
+            </div>
+            <iframe id="hrPdfPreviewFrame" class="pdf-preview-frame" title="PDF Preview"></iframe>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const closeBtn = document.getElementById('hrPdfPreviewCloseBtn');
+    const downloadBtn = document.getElementById('hrPdfPreviewDownloadBtn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeHrPdfPreviewModal);
+    }
+    if (downloadBtn) {
+        downloadBtn.addEventListener('click', function () {
+            if (!openHrPdfBlobPreview._blobUrl) return;
+            const anchor = document.createElement('a');
+            anchor.href = openHrPdfBlobPreview._blobUrl;
+            anchor.download = openHrPdfBlobPreview._filename || 'report.pdf';
+            document.body.appendChild(anchor);
+            anchor.click();
+            document.body.removeChild(anchor);
+        });
+    }
+    modal.addEventListener('click', function (event) {
+        if (event.target === modal) {
+            closeHrPdfPreviewModal();
+        }
+    });
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && modal.classList.contains('active')) {
+            closeHrPdfPreviewModal();
+        }
+    });
+
+    return modal;
+}
+
+function openHrPdfBlobPreview(config) {
+    const blob = config && config.blob;
+    if (!(blob instanceof Blob)) {
+        alert('Unable to preview the requested PDF file.');
+        return;
+    }
+
+    const modal = ensureHrPdfPreviewModal();
+    const frame = document.getElementById('hrPdfPreviewFrame');
+    const title = document.getElementById('hrPdfPreviewTitle');
+    const filename = document.getElementById('hrPdfPreviewFilename');
+    const fileName = String(config && config.fileName || 'report.pdf').trim() || 'report.pdf';
+    const dialogTitle = String(config && config.title || 'PDF Preview').trim() || 'PDF Preview';
+    const blobUrl = URL.createObjectURL(blob);
+
+    if (openHrPdfBlobPreview._blobUrl) {
+        URL.revokeObjectURL(openHrPdfBlobPreview._blobUrl);
+    }
+    openHrPdfBlobPreview._blobUrl = blobUrl;
+    openHrPdfBlobPreview._filename = fileName;
+
+    if (title) title.textContent = dialogTitle;
+    if (filename) filename.textContent = fileName;
+    if (frame) frame.src = `${blobUrl}#toolbar=1&navpanes=0&scrollbar=1`;
+    if (modal) modal.classList.add('active');
+}
+
+async function openHrIferTemplatePreview(professor, semesterId, loadType) {
+    const professorUserId = String(professor && professor.id || '').trim();
+    const selectedLoadType = normalizeHrReportLoadType(loadType);
+    if (!professorUserId) {
+        alert('Unable to resolve professor account for IFER download.');
+        return;
+    }
+    if (!semesterId) {
+        alert('Select a semester first.');
+        return;
+    }
+
+    let response;
+    try {
+        response = await fetch('../api/generate_ifer.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                professor_user_id: professorUserId,
+                semester_id: semesterId,
+                load_type: selectedLoadType,
+            }),
+        });
+    } catch (_error) {
+        alert('Unable to connect to the IFER generator.');
+        return;
+    }
+
+    if (!response.ok) {
+        let errorMessage = 'Failed to generate IFER Word file.';
+        try {
+            const data = await response.json();
+            if (data && data.error) errorMessage = String(data.error);
+        } catch (_error) {
+            // Ignore non-JSON error bodies.
+        }
+        alert(errorMessage);
+        return;
+    }
+
+    const wordBlob = await response.blob();
+    const fileName = parseHrPdfFilenameFromDisposition(response.headers.get('Content-Disposition'))
+        || `${String(professor && professor.name || 'Professor').trim() || 'Professor'} IFER.docx`;
+    const blobUrl = URL.createObjectURL(wordBlob);
+    const anchor = document.createElement('a');
+    anchor.href = blobUrl;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+}
+
+async function openHrSasrTemplateDownload(professor, semesterId, loadType) {
+    const professorUserId = String(professor && professor.id || '').trim();
+    const selectedLoadType = normalizeHrReportLoadType(loadType);
+    if (!professorUserId) {
+        alert('Unable to resolve professor account for SASR download.');
+        return;
+    }
+    if (!semesterId) {
+        alert('Select a semester first.');
+        return;
+    }
+
+    let response;
+    try {
+        response = await fetch('../api/generate_sasr.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                professor_user_id: professorUserId,
+                semester_id: semesterId,
+                load_type: selectedLoadType,
+            }),
+        });
+    } catch (_error) {
+        alert('Unable to connect to the SASR generator.');
+        return;
+    }
+
+    if (!response.ok) {
+        let errorMessage = 'Failed to generate SASR Excel file.';
+        try {
+            const data = await response.json();
+            if (data && data.error) errorMessage = String(data.error);
+        } catch (_error) {
+            // Ignore non-JSON error bodies.
+        }
+        alert(errorMessage);
+        return;
+    }
+
+    const excelBlob = await response.blob();
+    const fileName = parseHrPdfFilenameFromDisposition(response.headers.get('Content-Disposition'))
+        || `${String(professor && professor.name || 'Professor').trim() || 'Professor'} SASR.xlsx`;
+    const blobUrl = URL.createObjectURL(excelBlob);
+    const anchor = document.createElement('a');
+    anchor.href = blobUrl;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+}
+
+async function openHrStoredFacultyPaperPreview(professor, paper) {
+    if (!paper || !paper.id) {
+        alert('Stored acknowledgement PDF is unavailable for this semester.');
+        return;
+    }
+
+    const params = new URLSearchParams();
+    params.set('paper_id', String(paper.id));
+    const versionNo = getHrStoredFacultyPaperVersionNo(paper);
+    if (versionNo) {
+        params.set('version_no', String(versionNo));
+    }
+
+    const requestUrl = `../api/faculty_paper_file.php?${params.toString()}`;
+    let response;
+    try {
+        response = await fetch(requestUrl, {
+            method: 'GET',
+            credentials: 'same-origin',
+        });
+    } catch (_error) {
+        alert('Unable to open the stored acknowledgement PDF.');
+        return;
+    }
+
+    if (!response.ok) {
+        let errorMessage = 'Stored acknowledgement PDF is unavailable.';
+        try {
+            const data = await response.json();
+            if (data && data.error) errorMessage = String(data.error);
+        } catch (_error) {
+            // Ignore non-JSON error bodies.
+        }
+        alert(errorMessage);
+        return;
+    }
+
+    const pdfBlob = await response.blob();
+    const fileName = parseHrPdfFilenameFromDisposition(response.headers.get('Content-Disposition'))
+        || String(paper.latest_file_name || 'faculty_acknowledgement.pdf').trim()
+        || 'faculty_acknowledgement.pdf';
+    openHrPdfBlobPreview({
+        blob: pdfBlob,
+        fileName,
+        title: `${String(professor && professor.name || 'Professor')} Acknowledgement`,
+    });
+}
+
+function openHrProfessorIferFlow(professorId) {
+    const professor = getHrProfessorById(professorId);
+    if (!professor) {
+        alert('Professor not found. Please try again.');
+        return;
+    }
+
+    const semesterOptions = getHrReportSemesterChoices();
+    if (!semesterOptions.length) {
+        alert('No semester is available for IFER generation.');
+        return;
+    }
+
+    openHrReportSemesterPicker({
+        title: `Select IFER Semester for ${String(professor.name || 'Professor')}`,
+        note: 'Choose the load type and semester to generate the Individual Faculty Evaluation Report.',
+        options: semesterOptions,
+        selectedSemesterId: String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : '').trim(),
+        selectedLoadType: 'main',
+        showLoadType: true,
+        confirmLabel: 'Download',
+        onConfirm: function (semesterId, loadType) {
+            openHrIferCommentPicker(professor, semesterId, loadType);
+        },
+    });
+}
+
+function openHrProfessorSasrFlow(professorId) {
+    const professor = getHrProfessorById(professorId);
+    if (!professor) {
+        alert('Professor not found. Please try again.');
+        return;
+    }
+
+    const semesterOptions = getHrReportSemesterChoices();
+    if (!semesterOptions.length) {
+        alert('No semester is available for SASR generation.');
+        return;
+    }
+
+    openHrReportSemesterPicker({
+        title: `Select SASR Semester for ${String(professor.name || 'Professor')}`,
+        note: 'Choose the load type and semester to generate the SET and SEF rating summary Excel file.',
+        options: semesterOptions,
+        selectedSemesterId: String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : '').trim(),
+        selectedLoadType: 'main',
+        showLoadType: true,
+        confirmLabel: 'Download',
+        onConfirm: function (semesterId, loadType) {
+            openHrSasrTemplateDownload(professor, semesterId, loadType);
+        },
+    });
+}
+
+function openHrProfessorAcknowledgementFlow(professorId) {
+    const professor = getHrProfessorById(professorId);
+    if (!professor) {
+        alert('Professor not found. Please try again.');
+        return;
+    }
+
+    const mainSemesterOptions = buildHrAcknowledgementSemesterChoices(professor, 'main');
+    const excessSemesterOptions = buildHrAcknowledgementSemesterChoices(professor, 'excess');
+    const defaultLoadType = mainSemesterOptions.length ? 'main' : 'excess';
+    const semesterOptions = defaultLoadType === 'main' ? mainSemesterOptions : excessSemesterOptions;
+    if (!semesterOptions.length) {
+        alert('No stored acknowledgement PDF is available for this professor.');
+        return;
+    }
+
+    openHrReportSemesterPicker({
+        title: `Select Acknowledgement Semester for ${String(professor.name || 'Professor')}`,
+        note: 'Choose the load type and semester. Only matching stored acknowledgement PDFs are available.',
+        options: semesterOptions,
+        selectedSemesterId: semesterOptions[semesterOptions.length - 1].id,
+        selectedLoadType: defaultLoadType,
+        showLoadType: true,
+        loadScopedOptionsProvider: function (loadType) {
+            return buildHrAcknowledgementSemesterChoices(professor, loadType);
+        },
+        confirmLabel: 'Preview PDF',
+        onConfirm: function (semesterId, loadType) {
+            const selectedLoadType = normalizeHrReportLoadType(loadType);
+            const selectedOptions = buildHrAcknowledgementSemesterChoices(professor, selectedLoadType);
+            const selected = selectedOptions.find(option => option.id === semesterId);
+            if (!selected || !selected.paper) {
+                alert(`Stored ${getHrReportLoadTypeLabel(selectedLoadType).toLowerCase()} acknowledgement PDF is unavailable for this semester.`);
+                return;
+            }
+            openHrStoredFacultyPaperPreview(professor, selected.paper);
+        },
     });
 }
 
@@ -5908,7 +7424,7 @@ function normalizeHrAiAnalyticsSourceLabel(value) {
     if (!token) return 'General';
     if (token.includes('student')) return 'Student to Professor';
     if (token.includes('peer') || token.includes('professor')) return 'Professor to Professor';
-    if (token.includes('supervisor') || token.includes('dean') || token.includes('vpaa') || token.includes('hr')) return 'Supervisor to Professor';
+    if (token.includes('supervisor') || token.includes('dean') || token.includes('procoor') || token.includes('vpaa') || token.includes('hr')) return 'Supervisor to Professor';
     return 'General';
 }
 
@@ -6337,10 +7853,14 @@ function normalizeHrAiInsightData(rawInsight, fallbackInsight) {
 function renderHrAiInsightState(outputEl, stateType, message) {
     if (!outputEl) return;
     const type = String(stateType || 'info').toLowerCase();
+    const safeMessage = escapeHrHtml(message || 'No data available.');
+    const stateContent = type === 'loading'
+        ? `${window.AppHourglassMarkup ? window.AppHourglassMarkup('small') : ''}<span>${safeMessage}</span>`
+        : safeMessage;
     outputEl.classList.add('visible');
     outputEl.innerHTML = `
         <div class="hr-ai-note">AI Analytics uses all comment sources (student, peer, supervisor).</div>
-        <div class="hr-ai-state ${escapeHrHtml(type)}">${escapeHrHtml(message || 'No data available.')}</div>
+        <div class="hr-ai-state ${escapeHrHtml(type)}">${stateContent}</div>
     `;
 }
 
@@ -6449,7 +7969,7 @@ function runHrAiAnalyticsForProfessor(professorId, semesterId, outputEl, btnEl) 
     const originalText = btnEl ? btnEl.innerHTML : '';
     if (btnEl) {
         btnEl.disabled = true;
-        btnEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
+        btnEl.textContent = 'Analyzing...';
     }
 
     const executeAnalysis = function () {
@@ -6601,85 +8121,26 @@ function renderStudentProfessorCharts(data) {
     const pieCtx = document.getElementById('student-professor-pie-chart');
 
     if (barCtx) {
-        const existingBarChart = Chart.getChart(barCtx);
-        if (existingBarChart) existingBarChart.destroy();
-
-        new Chart(barCtx, {
-            type: 'bar',
-            data: {
-                labels: data.categoryScores.map(c => c.category),
-                datasets: [{
-                    label: 'Average Score',
-                    data: data.categoryScores.map(c => c.score),
-                    backgroundColor: 'rgba(102, 126, 234, 0.8)',
-                    borderColor: 'rgba(102, 126, 234, 1)',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: true,
-                scales: {
-                    x: {
-                        ticks: {
-                            maxRotation: 0,
-                            minRotation: 0,
-                            autoSkip: false
-                        }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        max: 5,
-                        ticks: {
-                            stepSize: 1
-                        }
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'bottom'
-                    }
-                }
-            }
+        const sectionSeries = window.AppChartDesign.buildSectionSeries(data.categoryScores, {
+            labelKey: 'category',
+            valueKey: 'score'
+        });
+        window.AppChartDesign.renderBarChart(barCtx, {
+            labels: sectionSeries.labels,
+            values: sectionSeries.values,
+            fullLabels: sectionSeries.fullLabels,
+            label: 'Average Score',
+            colors: ['#4f46e5', '#22c55e'],
+            maxValue: 5,
+            stepSize: 1,
+            tooltipDecimals: 2
         });
     }
 
     if (pieCtx) {
-        const existingPieChart = Chart.getChart(pieCtx);
-        if (existingPieChart) existingPieChart.destroy();
-
-        new Chart(pieCtx, {
-            type: 'pie',
-            data: {
-                labels: ['5 Stars', '4 Stars', '3 Stars', '2 Stars', '1 Star'],
-                datasets: [{
-                    data: [
-                        data.ratingDistribution[5],
-                        data.ratingDistribution[4],
-                        data.ratingDistribution[3],
-                        data.ratingDistribution[2],
-                        data.ratingDistribution[1]
-                    ],
-                    backgroundColor: [
-                        '#10b981',
-                        '#34d399',
-                        '#fbbf24',
-                        '#f97316',
-                        '#ef4444'
-                    ]
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: true,
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'bottom'
-                    }
-                }
-            }
+        window.AppChartDesign.renderRatingDistributionChart(pieCtx, {
+            ratingDistribution: data.ratingDistribution,
+            averageRating: data.averageRating
         });
     }
 
@@ -6697,85 +8158,26 @@ function renderProfessorProfessorCharts(data) {
     const pieCtx = document.getElementById('professor-professor-pie-chart');
 
     if (barCtx) {
-        const existingBarChart = Chart.getChart(barCtx);
-        if (existingBarChart) existingBarChart.destroy();
-
-        new Chart(barCtx, {
-            type: 'bar',
-            data: {
-                labels: data.categoryScores.map(c => c.category),
-                datasets: [{
-                    label: 'Average Score',
-                    data: data.categoryScores.map(c => c.score),
-                    backgroundColor: 'rgba(59, 130, 246, 0.8)',
-                    borderColor: 'rgba(59, 130, 246, 1)',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: true,
-                scales: {
-                    x: {
-                        ticks: {
-                            maxRotation: 0,
-                            minRotation: 0,
-                            autoSkip: false
-                        }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        max: 5,
-                        ticks: {
-                            stepSize: 1
-                        }
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'bottom'
-                    }
-                }
-            }
+        const sectionSeries = window.AppChartDesign.buildSectionSeries(data.categoryScores, {
+            labelKey: 'category',
+            valueKey: 'score'
+        });
+        window.AppChartDesign.renderBarChart(barCtx, {
+            labels: sectionSeries.labels,
+            values: sectionSeries.values,
+            fullLabels: sectionSeries.fullLabels,
+            label: 'Average Score',
+            colors: ['#2563eb', '#14b8a6'],
+            maxValue: 5,
+            stepSize: 1,
+            tooltipDecimals: 2
         });
     }
 
     if (pieCtx) {
-        const existingPieChart = Chart.getChart(pieCtx);
-        if (existingPieChart) existingPieChart.destroy();
-
-        new Chart(pieCtx, {
-            type: 'pie',
-            data: {
-                labels: ['5 Stars', '4 Stars', '3 Stars', '2 Stars', '1 Star'],
-                datasets: [{
-                    data: [
-                        data.ratingDistribution[5],
-                        data.ratingDistribution[4],
-                        data.ratingDistribution[3],
-                        data.ratingDistribution[2],
-                        data.ratingDistribution[1]
-                    ],
-                    backgroundColor: [
-                        '#10b981',
-                        '#34d399',
-                        '#fbbf24',
-                        '#f97316',
-                        '#ef4444'
-                    ]
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: true,
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'bottom'
-                    }
-                }
-            }
+        window.AppChartDesign.renderRatingDistributionChart(pieCtx, {
+            ratingDistribution: data.ratingDistribution,
+            averageRating: data.averageRating
         });
     }
 
@@ -6793,78 +8195,26 @@ function renderSupervisorProfessorCharts(data) {
     const pieCtx = document.getElementById('supervisor-professor-pie-chart');
 
     if (barCtx) {
-        const existingBarChart = Chart.getChart(barCtx);
-        if (existingBarChart) existingBarChart.destroy();
-
-        new Chart(barCtx, {
-            type: 'bar',
-            data: {
-                labels: data.categoryScores.map(c => c.category),
-                datasets: [{
-                    label: 'Average Score',
-                    data: data.categoryScores.map(c => c.score),
-                    backgroundColor: 'rgba(139, 92, 246, 0.8)',
-                    borderColor: 'rgba(139, 92, 246, 1)',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: true,
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        max: 5,
-                        ticks: {
-                            stepSize: 1
-                        }
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'bottom'
-                    }
-                }
-            }
+        const sectionSeries = window.AppChartDesign.buildSectionSeries(data.categoryScores, {
+            labelKey: 'category',
+            valueKey: 'score'
+        });
+        window.AppChartDesign.renderBarChart(barCtx, {
+            labels: sectionSeries.labels,
+            values: sectionSeries.values,
+            fullLabels: sectionSeries.fullLabels,
+            label: 'Average Score',
+            colors: ['#7c3aed', '#06b6d4'],
+            maxValue: 5,
+            stepSize: 1,
+            tooltipDecimals: 2
         });
     }
 
     if (pieCtx) {
-        const existingPieChart = Chart.getChart(pieCtx);
-        if (existingPieChart) existingPieChart.destroy();
-
-        new Chart(pieCtx, {
-            type: 'pie',
-            data: {
-                labels: ['5 Stars', '4 Stars', '3 Stars', '2 Stars', '1 Star'],
-                datasets: [{
-                    data: [
-                        data.ratingDistribution[5],
-                        data.ratingDistribution[4],
-                        data.ratingDistribution[3],
-                        data.ratingDistribution[2],
-                        data.ratingDistribution[1]
-                    ],
-                    backgroundColor: [
-                        '#10b981',
-                        '#34d399',
-                        '#fbbf24',
-                        '#f97316',
-                        '#ef4444'
-                    ]
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: true,
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'bottom'
-                    }
-                }
-            }
+        window.AppChartDesign.renderRatingDistributionChart(pieCtx, {
+            ratingDistribution: data.ratingDistribution,
+            averageRating: data.averageRating
         });
     }
 
@@ -6936,6 +8286,7 @@ function setupQuestionnaire() {
         questionnaireTypeSelect.value = currentQuestionnaireType;
         updateFormHeader(currentQuestionnaireType);
     }
+    syncSectionDescriptionRequirement();
     setupFormHeaderEditing();
 
     // Add section button
@@ -7204,7 +8555,7 @@ function setupSemesterSettings() {
 
     const getYearChoices = () => {
         const years = new Set();
-        const nowYear = new Date().getFullYear();
+        const nowYear = SharedData.getCurrentPhilippineYear();
         for (let year = nowYear - 3; year <= nowYear + 8; year += 1) {
             years.add(year);
         }
@@ -7235,7 +8586,7 @@ function setupSemesterSettings() {
             yearEndSelect.appendChild(endOption);
         });
 
-        const nowYear = new Date().getFullYear();
+        const nowYear = SharedData.getCurrentPhilippineYear();
         const fallbackStart = String(nowYear);
         const fallbackEnd = String(nowYear + 1);
         const startValue = preferredStart || fallbackStart;
@@ -7555,6 +8906,7 @@ function handleQuestionnaireTypeChange() {
     if (select) {
         currentQuestionnaireType = select.value;
         updateFormHeader(currentQuestionnaireType);
+        syncSectionDescriptionRequirement();
         renderQuestions();
         syncCopyQuestionnaireModalState();
     }
@@ -7571,6 +8923,29 @@ function updateFormHeader(type) {
 
     if (titleEl) titleEl.textContent = header.title;
     if (descEl) descEl.textContent = header.description;
+}
+
+function isSectionDescriptionRequired(type) {
+    return type === 'student-to-professor';
+}
+
+function syncSectionDescriptionRequirement() {
+    const descriptionInput = document.getElementById('section-description');
+    const descriptionLabel = document.getElementById('section-description-label');
+    const descriptionHint = document.getElementById('section-description-hint');
+    const required = isSectionDescriptionRequired(currentQuestionnaireType);
+
+    if (descriptionInput) {
+        descriptionInput.required = required;
+    }
+    if (descriptionLabel) {
+        descriptionLabel.textContent = required ? 'Section Description' : 'Section Description (Optional)';
+    }
+    if (descriptionHint) {
+        descriptionHint.textContent = required
+            ? 'Required for student-to-professor questionnaires.'
+            : 'Optional for professor-to-professor and supervisor-to-professor questionnaires.';
+    }
 }
 
 function getQuestionnaireHeader(type) {
@@ -8462,6 +9837,7 @@ function openAddSectionModal() {
     if (modal && modalTitle && form) {
         modalTitle.textContent = 'Add Section';
         form.reset();
+        syncSectionDescriptionRequirement();
         currentEditingSectionId = null;
         modal.style.display = 'flex';
         // Focus on first input after a brief delay
@@ -8571,6 +9947,7 @@ function editSection(sectionId) {
         document.getElementById('section-letter').value = section.letter;
         document.getElementById('section-title').value = section.title;
         document.getElementById('section-description').value = section.description;
+        syncSectionDescriptionRequirement();
         currentEditingSectionId = sectionId;
         modal.style.display = 'flex';
         // Focus on first input after a brief delay

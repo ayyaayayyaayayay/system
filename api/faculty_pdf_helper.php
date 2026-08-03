@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use setasign\Fpdi\Fpdi;
 
+require_once __DIR__ . '/time_helper.php';
+
 function facultyPdfEnsureAutoload(): void
 {
     if (class_exists(Fpdi::class)) {
@@ -48,6 +50,42 @@ function facultyPdfWriteOverlayText(
         return;
     }
     $pdf->Write(5, facultyPdfToText($text));
+}
+
+function facultyPdfWriteOverlayFittedText(
+    Fpdi $pdf,
+    float $x,
+    float $y,
+    string $text,
+    float $width,
+    string $align = 'L',
+    int $maxSize = 10,
+    int $minSize = 8,
+    string $style = 'B'
+): void {
+    $content = trim($text);
+    if ($content === '') {
+        return;
+    }
+
+    $pdf->SetTextColor(0, 0, 0);
+    for ($size = $maxSize; $size >= $minSize; $size--) {
+        $pdf->SetFont('Helvetica', $style, $size);
+        if ($pdf->GetStringWidth(facultyPdfToText($content)) <= $width) {
+            $pdf->SetXY($x, $y);
+            $pdf->Cell($width, 5, facultyPdfToText($content), 0, 0, $align);
+            return;
+        }
+    }
+
+    $pdf->SetFont('Helvetica', $style, $minSize);
+    $truncated = $content;
+    while ($truncated !== '' && $pdf->GetStringWidth(facultyPdfToText($truncated . '...')) > $width) {
+        $truncated = rtrim(substr($truncated, 0, -1));
+    }
+    $display = $truncated === '' ? '...' : ($truncated . '...');
+    $pdf->SetXY($x, $y);
+    $pdf->Cell($width, 5, facultyPdfToText($display), 0, 0, $align);
 }
 
 function facultyPdfWriteOverlayMultilineText(
@@ -212,18 +250,186 @@ function facultyPdfNormalizeRatingValue($value): string
     return number_format($value, 2, '.', '');
 }
 
+function facultyPdfNormalizeLoadType($value): string
+{
+    $token = strtolower(trim((string)$value));
+    return $token === 'excess' ? 'excess' : 'main';
+}
+
+function facultyPdfGetLoadTypeLabel($value): string
+{
+    return facultyPdfNormalizeLoadType($value) === 'excess' ? 'Excess Load' : 'Main Load';
+}
+
+function facultyPdfAppendLoadTypeToSemesterLabel(string $semesterLabel, string $loadType): string
+{
+    $label = facultyPdfGetLoadTypeLabel($loadType);
+    $base = trim($semesterLabel) !== '' ? trim($semesterLabel) : 'N/A';
+    if (stripos($base, $label) !== false) {
+        return $base;
+    }
+    return $base . ' - ' . $label;
+}
+
 function facultyPdfBuildPaperDataFromRecord(array $paper): array
 {
+    $loadType = facultyPdfNormalizeLoadType($paper['load_type'] ?? ($paper['loadType'] ?? 'main'));
+    $semesterLabel = trim((string)($paper['semester_label'] ?? 'N/A')) ?: 'N/A';
+
     return [
         'faculty_name' => trim((string)($paper['professor_name'] ?? 'N/A')) ?: 'N/A',
         'department' => trim((string)($paper['department'] ?? 'N/A')) ?: 'N/A',
         'rank' => trim((string)($paper['rank'] ?? 'N/A')) ?: 'N/A',
-        'semester_label' => trim((string)($paper['semester_label'] ?? 'N/A')) ?: 'N/A',
+        'semester_label' => facultyPdfAppendLoadTypeToSemesterLabel($semesterLabel, $loadType),
+        'load_type' => $loadType,
+        'load_label' => facultyPdfGetLoadTypeLabel($loadType),
         'set_rating' => facultyPdfNormalizeRatingValue($paper['set_rating'] ?? 'N/A'),
         'saf_rating' => facultyPdfNormalizeRatingValue($paper['saf_rating'] ?? 'N/A'),
         'section_c_areas' => facultyPdfNormalizeOptionalSectionCText($paper['section_c_areas'] ?? ''),
         'section_c_activities' => facultyPdfNormalizeOptionalSectionCText($paper['section_c_activities'] ?? ''),
         'section_c_action_plan' => facultyPdfNormalizeOptionalSectionCText($paper['section_c_action_plan'] ?? ''),
+    ];
+}
+
+function facultyPdfFormatIferNumericValue($value, bool $useThousands = false): string
+{
+    $numeric = is_numeric($value) ? (float)$value : 0.0;
+    if (!is_finite($numeric)) {
+        $numeric = 0.0;
+    }
+
+    $rounded = round($numeric);
+    if (abs($numeric - $rounded) < 0.005) {
+        return number_format($rounded, 0, '.', $useThousands ? ',' : '');
+    }
+
+    return number_format($numeric, 2, '.', $useThousands ? ',' : '');
+}
+
+function facultyPdfFormatIferRatingValue($value): string
+{
+    $numeric = is_numeric($value) ? (float)$value : 0.0;
+    if (!is_finite($numeric)) {
+        $numeric = 0.0;
+    }
+
+    return number_format($numeric, 2, '.', '');
+}
+
+function facultyPdfNormalizeIferSetSummary($summary): array
+{
+    $source = is_array($summary) ? $summary : [];
+    $rows = [];
+    foreach (($source['rows'] ?? []) as $index => $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $studentCount = max(0, (int)($row['student_count'] ?? 0));
+        $averageSetRating = is_numeric($row['average_set_rating'] ?? null)
+            ? max(0.0, min(100.0, (float)$row['average_set_rating']))
+            : 0.0;
+        $weightedSetScore = is_numeric($row['weighted_set_score'] ?? null)
+            ? max(0.0, (float)$row['weighted_set_score'])
+            : ($studentCount * $averageSetRating);
+
+        $courseCode = trim((string)($row['course_code'] ?? ''));
+        $yearSection = trim((string)($row['year_section'] ?? ''));
+        $rows[] = [
+            'seq' => max(1, (int)($row['seq'] ?? ($index + 1))),
+            'course_code' => $courseCode !== '' ? $courseCode : 'N/A',
+            'year_section' => $yearSection !== '' ? $yearSection : 'N/A',
+            'student_count' => $studentCount,
+            'average_set_rating' => $averageSetRating,
+            'weighted_set_score' => $weightedSetScore,
+        ];
+    }
+
+    $totalClasses = max(count($rows), (int)($source['total_classes'] ?? 0));
+    $displayLimit = max(1, (int)($source['display_limit'] ?? 8));
+    $totalStudents = max(0, (int)($source['total_students'] ?? 0));
+    $totalWeightedScore = is_numeric($source['total_weighted_score'] ?? null)
+        ? max(0.0, (float)$source['total_weighted_score'])
+        : 0.0;
+
+    if (!array_key_exists('total_students', $source)) {
+        $totalStudents = array_reduce($rows, fn($sum, $row) => $sum + (int)$row['student_count'], 0);
+    }
+    if (!array_key_exists('total_weighted_score', $source)) {
+        $totalWeightedScore = array_reduce($rows, fn($sum, $row) => $sum + (float)$row['weighted_set_score'], 0.0);
+    }
+
+    return [
+        'rows' => $rows,
+        'total_students' => $totalStudents,
+        'total_weighted_score' => $totalWeightedScore,
+        'total_classes' => $totalClasses,
+        'display_limit' => $displayLimit,
+        'overflow_note' => $totalClasses > $displayLimit
+            ? sprintf('ONLY FIRST %d OF %d CLASSES ARE SHOWN. TOTAL INCLUDES ALL CLASSES.', $displayLimit, $totalClasses)
+            : '',
+    ];
+}
+
+function facultyPdfNormalizeIferSectionCSummary($summary): array
+{
+    $source = is_array($summary) ? $summary : [];
+    $setRating = is_numeric($source['set_rating'] ?? null)
+        ? max(0.0, min(100.0, (float)$source['set_rating']))
+        : 0.0;
+    $sefRating = is_numeric($source['sef_rating'] ?? null)
+        ? max(0.0, min(100.0, (float)$source['sef_rating']))
+        : 0.0;
+
+    return [
+        'set_rating' => $setRating,
+        'sef_rating' => $sefRating,
+    ];
+}
+
+function facultyPdfNormalizeIferCommentList($comments): array
+{
+    $items = [];
+    foreach ((is_array($comments) ? $comments : []) as $comment) {
+        $text = trim((string)$comment);
+        if ($text === '') {
+            continue;
+        }
+        $items[] = preg_replace('/\s+/', ' ', $text) ?? $text;
+    }
+    return $items;
+}
+
+function facultyPdfNormalizeIferSectionDComments($comments): array
+{
+    $source = is_array($comments) ? $comments : [];
+    return [
+        'student' => facultyPdfNormalizeIferCommentList($source['student'] ?? []),
+        'supervisor' => facultyPdfNormalizeIferCommentList($source['supervisor'] ?? []),
+    ];
+}
+
+function facultyPdfBuildIferData(array $professor, string $semesterLabel, array $options = []): array
+{
+    $facultyName = trim((string)($professor['name'] ?? ''));
+    $department = trim((string)($professor['department'] ?? $professor['institute'] ?? ''));
+    $rank = trim((string)($professor['position'] ?? $professor['employmentType'] ?? ''));
+    $reviewerName = trim((string)($options['reviewer_name'] ?? ''));
+    $preparedDate = trim((string)($options['prepared_date'] ?? ''));
+    $reviewedDate = trim((string)($options['reviewed_date'] ?? $preparedDate));
+
+    return [
+        'faculty_name' => $facultyName !== '' ? $facultyName : 'N/A',
+        'department' => $department !== '' ? $department : 'N/A',
+        'rank' => $rank !== '' ? $rank : 'N/A',
+        'semester_label' => trim($semesterLabel) !== '' ? trim($semesterLabel) : 'N/A',
+        'staff_name' => $facultyName !== '' ? $facultyName : 'N/A',
+        'reviewer_name' => $reviewerName !== '' ? $reviewerName : 'N/A',
+        'prepared_date' => $preparedDate !== '' ? $preparedDate : 'N/A',
+        'reviewed_date' => $reviewedDate !== '' ? $reviewedDate : 'N/A',
+        'set_summary' => facultyPdfNormalizeIferSetSummary($options['set_summary'] ?? []),
+        'section_c_summary' => facultyPdfNormalizeIferSectionCSummary($options['section_c_summary'] ?? []),
+        'section_d_comments' => facultyPdfNormalizeIferSectionDComments($options['section_d_comments'] ?? []),
     ];
 }
 
@@ -272,6 +478,84 @@ function facultyPdfGenerateBinary(array $paperData): string
     return $binary;
 }
 
+function facultyPdfGenerateIferBinary(array $paperData): string
+{
+    facultyPdfEnsureAutoload();
+
+    $basePdfPath = __DIR__ . '/../files/ifer.pdf';
+    if (!file_exists($basePdfPath)) {
+        throw new RuntimeException('Base PDF file not found: files/ifer.pdf');
+    }
+
+    $pdf = new Fpdi();
+    $pageCount = $pdf->setSourceFile($basePdfPath);
+    if ($pageCount <= 0) {
+        throw new RuntimeException('Base PDF has no pages.');
+    }
+
+    for ($pageNo = 1; $pageNo <= $pageCount; $pageNo++) {
+        $templateId = $pdf->importPage($pageNo);
+        $size = $pdf->getTemplateSize($templateId);
+        $orientation = ($size['width'] > $size['height']) ? 'L' : 'P';
+        $pdf->AddPage($orientation, [$size['width'], $size['height']]);
+        $pdf->useTemplate($templateId);
+
+        if ($pageNo === 1) {
+            facultyPdfWriteOverlayFittedText($pdf, 90.0, 45.0, strtoupper((string)($paperData['faculty_name'] ?? 'N/A')), 96.0, 'L', 10, 8, 'B');
+            facultyPdfWriteOverlayFittedText($pdf, 90.0, 52.5, strtoupper((string)($paperData['department'] ?? 'N/A')), 96.0, 'L', 10, 8, 'B');
+            facultyPdfWriteOverlayFittedText($pdf, 90.0, 60.5, strtoupper((string)($paperData['rank'] ?? 'N/A')), 96.0, 'L', 10, 8, 'B');
+            facultyPdfWriteOverlayFittedText($pdf, 90.0, 67.5, strtoupper((string)($paperData['semester_label'] ?? 'N/A')), 101.0, 'L', 10, 7, 'B');
+
+            $setSummary = facultyPdfNormalizeIferSetSummary($paperData['set_summary'] ?? []);
+            $displayLimit = min(8, (int)$setSummary['display_limit']);
+            $setRows = array_slice($setSummary['rows'], 0, $displayLimit);
+            $rowY = 137.1;
+            $rowHeight = 7.55;
+            foreach ($setRows as $index => $row) {
+                $y = $rowY + ($index * $rowHeight);
+                facultyPdfWriteOverlayFittedText($pdf, 35.0, $y, strtoupper((string)$row['course_code']), 23.6, 'C', 8, 6, 'B');
+                facultyPdfWriteOverlayFittedText($pdf, 53.0, $y, strtoupper((string)$row['year_section']), 35.0, 'C', 8, 6, 'B');
+                facultyPdfWriteOverlayFittedText($pdf, 92.8, $y, (string)$row['student_count'], 30.5, 'C', 8, 6, 'B');
+                facultyPdfWriteOverlayFittedText($pdf, 123.4, $y, facultyPdfFormatIferNumericValue($row['average_set_rating']), 32.0, 'C', 8, 6, 'B');
+                facultyPdfWriteOverlayFittedText($pdf, 155.4, $y, facultyPdfFormatIferNumericValue($row['weighted_set_score'], true), 28.8, 'C', 8, 6, 'B');
+            }
+
+            facultyPdfWriteOverlayFittedText($pdf, 92.8, 197.1, (string)$setSummary['total_students'], 30.5, 'C', 8, 6, 'B');
+            facultyPdfWriteOverlayFittedText($pdf, 155.4, 197.1, facultyPdfFormatIferNumericValue($setSummary['total_weighted_score'], true), 28.8, 'C', 8, 6, 'B');
+            if ((string)$setSummary['overflow_note'] !== '') {
+                facultyPdfWriteOverlayFittedText($pdf, 24.0, 204.3, (string)$setSummary['overflow_note'], 160.0, 'L', 6, 5, 'B');
+            }
+
+            $sectionCSummary = facultyPdfNormalizeIferSectionCSummary($paperData['section_c_summary'] ?? []);
+            facultyPdfWriteOverlayFittedText($pdf, 76.0, 258.3, facultyPdfFormatIferRatingValue($sectionCSummary['set_rating']), 56.0, 'C', 9, 7, 'B');
+            facultyPdfWriteOverlayFittedText($pdf, 132.0, 258.3, facultyPdfFormatIferRatingValue($sectionCSummary['sef_rating']), 52.0, 'C', 9, 7, 'B');
+        } elseif ($pageNo === 2) {
+            $sectionDComments = facultyPdfNormalizeIferSectionDComments($paperData['section_d_comments'] ?? []);
+            $studentCommentY = 35.0;
+            $supervisorCommentY = 86.5;
+            $commentRowHeight = 6.7;
+            foreach ($sectionDComments['student'] as $index => $comment) {
+                facultyPdfWriteOverlayFittedText($pdf, 36.0, $studentCommentY + ($index * $commentRowHeight), $comment, 147.0, 'L', 7, 5, '');
+            }
+            foreach ($sectionDComments['supervisor'] as $index => $comment) {
+                facultyPdfWriteOverlayFittedText($pdf, 36.0, $supervisorCommentY + ($index * $commentRowHeight), $comment, 147.0, 'L', 7, 5, '');
+            }
+
+            facultyPdfWriteOverlayFittedText($pdf, 95.0, 146.0, strtoupper((string)($paperData['staff_name'] ?? 'N/A')), 113.0, 'L', 9, 7, 'B');
+            facultyPdfWriteOverlayFittedText($pdf, 95.0, 153.8, strtoupper((string)($paperData['prepared_date'] ?? 'N/A')), 113.0, 'L', 9, 7, 'B');
+            facultyPdfWriteOverlayFittedText($pdf, 95.0, 179.0, strtoupper((string)($paperData['reviewer_name'] ?? 'N/A')), 113.0, 'L', 9, 7, 'B');
+            facultyPdfWriteOverlayFittedText($pdf, 95.0, 187.0, strtoupper((string)($paperData['reviewed_date'] ?? 'N/A')), 113.0, 'L', 9, 7, 'B');
+        }
+    }
+
+    $binary = $pdf->Output('S');
+    if (!is_string($binary) || $binary === '') {
+        throw new RuntimeException('Generated PDF is empty.');
+    }
+
+    return $binary;
+}
+
 function facultyPdfNormalizeRoleToken($role): string
 {
     return strtolower(trim((string)$role));
@@ -294,6 +578,7 @@ function facultyPdfNormalizeUserIdToken($value): string
 
 function facultyPdfNormalizePaperRecord(array $paper): array
 {
+    $paper['load_type'] = facultyPdfNormalizeLoadType($paper['load_type'] ?? ($paper['loadType'] ?? 'main'));
     $paper['latest_file_path'] = trim((string)($paper['latest_file_path'] ?? ''));
     $paper['latest_file_name'] = trim((string)($paper['latest_file_name'] ?? ''));
     $paper['latest_file_created_at'] = $paper['latest_file_created_at'] ?? null;
@@ -314,6 +599,7 @@ function facultyPdfNormalizePaperRecord(array $paper): array
             'file_path' => trim((string)($item['file_path'] ?? '')),
             'file_name' => trim((string)($item['file_name'] ?? '')),
             'status_snapshot' => trim((string)($item['status_snapshot'] ?? '')),
+            'load_type' => facultyPdfNormalizeLoadType($item['load_type'] ?? ($paper['load_type'] ?? 'main')),
             'created_at' => trim((string)($item['created_at'] ?? '')),
             'created_by_role' => trim((string)($item['created_by_role'] ?? '')),
             'created_by_user_id' => trim((string)($item['created_by_user_id'] ?? '')),
@@ -371,6 +657,7 @@ function facultyPdfPersistPaperVersion(
     $paper = facultyPdfNormalizePaperRecord($paper);
     $safePaperId = facultyPdfSanitizePathPart((string)($paper['id'] ?? 'paper'));
     $safeStatus = facultyPdfSanitizePathPart($statusSnapshot ?: 'status');
+    $safeLoadType = facultyPdfSanitizePathPart(facultyPdfNormalizeLoadType($paper['load_type'] ?? 'main'));
     $roleToken = facultyPdfNormalizeRoleToken($actorRole);
     $userIdToken = facultyPdfNormalizeUserIdToken($actorUserId);
 
@@ -382,8 +669,8 @@ function facultyPdfPersistPaperVersion(
         }
     }
 
-    $timestamp = date('Ymd_His');
-    $filename = sprintf('%s_v%d_%s_%s.pdf', $safePaperId, $nextVersion, $safeStatus, $timestamp);
+    $timestamp = getAuthoritativePhilippineFormatted('Ymd_His');
+    $filename = sprintf('%s_%s_v%d_%s_%s.pdf', $safePaperId, $safeLoadType, $nextVersion, $safeStatus, $timestamp);
 
     $root = facultyPdfGetStorageRoot();
     $paperDir = $root . '/' . $safePaperId;
@@ -431,7 +718,8 @@ function facultyPdfPersistPaperVersion(
         'file_path' => $relativePath,
         'file_name' => $filename,
         'status_snapshot' => trim($statusSnapshot),
-        'created_at' => date('c'),
+        'load_type' => facultyPdfNormalizeLoadType($paper['load_type'] ?? 'main'),
+        'created_at' => getAuthoritativePhilippineIso8601(),
         'created_by_role' => $roleToken,
         'created_by_user_id' => $userIdToken,
         'size_bytes' => $sizeBytes,
@@ -502,7 +790,7 @@ function facultyPdfResolveStoredFile(array $paper, ?int $versionNo = null): arra
     ];
 }
 
-function facultyPdfCanAccessStoredFile(array $paper, string $actorRole, string $actorUserId): bool
+function facultyPdfCanAccessStoredFile(array $paper, string $actorRole, string $actorUserId, array $actorUser = []): bool
 {
     $role = facultyPdfNormalizeRoleToken($actorRole);
     $userId = facultyPdfNormalizeUserIdToken($actorUserId);
@@ -511,15 +799,35 @@ function facultyPdfCanAccessStoredFile(array $paper, string $actorRole, string $
     }
 
     $ownerId = facultyPdfNormalizeUserIdToken($paper['professor_user_id'] ?? '');
-    $recipientId = facultyPdfNormalizeUserIdToken($paper['recipient_dean_user_id'] ?? '');
+    $recipientRole = facultyPdfNormalizeRoleToken($paper['recipient_role'] ?? '');
+    $recipientId = facultyPdfNormalizeUserIdToken($paper['recipient_user_id'] ?? '');
+    if ($recipientId === '') {
+        $recipientId = facultyPdfNormalizeUserIdToken($paper['recipient_dean_user_id'] ?? '');
+    }
     $status = facultyPdfNormalizeRoleToken($paper['status'] ?? '');
 
     if ($role === 'professor') {
         return $ownerId !== '' && $ownerId === $userId;
     }
 
+    if ($role === 'procoor') {
+        return $recipientRole === 'procoor'
+            && $recipientId !== ''
+            && $recipientId === $userId
+            && ($status === 'sent' || $status === 'completed');
+    }
+
     if ($role === 'dean') {
-        return $recipientId !== '' && $recipientId === $userId && ($status === 'sent' || $status === 'completed');
+        $deanDepartment = strtoupper(trim((string) ($actorUser['department'] ?? ($actorUser['institute'] ?? ''))));
+        $paperDepartment = strtoupper(trim((string) ($paper['department'] ?? '')));
+        return $deanDepartment !== ''
+            && $paperDepartment !== ''
+            && $deanDepartment === $paperDepartment
+            && ($status === 'sent' || $status === 'completed');
+    }
+
+    if ($role === 'hr') {
+        return true;
     }
 
     return false;

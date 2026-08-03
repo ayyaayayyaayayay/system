@@ -75,19 +75,19 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     sendJsonError('Method not allowed', 405);
 }
 
-$session = requireNaapAuthenticatedSession();
+$session = requireNaapAuthenticatedSession($pdo);
 $sessionUser = buildUserSnapshotById($pdo, $session['userId'], false);
 if (!$sessionUser) {
-    destroyNaapSession();
+    destroyNaapSession($pdo);
     sendJsonError('Authentication required.', 401);
 }
 if (strtolower(trim((string) ($sessionUser['status'] ?? 'active'))) === 'inactive') {
-    destroyNaapSession();
+    destroyNaapSession($pdo);
     sendJsonError('Account is inactive.', 403);
 }
 
 $actorRole = strtolower(trim((string) ($sessionUser['role'] ?? '')));
-if ($actorRole !== 'professor' && $actorRole !== 'dean') {
+if ($actorRole !== 'professor' && $actorRole !== 'dean' && $actorRole !== 'procoor') {
     sendJsonError('Permission denied.', 403);
 }
 
@@ -101,11 +101,15 @@ if (!is_array($payload)) {
     sendJsonError('Invalid JSON payload.', 400);
 }
 
+$loadType = facultyPdfNormalizeLoadType($payload['load_type'] ?? 'main');
+$semesterLabel = normalizeRequiredString($payload, 'semester_label');
 $paperData = [  
     'faculty_name' => normalizeRequiredString($payload, 'faculty_name'),
     'department' => normalizeRequiredString($payload, 'department'),
     'rank' => normalizeRequiredString($payload, 'rank'),
-    'semester_label' => normalizeRequiredString($payload, 'semester_label'),
+    'semester_label' => facultyPdfAppendLoadTypeToSemesterLabel($semesterLabel, $loadType),
+    'load_type' => $loadType,
+    'load_label' => facultyPdfGetLoadTypeLabel($loadType),
     'set_rating' => normalizeRatingValue($payload['set_rating'] ?? null, 'set_rating'),
     'saf_rating' => normalizeRatingValue($payload['saf_rating'] ?? null, 'saf_rating'),
     'section_c_areas' => facultyPdfNormalizeOptionalSectionCText($payload['section_c_areas'] ?? ''),
@@ -116,9 +120,10 @@ $paperData = [
 try {
     $pdfBinary = facultyPdfGenerateBinary($paperData);
     $filename = sprintf(
-        'faculty_ack_%s_%s.pdf',
+        'faculty_ack_%s_%s_%s.pdf',
         sanitizeFilenamePart($paperData['faculty_name']),
-        sanitizeFilenamePart($paperData['semester_label'])
+        sanitizeFilenamePart($semesterLabel),
+        sanitizeFilenamePart($loadType)
     );
 
     header('Content-Type: application/pdf');

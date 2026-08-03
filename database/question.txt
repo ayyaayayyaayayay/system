@@ -1,0 +1,229 @@
+USE `naap_evaluation_system`;
+
+START TRANSACTION;
+
+SET @semester_slug := '1st-semester-2026-2027';
+SET @semester_id := (
+    SELECT `id`
+    FROM `semesters`
+    WHERE `slug` = @semester_slug
+    LIMIT 1
+);
+
+INSERT INTO `questionnaires` (
+    `semester_id`,
+    `evaluation_type_id`,
+    `title`,
+    `description`,
+    `status`
+)
+SELECT
+    @semester_id AS `semester_id`,
+    et.`id` AS `evaluation_type_id`,
+    src.`title`,
+    src.`description`,
+    'published' AS `status`
+FROM (
+    SELECT
+        'student-professor' AS `evaluation_type_code`,
+        'Student to Professor Evaluation Form' AS `title`,
+        'Please provide your honest feedback about your professors.' AS `description`
+    UNION ALL
+    SELECT
+        'supervisor-professor',
+        'Supervisor to Professor Evaluation Form',
+        'Please provide your evaluation of the professor''s performance.'
+    UNION ALL
+    SELECT
+        'professor-professor',
+        'Peer to Peer Evaluation Form',
+        'Please provide your professional assessment of your colleague.'
+) AS src
+JOIN `evaluation_types` et
+    ON et.`code` = src.`evaluation_type_code`
+WHERE @semester_id IS NOT NULL
+ON DUPLICATE KEY UPDATE
+    `title` = VALUES(`title`),
+    `description` = VALUES(`description`),
+    `status` = VALUES(`status`);
+
+INSERT INTO `questionnaire_sections` (
+    `questionnaire_id`,
+    `section_code`,
+    `title`,
+    `description`,
+    `sort_order`
+)
+SELECT
+    qn.`id` AS `questionnaire_id`,
+    src.`section_code`,
+    src.`title`,
+    src.`description`,
+    src.`sort_order`
+FROM (
+    SELECT
+        'student-professor' AS `evaluation_type_code`,
+        'A' AS `section_code`,
+        'Management of Teaching and Learning' AS `title`,
+        'Management of Teaching and Learning refers to the intentional and organized handling of classroom presence, clear communication of academic expectations, efficient use of time, and the purposeful use of student-centered activities that promote critical thinking, independent learning, reflection, decision-making, and continuous academic improvement through constructive feedback.' AS `description`,
+        1 AS `sort_order`
+    UNION ALL
+    SELECT
+        'student-professor',
+        'B',
+        'Content Knowledge, Pedagogy and Technology',
+        'Content Knowledge, Pedagogy, and Technology refer to a teacher''s ability to demonstrate a strong grasp of subject matter, present complex concepts in a clear and accessible way, relate content to real-world contexts and current developments, engage students through appropriate instructional strategies and digital tools, and apply assessment methods aligned with intended learning outcomes.',
+        2
+    UNION ALL
+    SELECT
+        'student-professor',
+        'C',
+        'Commitment and Transparency',
+        'Commitment and Transparency refer to the teacher''s consistent dedication to supporting student learning by acknowledging learner diversity, offering timely academic support and feedback, and upholding fairness and accountability through the use of clear and openly communicated performance criteria.',
+        3
+    UNION ALL
+    SELECT
+        'supervisor-professor',
+        'A',
+        'Management of Teaching and Learning',
+        NULL,
+        1
+    UNION ALL
+    SELECT
+        'supervisor-professor',
+        'B',
+        'Content Knowledge, Pedagogy and Technology',
+        NULL,
+        2
+    UNION ALL
+    SELECT
+        'supervisor-professor',
+        'C',
+        'Commitment and Transparency',
+        NULL,
+        3
+    UNION ALL
+    SELECT
+        'professor-professor',
+        'A',
+        'Interpersonal Approach and Workplace Conduct',
+        NULL,
+        1
+    UNION ALL
+    SELECT
+        'professor-professor',
+        'B',
+        'Cooperation and Teamwork',
+        NULL,
+        2
+    UNION ALL
+    SELECT
+        'professor-professor',
+        'C',
+        'Communication Skills',
+        NULL,
+        3
+    UNION ALL
+    SELECT
+        'professor-professor',
+        'D',
+        'Open-Ended Questions',
+        NULL,
+        4
+) AS src
+JOIN `evaluation_types` et
+    ON et.`code` = src.`evaluation_type_code`
+JOIN `questionnaires` qn
+    ON qn.`semester_id` = @semester_id
+   AND qn.`evaluation_type_id` = et.`id`
+WHERE @semester_id IS NOT NULL
+ON DUPLICATE KEY UPDATE
+    `title` = VALUES(`title`),
+    `description` = VALUES(`description`),
+    `sort_order` = VALUES(`sort_order`);
+
+INSERT INTO `questions` (
+    `questionnaire_id`,
+    `section_id`,
+    `question_type_id`,
+    `question_text`,
+    `rating_max`,
+    `max_length`,
+    `is_required`,
+    `sort_order`
+)
+SELECT
+    qn.`id` AS `questionnaire_id`,
+    qs.`id` AS `section_id`,
+    qt.`id` AS `question_type_id`,
+    src.`question_text`,
+    5 AS `rating_max`,
+    500 AS `max_length`,
+    src.`is_required`,
+    src.`sort_order`
+FROM (
+    SELECT 'student-professor' AS `evaluation_type_code`, 'A' AS `section_code`, 'rating' AS `question_type_code`, 'Come to class on time.' AS `question_text`, 1 AS `is_required`, 1 AS `sort_order`
+    UNION ALL SELECT 'student-professor', 'A', 'rating', 'Explains learning outcomes, expectations, grading systems, and various requirements of the subject/courses.', 1, 2
+    UNION ALL SELECT 'student-professor', 'A', 'rating', 'Maximizes the allocated time/learning hours effectively.', 1, 3
+    UNION ALL SELECT 'student-professor', 'A', 'rating', 'Facilitates students to think critically and creatively by providing appropriate learning activities.', 1, 4
+    UNION ALL SELECT 'student-professor', 'A', 'rating', 'Guides students to learn on their own, reflect on new ideas and experiences, and make decisions in accomplishing given tasks.', 1, 5
+    UNION ALL SELECT 'student-professor', 'A', 'rating', 'Communicates constructive feedback to students for their academic growth.', 1, 6
+    UNION ALL SELECT 'student-professor', 'B', 'rating', 'Demonstrate extensive and broad knowledge of the subject/course.', 1, 7
+    UNION ALL SELECT 'student-professor', 'B', 'rating', 'Simplifies complex ideas in the lesson for ease of understanding.', 1, 8
+    UNION ALL SELECT 'student-professor', 'B', 'rating', 'Relates the subject matter to contemporary issues and developments in the discipline and/or daily life activities.', 1, 9
+    UNION ALL SELECT 'student-professor', 'B', 'rating', 'Promotes active learning and student engagement by using appropriate teaching and learning resources including ICT tools and platforms.', 1, 10
+    UNION ALL SELECT 'student-professor', 'B', 'rating', 'Uses appropriate assessments (projects, exams, quizzes, assignments, etc.) aligned with the learning outcomes.', 1, 11
+    UNION ALL SELECT 'student-professor', 'C', 'rating', 'Recognizes and values the unique diversity and individual differences among students.', 1, 12
+    UNION ALL SELECT 'student-professor', 'C', 'rating', 'Assists students with their learning challenges during consultation hours.', 1, 13
+    UNION ALL SELECT 'student-professor', 'C', 'rating', 'Provides immediate feedback on student outputs and performance.', 1, 14
+    UNION ALL SELECT 'student-professor', 'C', 'rating', 'Provides transparent and clear criteria in rating student''s performance.', 1, 15
+    UNION ALL SELECT 'student-professor', 'C', 'qualitative', 'Other comments and suggestions:', 0, 16
+
+    UNION ALL SELECT 'supervisor-professor', 'A', 'rating', 'Comes to class on time.', 1, 1
+    UNION ALL SELECT 'supervisor-professor', 'A', 'rating', 'Submits updated syllabus, grade sheets, and other required reports on time.', 1, 2
+    UNION ALL SELECT 'supervisor-professor', 'A', 'rating', 'Maximizes the allocated time/learning hours effectively.', 1, 3
+    UNION ALL SELECT 'supervisor-professor', 'A', 'rating', 'Provide appropriate learning activities that facilitate critical thinking and creativity of students.', 1, 4
+    UNION ALL SELECT 'supervisor-professor', 'A', 'rating', 'Guides students to learn on their own, reflect on new ideas and experiences, and make decisions in accomplishing given tasks.', 1, 5
+    UNION ALL SELECT 'supervisor-professor', 'A', 'rating', 'Communicates constructive feedback to students for their academic growth.', 1, 6
+    UNION ALL SELECT 'supervisor-professor', 'B', 'rating', 'Demonstrates extensive and broad knowledge of the subject/course.', 1, 7
+    UNION ALL SELECT 'supervisor-professor', 'B', 'rating', 'Simplifies complex ideas in the lesson for ease of understanding.', 1, 8
+    UNION ALL SELECT 'supervisor-professor', 'B', 'rating', 'Integrates contemporary issues and developments in the discipline and/or daily life activities in the syllabus.', 1, 9
+    UNION ALL SELECT 'supervisor-professor', 'B', 'rating', 'Promotes active learning and student engagement by using appropriate teaching and learning resources including ICT tools and platforms.', 1, 10
+    UNION ALL SELECT 'supervisor-professor', 'B', 'rating', 'Uses appropriate assessments (projects, exams, quizzes, assignments, etc.) aligned with the learning outcomes.', 1, 11
+    UNION ALL SELECT 'supervisor-professor', 'C', 'rating', 'Recognizes and values the unique diversity and individual differences among students.', 1, 12
+    UNION ALL SELECT 'supervisor-professor', 'C', 'rating', 'Assists students with their learning challenges during consultation hours.', 1, 13
+    UNION ALL SELECT 'supervisor-professor', 'C', 'rating', 'Provides immediate feedback on student outputs and performance.', 1, 14
+    UNION ALL SELECT 'supervisor-professor', 'C', 'rating', 'Provides transparent and clear criteria in rating student''s performance.', 1, 15
+    UNION ALL SELECT 'supervisor-professor', 'C', 'qualitative', 'Other comments and suggestions (Optional):', 0, 16
+
+    UNION ALL SELECT 'professor-professor', 'A', 'rating', 'Maintains a courteous and respectful manner when interacting with colleagues.', 1, 1
+    UNION ALL SELECT 'professor-professor', 'A', 'rating', 'Demonstrates openness and approachability in professional interactions.', 1, 2
+    UNION ALL SELECT 'professor-professor', 'A', 'rating', 'Contributes to a positive and respectful workplace atmosphere.', 1, 3
+    UNION ALL SELECT 'professor-professor', 'A', 'rating', 'Demonstrates commitment to the organization.', 1, 4
+    UNION ALL SELECT 'professor-professor', 'B', 'rating', 'Works well with others and supports team goals.', 1, 5
+    UNION ALL SELECT 'professor-professor', 'B', 'rating', 'Willingly assists teammates when needed.', 1, 6
+    UNION ALL SELECT 'professor-professor', 'B', 'rating', 'Respects ideas and opinions of co-workers.', 1, 7
+    UNION ALL SELECT 'professor-professor', 'C', 'rating', 'Communicates clearly and professionally.', 1, 8
+    UNION ALL SELECT 'professor-professor', 'C', 'rating', 'Listens and responds appropriately.', 1, 9
+    UNION ALL SELECT 'professor-professor', 'C', 'rating', 'Shares necessary information in a timely manner.', 1, 10
+    UNION ALL SELECT 'professor-professor', 'D', 'qualitative', 'What are this colleague''s greatest strengths?', 0, 11
+    UNION ALL SELECT 'professor-professor', 'D', 'qualitative', 'In what areas could this colleague improve?', 0, 12
+    UNION ALL SELECT 'professor-professor', 'D', 'qualitative', 'Additional comments or suggestions.', 0, 13
+) AS src
+JOIN `evaluation_types` et
+    ON et.`code` = src.`evaluation_type_code`
+JOIN `questionnaires` qn
+    ON qn.`semester_id` = @semester_id
+   AND qn.`evaluation_type_id` = et.`id`
+JOIN `questionnaire_sections` qs
+    ON qs.`questionnaire_id` = qn.`id`
+   AND qs.`section_code` = src.`section_code`
+JOIN `question_types` qt
+    ON qt.`code` = src.`question_type_code`
+LEFT JOIN `questions` existing
+    ON existing.`questionnaire_id` = qn.`id`
+   AND existing.`question_text` = src.`question_text`
+WHERE @semester_id IS NOT NULL
+  AND existing.`id` IS NULL;
+
+COMMIT;

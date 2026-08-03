@@ -12,10 +12,10 @@ if ($method !== 'GET') {
     ], 405);
 }
 
-$session = requireNaapAuthenticatedSession();
+$session = requireNaapAuthenticatedSession($pdo);
 $user = buildUserSnapshotById($pdo, $session['userId'], false);
 if (!$user) {
-    destroyNaapSession();
+    destroyNaapSession($pdo);
     sendJson(['success' => false, 'error' => 'Authentication required.'], 401);
 }
 

@@ -5,8 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Professor Dashboard - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/panel-theme.css">
-    <link rel="stylesheet" href="../css/profesorpanel.css">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260802c">
+    <link rel="stylesheet" href="../css/profesorpanel.css?v=20260729c">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
 </head>
@@ -300,7 +300,19 @@
 
                         <div id="dynamic-peer-questions-container">
                             <div class="questionnaire-loading-state">
-                                <i class="fas fa-spinner fa-spin"></i>
+                                <div class="loading-hourglass-frame loading-hourglass-frame--small" aria-hidden="true">
+                                    <div class="hourglassBackground">
+                                        <div class="hourglassContainer">
+                                            <div class="hourglassCurves"></div>
+                                            <div class="hourglassCapTop"></div>
+                                            <div class="hourglassGlassTop"></div>
+                                            <div class="hourglassSand"></div>
+                                            <div class="hourglassSandStream"></div>
+                                            <div class="hourglassCapBottom"></div>
+                                            <div class="hourglassGlass"></div>
+                                        </div>
+                                    </div>
+                                </div>
                                 <p>Loading peer evaluation form...</p>
                             </div>
                         </div>
@@ -520,7 +532,7 @@
                                     <h3>4-Semester Trend</h3>
                                     <p>Overall average score movement</p>
                                 </div>
-                                <div class="chart-container semestral-trend-chart-container">
+                                <div class="chart-container graph-chart-container semestral-trend-chart-container">
                                     <canvas id="semestralTrendChart"></canvas>
                                 </div>
                             </div>
@@ -534,7 +546,7 @@
                                 <h3>Student Evaluation � Average Scores</h3>
                                 <p>Performance across evaluation criteria (student feedback)</p>
                             </div>
-                            <div class="chart-container">
+                            <div class="chart-container graph-chart-container">
                                 <canvas id="studentBarChart"></canvas>
                             </div>
                         </div>
@@ -544,7 +556,7 @@
                                 <h3>Student Evaluation � Rating Distribution</h3>
                                 <p>Breakdown of student-submitted ratings</p>
                             </div>
-                            <div class="chart-container">
+                            <div class="chart-container rating-chart-container">
                                 <canvas id="studentPieChart"></canvas>
                             </div>
                         </div>
@@ -557,7 +569,7 @@
                                 <h3>Peer Evaluation � Average Scores</h3>
                                 <p>Professor-to-professor evaluation averages</p>
                             </div>
-                            <div class="chart-container">
+                            <div class="chart-container graph-chart-container">
                                 <canvas id="peerBarChart"></canvas>
                             </div>
                         </div>
@@ -567,7 +579,7 @@
                                 <h3>Peer Evaluation � Rating Distribution</h3>
                                 <p>Distribution of peer ratings</p>
                             </div>
-                            <div class="chart-container">
+                            <div class="chart-container rating-chart-container">
                                 <canvas id="peerPieChart"></canvas>
                             </div>
                         </div>
@@ -580,7 +592,7 @@
                                 <h3>Supervisor Evaluation � Average Scores</h3>
                                 <p>Supervisor-assessed performance across criteria</p>
                             </div>
-                            <div class="chart-container">
+                            <div class="chart-container graph-chart-container">
                                 <canvas id="supervisorBarChart"></canvas>
                             </div>
                         </div>
@@ -590,7 +602,7 @@
                                 <h3>Supervisor Evaluation � Rating Distribution</h3>
                                 <p>Breakdown of supervisor ratings</p>
                             </div>
-                            <div class="chart-container">
+                            <div class="chart-container rating-chart-container">
                                 <canvas id="supervisorPieChart"></canvas>
                             </div>
                         </div>
@@ -695,6 +707,10 @@
                             <p>Section A and Section B are read-only snapshots. Section C can be edited by both professor and dean.</p>
                         </div>
                         <div class="faculty-paper-header-actions">
+                            <select id="facultyPaperLoadTypeSelect" class="form-input faculty-paper-load-select" aria-label="Faculty paper load type">
+                                <option value="main">Main Load</option>
+                                <option value="excess">Excess Load</option>
+                            </select>
                             <button type="button" class="btn-submit" id="facultyPaperCreateDraftBtn">Create/Refresh Draft</button>
                         </div>
                     </div>
@@ -710,6 +726,7 @@
                                 <tr>
                                     <th>Paper ID</th>
                                     <th>Semester</th>
+                                    <th>Load</th>
                                     <th>Status</th>
                                     <th>Recipient Dean</th>
                                     <th>Updated</th>
@@ -718,7 +735,7 @@
                             </thead>
                             <tbody id="facultyPaperTableBody">
                                 <tr>
-                                    <td colspan="6">No faculty papers available.</td>
+                                    <td colspan="7">No faculty papers available.</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -738,6 +755,7 @@
                         <div class="profile-item"><span class="profile-label">Department</span><span class="profile-value" id="fpDetailDepartment">N/A</span></div>
                         <div class="profile-item"><span class="profile-label">Rank</span><span class="profile-value" id="fpDetailRank">N/A</span></div>
                         <div class="profile-item"><span class="profile-label">Semester</span><span class="profile-value" id="fpDetailSemester">N/A</span></div>
+                        <div class="profile-item"><span class="profile-label">Load Type</span><span class="profile-value" id="fpDetailLoadType">N/A</span></div>
                         <div class="profile-item"><span class="profile-label">SET Rating (%)</span><span class="profile-value" id="fpDetailSetRating">N/A</span></div>
                         <div class="profile-item"><span class="profile-label">SAF Rating (%)</span><span class="profile-value" id="fpDetailSafRating">N/A</span></div>
                     </div>
@@ -976,8 +994,9 @@
         </main>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="../JsScrip/db-data.js?v=20260414d"></script>
-    <script src="../JsScrip/profesorpanel.js?v=20260414d"></script>
+    <script src="../JsScrip/db-data.js?v=20260802e"></script>
+    <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
+    <script src="../JsScrip/profesorpanel.js?v=20260802a"></script>
 </body>
 
 </html>

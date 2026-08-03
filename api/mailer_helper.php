@@ -22,14 +22,159 @@ function credentialMailerEnsureAutoload(): void
     }
 }
 
-function credentialMailerSendCredentials(array $smtpConfig, array $payload): void
+function credentialMailerNormalizeEncryption($value): string
+{
+    $token = strtolower(trim((string) $value));
+    if ($token === '' || $token === 'none' || $token === 'off' || $token === 'plain' || $token === 'false' || $token === '0') {
+        return '';
+    }
+    if ($token === 'tls' || $token === 'starttls') {
+        return 'tls';
+    }
+    if ($token === 'ssl' || $token === 'smtps') {
+        return 'ssl';
+    }
+
+    return 'tls';
+}
+
+function credentialMailerNormalizeAuthFlag($value): bool
+{
+    if (is_bool($value)) {
+        return $value;
+    }
+
+    $token = strtolower(trim((string) $value));
+    if ($token === '' || $token === '1' || $token === 'true' || $token === 'yes' || $token === 'on' || $token === 'enabled') {
+        return true;
+    }
+    if ($token === '0' || $token === 'false' || $token === 'no' || $token === 'off' || $token === 'disabled') {
+        return false;
+    }
+
+    return true;
+}
+
+function credentialMailerResolveTimeoutSeconds(array $smtpConfig): int
+{
+    $timeout = (int) ($smtpConfig['timeout'] ?? 20);
+    if ($timeout < 5) {
+        return 5;
+    }
+    if ($timeout > 120) {
+        return 120;
+    }
+
+    return $timeout;
+}
+
+function credentialMailerResolveFromEmail(array $smtpConfig): string
+{
+    return trim((string) ($smtpConfig['fromEmail'] ?? ($smtpConfig['senderEmail'] ?? '')));
+}
+
+function credentialMailerResolveFromName(array $smtpConfig): string
+{
+    $fromName = trim((string) ($smtpConfig['fromName'] ?? ($smtpConfig['senderName'] ?? '')));
+    return $fromName !== '' ? $fromName : 'NAAP Evaluation System';
+}
+
+function credentialMailerResolveUsername(array $smtpConfig): string
+{
+    return trim((string) ($smtpConfig['username'] ?? credentialMailerResolveFromEmail($smtpConfig)));
+}
+
+function credentialMailerResolvePassword(array $smtpConfig): string
+{
+    $password = trim((string) ($smtpConfig['password'] ?? ($smtpConfig['appPassword'] ?? '')));
+    return preg_replace('/\s+/', '', $password) ?? '';
+}
+
+function credentialMailerBuildMailer(array $smtpConfig, bool $keepAlive = false): PHPMailer
 {
     credentialMailerEnsureAutoload();
 
-    $senderEmail = trim((string) ($smtpConfig['senderEmail'] ?? ''));
-    $senderName = trim((string) ($smtpConfig['senderName'] ?? ''));
-    $smtpPassword = trim((string) ($smtpConfig['appPassword'] ?? ''));
+    $host = trim((string) ($smtpConfig['host'] ?? ''));
+    $port = (int) ($smtpConfig['port'] ?? 0);
+    $encryption = credentialMailerNormalizeEncryption($smtpConfig['encryption'] ?? 'tls');
+    $auth = credentialMailerNormalizeAuthFlag($smtpConfig['auth'] ?? true);
+    $username = credentialMailerResolveUsername($smtpConfig);
+    $password = credentialMailerResolvePassword($smtpConfig);
+    $fromEmail = credentialMailerResolveFromEmail($smtpConfig);
+    $fromName = credentialMailerResolveFromName($smtpConfig);
 
+    if ($host === '') {
+        throw new RuntimeException('SMTP host is required.');
+    }
+    if ($port < 1 || $port > 65535) {
+        throw new RuntimeException('SMTP port is invalid.');
+    }
+    if ($fromEmail === '' || !filter_var($fromEmail, FILTER_VALIDATE_EMAIL)) {
+        throw new RuntimeException('SMTP from email is invalid.');
+    }
+    if ($auth && $username === '') {
+        throw new RuntimeException('SMTP username is required when authentication is enabled.');
+    }
+    if ($auth && $password === '') {
+        throw new RuntimeException('SMTP password is required when authentication is enabled.');
+    }
+
+    $mailer = new PHPMailer(true);
+    $mailer->isSMTP();
+    $mailer->Host = $host;
+    $mailer->Port = $port;
+    $mailer->SMTPAuth = $auth;
+    $mailer->Timeout = credentialMailerResolveTimeoutSeconds($smtpConfig);
+    $mailer->CharSet = 'UTF-8';
+    $mailer->SMTPKeepAlive = $keepAlive;
+    $mailer->isHTML(true);
+
+    if ($auth) {
+        $mailer->Username = $username;
+        $mailer->Password = $password;
+    }
+
+    if ($encryption === 'tls') {
+        $mailer->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+    } elseif ($encryption === 'ssl') {
+        $mailer->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
+    } else {
+        $mailer->SMTPAutoTLS = false;
+        $mailer->SMTPSecure = false;
+    }
+
+    $mailer->setFrom($fromEmail, $fromName);
+
+    return $mailer;
+}
+
+function credentialMailerBuildCustomMessageBodies(array $payload): array
+{
+    $recipientEmail = trim((string) ($payload['recipientEmail'] ?? ''));
+    $recipientName = trim((string) ($payload['recipientName'] ?? ''));
+    $message = trim((string) ($payload['message'] ?? ''));
+    $intro = trim((string) ($payload['intro'] ?? ''));
+    if ($intro === '') {
+        $intro = 'You have a new notification from the NAAP Evaluation System.';
+    }
+
+    $htmlFlags = ENT_QUOTES | ENT_SUBSTITUTE;
+    $safeRecipient = htmlspecialchars($recipientName !== '' ? $recipientName : $recipientEmail, $htmlFlags, 'UTF-8');
+    $safeIntro = htmlspecialchars($intro, $htmlFlags, 'UTF-8');
+    $safeMessageHtml = nl2br(htmlspecialchars($message, $htmlFlags, 'UTF-8'));
+
+    return [
+        'html' => '<p>Hello ' . $safeRecipient . ',</p>'
+            . '<p>' . $safeIntro . '</p>'
+            . '<p>' . $safeMessageHtml . '</p>',
+        'text' => "Hello " . ($recipientName !== '' ? $recipientName : $recipientEmail) . ",\n\n"
+            . $intro . "\n\n"
+            . $message . "\n",
+    ];
+}
+
+function credentialMailerSendCredentials(array $smtpConfig, array $payload): void
+{
     $recipientEmail = trim((string) ($payload['recipientEmail'] ?? ''));
     $recipientName = trim((string) ($payload['recipientName'] ?? ''));
     $subject = trim((string) ($payload['subject'] ?? 'NAAP Evaluation System Credentials'));
@@ -38,9 +183,6 @@ function credentialMailerSendCredentials(array $smtpConfig, array $payload): voi
     $password = (string) ($payload['password'] ?? '');
     $role = trim((string) ($payload['role'] ?? ''));
 
-    if ($senderEmail === '' || $smtpPassword === '') {
-        throw new RuntimeException('SMTP sender email and app password are required.');
-    }
     if ($recipientEmail === '') {
         throw new RuntimeException('Recipient email is required.');
     }
@@ -76,21 +218,9 @@ function credentialMailerSendCredentials(array $smtpConfig, array $payload): voi
         . "Please log in and change your password immediately after first sign-in.\n";
 
     try {
-        $mailer = new PHPMailer(true);
-        $mailer->isSMTP();
-        $mailer->Host = 'smtp.gmail.com';
-        $mailer->SMTPAuth = true;
-        $mailer->Username = $senderEmail;
-        $mailer->Password = $smtpPassword;
-        $mailer->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-        $mailer->Port = 587;
-        $mailer->CharSet = 'UTF-8';
-        $mailer->Timeout = 20;
-
-        $mailer->setFrom($senderEmail, $senderName !== '' ? $senderName : 'NAAP Evaluation System');
+        $mailer = credentialMailerBuildMailer($smtpConfig);
         $mailer->addAddress($recipientEmail, $recipientName);
         $mailer->Subject = $subject;
-        $mailer->isHTML(true);
         $mailer->Body = $htmlBody;
         $mailer->AltBody = $textBody;
         $mailer->send();
@@ -101,12 +231,6 @@ function credentialMailerSendCredentials(array $smtpConfig, array $payload): voi
 
 function credentialMailerSendOtp(array $smtpConfig, array $payload): void
 {
-    credentialMailerEnsureAutoload();
-
-    $senderEmail = trim((string) ($smtpConfig['senderEmail'] ?? ''));
-    $senderName = trim((string) ($smtpConfig['senderName'] ?? ''));
-    $smtpPassword = trim((string) ($smtpConfig['appPassword'] ?? ''));
-
     $recipientEmail = trim((string) ($payload['recipientEmail'] ?? ''));
     $recipientName = trim((string) ($payload['recipientName'] ?? ''));
     $otpCode = trim((string) ($payload['otpCode'] ?? ''));
@@ -117,9 +241,6 @@ function credentialMailerSendOtp(array $smtpConfig, array $payload): void
 
     $subject = trim((string) ($payload['subject'] ?? 'NAAP Evaluation System OTP Verification Code'));
 
-    if ($senderEmail === '' || $smtpPassword === '') {
-        throw new RuntimeException('SMTP sender email and app password are required.');
-    }
     if ($recipientEmail === '') {
         throw new RuntimeException('Recipient email is required.');
     }
@@ -143,21 +264,9 @@ function credentialMailerSendOtp(array $smtpConfig, array $payload): void
         . "If you did not attempt to sign in, please ignore this email.\n";
 
     try {
-        $mailer = new PHPMailer(true);
-        $mailer->isSMTP();
-        $mailer->Host = 'smtp.gmail.com';
-        $mailer->SMTPAuth = true;
-        $mailer->Username = $senderEmail;
-        $mailer->Password = $smtpPassword;
-        $mailer->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-        $mailer->Port = 587;
-        $mailer->CharSet = 'UTF-8';
-        $mailer->Timeout = 20;
-
-        $mailer->setFrom($senderEmail, $senderName !== '' ? $senderName : 'NAAP Evaluation System');
+        $mailer = credentialMailerBuildMailer($smtpConfig);
         $mailer->addAddress($recipientEmail, $recipientName);
         $mailer->Subject = $subject;
-        $mailer->isHTML(true);
         $mailer->Body = $htmlBody;
         $mailer->AltBody = $textBody;
         $mailer->send();
@@ -166,26 +275,61 @@ function credentialMailerSendOtp(array $smtpConfig, array $payload): void
     }
 }
 
+function credentialMailerSendPasswordReset(array $smtpConfig, array $payload): void
+{
+    $recipientEmail = trim((string) ($payload['recipientEmail'] ?? ''));
+    $recipientName = trim((string) ($payload['recipientName'] ?? ''));
+    $resetUrl = trim((string) ($payload['resetUrl'] ?? ''));
+    $expiresMinutes = (int) ($payload['expiresMinutes'] ?? 30);
+    if ($expiresMinutes <= 0) {
+        $expiresMinutes = 30;
+    }
+
+    $subject = trim((string) ($payload['subject'] ?? 'NAAP Evaluation System Password Reset'));
+
+    if ($recipientEmail === '') {
+        throw new RuntimeException('Recipient email is required.');
+    }
+    if ($resetUrl === '') {
+        throw new RuntimeException('Password reset link is required.');
+    }
+
+    $htmlFlags = ENT_QUOTES | ENT_SUBSTITUTE;
+    $safeRecipient = htmlspecialchars($recipientName !== '' ? $recipientName : $recipientEmail, $htmlFlags, 'UTF-8');
+    $safeResetUrl = htmlspecialchars($resetUrl, $htmlFlags, 'UTF-8');
+    $safeMinutes = htmlspecialchars((string) $expiresMinutes, $htmlFlags, 'UTF-8');
+
+    $htmlBody = '<p>Hello ' . $safeRecipient . ',</p>'
+        . '<p>We received a request to reset your NAAP Evaluation System password.</p>'
+        . '<p><a href="' . $safeResetUrl . '">Reset your password</a></p>'
+        . '<p>This link expires in <strong>' . $safeMinutes . ' minutes</strong> and can only be used once.</p>'
+        . '<p>If you did not request a password reset, please ignore this email.</p>';
+
+    $textBody = "Hello " . ($recipientName !== '' ? $recipientName : $recipientEmail) . ",\n\n"
+        . "We received a request to reset your NAAP Evaluation System password.\n"
+        . "Reset link: {$resetUrl}\n"
+        . "This link expires in {$expiresMinutes} minutes and can only be used once.\n\n"
+        . "If you did not request a password reset, please ignore this email.\n";
+
+    try {
+        $mailer = credentialMailerBuildMailer($smtpConfig);
+        $mailer->addAddress($recipientEmail, $recipientName);
+        $mailer->Subject = $subject;
+        $mailer->Body = $htmlBody;
+        $mailer->AltBody = $textBody;
+        $mailer->send();
+    } catch (PHPMailerException $error) {
+        throw new RuntimeException('Failed to send password reset email to ' . $recipientEmail . ': ' . $error->getMessage());
+    }
+}
+
 function credentialMailerSendCustomMessage(array $smtpConfig, array $payload): void
 {
-    credentialMailerEnsureAutoload();
-
-    $senderEmail = trim((string) ($smtpConfig['senderEmail'] ?? ''));
-    $senderName = trim((string) ($smtpConfig['senderName'] ?? ''));
-    $smtpPassword = trim((string) ($smtpConfig['appPassword'] ?? ''));
-
     $recipientEmail = trim((string) ($payload['recipientEmail'] ?? ''));
     $recipientName = trim((string) ($payload['recipientName'] ?? ''));
     $subject = trim((string) ($payload['subject'] ?? 'NAAP Evaluation System Notification'));
     $message = trim((string) ($payload['message'] ?? ''));
-    $intro = trim((string) ($payload['intro'] ?? ''));
-    if ($intro === '') {
-        $intro = 'You have a new notification from the NAAP Evaluation System.';
-    }
 
-    if ($senderEmail === '' || $smtpPassword === '') {
-        throw new RuntimeException('SMTP sender email and app password are required.');
-    }
     if ($recipientEmail === '') {
         throw new RuntimeException('Recipient email is required.');
     }
@@ -196,37 +340,19 @@ function credentialMailerSendCustomMessage(array $smtpConfig, array $payload): v
         throw new RuntimeException('Email message is required.');
     }
 
-    $htmlFlags = ENT_QUOTES | ENT_SUBSTITUTE;
-    $safeRecipient = htmlspecialchars($recipientName !== '' ? $recipientName : $recipientEmail, $htmlFlags, 'UTF-8');
-    $safeIntro = htmlspecialchars($intro, $htmlFlags, 'UTF-8');
-    $safeMessageHtml = nl2br(htmlspecialchars($message, $htmlFlags, 'UTF-8'));
-
-    $htmlBody = '<p>Hello ' . $safeRecipient . ',</p>'
-        . '<p>' . $safeIntro . '</p>'
-        . '<p>' . $safeMessageHtml . '</p>';
-
-    $textBody = "Hello " . ($recipientName !== '' ? $recipientName : $recipientEmail) . ",\n\n"
-        . $intro . "\n\n"
-        . $message . "\n";
+    $bodies = credentialMailerBuildCustomMessageBodies([
+        'recipientEmail' => $recipientEmail,
+        'recipientName' => $recipientName,
+        'message' => $message,
+        'intro' => $payload['intro'] ?? '',
+    ]);
 
     try {
-        $mailer = new PHPMailer(true);
-        $mailer->isSMTP();
-        $mailer->Host = 'smtp.gmail.com';
-        $mailer->SMTPAuth = true;
-        $mailer->Username = $senderEmail;
-        $mailer->Password = $smtpPassword;
-        $mailer->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-        $mailer->Port = 587;
-        $mailer->CharSet = 'UTF-8';
-        $mailer->Timeout = 20;
-
-        $mailer->setFrom($senderEmail, $senderName !== '' ? $senderName : 'NAAP Evaluation System');
+        $mailer = credentialMailerBuildMailer($smtpConfig);
         $mailer->addAddress($recipientEmail, $recipientName);
         $mailer->Subject = $subject;
-        $mailer->isHTML(true);
-        $mailer->Body = $htmlBody;
-        $mailer->AltBody = $textBody;
+        $mailer->Body = $bodies['html'];
+        $mailer->AltBody = $bodies['text'];
         $mailer->send();
     } catch (PHPMailerException $error) {
         throw new RuntimeException('Failed to send email to ' . $recipientEmail . ': ' . $error->getMessage());
@@ -235,12 +361,6 @@ function credentialMailerSendCustomMessage(array $smtpConfig, array $payload): v
 
 function credentialMailerSendCustomMessageBatch(array $smtpConfig, array $payload): array
 {
-    credentialMailerEnsureAutoload();
-
-    $senderEmail = trim((string) ($smtpConfig['senderEmail'] ?? ''));
-    $senderName = trim((string) ($smtpConfig['senderName'] ?? ''));
-    $smtpPassword = trim((string) ($smtpConfig['appPassword'] ?? ''));
-
     $subject = trim((string) ($payload['subject'] ?? 'NAAP Evaluation System Notification'));
     $message = trim((string) ($payload['message'] ?? ''));
     $intro = trim((string) ($payload['intro'] ?? ''));
@@ -250,9 +370,6 @@ function credentialMailerSendCustomMessageBatch(array $smtpConfig, array $payloa
 
     $recipients = is_array($payload['recipients'] ?? null) ? $payload['recipients'] : [];
 
-    if ($senderEmail === '' || $smtpPassword === '') {
-        throw new RuntimeException('SMTP sender email and app password are required.');
-    }
     if ($subject === '') {
         throw new RuntimeException('Email subject is required.');
     }
@@ -264,19 +381,7 @@ function credentialMailerSendCustomMessageBatch(array $smtpConfig, array $payloa
     $failures = [];
 
     try {
-        $mailer = new PHPMailer(true);
-        $mailer->isSMTP();
-        $mailer->Host = 'smtp.gmail.com';
-        $mailer->SMTPAuth = true;
-        $mailer->Username = $senderEmail;
-        $mailer->Password = $smtpPassword;
-        $mailer->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-        $mailer->Port = 587;
-        $mailer->CharSet = 'UTF-8';
-        $mailer->Timeout = 20;
-        $mailer->SMTPKeepAlive = true;
-        $mailer->isHTML(true);
-        $mailer->setFrom($senderEmail, $senderName !== '' ? $senderName : 'NAAP Evaluation System');
+        $mailer = credentialMailerBuildMailer($smtpConfig, true);
 
         foreach ($recipients as $recipient) {
             $recipientRow = is_array($recipient) ? $recipient : [];
@@ -291,25 +396,19 @@ function credentialMailerSendCustomMessageBatch(array $smtpConfig, array $payloa
                 continue;
             }
 
-            $htmlFlags = ENT_QUOTES | ENT_SUBSTITUTE;
-            $safeRecipient = htmlspecialchars($recipientName !== '' ? $recipientName : $recipientEmail, $htmlFlags, 'UTF-8');
-            $safeIntro = htmlspecialchars($intro, $htmlFlags, 'UTF-8');
-            $safeMessageHtml = nl2br(htmlspecialchars($message, $htmlFlags, 'UTF-8'));
-
-            $htmlBody = '<p>Hello ' . $safeRecipient . ',</p>'
-                . '<p>' . $safeIntro . '</p>'
-                . '<p>' . $safeMessageHtml . '</p>';
-
-            $textBody = "Hello " . ($recipientName !== '' ? $recipientName : $recipientEmail) . ",\n\n"
-                . $intro . "\n\n"
-                . $message . "\n";
+            $bodies = credentialMailerBuildCustomMessageBodies([
+                'recipientEmail' => $recipientEmail,
+                'recipientName' => $recipientName,
+                'message' => $message,
+                'intro' => $intro,
+            ]);
 
             try {
                 $mailer->clearAllRecipients();
                 $mailer->addAddress($recipientEmail, $recipientName);
                 $mailer->Subject = $subject;
-                $mailer->Body = $htmlBody;
-                $mailer->AltBody = $textBody;
+                $mailer->Body = $bodies['html'];
+                $mailer->AltBody = $bodies['text'];
                 $mailer->send();
                 $sent++;
             } catch (PHPMailerException $error) {

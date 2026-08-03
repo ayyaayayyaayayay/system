@@ -132,6 +132,16 @@ function sanitizeOtpCode(value) {
 function formatDisplayDateTime(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
+  const formatted = SharedData && SharedData.formatDateTimeInPhilippines
+    ? SharedData.formatDateTimeInPhilippines(raw, "en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+    : "";
+  if (formatted) return formatted;
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) return raw;
   return date.toLocaleString("en-US", {
@@ -249,6 +259,16 @@ function handleLogin() {
         return;
       }
 
+      if (data && data.activeSession) {
+        loginFlowState.pendingOtp = null;
+        closeOtpModal();
+        showError(
+          data.error ||
+            "This account is already active in another browser or device. Try again after 5 minutes of inactivity or log out from the active session.",
+        );
+        return;
+      }
+
       if (data && data.otpRequired) {
         loginFlowState.pendingOtp = {
           username: sanitizedUsername,
@@ -325,6 +345,16 @@ function handleOtpVerification() {
         loginFlowState.pendingOtp = null;
         closeOtpModal();
         showError(formatLockMessage(data.lockUntil));
+        return;
+      }
+
+      if (data && data.activeSession) {
+        loginFlowState.pendingOtp = null;
+        closeOtpModal();
+        showError(
+          data.error ||
+            "This account is already active in another browser or device. Try again after 5 minutes of inactivity or log out from the active session.",
+        );
         return;
       }
 
@@ -460,6 +490,8 @@ function redirectToDashboard(role) {
     window.location.href = "vpaapanel.html";
   } else if (role === "dean") {
     window.location.href = "daenpanel.html";
+  } else if (role === "procoor") {
+    window.location.href = "procoorpanel.html";
   } else if (role === "professor") {
     window.location.href = "profesorpanel.html";
   } else if (role === "admin") {
@@ -501,58 +533,256 @@ function setupForgotPassword() {
   const modal = document.getElementById("forgotPasswordModal");
   const closeModal = modal ? modal.querySelector(".close-modal") : null;
   const sendResetBtn = document.getElementById("sendResetLinkBtn");
+  const resetPasswordBtn = document.getElementById("resetPasswordBtn");
   const resetEmailInput = document.getElementById("resetEmail");
+  const resetIdentifierInput = document.getElementById("resetIdentifier");
+  const newPasswordInput = document.getElementById("newResetPassword");
+  const confirmPasswordInput = document.getElementById("confirmResetPassword");
 
-  if (!forgotPasswordLink || !modal || !closeModal || !sendResetBtn || !resetEmailInput) return;
+  if (
+    !forgotPasswordLink ||
+    !modal ||
+    !closeModal ||
+    !sendResetBtn ||
+    !resetPasswordBtn ||
+    !resetEmailInput ||
+    !resetIdentifierInput ||
+    !newPasswordInput ||
+    !confirmPasswordInput
+  ) return;
 
   forgotPasswordLink.addEventListener("click", function (e) {
     e.preventDefault();
-    modal.classList.add("show");
-    modal.setAttribute("aria-hidden", "false");
+    setForgotPasswordMode("request");
+    openForgotPasswordModal();
     resetEmailInput.value = "";
+    resetIdentifierInput.value = "";
     clearFeedbackMessage("forgotPasswordFeedback");
     resetEmailInput.focus();
   });
 
   closeModal.addEventListener("click", function () {
-    modal.classList.remove("show");
-    modal.setAttribute("aria-hidden", "true");
+    closeForgotPasswordModal();
   });
 
   window.addEventListener("click", function (e) {
     if (e.target === modal) {
-      modal.classList.remove("show");
-      modal.setAttribute("aria-hidden", "true");
+      closeForgotPasswordModal();
     }
   });
 
   sendResetBtn.addEventListener("click", function () {
-    const email = resetEmailInput.value.trim();
+    handlePasswordResetRequest();
+  });
 
-    if (!email) {
-      showErrorInModal("Please enter your Gmail address");
-      return;
-    }
+  resetPasswordBtn.addEventListener("click", function () {
+    handlePasswordResetSubmit();
+  });
 
-    if (!email.toLowerCase().endsWith("@gmail.com")) {
-      showErrorInModal("Please enter a valid Gmail address");
-      return;
-    }
+  [resetEmailInput, resetIdentifierInput, newPasswordInput, confirmPasswordInput].forEach(function (input) {
+    input.addEventListener("keypress", function (e) {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      if (getPasswordResetTokenFromUrl()) {
+        handlePasswordResetSubmit();
+      } else {
+        handlePasswordResetRequest();
+      }
+    });
+  });
 
-    const originalText = sendResetBtn.querySelector("span").textContent;
-    sendResetBtn.querySelector("span").textContent = "Sending...";
-    sendResetBtn.disabled = true;
+  if (getPasswordResetTokenFromUrl()) {
+    setForgotPasswordMode("reset");
+    openForgotPasswordModal();
+    clearFeedbackMessage("forgotPasswordFeedback");
+    newPasswordInput.focus();
+  }
+}
 
-    setTimeout(() => {
-      alert(
-        `A reset password link has been sent to ${email}!\n\n(This is a simulation. No database is connected yet.)`,
+function getPasswordResetTokenFromUrl() {
+  try {
+    return new URLSearchParams(window.location.search).get("reset_token") || "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+function removePasswordResetTokenFromUrl() {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("reset_token");
+    window.history.replaceState({}, document.title, url.toString());
+  } catch (_error) {
+    // URL cleanup is best-effort only.
+  }
+}
+
+function setForgotPasswordMode(mode) {
+  const requestView = document.getElementById("passwordResetRequestView");
+  const confirmView = document.getElementById("passwordResetConfirmView");
+  const intro = document.getElementById("forgotPasswordIntro");
+  const isReset = String(mode || "").toLowerCase() === "reset";
+
+  if (requestView) requestView.hidden = isReset;
+  if (confirmView) confirmView.hidden = !isReset;
+  if (intro) {
+    intro.textContent = isReset
+      ? "Enter and confirm your new password to complete account recovery."
+      : "Enter your saved account email and student number or employee ID to receive a password reset link.";
+  }
+}
+
+function openForgotPasswordModal() {
+  const modal = document.getElementById("forgotPasswordModal");
+  if (!modal) return;
+  modal.classList.add("show");
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function closeForgotPasswordModal() {
+  const modal = document.getElementById("forgotPasswordModal");
+  if (!modal) return;
+  modal.classList.remove("show");
+  modal.setAttribute("aria-hidden", "true");
+}
+
+function isValidEmailAddress(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
+function readLoginApiJson(response) {
+  return response
+    .json()
+    .catch(function () {
+      return {};
+    })
+    .then(function (data) {
+      if (!response.ok) {
+        const error = new Error((data && data.error) || "Request failed. Please try again.");
+        error.payload = data || {};
+        throw error;
+      }
+      return data || {};
+    });
+}
+
+function handlePasswordResetRequest() {
+  const sendResetBtn = document.getElementById("sendResetLinkBtn");
+  const resetEmailInput = document.getElementById("resetEmail");
+  const resetIdentifierInput = document.getElementById("resetIdentifier");
+  if (!sendResetBtn || !resetEmailInput || !resetIdentifierInput) return;
+
+  const email = resetEmailInput.value.trim();
+  const identifier = resetIdentifierInput.value.trim();
+
+  clearFeedbackMessage("forgotPasswordFeedback");
+
+  if (!email) {
+    showErrorInModal("Please enter your account email address.");
+    return;
+  }
+
+  if (!isValidEmailAddress(email)) {
+    showErrorInModal("Please enter a valid account email address.");
+    return;
+  }
+
+  if (!identifier) {
+    showErrorInModal("Please enter your Student Number / Employee ID.");
+    return;
+  }
+
+  const originalText = sendResetBtn.querySelector("span").textContent;
+  sendResetBtn.querySelector("span").textContent = "Sending...";
+  sendResetBtn.disabled = true;
+
+  fetch("../api/login.php", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "requestPasswordReset",
+      email: email,
+      identifier: identifier,
+    }),
+  })
+    .then(readLoginApiJson)
+    .then(function (data) {
+      setFeedbackMessage(
+        "forgotPasswordFeedback",
+        data.message || "A password reset link has been sent to your account email.",
+        "success",
       );
-      modal.classList.remove("show");
-      modal.setAttribute("aria-hidden", "true");
+      resetEmailInput.value = "";
+      resetIdentifierInput.value = "";
+    })
+    .catch(function (error) {
+      showErrorInModal(error.message || "Password reset service is unavailable. Please try again.");
+    })
+    .finally(function () {
       sendResetBtn.querySelector("span").textContent = originalText;
       sendResetBtn.disabled = false;
-    }, 1500);
-  });
+    });
+}
+
+function handlePasswordResetSubmit() {
+  const resetPasswordBtn = document.getElementById("resetPasswordBtn");
+  const newPasswordInput = document.getElementById("newResetPassword");
+  const confirmPasswordInput = document.getElementById("confirmResetPassword");
+  if (!resetPasswordBtn || !newPasswordInput || !confirmPasswordInput) return;
+
+  const token = getPasswordResetTokenFromUrl();
+  const newPassword = newPasswordInput.value;
+  const confirmPassword = confirmPasswordInput.value;
+
+  clearFeedbackMessage("forgotPasswordFeedback");
+
+  if (!token) {
+    showErrorInModal("Password reset link is missing or invalid.");
+    return;
+  }
+
+  if (newPassword.length < 8) {
+    showErrorInModal("New password must be at least 8 characters.");
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    showErrorInModal("New password and confirmation do not match.");
+    return;
+  }
+
+  const originalText = resetPasswordBtn.querySelector("span").textContent;
+  resetPasswordBtn.querySelector("span").textContent = "Resetting...";
+  resetPasswordBtn.disabled = true;
+
+  fetch("../api/login.php", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "resetPassword",
+      token: token,
+      newPassword: newPassword,
+    }),
+  })
+    .then(readLoginApiJson)
+    .then(function (data) {
+      newPasswordInput.value = "";
+      confirmPasswordInput.value = "";
+      removePasswordResetTokenFromUrl();
+      setForgotPasswordMode("request");
+      setFeedbackMessage(
+        "forgotPasswordFeedback",
+        data.message || "Password has been reset. You can now log in with your new password.",
+        "success",
+      );
+    })
+    .catch(function (error) {
+      showErrorInModal(error.message || "Unable to reset password. Please try again.");
+    })
+    .finally(function () {
+      resetPasswordBtn.querySelector("span").textContent = originalText;
+      resetPasswordBtn.disabled = false;
+    });
 }
 
 /**

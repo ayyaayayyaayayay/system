@@ -49,16 +49,18 @@ function resolvePanelLinkByRole($role) {
 }
 
 startNaapSession();
-if (!isNaapAuthenticatedSession()) {
+if (!isNaapAuthenticatedSession($pdo)) {
+    destroyNaapSession();
     header('Location: html/mainpage.html');
     exit();
 }
+touchNaapActiveSession($pdo, getNaapSessionUserId(), getNaapActiveSessionToken());
 
 runProfileImageMigrationsIfNeeded($pdo);
 
 $currentUser = buildUserSnapshotById($pdo, getNaapSessionUserId(), false);
 if (!$currentUser || normalizeLookupValue($currentUser['status'] ?? 'active') === 'inactive') {
-    destroyNaapSession();
+    destroyNaapSession($pdo);
     header('Location: html/mainpage.html');
     exit();
 }
@@ -96,7 +98,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
 $csrfToken = getNaapCsrfToken();
 $profileImageUrl = trim((string) ($currentUser['profileImageUrl'] ?? $currentUser['photoData'] ?? ''));
-$profileImagePath = trim((string) ($currentUser['profileImage'] ?? ''));
 $fullName = trim((string) ($currentUser['name'] ?? ''));
 $role = trim((string) ($currentUser['role'] ?? ''));
 $panelLink = resolvePanelLinkByRole($role);
@@ -343,11 +344,6 @@ $details = [
             font-size: 0.95rem;
         }
 
-        .stored-path {
-            color: var(--muted);
-            font-size: 0.92rem;
-        }
-
         @media (max-width: 760px) {
             .hero {
                 grid-template-columns: 1fr;
@@ -382,15 +378,12 @@ $details = [
                 <h1><?php echo profilePageEscape($fullName !== '' ? $fullName : 'Profile'); ?></h1>
                 <p>
                     This page reads your account from the active PHP session, shows your saved user information,
-                    and lets you upload a new profile image without storing the image file inside MySQL.
+                    and lets you upload a new profile image stored with your account in the database.
                 </p>
                 <div class="hero-actions">
                     <a class="btn-primary" href="<?php echo profilePageEscape($panelLink); ?>">Back To Panel</a>
                     <a class="btn-secondary" href="html/mainpage.html">Go To Login Page</a>
                 </div>
-                <?php if ($profileImagePath !== ''): ?>
-                    <p class="stored-path">Saved file: <?php echo profilePageEscape($profileImagePath); ?></p>
-                <?php endif; ?>
             </div>
         </section>
 
@@ -410,7 +403,7 @@ $details = [
             <h2 class="section-title">Upload Or Replace Profile Image</h2>
             <p class="upload-help">
                 Select only one image. Allowed file types: JPG, JPEG, PNG, and WEBP. Maximum size: 2MB.
-                When you upload a new image, the previous managed profile file is deleted automatically.
+                When you upload a new image, the previous database photo is replaced automatically.
             </p>
 
             <form method="post" enctype="multipart/form-data">

@@ -495,6 +495,33 @@ body {
     margin-bottom: 18px;
 }
 
+.analytics-campus-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 220px;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.analytics-campus-filter select {
+    min-height: 42px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: #ffffff;
+    color: #0f172a;
+    padding: 0 12px;
+    font-size: 13px;
+    font-weight: 600;
+    outline: none;
+}
+
+.analytics-campus-filter select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(91, 103, 232, 0.14);
+}
+
 .analytics-table-title {
     font-size: 14px;
     font-weight: 700;
@@ -525,6 +552,17 @@ body {
 
 .analytics-inline-empty {
     padding-top: 8px;
+}
+
+@media (max-width: 700px) {
+    .analytics-section .section-header {
+        align-items: stretch;
+    }
+
+    .analytics-campus-filter {
+        width: 100%;
+        min-width: 0;
+    }
 }
 
 .empty-state {

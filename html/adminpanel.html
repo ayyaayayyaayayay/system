@@ -5,9 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Panel - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/hrpanel.css?v=20260322a">
-    <link rel="stylesheet" href="../css/panel-theme.css?v=20260322a">
-    <link rel="stylesheet" href="../css/adminpanel.css?v=20260627e">
+    <link rel="stylesheet" href="../css/hrpanel.css?v=20260729c">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260802c">
+    <link rel="stylesheet" href="../css/adminpanel.css?v=20260801b">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -214,7 +214,19 @@
                             <div class="activity-list" id="activity-list" aria-live="polite">
                                 <div class="activity-item">
                                     <div class="activity-icon login">
-                                        <i class="fas fa-spinner fa-spin"></i>
+                                        <div class="loading-hourglass-frame loading-hourglass-frame--tiny" aria-hidden="true">
+                                            <div class="hourglassBackground">
+                                                <div class="hourglassContainer">
+                                                    <div class="hourglassCurves"></div>
+                                                    <div class="hourglassCapTop"></div>
+                                                    <div class="hourglassGlassTop"></div>
+                                                    <div class="hourglassSand"></div>
+                                                    <div class="hourglassSandStream"></div>
+                                                    <div class="hourglassCapBottom"></div>
+                                                    <div class="hourglassGlass"></div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                     <div class="activity-content">
                                         <p>Loading recent activity...</p>
@@ -246,7 +258,7 @@
                                     <p>Evaluation trends per semester</p>
                                 </div>
                             </div>
-                            <div class="chart-container">
+                            <div class="chart-container graph-chart-container">
                                 <canvas id="performance-chart"></canvas>
                             </div>
                         </section>
@@ -268,12 +280,12 @@
                                     Student to Professor Evaluation
                                 </h2>
                                 <div class="charts-grid">
-                                    <div class="chart-container">
+                                    <div class="chart-container graph-chart-container">
                                         <h3 class="chart-title">Average Scores by Category</h3>
                                         <p class="chart-subtitle">Performance across different evaluation criteria</p>
                                         <canvas id="student-professor-bar-chart"></canvas>
                                     </div>
-                                    <div class="chart-container">
+                                    <div class="chart-container rating-chart-container">
                                         <h3 class="chart-title">Rating Distribution</h3>
                                         <p class="chart-subtitle">Breakdown of student ratings</p>
                                         <canvas id="student-professor-pie-chart"></canvas>
@@ -305,12 +317,12 @@
                                     Professor to Professor Analytics
                                 </h2>
                                 <div class="charts-grid">
-                                    <div class="chart-container">
+                                    <div class="chart-container graph-chart-container">
                                         <h3 class="chart-title">Average Scores by Category</h3>
                                         <p class="chart-subtitle">Performance across different evaluation criteria</p>
                                         <canvas id="professor-professor-bar-chart"></canvas>
                                     </div>
-                                    <div class="chart-container">
+                                    <div class="chart-container rating-chart-container">
                                         <h3 class="chart-title">Rating Distribution</h3>
                                         <p class="chart-subtitle">Breakdown of professor ratings</p>
                                         <canvas id="professor-professor-pie-chart"></canvas>
@@ -344,12 +356,12 @@
                                     Supervisor to Professor Evaluation
                                 </h2>
                                 <div class="charts-grid">
-                                    <div class="chart-container">
+                                    <div class="chart-container graph-chart-container">
                                         <h3 class="chart-title">Average Scores by Category</h3>
                                         <p class="chart-subtitle">Performance across different evaluation criteria</p>
                                         <canvas id="supervisor-professor-bar-chart"></canvas>
                                     </div>
-                                    <div class="chart-container">
+                                    <div class="chart-container rating-chart-container">
                                         <h3 class="chart-title">Rating Distribution</h3>
                                         <p class="chart-subtitle">Breakdown of supervisor ratings</p>
                                         <canvas id="supervisor-professor-pie-chart"></canvas>
@@ -395,10 +407,6 @@
                         </div>
                     </header>
 
-                    <div class="view-header">
-                        <h1><i class="fas fa-users"></i> User Management</h1>
-                        <p>Manage all system users organized by campus and department</p>
-                    </div>
                     <div class="user-management-content">
                         <!-- Campus Filter Tabs -->
                         <div class="campus-tabs-bar">
@@ -732,10 +740,6 @@
                         </div>
                     </header>
 
-                    <div class="view-header">
-                        <h1><i class="fas fa-cog"></i> System Settings</h1>
-                        <p>Configure system-wide settings and preferences</p>
-                    </div>
                     <div class="system-settings-content">
                         <div class="settings-group">
                             <h3>General Settings</h3>
@@ -777,6 +781,63 @@
                         <div class="settings-group credential-distributor-group">
                             <h3><i class="fas fa-envelope"></i> Bulk Credential Distributor</h3>
                             <p class="credential-distributor-description">
+                                Configure the SMTP server used for OTP, credential delivery, reminders, and test mail. Environment variables override the saved database fallback when present.
+                            </p>
+                            <div class="credential-distributor-grid">
+                                <div class="credential-distributor-field">
+                                    <label for="credential-smtp-host">SMTP Host</label>
+                                    <input type="text" id="credential-smtp-host" placeholder="smtp.example.com">
+                                </div>
+                                <div class="credential-distributor-field">
+                                    <label for="credential-smtp-port">SMTP Port</label>
+                                    <input type="number" id="credential-smtp-port" min="1" max="65535" placeholder="587">
+                                </div>
+                                <div class="credential-distributor-field">
+                                    <label for="credential-smtp-encryption">Encryption</label>
+                                    <select id="credential-smtp-encryption">
+                                        <option value="tls">TLS / STARTTLS</option>
+                                        <option value="ssl">SSL / SMTPS</option>
+                                        <option value="">None</option>
+                                    </select>
+                                </div>
+                                <div class="credential-distributor-field">
+                                    <label for="credential-smtp-auth">Authentication</label>
+                                    <select id="credential-smtp-auth">
+                                        <option value="true">Enabled</option>
+                                        <option value="false">Disabled</option>
+                                    </select>
+                                </div>
+                                <div class="credential-distributor-field">
+                                    <label for="credential-smtp-username">SMTP Username</label>
+                                    <input type="text" id="credential-smtp-username" placeholder="mailer@example.com">
+                                </div>
+                                <div class="credential-distributor-field">
+                                    <label for="credential-smtp-timeout">Timeout (seconds)</label>
+                                    <input type="number" id="credential-smtp-timeout" min="5" max="120" placeholder="20">
+                                </div>
+                                <div class="credential-distributor-field">
+                                    <label for="credential-smtp-from-email">From Email</label>
+                                    <input type="email" id="credential-smtp-from-email" placeholder="mailer@example.com">
+                                </div>
+                                <div class="credential-distributor-field">
+                                    <label for="credential-smtp-from-name">From Name</label>
+                                    <input type="text" id="credential-smtp-from-name" placeholder="NAAP Evaluation System">
+                                </div>
+                                <div class="credential-distributor-field">
+                                    <label for="credential-smtp-password">SMTP Password</label>
+                                    <input type="password" id="credential-smtp-password" placeholder="Enter SMTP password">
+                                </div>
+                            </div>
+                            <div class="credential-distributor-actions">
+                                <button class="btn-save" id="credential-save-config-btn" type="button">
+                                    <i class="fas fa-save"></i> Save SMTP Config
+                                </button>
+                                <button class="btn-reset" id="credential-clear-password-btn" type="button">
+                                    <i class="fas fa-eraser"></i> Clear Saved Password
+                                </button>
+                            </div>
+                            <div class="credential-config-status" id="credential-config-status" aria-live="polite"></div>
+                            <p class="credential-distributor-description">
                                 Upload an Excel file with columns: <strong>name, email, role, campus, employee_or_student_number, password</strong> to send login credentials to existing users via email.
                             </p>
                             <div class="credential-distributor-upload">
@@ -799,29 +860,63 @@
                             </button>
 
                             <div class="credential-test-mail-box">
-                                <h4><i class="fas fa-flask"></i> Test Gmail Broadcast (All Active Users)</h4>
+                                <h4><i class="fas fa-flask"></i> Send Single SMTP Test Email</h4>
                                 <p class="credential-distributor-description">
-                                    Testing only. This sends the custom message below to all active user emails.
+                                    Use this safe one-recipient test before sending OTP or bulk mail in production.
                                 </p>
                                 <div class="credential-distributor-field">
-                                    <label for="credential-test-gmail-subject">Email Subject</label>
-                                    <input type="text" id="credential-test-gmail-subject"
-                                        placeholder="Test Reminder: Please complete your evaluation">
+                                    <label for="credential-test-smtp-recipient">Recipient Email</label>
+                                    <input type="email" id="credential-test-smtp-recipient"
+                                        placeholder="your.address@example.com">
                                 </div>
                                 <div class="credential-distributor-field">
-                                    <label for="credential-test-gmail-message">Email Message</label>
-                                    <textarea id="credential-test-gmail-message" rows="5"
-                                        placeholder="This is a test message from the admin panel. Please complete your evaluation within the evaluation period."></textarea>
+                                    <label for="credential-test-smtp-subject">Email Subject</label>
+                                    <input type="text" id="credential-test-smtp-subject"
+                                        placeholder="NAAP SMTP Test Email">
+                                </div>
+                                <div class="credential-distributor-field">
+                                    <label for="credential-test-smtp-message">Email Message</label>
+                                    <textarea id="credential-test-smtp-message" rows="5"
+                                        placeholder="This is a one-recipient SMTP verification message from the admin panel."></textarea>
                                 </div>
                                 <div class="credential-distributor-actions">
-                                    <button class="btn-save credential-send-btn" id="credential-test-gmail-send-btn"
+                                    <button class="btn-save credential-send-btn" id="credential-test-smtp-send-btn"
                                         type="button">
-                                        <i class="fas fa-paper-plane"></i> Send Test Gmail to Everyone
+                                        <i class="fas fa-paper-plane"></i> Send Test Email
                                     </button>
                                 </div>
-                                <div class="credential-distributor-feedback" id="credential-test-gmail-feedback"
+                                <div class="credential-distributor-feedback" id="credential-test-smtp-feedback"
                                     aria-live="polite"></div>
                             </div>
+                        </div>
+                        <div class="settings-group credential-distributor-group">
+                            <h3><i class="fas fa-robot"></i> Gemini AI Configuration</h3>
+                            <p class="credential-distributor-description">
+                                Configure the Gemini API fallback used by bias detection, explainability insights, and faculty Section C recommendations. Environment variables still override saved database values when present.
+                            </p>
+                            <div class="credential-distributor-grid">
+                                <div class="credential-distributor-field">
+                                    <label for="gemini-model">Gemini Model</label>
+                                    <input type="text" id="gemini-model" placeholder="gemini-2.5-flash">
+                                </div>
+                                <div class="credential-distributor-field">
+                                    <label for="gemini-timeout-ms">Timeout (milliseconds)</label>
+                                    <input type="number" id="gemini-timeout-ms" min="5000" max="60000" placeholder="30000">
+                                </div>
+                                <div class="credential-distributor-field" style="grid-column: 1 / -1;">
+                                    <label for="gemini-api-key">Gemini API Key</label>
+                                    <input type="password" id="gemini-api-key" placeholder="Enter Gemini API key">
+                                </div>
+                            </div>
+                            <div class="credential-distributor-actions">
+                                <button class="btn-save" id="gemini-save-config-btn" type="button">
+                                    <i class="fas fa-save"></i> Save Gemini Config
+                                </button>
+                                <button class="btn-reset" id="gemini-clear-key-btn" type="button">
+                                    <i class="fas fa-eraser"></i> Clear Saved API Key
+                                </button>
+                            </div>
+                            <div class="credential-config-status" id="gemini-config-status" aria-live="polite"></div>
                         </div>
                         <div class="settings-group">
                             <h3>Activity Log</h3>
@@ -929,15 +1024,6 @@
                     </header>
 
                     <div class="settings-container" style="padding: 20px;">
-                        <div class="view-header" style="margin-bottom: 24px;">
-                            <h1
-                                style="font-size: 28px; font-weight: 700; display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-                                <i class="fas fa-sliders-h" style="color: #667eea;"></i> Evaluation Settings
-                            </h1>
-                            <p style="font-size: 14px; color: #64748b;">Configure evaluation periods, questionnaires,
-                                and criteria</p>
-                        </div>
-
                         <!-- Evaluation Period Configuration -->
                         <section class="admin-section eval-period-section">
                             <div class="section-header">
@@ -1127,20 +1213,28 @@
                     </header>
 
                     <div class="user-management-container">
-                        <div class="um-header">
-                            <div class="um-title">
-                                <h1>Professor/Professor Management</h1>
-                                <p>Manage professors across different departments</p>
+                        <div class="professor-toolbar">
+                            <div class="professor-filter-controls">
+                                <div class="professor-search">
+                                    <i class="fas fa-search"></i>
+                                    <input type="text" id="professor-search" placeholder="Search by employee ID or name">
+                                </div>
+                                <select id="professor-campus-filter" class="professor-campus-filter" aria-label="Filter professors by campus">
+                                    <option value="all">All Campuses</option>
+                                </select>
+                                <button type="button" class="btn-professor-search" id="professor-search-btn">
+                                    <i class="fas fa-search"></i>
+                                    Search
+                                </button>
+                                <button type="button" class="btn-professor-clear" id="professor-clear-btn">
+                                    <i class="fas fa-rotate-left"></i>
+                                    Clear
+                                </button>
                             </div>
                             <button class="btn-add-professor" id="add-professor-btn">
                                 <i class="fas fa-user-plus"></i>
                                 Add Professor
                             </button>
-                        </div>
-
-                        <div class="professor-search">
-                            <i class="fas fa-search"></i>
-                            <input type="text" id="professor-search" placeholder="Search by employee ID or name">
                         </div>
 
                         <!-- Department Tabs -->
@@ -1192,11 +1286,6 @@
                         </div>
                     </header>
 
-                    <div class="view-header">
-                        <h1><i class="fas fa-book"></i> Subject Management</h1>
-                        <p>Manage subject catalog, assign professors, and assign students per semester and section</p>
-                    </div>
-
                     <div class="subject-management-layout">
                         <section class="admin-section subject-catalog-section">
                             <div class="section-header">
@@ -1246,6 +1335,11 @@
                                 </button>
                                 <input type="file" id="bulk-offering-import-input" accept=".xlsx,.xls"
                                     style="display:none">
+                                <button class="btn-bulk-register" id="bulk-excess-load-import-btn">
+                                    <i class="fas fa-file-import"></i> Import Excess Load
+                                </button>
+                                <input type="file" id="bulk-excess-load-import-input" accept=".xlsx,.xls"
+                                    style="display:none">
                                 <div class="offering-search-box">
                                     <i class="fas fa-search"></i>
                                     <input type="text" id="offering-search"
@@ -1276,6 +1370,7 @@
                                             <th>Professor Employee ID</th>
                                             <th>Program Code</th>
                                             <th>Campus/Dept</th>
+                                            <th>Load</th>
                                             <th>Status</th>
                                             <th class="actions-col">Actions</th>
                                         </tr>
@@ -1309,10 +1404,6 @@
 
                     <div class="questionnaire-container">
                         <div class="questionnaire-header">
-                            <div class="questionnaire-title-section">
-                                <h1>Evaluation Questionnaire</h1>
-                                <p>Create and manage questions for student evaluations</p>
-                            </div>
                             <div class="questionnaire-actions">
                                 <div class="questionnaire-semester-selector">
                                     <label for="semester-select">Semester:</label>
@@ -1506,6 +1597,7 @@
                         <option value="student">Student</option>
                         <option value="professor">Professor</option>
                         <option value="dean">Dean</option>
+                        <option value="procoor">Program Coordinator</option>
                         <option value="osa">OSA</option>
                         <option value="vpaa">VPAA</option>
                         <option value="hr">HR Staff</option>
@@ -1545,6 +1637,12 @@
                         <option value="ics">ICS - Institute of Computer Studies</option>
                         <option value="ilas">ILAS - Institute of Liberal Arts & Sciences</option>
                         <option value="engi">ENGI - Engineering Department</option>
+                    </select>
+                </div>
+                <div class="form-group" id="new-user-program-group" style="display:none;">
+                    <label for="new-user-program">Program</label>
+                    <select id="new-user-program" name="programCode">
+                        <option value="">Select Program</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -1597,7 +1695,13 @@
                 </div>
                 <div class="form-group">
                     <label for="edit-user-institute">Institute</label>
-                    <input type="text" id="edit-user-institute" name="institute" required>
+                    <select id="edit-user-institute" name="institute" required></select>
+                </div>
+                <div class="form-group" id="edit-user-program-group" style="display:none;">
+                    <label for="edit-user-program">Program</label>
+                    <select id="edit-user-program" name="programCode">
+                        <option value="">Select Program</option>
+                    </select>
                 </div>
                 <div class="form-group" id="edit-user-year-section-group" style="display:none;">
                     <label for="edit-user-year-section">Year & Section</label>
@@ -1832,9 +1936,10 @@
                         placeholder="e.g., Management of Teaching and Learning" required>
                 </div>
                 <div class="form-group">
-                    <label for="section-description">Section Description</label>
+                    <label for="section-description" id="section-description-label">Section Description</label>
                     <textarea id="section-description" name="sectionDescription" rows="4"
                         placeholder="Enter a detailed description of this section..." required></textarea>
+                    <small class="form-hint" id="section-description-hint">Required for student-to-professor questionnaires.</small>
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn-cancel" id="cancel-section-form">Cancel</button>
@@ -1902,7 +2007,19 @@
 
     <div id="bulk-register-loading" class="bulk-register-loading" aria-hidden="true">
         <div class="bulk-register-loading-card" role="status" aria-live="polite" aria-label="Bulk registration in progress">
-            <div class="bulk-register-loading-spinner"></div>
+            <div class="loading-hourglass-frame loading-hourglass-frame--compact" aria-hidden="true">
+                <div class="hourglassBackground">
+                    <div class="hourglassContainer">
+                        <div class="hourglassCurves"></div>
+                        <div class="hourglassCapTop"></div>
+                        <div class="hourglassGlassTop"></div>
+                        <div class="hourglassSand"></div>
+                        <div class="hourglassSandStream"></div>
+                        <div class="hourglassCapBottom"></div>
+                        <div class="hourglassGlass"></div>
+                    </div>
+                </div>
+            </div>
             <h3>Processing Bulk Register</h3>
             <p id="bulk-register-loading-text">Please wait while the system validates and saves your Excel file.</p>
         </div>
@@ -1910,7 +2027,19 @@
 
     <div id="credential-distributor-loading" class="credential-distributor-loading" aria-hidden="true">
         <div class="credential-distributor-loading-card" role="status" aria-live="polite" aria-label="Sending credentials in progress">
-            <div class="credential-distributor-loading-spinner"></div>
+            <div class="loading-hourglass-frame loading-hourglass-frame--compact" aria-hidden="true">
+                <div class="hourglassBackground">
+                    <div class="hourglassContainer">
+                        <div class="hourglassCurves"></div>
+                        <div class="hourglassCapTop"></div>
+                        <div class="hourglassGlassTop"></div>
+                        <div class="hourglassSand"></div>
+                        <div class="hourglassSandStream"></div>
+                        <div class="hourglassCapBottom"></div>
+                        <div class="hourglassGlass"></div>
+                    </div>
+                </div>
+            </div>
             <h3 id="credential-distributor-loading-title">Distributing Credentials</h3>
             <p id="credential-distributor-loading-text">Please wait while the system sends login credentials via email. This may take a few minutes depending on the number of recipients.</p>
             <div class="credential-distributor-loading-progress" id="credential-distributor-loading-progress"></div>
@@ -1918,9 +2047,10 @@
     </div>
 
 
-    <script src="../JsScrip/db-data.js?v=20260414d"></script>
+    <script src="../JsScrip/db-data.js?v=20260802e"></script>
+    <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
     <script src="../JsScrip/vendor/xlsx.full.min.js?v=20260701a"></script>
-    <script src="../JsScrip/adminpanel.js?v=20260701b"></script>
+    <script src="../JsScrip/adminpanel.js?v=20260802a"></script>
 </body>
 
 </html>
