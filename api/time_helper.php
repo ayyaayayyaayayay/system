@@ -7,7 +7,7 @@ const AUTHORITATIVE_PH_TIME_FILE_CACHE_SECONDS = 300;
 function getPhilippineTimeCacheFilePath(): string
 {
     $tmpDir = rtrim((string) sys_get_temp_dir(), "\\/");
-    return $tmpDir . DIRECTORY_SEPARATOR . 'naap_ph_time_cache.json';
+    return $tmpDir . DIRECTORY_SEPARATOR . 'naap_ph_time_cache_v2.json';
 }
 
 function getAuthoritativePhilippineTimezone(): DateTimeZone
@@ -34,7 +34,12 @@ function parsePhilippineDateTimeValue($value): ?DateTimeImmutable
     }
 
     try {
-        return (new DateTimeImmutable($raw))->setTimezone(getAuthoritativePhilippineTimezone());
+        $timezone = getAuthoritativePhilippineTimezone();
+        $hasExplicitTimezone = (bool) preg_match('/(?:Z|[+-]\d{2}:?\d{2})$/i', $raw);
+        $dateTime = $hasExplicitTimezone
+            ? new DateTimeImmutable($raw)
+            : new DateTimeImmutable($raw, $timezone);
+        return $dateTime->setTimezone($timezone);
     } catch (Throwable $error) {
         return null;
     }

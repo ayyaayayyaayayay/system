@@ -5,8 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Program Coordinator Dashboard - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/panel-theme.css?v=20260802c">
-    <link rel="stylesheet" href="../css/procoorpanel.css?v=20260729c">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260808a">
+    <link rel="stylesheet" href="../css/procoorpanel.css?v=20260820a">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
 </head>
@@ -577,8 +577,8 @@
                                     </div>
                                 </li>
                                 <li>
-                                    <div class="panel-title">Email Updates</div>
-                                    <div class="panel-meta">Gmail changes require confirmation before saving.</div>
+                                    <div class="panel-title">Mail Account Updates</div>
+                                    <div class="panel-meta">Mail account changes require confirmation before saving.</div>
                                 </li>
                             </ul>
                         </div>
@@ -602,84 +602,90 @@
                     </div>
                 </header>
 
-                <div class="form-card">
+                <div class="form-card profile-page-card">
                     <div class="form-header">
                         <h2>Dean Profile</h2>
                         <p>View-only information synced from HR records.</p>
                     </div>
-                    <div class="profile-photo-block">
-                        <div class="profile-photo" aria-hidden="true">
-                            <img id="profilePhotoPreview" alt="Profile photo">
-                            <div class="profile-photo-placeholder" id="profilePhotoPlaceholder">DP</div>
+                    <div class="profile-page-body">
+                        <div class="profile-photo-block">
+                            <div class="profile-photo" aria-hidden="true">
+                                <img id="profilePhotoPreview" alt="Profile photo">
+                                <div class="profile-photo-placeholder" id="profilePhotoPlaceholder">DP</div>
+                            </div>
+                            <div class="profile-photo-actions">
+                                <p class="profile-photo-help">Upload a profile photo (JPG/PNG).</p>
+                                <label class="btn-submit profile-photo-btn" for="profilePhotoInput">Upload Photo</label>
+                                <input type="file" id="profilePhotoInput" class="profile-photo-input" accept="image/*">
+                            </div>
                         </div>
-                        <div class="profile-photo-actions">
-                            <p class="profile-photo-help">Upload a profile photo (JPG/PNG).</p>
-                            <label class="btn-submit profile-photo-btn" for="profilePhotoInput">Upload Photo</label>
-                            <input type="file" id="profilePhotoInput" class="profile-photo-input" accept="image/*">
-                        </div>
-                    </div>
-                    <div class="profile-grid profile-grid-wide">
-                        <div class="profile-item">
-                            <span class="profile-label">Faculty ID</span>
-                            <span class="profile-value">N/A</span>
-                        </div>
-                        <div class="profile-item">
-                            <span class="profile-label">Full Name</span>
-                            <span class="profile-value">Dean User</span>
-                        </div>
-                        <div class="profile-item">
-                            <span class="profile-label">Department</span>
-                            <span class="profile-value">N/A</span>
-                        </div>
-                        <div class="profile-item">
-                            <span class="profile-label">Rank</span>
-                            <span class="profile-value">N/A</span>
-                        </div>
-                        <div class="profile-item">
-                            <span class="profile-label">Gmail</span>
-                            <span class="profile-value" id="profileEmail">N/A</span>
-                        </div>
-                        <div class="profile-item">
-                            <span class="profile-label">AY/SEM</span>
-                            <span class="profile-value">Selected semester</span>
+                        <div class="profile-grid profile-grid-wide profile-page-details">
+                            <div class="profile-item">
+                                <span class="profile-label">Faculty ID</span>
+                                <span class="profile-value">N/A</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">Full Name</span>
+                                <span class="profile-value">Dean User</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">Department</span>
+                                <span class="profile-value">N/A</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">Program Lead</span>
+                                <span class="profile-value">N/A</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">Rank</span>
+                                <span class="profile-value">N/A</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">Mail Account</span>
+                                <span class="profile-value" id="profileEmail">N/A</span>
+                            </div>
+                            <div class="profile-item">
+                                <span class="profile-label">AY/SEM</span>
+                                <span class="profile-value">Selected semester</span>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="form-card">
+                <div class="form-card account-actions-card">
                     <div class="form-header">
                         <h2>Account Actions</h2>
                         <p>Choose what you want to update.</p>
                     </div>
                     <div class="form-actions profile-actions">
-                        <button type="button" class="btn-submit js-toggle-account-form"
-                            data-target="emailUpdateCard">Change Gmail</button>
-                        <button type="button" class="btn-cancel js-toggle-account-form"
+                        <button type="button" class="btn-cancel account-action-toggle js-toggle-account-form"
+                            data-target="emailUpdateCard">Change Mail Account</button>
+                        <button type="button" class="btn-cancel account-action-toggle js-toggle-account-form"
                             data-target="passwordUpdateCard">Change Password</button>
                     </div>
                 </div>
 
                 <div class="form-card account-action-card" id="emailUpdateCard" style="display: none;">
                     <div class="form-header">
-                        <h2>Update Gmail</h2>
+                        <h2>Update Mail Account</h2>
                         <p>Read-only in this phase. Update endpoint is not available yet.</p>
                     </div>
                     <form id="changeEmailForm" class="evaluation-form">
                         <div class="form-section">
-                            <h3 class="section-title">Email Details</h3>
+                            <h3 class="section-title">Mail Account Details</h3>
                             <div class="form-group">
-                                <label for="currentEmail">Current Gmail</label>
+                                <label for="currentEmail">Current Mail Account</label>
                                 <input type="email" id="currentEmail" name="currentEmail" class="form-input"
                                     value="N/A" readonly>
                             </div>
                             <div class="form-group">
-                                <label for="newEmail">New Gmail</label>
+                                <label for="newEmail">New Mail Account</label>
                                 <input type="email" id="newEmail" name="newEmail" class="form-input"
-                                    placeholder="Enter new Gmail address" disabled>
+                                    placeholder="Enter new mail account" disabled>
                             </div>
                             <div class="form-group">
-                                <label for="confirmEmail">Confirm New Gmail</label>
+                                <label for="confirmEmail">Confirm New Mail Account</label>
                                 <input type="email" id="confirmEmail" name="confirmEmail" class="form-input"
-                                    placeholder="Re-enter new Gmail address" disabled>
+                                    placeholder="Re-enter new mail account" disabled>
                             </div>
                         </div>
 
@@ -689,7 +695,7 @@
                         </div>
 
                         <div class="form-actions">
-                            <button type="submit" class="btn-submit">Update Gmail</button>
+                            <button type="submit" class="btn-submit">Update Mail Account</button>
                             <button type="button" class="btn-cancel js-close-account-form"
                                 data-target="emailUpdateCard">Cancel</button>
                         </div>
@@ -1133,7 +1139,7 @@
     <script src="../JsScrip/db-data.js?v=20260802e"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
     <script src="../JsScrip/procoorpanel.js?v=20260717a"></script>
-    <script src="../JsScrip/daenpanel.js?v=20260802g"></script>
+    <script src="../JsScrip/daenpanel.js?v=20260808d"></script>
 </body>
 
 </html>

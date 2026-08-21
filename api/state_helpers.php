@@ -7866,16 +7866,6 @@ function getCredentialDistributorOptionalEnvValue(string $name): ?string
     return trim((string) $value);
 }
 
-function getGeminiOptionalEnvValue(string $name): ?string
-{
-    $value = getenv($name);
-    if ($value === false) {
-        return null;
-    }
-
-    return trim((string) $value);
-}
-
 function normalizeCredentialDistributorSmtpEncryptionValue($value, string $default = 'tls'): string
 {
     $token = strtolower(trim((string) $value));
@@ -7938,7 +7928,7 @@ function normalizeCredentialDistributorSmtpTimeoutValue($value, int $default = 2
     return $timeout;
 }
 
-function normalizeGeminiModelValue($value, string $default = 'gemini-2.5-flash'): string
+function normalizeGeminiModelValue($value, string $default = 'gpt-5.6-luna'): string
 {
     $model = trim((string) $value);
     if ($model === '') {
@@ -7959,6 +7949,28 @@ function normalizeGeminiTimeoutMsValue($value, int $default = 30000): int
     }
 
     return max(5000, min($timeout, 60000));
+}
+
+function getOpenAiOptionalEnvValue(string $name): ?string
+{
+    $value = getenv($name);
+    if ($value === false) {
+        return null;
+    }
+
+    return trim((string) $value);
+}
+
+function getFirstOpenAiOptionalEnvValue(array $names): ?string
+{
+    foreach ($names as $name) {
+        $value = getOpenAiOptionalEnvValue((string) $name);
+        if ($value !== null && trim((string) $value) !== '') {
+            return $value;
+        }
+    }
+
+    return null;
 }
 
 function inferCredentialDistributorSmtpPortDefault(string $encryption): int
@@ -8139,16 +8151,16 @@ function buildCredentialDistributorConfigSnapshot(PDO $pdo) {
 
 function getGeminiRawConfig(PDO $pdo): array
 {
-    $stored = getSettingJson($pdo, 'geminiConfig', []);
+    $stored = getSettingJson($pdo, 'openAiConfig', []);
     $stored = is_array($stored) ? $stored : [];
 
     $storedApiKey = trim((string) ($stored['apiKey'] ?? ''));
-    $storedModel = normalizeGeminiModelValue($stored['model'] ?? 'gemini-2.5-flash', 'gemini-2.5-flash');
+    $storedModel = normalizeGeminiModelValue($stored['model'] ?? 'gpt-5.6-luna', 'gpt-5.6-luna');
     $storedTimeoutMs = normalizeGeminiTimeoutMsValue($stored['timeoutMs'] ?? 30000, 30000);
 
-    $envApiKey = getGeminiOptionalEnvValue('NAAP_GEMINI_API_KEY');
-    $envModel = getGeminiOptionalEnvValue('NAAP_GEMINI_MODEL');
-    $envTimeoutMs = getGeminiOptionalEnvValue('NAAP_GEMINI_TIMEOUT_MS');
+    $envApiKey = getFirstOpenAiOptionalEnvValue(['NAAP_OPENAI_API_KEY', 'OPENAI_API_KEY']);
+    $envModel = getFirstOpenAiOptionalEnvValue(['NAAP_OPENAI_MODEL', 'OPENAI_MODEL']);
+    $envTimeoutMs = getFirstOpenAiOptionalEnvValue(['NAAP_OPENAI_TIMEOUT_MS', 'OPENAI_TIMEOUT_MS']);
 
     $hasEnvOverride = $envApiKey !== null || $envModel !== null || $envTimeoutMs !== null;
 
@@ -8156,7 +8168,7 @@ function getGeminiRawConfig(PDO $pdo): array
         ? trim((string) $envApiKey)
         : $storedApiKey;
     $model = ($hasEnvOverride && $envModel !== null)
-        ? normalizeGeminiModelValue($envModel, 'gemini-2.5-flash')
+        ? normalizeGeminiModelValue($envModel, 'gpt-5.6-luna')
         : $storedModel;
     $timeoutMs = ($hasEnvOverride && $envTimeoutMs !== null)
         ? normalizeGeminiTimeoutMsValue($envTimeoutMs, 30000)
@@ -8175,7 +8187,7 @@ function buildGeminiConfigSnapshot(PDO $pdo): array
     $raw = getGeminiRawConfig($pdo);
 
     return [
-        'model' => (string) ($raw['model'] ?? 'gemini-2.5-flash'),
+        'model' => (string) ($raw['model'] ?? 'gpt-5.6-luna'),
         'timeoutMs' => (int) ($raw['timeoutMs'] ?? 30000),
         'hasApiKey' => trim((string) ($raw['apiKey'] ?? '')) !== '',
         'source' => (string) ($raw['source'] ?? 'database'),
@@ -8184,18 +8196,20 @@ function buildGeminiConfigSnapshot(PDO $pdo): array
 
 function persistGeminiConfigSnapshot(PDO $pdo, array $input): array
 {
+    $stored = getSettingJson($pdo, 'openAiConfig', []);
+    $stored = is_array($stored) ? $stored : [];
     $current = getGeminiRawConfig($pdo);
 
     $model = normalizeGeminiModelValue(
-        $input['model'] ?? ($current['model'] ?? 'gemini-2.5-flash'),
-        'gemini-2.5-flash'
+        $input['model'] ?? ($stored['model'] ?? ($current['model'] ?? 'gpt-5.6-luna')),
+        'gpt-5.6-luna'
     );
     $timeoutMs = normalizeGeminiTimeoutMsValue(
-        $input['timeoutMs'] ?? ($current['timeoutMs'] ?? 30000),
+        $input['timeoutMs'] ?? ($stored['timeoutMs'] ?? ($current['timeoutMs'] ?? 30000)),
         30000
     );
 
-    $apiKey = trim((string) ($current['apiKey'] ?? ''));
+    $apiKey = trim((string) ($stored['apiKey'] ?? ''));
     if (array_key_exists('apiKey', $input)) {
         $incomingApiKey = trim((string) ($input['apiKey'] ?? ''));
         if ($incomingApiKey !== '') {
@@ -8205,7 +8219,7 @@ function persistGeminiConfigSnapshot(PDO $pdo, array $input): array
         }
     }
 
-    setSettingJson($pdo, 'geminiConfig', [
+    setSettingJson($pdo, 'openAiConfig', [
         'apiKey' => $apiKey,
         'model' => $model,
         'timeoutMs' => $timeoutMs,

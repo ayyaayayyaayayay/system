@@ -1924,8 +1924,8 @@ function buildFacultySectionCRecommendationContext(paper) {
 
 function resolveFacultyRecommendationSourceLabel(source) {
     const token = normalizeToken(source);
-    if (token === 'gemini') return 'Gemini';
-    if (token === 'gemini+rule') return 'Gemini with rule safety completion';
+    if (token === 'openai' || token === 'gemini') return 'OpenAI';
+    if (token === 'openai+rule' || token === 'gemini+rule') return 'OpenAI with rule safety completion';
     return 'rule fallback';
 }
 
@@ -2002,12 +2002,12 @@ function runFacultySectionCAiRecommendation(paper) {
             const weakAreas = Array.isArray(response && response.weakAreas) ? response.weakAreas : [];
             const weakAreaText = weakAreas.length ? ` Weak areas: ${weakAreas.join(', ')}.` : '';
             const sourceToken = normalizeToken(response && response.source);
-            if (sourceToken === 'gemini') {
+            if (sourceToken === 'openai' || sourceToken === 'gemini') {
                 setFacultyPaperAiFeedback(
                     'success',
                     `Recommendations applied using ${resolveFacultyRecommendationSourceLabel(response.source)}.${weakAreaText} Click Save Section C to persist.`
                 );
-            } else if (sourceToken === 'gemini+rule') {
+            } else if (sourceToken === 'openai+rule' || sourceToken === 'gemini+rule') {
                 setFacultyPaperAiFeedback(
                     'warning',
                     `Recommendations applied using ${resolveFacultyRecommendationSourceLabel(response.source)}.${weakAreaText} Click Save Section C to persist.`
@@ -2015,7 +2015,7 @@ function runFacultySectionCAiRecommendation(paper) {
             } else {
                 setFacultyPaperAiFeedback(
                     'warning',
-                    `Gemini unavailable or partial. Recommendations applied using ${resolveFacultyRecommendationSourceLabel(response.source)}.${weakAreaText} Click Save Section C to persist.`
+                    `OpenAI unavailable or partial. Recommendations applied using ${resolveFacultyRecommendationSourceLabel(response.source)}.${weakAreaText} Click Save Section C to persist.`
                 );
             }
         } catch (error) {
@@ -4025,6 +4025,7 @@ function setupProfileActions() {
             hideAccountActionCards();
             const targetCard = document.getElementById(targetId);
             if (targetCard) {
+                setActiveAccountActionButton(targetId);
                 targetCard.style.display = 'block';
                 const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
                 targetCard.scrollIntoView({ behavior: prefersReducedMotion ? 'auto' : 'smooth', block: 'start' });
@@ -4043,8 +4044,21 @@ function setupProfileActions() {
                     clearFormMessage(form);
                 }
                 targetCard.style.display = 'none';
+                clearActiveAccountActionButtons();
             }
         });
+    });
+}
+
+function setActiveAccountActionButton(targetId) {
+    document.querySelectorAll('.js-toggle-account-form').forEach(button => {
+        button.classList.toggle('is-active', button.getAttribute('data-target') === targetId);
+    });
+}
+
+function clearActiveAccountActionButtons() {
+    document.querySelectorAll('.js-toggle-account-form').forEach(button => {
+        button.classList.remove('is-active');
     });
 }
 
@@ -4079,22 +4093,22 @@ function handleChangeEmail() {
     const confirmEmail = document.getElementById('confirmEmail').value.trim();
 
     if (!newEmail || !confirmEmail) {
-        showFormMessage(form, 'Please fill out all email fields.', 'error');
+        showFormMessage(form, 'Please fill out all mail account fields.', 'error');
         return;
     }
 
     if (newEmail !== confirmEmail) {
-        showFormMessage(form, 'New email and confirmation do not match.', 'error');
+        showFormMessage(form, 'New mail account and confirmation do not match.', 'error');
         return;
     }
 
     if (currentEmail && newEmail.toLowerCase() === currentEmail.toLowerCase()) {
-        showFormMessage(form, 'New email must be different from the current email.', 'error');
+        showFormMessage(form, 'New mail account must be different from the current mail account.', 'error');
         return;
     }
 
     if (!SharedData.changeOwnEmail) {
-        showFormMessage(form, 'Email update service is unavailable.', 'error');
+        showFormMessage(form, 'Mail account update service is unavailable.', 'error');
         return;
     }
 
@@ -4111,14 +4125,14 @@ function handleChangeEmail() {
             currentEmailInput.defaultValue = nextEmail;
         }
     } catch (error) {
-        console.error('[ProfessorPanel] Failed to update email.', error);
-        showFormMessage(form, error && error.message ? error.message : 'Failed to update email.', 'error');
+        console.error('[ProfessorPanel] Failed to update mail account.', error);
+        showFormMessage(form, error && error.message ? error.message : 'Failed to update mail account.', 'error');
         return;
     }
 
     if (form) {
         form.reset();
-        showFormMessage(form, 'Email updated successfully.', 'success');
+        showFormMessage(form, 'Mail account updated successfully.', 'success');
     }
 }
 

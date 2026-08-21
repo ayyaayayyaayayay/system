@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Panel - National Aviation Academy of the Philippines</title>
     <link rel="stylesheet" href="../css/hrpanel.css?v=20260729c">
-    <link rel="stylesheet" href="../css/panel-theme.css?v=20260802c">
-    <link rel="stylesheet" href="../css/adminpanel.css?v=20260801b">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260808a">
+    <link rel="stylesheet" href="../css/adminpanel.css?v=20260821a">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -206,8 +206,8 @@
                         <section class="admin-section dashboard-activity-section">
                             <div class="section-header">
                                 <div class="section-title">
-                                    <h2><i class="fas fa-clock-rotate-left"></i> Recent Activity</h2>
-                                    <p>Latest admin actions and evaluation events.</p>
+                                    <h2><i class="fas fa-clock-rotate-left"></i> Activity Summary</h2>
+                                    <p>Session snapshot of user, login, and evaluation activity.</p>
                                 </div>
                                 <button type="button" class="btn-cancel js-open-activity-log">View Activity Log</button>
                             </div>
@@ -229,7 +229,7 @@
                                         </div>
                                     </div>
                                     <div class="activity-content">
-                                        <p>Loading recent activity...</p>
+                                        <p>Loading activity summary...</p>
                                         <span>Please wait</span>
                                     </div>
                                 </div>
@@ -890,27 +890,27 @@
                             </div>
                         </div>
                         <div class="settings-group credential-distributor-group">
-                            <h3><i class="fas fa-robot"></i> Gemini AI Configuration</h3>
+                            <h3><i class="fas fa-robot"></i> OpenAI Configuration</h3>
                             <p class="credential-distributor-description">
-                                Configure the Gemini API fallback used by bias detection, explainability insights, and faculty Section C recommendations. Environment variables still override saved database values when present.
+                                Configure the OpenAI API fallback used by bias detection, explainability insights, and faculty Section C recommendations. Environment variables still override saved database values when present.
                             </p>
                             <div class="credential-distributor-grid">
                                 <div class="credential-distributor-field">
-                                    <label for="gemini-model">Gemini Model</label>
-                                    <input type="text" id="gemini-model" placeholder="gemini-2.5-flash">
+                                    <label for="gemini-model">OpenAI Model</label>
+                                    <input type="text" id="gemini-model" placeholder="gpt-5.6-luna">
                                 </div>
                                 <div class="credential-distributor-field">
                                     <label for="gemini-timeout-ms">Timeout (milliseconds)</label>
                                     <input type="number" id="gemini-timeout-ms" min="5000" max="60000" placeholder="30000">
                                 </div>
                                 <div class="credential-distributor-field" style="grid-column: 1 / -1;">
-                                    <label for="gemini-api-key">Gemini API Key</label>
-                                    <input type="password" id="gemini-api-key" placeholder="Enter Gemini API key">
+                                    <label for="gemini-api-key">OpenAI API Key</label>
+                                    <input type="password" id="gemini-api-key" placeholder="Enter OpenAI API key">
                                 </div>
                             </div>
                             <div class="credential-distributor-actions">
                                 <button class="btn-save" id="gemini-save-config-btn" type="button">
-                                    <i class="fas fa-save"></i> Save Gemini Config
+                                    <i class="fas fa-save"></i> Save OpenAI Config
                                 </button>
                                 <button class="btn-reset" id="gemini-clear-key-btn" type="button">
                                     <i class="fas fa-eraser"></i> Clear Saved API Key
@@ -983,7 +983,7 @@
                         </div>
                         <button class="btn-save" id="activity-search-btn">Search</button>
                     </div>
-                    <div class="activity-log-table">
+                    <div class="activity-log-table admin-activity-log-table">
                         <table>
                             <thead>
                                 <tr>
@@ -2020,7 +2020,7 @@
                     </div>
                 </div>
             </div>
-            <h3>Processing Bulk Register</h3>
+            <h3 id="bulk-register-loading-title">Processing Bulk Register</h3>
             <p id="bulk-register-loading-text">Please wait while the system validates and saves your Excel file.</p>
         </div>
     </div>
@@ -2050,7 +2050,7 @@
     <script src="../JsScrip/db-data.js?v=20260802e"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
     <script src="../JsScrip/vendor/xlsx.full.min.js?v=20260701a"></script>
-    <script src="../JsScrip/adminpanel.js?v=20260802a"></script>
+    <script src="../JsScrip/adminpanel.js?v=20260821c"></script>
 </body>
 
 </html>

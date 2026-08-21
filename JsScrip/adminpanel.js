@@ -11,12 +11,14 @@ let subjectManagementState = { subjects: [], offerings: [], enrollments: [] };
 let editingSubjectId = null;
 let selectedOfferingForStudents = null;
 let offeringSearchAppliedTerm = '';
+let adminCurrentViewId = null;
 
 // Users loaded from PHP API (or SharedData centralized storage)
 let adminUsers = [];
 let adminEvaluationOverviewChartInstance = null;
 let adminSemestralPerformanceChartInstance = null;
 let announcementComposerReady = false;
+let adminActivitySummaryCache = null;
 let credentialDistributorParsedRows = [];
 let credentialDistributorFailures = [];
 let adminMobileDrawerBound = false;
@@ -33,7 +35,7 @@ let credentialDistributorSmtpConfig = {
     source: 'database'
 };
 let geminiRuntimeConfig = {
-    model: 'gemini-2.5-flash',
+    model: 'gpt-5.6-luna',
     timeoutMs: 30000,
     hasApiKey: false,
     source: 'database'
@@ -91,7 +93,6 @@ function initializeAdminPanel() {
     setupEditUserModal();
     loadDashboardData();
     initializeCharts();
-    loadActivityList();
     loadUsersByOrganization();
     setupQuickActions();
     setupDashboardHeroActions();
@@ -1514,7 +1515,7 @@ function setupGeminiConfig() {
 
     function applyGeminiConfig(config) {
         geminiRuntimeConfig = {
-            model: String(config && config.model || 'gemini-2.5-flash').trim() || 'gemini-2.5-flash',
+            model: String(config && config.model || 'gpt-5.6-luna').trim() || 'gpt-5.6-luna',
             timeoutMs: Number(config && config.timeoutMs || 30000),
             hasApiKey: !!(config && config.hasApiKey),
             source: String(config && config.source || 'database').trim() || 'database'
@@ -1527,18 +1528,18 @@ function setupGeminiConfig() {
         const sourceLabel = formatGeminiConfigSource(geminiRuntimeConfig.source);
         const keyLabel = geminiRuntimeConfig.hasApiKey ? 'API key is present.' : 'API key is missing.';
         setGeminiConfigStatus(
-            `Gemini ready via ${sourceLabel}. Model: ${geminiRuntimeConfig.model}. Timeout: ${geminiRuntimeConfig.timeoutMs} ms. ${keyLabel}`,
+            `OpenAI ready via ${sourceLabel}. Model: ${geminiRuntimeConfig.model}. Timeout: ${geminiRuntimeConfig.timeoutMs} ms. ${keyLabel}`,
             geminiRuntimeConfig.hasApiKey ? 'success' : 'error'
         );
     }
 
     function loadGeminiConfig() {
         try {
-            const config = SharedData.getGeminiConfig(actor);
+            const config = SharedData.getOpenAiConfig ? SharedData.getOpenAiConfig(actor) : SharedData.getGeminiConfig(actor);
             applyGeminiConfig(config);
         } catch (error) {
-            console.error('[AdminPanel] Failed to load Gemini config.', error);
-            setGeminiConfigStatus('Unable to load Gemini config: ' + (error.message || 'Unknown error'), 'error');
+            console.error('[AdminPanel] Failed to load OpenAI config.', error);
+            setGeminiConfigStatus('Unable to load OpenAI config: ' + (error.message || 'Unknown error'), 'error');
         }
     }
 
@@ -1549,12 +1550,12 @@ function setupGeminiConfig() {
     }
 
     saveBtn.addEventListener('click', () => {
-        const model = String(modelInput.value || '').trim() || 'gemini-2.5-flash';
+        const model = String(modelInput.value || '').trim() || 'gpt-5.6-luna';
         const timeoutMs = String(timeoutInput.value || '').trim() || '30000';
         const apiKey = String(apiKeyInput.value || '').trim();
 
         setGeminiBusyState(true);
-        setGeminiConfigStatus('Saving Gemini configuration...', 'info');
+        setGeminiConfigStatus('Saving OpenAI configuration...', 'info');
         try {
             const payload = {
                 model,
@@ -1564,11 +1565,11 @@ function setupGeminiConfig() {
                 payload.apiKey = apiKey;
             }
 
-            const saved = SharedData.saveGeminiConfig(payload, actor);
+            const saved = SharedData.saveOpenAiConfig ? SharedData.saveOpenAiConfig(payload, actor) : SharedData.saveGeminiConfig(payload, actor);
             applyGeminiConfig(saved);
         } catch (error) {
-            console.error('[AdminPanel] Failed to save Gemini config.', error);
-            setGeminiConfigStatus('Failed to save Gemini config: ' + (error.message || 'Unknown error'), 'error');
+            console.error('[AdminPanel] Failed to save OpenAI config.', error);
+            setGeminiConfigStatus('Failed to save OpenAI config: ' + (error.message || 'Unknown error'), 'error');
         } finally {
             setGeminiBusyState(false);
         }
@@ -1576,18 +1577,19 @@ function setupGeminiConfig() {
 
     clearBtn.addEventListener('click', () => {
         setGeminiBusyState(true);
-        setGeminiConfigStatus('Clearing saved Gemini API key...', 'info');
+        setGeminiConfigStatus('Clearing saved OpenAI API key...', 'info');
         try {
-            const saved = SharedData.saveGeminiConfig({
-                model: String(modelInput.value || '').trim() || 'gemini-2.5-flash',
+            const saveConfig = SharedData.saveOpenAiConfig ? SharedData.saveOpenAiConfig : SharedData.saveGeminiConfig;
+            const saved = saveConfig({
+                model: String(modelInput.value || '').trim() || 'gpt-5.6-luna',
                 timeoutMs: String(timeoutInput.value || '').trim() || '30000',
                 apiKey: '',
                 clearApiKey: true
             }, actor);
             applyGeminiConfig(saved);
         } catch (error) {
-            console.error('[AdminPanel] Failed to clear Gemini API key.', error);
-            setGeminiConfigStatus('Failed to clear Gemini API key: ' + (error.message || 'Unknown error'), 'error');
+            console.error('[AdminPanel] Failed to clear OpenAI API key.', error);
+            setGeminiConfigStatus('Failed to clear OpenAI API key: ' + (error.message || 'Unknown error'), 'error');
         } finally {
             setGeminiBusyState(false);
         }
@@ -1698,14 +1700,30 @@ function buildBulkUserFromRow(row, rowNumber, existingUsersByEmail, fileEmailSet
     };
 }
 
-function setBulkRegisterLoadingState(isLoading, message) {
+function waitForBrowserPaint() {
+    return new Promise(resolve => {
+        if (typeof requestAnimationFrame !== 'function') {
+            setTimeout(resolve, 0);
+            return;
+        }
+        requestAnimationFrame(() => {
+            requestAnimationFrame(resolve);
+        });
+    });
+}
+
+function setBulkRegisterLoadingState(isLoading, message, title) {
     const overlay = document.getElementById('bulk-register-loading');
+    const titleEl = document.getElementById('bulk-register-loading-title');
     const messageEl = document.getElementById('bulk-register-loading-text');
     const triggerBtn = document.getElementById('bulk-register-btn');
 
     if (overlay) {
         overlay.classList.toggle('active', Boolean(isLoading));
         overlay.setAttribute('aria-hidden', isLoading ? 'false' : 'true');
+    }
+    if (titleEl) {
+        titleEl.textContent = title || 'Processing Bulk Register';
     }
     if (messageEl && typeof message === 'string' && message.trim() !== '') {
         messageEl.textContent = message;
@@ -1744,7 +1762,8 @@ function setupBulkRegister() {
         }
 
         try {
-            setBulkRegisterLoadingState(true, 'Please wait while the system validates and saves your Excel file.');
+            setBulkRegisterLoadingState(true, 'Please wait while the system validates and saves your Excel file.', 'Processing Bulk Register');
+            await waitForBrowserPaint();
             const rawRows = await readExcelRows(file);
             if (!rawRows.length) {
                 alert('No importable rows found in the first worksheet.');
@@ -1899,6 +1918,8 @@ function setupBulkRegister() {
             if (processedRows > 0) {
                 let savedUsers = [];
                 try {
+                    setBulkRegisterLoadingState(true, `Saving ${processedRows} validated row(s) to the database.`, 'Saving Bulk Register');
+                    await waitForBrowserPaint();
                     savedUsers = (typeof SharedData.bulkUpsertUsers === 'function')
                         ? SharedData.bulkUpsertUsers(usersToPersist)
                         : SharedData.setUsers(usersToPersist);
@@ -2706,7 +2727,7 @@ function getUserSearchTerm() {
 /**
  * Handle adding a new user — sends to PHP API
  */
-function handleAddUser() {
+async function handleAddUser() {
     const form = document.getElementById('add-user-form');
     const formData = new FormData(form);
 
@@ -2753,19 +2774,31 @@ function handleAddUser() {
         id: 'u' + Date.now() // Generate local ID
     };
 
-    // Save directly to the local SharedData database
-    SharedData.addUser(userData);
-    adminUsers = SharedData.getUsers();
+    try {
+        setBulkRegisterLoadingState(true, 'Saving the new user account to the database.', 'Adding User');
+        await waitForBrowserPaint();
 
-    alert('User added successfully to local database!');
-    document.getElementById('add-user-modal').classList.remove('active');
-    resetUserForm();
-    loadUsersByOrganization();
+        // Save directly to the local SharedData database
+        SharedData.addUser(userData);
+        adminUsers = SharedData.getUsers();
 
-    // Refresh Professor Management data if the new user is a professor
-    if (userData.role === 'professor') {
-        loadProfessorsData();
-        renderProfessors();
+        setBulkRegisterLoadingState(false);
+        alert('User added successfully to local database!');
+        document.getElementById('add-user-modal').classList.remove('active');
+        resetUserForm();
+        loadUsersByOrganization();
+
+        // Refresh Professor Management data if the new user is a professor
+        if (userData.role === 'professor') {
+            loadProfessorsData();
+            renderProfessors();
+        }
+    } catch (error) {
+        setBulkRegisterLoadingState(false);
+        console.error('[AdminPanel] Failed to add user.', error);
+        alert('Failed to add user: ' + (error.message || 'Unknown error'));
+    } finally {
+        setBulkRegisterLoadingState(false);
     }
 }
 
@@ -3400,34 +3433,206 @@ function initializeCharts() {
 /**
  * Load recent activity list
  */
+function renderActivitySummaryRows(activityList, summaries) {
+    if (!activityList) return;
+
+    activityList.innerHTML = summaries.map(summary => {
+        return `
+        <div class="activity-item">
+            <div class="activity-icon ${escapeActivityHtml(summary.type)}">
+                <i class="fas fa-${getActivityIcon(summary.type)}"></i>
+            </div>
+            <div class="activity-content">
+                <p>${escapeActivityHtml(summary.message)}</p>
+                <span>${escapeActivityHtml(summary.detail)}</span>
+            </div>
+        </div>
+        `;
+    }).join('');
+}
+
+function renderActivitySummaryPrompt(activityList, message, iconType = 'system') {
+    if (!activityList) return;
+
+    activityList.innerHTML = `
+        <div class="activity-item">
+            <div class="activity-icon ${escapeActivityHtml(iconType)}">
+                <i class="fas fa-${getActivityIcon(iconType)}"></i>
+            </div>
+            <div class="activity-content">
+                <p>${escapeActivityHtml(message)}</p>
+                <span>Activity log</span>
+            </div>
+        </div>
+    `;
+}
+
 function loadActivityList() {
     const activityList = document.getElementById('activity-list');
     if (!activityList) return;
 
-    const activities = [
-        { icon: 'login', message: 'Admin logged in successfully', time: '2 minutes ago' },
-        { icon: 'user', message: 'New student added to ICS dept', time: '15 minutes ago' },
-        { icon: 'user', message: 'New professor added to ILAS dept', time: '1 hour ago' },
-        { icon: 'evaluation', message: '25 students completed evaluations', time: '2 hours ago' },
-        { icon: 'login', message: 'HR staff logged in', time: '3 hours ago' }
-    ];
+    if (adminActivitySummaryCache) {
+        renderActivitySummaryRows(activityList, adminActivitySummaryCache);
+        return;
+    }
 
-    activityList.innerHTML = activities.map(activity => `
-        <div class="activity-item">
-            <div class="activity-icon ${activity.icon}">
-                <i class="fas fa-${getActivityIcon(activity.icon)}"></i>
-            </div>
-            <div class="activity-content">
-                <p>${activity.message}</p>
-                <span>${activity.time}</span>
-            </div>
-        </div>
-    `).join('');
+    try {
+        const summaries = buildDashboardActivitySummary();
+        adminActivitySummaryCache = summaries;
+        if (!summaries.length) {
+            renderActivitySummaryPrompt(activityList, 'No activity summary available.');
+            return;
+        }
+        renderActivitySummaryRows(activityList, summaries);
+    } catch (error) {
+        console.error('[AdminPanel] Failed to build dashboard activity summary.', error);
+        renderActivitySummaryPrompt(activityList, 'Failed to load activity summary.');
+    }
+}
+
+function buildDashboardActivitySummary() {
+    const users = SharedData.getUsers ? SharedData.getUsers() : [];
+    const evaluations = SharedData.getEvaluations ? SharedData.getEvaluations() : [];
+    const activityLog = SharedData.getActivityLog ? SharedData.getActivityLog() : [];
+    const now = SharedData.getNowDate ? SharedData.getNowDate() : new Date();
+    const oneHourAgoMs = now.getTime() - (60 * 60 * 1000);
+    const todayStart = parseRecentActivityDate(SharedData.getCurrentPhilippineDateYmd ? SharedData.getCurrentPhilippineDateYmd() : '');
+    const todayStartMs = Number.isNaN(todayStart.getTime()) ? 0 : todayStart.getTime();
+
+    const activeUsers = users.filter(user => isDashboardSummaryActiveUser(user)).length;
+    const totalUsers = Array.isArray(users) ? users.length : 0;
+    const evaluationSubmissionsLastHour = evaluations.filter(evaluation => {
+        const date = parseRecentActivityDate(evaluation && (evaluation.submittedAt || evaluation.timestamp || ''));
+        if (Number.isNaN(date.getTime())) return false;
+        if (date.getTime() < oneHourAgoMs || date.getTime() > now.getTime()) return false;
+        const status = String(evaluation && evaluation.status || 'submitted').trim().toLowerCase();
+        return status !== 'draft' && status !== 'pending';
+    }).length;
+
+    const todaysLogRows = activityLog.filter(row => {
+        const date = parseRecentActivityDate(row && (row.timestamp || row.happened_at || ''));
+        return !Number.isNaN(date.getTime()) && date.getTime() >= todayStartMs && date.getTime() <= now.getTime();
+    });
+
+    const loginRowsToday = todaysLogRows.filter(row => normalizeRecentActivityType(row) === 'login');
+    const uniqueLoginUsersToday = new Set(loginRowsToday.map(row => String(row.user_id || row.role || row.description || '').trim()).filter(Boolean)).size;
+    const userChangesToday = todaysLogRows.filter(row => normalizeRecentActivityType(row) === 'user').length;
+    const systemEventsToday = todaysLogRows.filter(row => {
+        const type = normalizeRecentActivityType(row);
+        return type !== 'login' && type !== 'user' && type !== 'evaluation';
+    }).length;
+
+    return [
+        {
+            type: 'user',
+            message: `${activeUsers} active user${activeUsers === 1 ? '' : 's'}`,
+            detail: `${totalUsers} total account${totalUsers === 1 ? '' : 's'} in the system`
+        },
+        {
+            type: 'evaluation',
+            message: `${evaluationSubmissionsLastHour} evaluation submission${evaluationSubmissionsLastHour === 1 ? '' : 's'} within the hour`,
+            detail: 'Based on submitted evaluation timestamps'
+        },
+        {
+            type: 'login',
+            message: `${loginRowsToday.length} login event${loginRowsToday.length === 1 ? '' : 's'} today`,
+            detail: `${uniqueLoginUsersToday} unique account${uniqueLoginUsersToday === 1 ? '' : 's'} logged in`
+        },
+        {
+            type: 'system',
+            message: `${userChangesToday + systemEventsToday} admin/system change${(userChangesToday + systemEventsToday) === 1 ? '' : 's'} today`,
+            detail: `${userChangesToday} user change${userChangesToday === 1 ? '' : 's'}, ${systemEventsToday} system event${systemEventsToday === 1 ? '' : 's'}`
+        }
+    ];
+}
+
+function isDashboardSummaryActiveUser(user) {
+    if (!user) return false;
+    const status = String(user.status || 'active').trim().toLowerCase();
+    return status !== 'inactive' && user.isActive !== false;
+}
+
+function escapeActivityHtml(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function normalizeRecentActivityType(activity) {
+    const text = [
+        activity && activity.type,
+        activity && activity.action,
+        activity && activity.description,
+    ].map(value => String(value || '').toLowerCase()).join(' ');
+
+    if (text.includes('evaluation')) return 'evaluation';
+    if (text.includes('login') || text.includes('auth')) return 'login';
+    if (text.includes('user') || text.includes('account') || text.includes('student') || text.includes('professor')) return 'user';
+    return 'system';
+}
+
+function formatRecentActivityTime(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return 'Just now';
+
+    const date = parseRecentActivityDate(raw);
+    if (Number.isNaN(date.getTime())) {
+        return raw;
+    }
+
+    const now = SharedData.getNowDate ? SharedData.getNowDate() : new Date();
+    const diffMs = now.getTime() - date.getTime();
+    if (diffMs < 0) {
+        return SharedData.formatDateTimeInPhilippines
+            ? SharedData.formatDateTimeInPhilippines(date)
+            : date.toLocaleString();
+    }
+
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+
+    if (diffMs < minute) return 'Just now';
+    if (diffMs < hour) {
+        const minutes = Math.floor(diffMs / minute);
+        return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+    }
+    if (diffMs < day) {
+        const hours = Math.floor(diffMs / hour);
+        return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    }
+    if (diffMs < 7 * day) {
+        const days = Math.floor(diffMs / day);
+        return `${days} day${days === 1 ? '' : 's'} ago`;
+    }
+
+    return SharedData.formatDateTimeInPhilippines
+        ? SharedData.formatDateTimeInPhilippines(date)
+        : date.toLocaleString();
+}
+
+function parseRecentActivityDate(value) {
+    const raw = String(value || '').trim();
+    const localTimestamp = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (localTimestamp) {
+        const time = `${localTimestamp[4] || '00'}:${localTimestamp[5] || '00'}:${localTimestamp[6] || '00'}`;
+        return new Date(`${localTimestamp[1]}-${localTimestamp[2]}-${localTimestamp[3]}T${time}+08:00`);
+    }
+
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+
+    const altParsed = new Date(raw.replace(' ', 'T'));
+    return Number.isNaN(altParsed.getTime()) ? new Date(NaN) : altParsed;
 }
 
 function loadActivityLog() {
     const tbody = document.getElementById('activity-log-body');
     if (!tbody) return;
+    const ADMIN_ACTIVITY_LOG_LIMIT = 80;
 
     const fromInput = document.getElementById('activity-from');
     const toInput = document.getElementById('activity-to');
@@ -3485,7 +3690,7 @@ function loadActivityLog() {
             term: String(searchInput ? searchInput.value : '').trim(),
             from: String(fromInput ? fromInput.value : '').trim(),
             to: String(toInput ? toInput.value : '').trim(),
-            limit: 200,
+            limit: ADMIN_ACTIVITY_LOG_LIMIT,
         };
 
         try {
@@ -4460,6 +4665,10 @@ function handleQuickAction(action) {
  */
 function switchToView(viewId) {
     const safeViewId = viewId || 'dashboard';
+    if (adminCurrentViewId === safeViewId && isContentViewVisible(safeViewId + '-view')) {
+        return;
+    }
+
     const contentViews = document.querySelectorAll('.content-view');
     contentViews.forEach(view => {
         view.style.display = 'none';
@@ -4472,6 +4681,7 @@ function switchToView(viewId) {
     }
 
     setActiveNav(safeViewId);
+    adminCurrentViewId = safeViewId;
     handleViewShown(safeViewId);
 }
 
@@ -4491,6 +4701,7 @@ function handleViewShown(viewId) {
     if (viewId === 'dashboard') {
         updateOverviewCards();
         initializeCharts();
+        loadActivityList();
         loadReports();
     }
     if (viewId === 'hr-professors') {
@@ -7894,8 +8105,8 @@ function normalizeAdminAiAnalyticsSourceLabel(value) {
 
 function formatAdminAiInsightSource(source) {
     const token = String(source || 'rule').trim().toLowerCase();
-    if (token === 'gemini') return 'Gemini';
-    if (token === 'gemini+rule') return 'Gemini + Rule fallback';
+    if (token === 'openai' || token === 'gemini') return 'OpenAI';
+    if (token === 'openai+rule' || token === 'gemini+rule') return 'OpenAI + Rule fallback';
     return 'Rule fallback';
 }
 
@@ -8444,9 +8655,9 @@ function runAdminAiAnalyticsForProfessor(professorId, semesterId, outputEl, btnE
             }
             const insight = normalizeAdminAiInsightData(response && response.insight, fallbackInsight);
             const source = response && response.source ? response.source : 'rule';
-            const notice = source === 'gemini'
+            const notice = source === 'openai' || source === 'gemini'
                 ? ''
-                : 'Gemini is unavailable or partial; showing rule-based fallback insights.';
+                : 'OpenAI is unavailable or partial; showing rule-based fallback insights.';
             renderAdminAiInsightResult(outputEl, insight, source, notice);
         } catch (error) {
             console.error('[AdminPanel] AI analytics failed, using local fallback.', error);
@@ -8454,7 +8665,7 @@ function runAdminAiAnalyticsForProfessor(professorId, semesterId, outputEl, btnE
                 outputEl,
                 fallbackInsight,
                 'rule',
-                'Gemini is unavailable right now. Showing rule-based fallback analytics.'
+                'OpenAI is unavailable right now. Showing rule-based fallback analytics.'
             );
         } finally {
             if (btnEl) {
@@ -10401,4 +10612,3 @@ if (typeof module !== 'undefined' && module.exports) {
         loadUserManagement
     };
 }
-

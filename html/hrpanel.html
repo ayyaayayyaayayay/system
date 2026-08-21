@@ -5,8 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HR Dashboard - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/panel-theme.css?v=20260802c">
-    <link rel="stylesheet" href="../css/hrpanel.css?v=20260729c">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260808a">
+    <link rel="stylesheet" href="../css/hrpanel.css?v=20260821a">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -1040,6 +1040,26 @@
 
                 <!-- Activity Log View -->
                 <div id="activity-log-view" class="content-view" style="display: none;">
+                    <section class="hr-activity-summary-section" aria-labelledby="hr-activity-summary-title">
+                        <div class="hr-activity-summary-header">
+                            <div class="hr-activity-summary-title">
+                                <h2 id="hr-activity-summary-title"><i class="fas fa-clock-rotate-left"></i> Activity Summary</h2>
+                                <p>Session snapshot of user, login, and evaluation activity.</p>
+                            </div>
+                        </div>
+                        <div class="hr-activity-summary-list" id="hr-activity-summary-list" aria-live="polite">
+                            <div class="hr-activity-summary-item">
+                                <div class="hr-activity-summary-icon login">
+                                    <i class="fas fa-hourglass-half"></i>
+                                </div>
+                                <div class="hr-activity-summary-content">
+                                    <p>Loading activity summary...</p>
+                                    <span>Please wait</span>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
                     <div class="activity-log-controls">
                         <div class="log-control">
                             <label for="hr-activity-from">From</label>
@@ -1065,7 +1085,7 @@
                         </div>
                         <button class="btn-save" id="hr-activity-search-btn">Search</button>
                     </div>
-                    <div class="activity-log-table">
+                    <div class="activity-log-table hr-activity-log-table">
                         <table>
                             <thead>
                                 <tr>
@@ -1451,7 +1471,7 @@
 
     <script src="../JsScrip/db-data.js?v=20260802e"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
-    <script src="../JsScrip/hrpanel.js?v=20260802a"></script>
+    <script src="../JsScrip/hrpanel.js?v=20260821a"></script>
 </body>
 
 </html>

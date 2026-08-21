@@ -298,26 +298,53 @@ body {
 }
 
 .profile-actions {
-    justify-content: flex-start;
+    justify-content: flex-end;
     flex-wrap: wrap;
+}
+
+.profile-page-card {
+    max-width: 100%;
+    overflow: hidden;
+}
+
+#profileView {
+    width: 100%;
+}
+
+#profileView > .top-header,
+#profileView > .form-card {
+    width: 100%;
+    max-width: 100%;
+}
+
+.profile-page-body {
+    display: grid;
+    grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+    gap: 24px;
+    align-items: stretch;
 }
 
 .profile-photo-block {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 20px;
-    padding: 16px 18px;
-    border-radius: 14px;
-    border: 1px solid #eef2f7;
-    background: #f9fafb;
-    margin-bottom: 18px;
+    justify-content: center;
+    gap: 16px;
+    min-height: 100%;
+    padding: 24px;
+    border-radius: 18px;
+    border: 0;
+    background: #f8fafc;
+    margin-bottom: 0;
+    text-align: center;
 }
 
 .profile-photo {
-    width: 96px;
-    height: 120px;
-    border-radius: 50%;
-    background: var(--border-color);
+    width: 132px;
+    height: 132px;
+    border-radius: 18px;
+    background: #e9eef7;
+    box-shadow: 0 12px 26px rgba(15, 23, 42, 0.1);
     position: relative;
     overflow: hidden;
     flex-shrink: 0;
@@ -329,7 +356,7 @@ body {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    border-radius: 50%;
+    border-radius: inherit;
     display: none;
 }
 
@@ -347,7 +374,9 @@ body {
 .profile-photo-actions {
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 10px;
+    width: 100%;
 }
 
 .profile-photo-help {
@@ -364,11 +393,53 @@ body {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    width: min(190px, 100%);
     padding: 10px 18px;
     font-size: 13px;
     border-radius: 10px;
     cursor: pointer;
     text-decoration: none;
+}
+
+.profile-page-details {
+    align-content: stretch;
+}
+
+.profile-page-details.profile-grid-wide {
+    grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
+.profile-page-details .profile-item {
+    min-height: 74px;
+    justify-content: center;
+    padding: 14px 16px;
+}
+
+.account-actions-card .form-header {
+    margin-bottom: 18px;
+}
+
+.profile-page-card,
+.account-actions-card,
+.account-action-card {
+    width: 100%;
+    max-width: 100%;
+}
+
+.account-actions-card .profile-actions {
+    padding-top: 4px;
+}
+
+.account-action-toggle {
+    min-width: 172px;
+    justify-content: center;
+}
+
+.account-action-toggle.is-active {
+    background: var(--primary-gradient);
+    color: #ffffff;
+    border-color: transparent;
+    box-shadow: 0 10px 20px rgba(91, 103, 232, 0.22);
 }
 
 .account-action-card {
@@ -1964,7 +2035,13 @@ body {
 }
 
 .dean-semestral-trend-chart-container {
-    height: 240px;
+    height: 320px;
+    overflow: visible;
+}
+
+.dean-semestral-trend-chart-container canvas {
+    height: 100% !important;
+    min-height: 0;
 }
 
 .faculty-response-table-container {
@@ -2106,22 +2183,32 @@ body {
 .peer-mgmt-section {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 24px;
+    padding: 28px;
+    background: rgba(255, 255, 255, 0.94);
+    border: 1px solid rgba(226, 232, 240, 0.92);
+    border-radius: 24px;
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
 }
 
 .peer-mgmt-grid {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 20px;
+    gap: 28px;
     align-items: start;
 }
 
 .peer-mgmt-card {
-    border: 1px solid var(--border-color);
-    border-radius: 14px;
-    background: var(--bg-secondary);
-    padding: 20px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding: 0;
     min-width: 0;
+}
+
+.peer-mgmt-card + .peer-mgmt-card {
+    padding-top: 28px;
+    border-top: 1px solid #e2e8f0;
 }
 
 .peer-mgmt-card h2 {
@@ -2151,13 +2238,32 @@ body {
 .peer-mgmt-subtitle {
     font-size: 12px;
     color: #6b7280;
-    margin-bottom: 16px;
+    margin-bottom: 18px;
+}
+
+.peer-mgmt-card > h2,
+.peer-mgmt-ops-card > h2 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.peer-mgmt-card > h2::before,
+.peer-mgmt-ops-card > h2::before {
+    content: "";
+    width: 6px;
+    height: 20px;
+    border-radius: 999px;
+    background: var(--primary-gradient);
+    flex: 0 0 auto;
 }
 
 .peer-mgmt-ops-card {
-    margin-top: 16px;
-    border-top: 1px solid var(--border-color);
-    padding-top: 16px;
+    margin-top: 28px;
+    padding-top: 28px;
+    border-top: 1px solid #e2e8f0;
+    background: transparent;
+    box-shadow: none;
 }
 
 .peer-mgmt-ops-card h2 {
@@ -2179,14 +2285,27 @@ body {
 }
 
 .peer-mgmt-members-table-container {
-    margin-top: 12px;
+    margin-top: 16px;
+    border-radius: 14px;
+    overflow: auto;
+    background: #f8fafc;
 }
 
 .peer-mgmt-rooms-table-container {
     max-height: 360px;
     overflow-y: auto;
-    border: 1px solid var(--border-color);
-    border-radius: 10px;
+    border-radius: 14px;
+    background: #f8fafc;
+}
+
+.peer-mgmt-rooms-table-container .summary-table,
+.peer-mgmt-members-table-container .summary-table {
+    background: transparent;
+}
+
+.peer-mgmt-rooms-table-container .summary-table tbody tr,
+.peer-mgmt-members-table-container .summary-table tbody tr {
+    background: #ffffff;
 }
 
 #peerMgmtRoomsTable thead th,
@@ -2596,6 +2715,7 @@ body {
 
 .dean-panel .dashboard-container {
     position: relative;
+    min-height: 100vh;
 }
 
 .dean-panel .sidebar {
@@ -2851,6 +2971,31 @@ body {
     background: rgba(255, 255, 255, 0.94);
 }
 
+.dean-panel .peer-mgmt-section {
+    padding: 28px;
+}
+
+.dean-panel .peer-mgmt-card,
+.dean-panel .peer-mgmt-ops-card {
+    border-radius: 0;
+    border: 0;
+    box-shadow: none;
+    background: transparent;
+}
+
+.dean-panel .peer-mgmt-card {
+    padding: 0;
+}
+
+.dean-panel .peer-mgmt-card + .peer-mgmt-card {
+    padding-top: 28px;
+    border-top: 1px solid #e2e8f0;
+}
+
+.dean-panel .peer-mgmt-ops-card {
+    padding: 28px 0 0;
+}
+
 .dean-panel .summary-card {
     padding: 20px 22px;
 }
@@ -2936,6 +3081,14 @@ body {
         flex-direction: row;
         flex-wrap: wrap;
     }
+
+    .profile-page-body {
+        grid-template-columns: 1fr;
+    }
+
+    .profile-photo-block {
+        min-height: auto;
+    }
 }
 
 @media (max-width: 1000px) {
@@ -2991,15 +3144,40 @@ body {
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        width: 38px;
+        height: 38px;
+        border-radius: 12px;
     }
 
     .dean-panel .top-header {
-        padding: 18px 16px;
-        border-radius: 20px;
+        padding: 14px 14px;
+        border-radius: 18px;
     }
 
     .dean-panel .page-title {
-        font-size: 24px;
+        font-size: 22px;
+        line-height: 1.18;
+    }
+
+    .dean-panel .page-context {
+        font-size: 12px;
+        line-height: 1.45;
+    }
+
+    .dean-panel .user-action-btn,
+    .dean-panel .user-profile {
+        min-width: 38px;
+        min-height: 38px;
+        padding: 6px;
+        border-radius: 14px;
+    }
+
+    .profile-page-details.profile-grid-wide {
+        grid-template-columns: 1fr;
+    }
+
+    .account-action-toggle {
+        width: 100%;
     }
 
     .dean-panel .user-profile span {
@@ -3011,11 +3189,25 @@ body {
     .dean-panel .top-header {
         flex-direction: column;
         align-items: flex-start;
+        padding: 12px;
+        border-radius: 16px;
     }
 
     .dean-panel .user-info {
         width: 100%;
         justify-content: flex-end;
+    }
+
+    .dean-header-main {
+        gap: 10px;
+    }
+
+    .page-title-block {
+        gap: 3px;
+    }
+
+    .dean-panel .page-title {
+        font-size: 21px;
     }
 
     .dean-panel .dashboard-hero-card,
@@ -3103,6 +3295,10 @@ body {
         height: 270px;
     }
 
+    .dean-panel .dean-semestral-trend-chart-container {
+        height: 300px;
+    }
+
     .dean-panel .faculty-response-controls {
         align-items: stretch;
     }
@@ -3141,9 +3337,16 @@ body {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .dean-panel .peer-mgmt-card,
+    .dean-panel .peer-mgmt-section {
+        padding: 20px;
+    }
+
+    .dean-panel .peer-mgmt-card {
+        padding: 0;
+    }
+
     .dean-panel .peer-mgmt-ops-card {
-        padding: 18px;
+        padding: 24px 0 0;
     }
 
     .dean-panel .peer-mgmt-row-actions,
@@ -3164,7 +3367,8 @@ body {
 
     .dean-panel .top-header {
         gap: 12px;
-        padding: 16px 14px;
+        padding: 12px;
+        border-radius: 16px;
     }
 
     .dean-panel .page-title {
@@ -3267,6 +3471,10 @@ body {
         height: 220px;
     }
 
+    .dean-panel .dean-semestral-trend-chart-container {
+        height: 300px;
+    }
+
     .dean-panel .faculty-response-controls,
     .dean-panel .faculty-response-actions,
     .dean-panel .faculty-response-toggle,
@@ -3313,10 +3521,20 @@ body {
 
     .dean-panel .faculty-comments-panel,
     .dean-panel .dean-semestral-trend-panel,
-    .dean-panel .dean-semestral-trend-chart-card,
-    .dean-panel .peer-mgmt-card,
-    .dean-panel .peer-mgmt-ops-card {
+    .dean-panel .dean-semestral-trend-chart-card {
         padding: 18px 16px;
+    }
+
+    .dean-panel .peer-mgmt-section {
+        padding: 16px;
+    }
+
+    .dean-panel .peer-mgmt-card {
+        padding: 0;
+    }
+
+    .dean-panel .peer-mgmt-ops-card {
+        padding: 22px 0 0;
     }
 
     .dean-panel .faculty-comments-header {

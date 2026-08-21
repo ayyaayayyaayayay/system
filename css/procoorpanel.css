@@ -1,4 +1,4 @@
-@import url('./daenpanel.css');
+@import url('./daenpanel.css?v=20260820a');
 
 body.procoor-panel .dashboard-container {
     min-height: 100vh;

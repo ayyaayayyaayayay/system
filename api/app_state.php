@@ -1008,7 +1008,7 @@ function mergeBiasClassifications(array $geminiClassification, array $ruleClassi
     return [
         'label' => $geminiLabel,
         'reason' => $geminiReason !== '' ? $geminiReason : 'Model-generated classification.',
-        'source' => 'gemini',
+        'source' => 'openai',
     ];
 }
 
@@ -1112,7 +1112,7 @@ function buildGeminiBiasDetectionPrompt(array $batch) {
         . "Return JSON only with this shape:\n"
         . "{ \"items\": [ { \"id\": \"...\", \"label\": \"Constructive|Neutral|Biased\", \"reason\": \"short reason\" } ] }\n"
         . "Input:\n"
-        . json_encode($input, JSON_UNESCAPED_UNICODE);
+        . json_encode($input, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
 }
 
 function extractJsonObjectFromGeminiText($value) {
@@ -1170,7 +1170,125 @@ function isRetryableGeminiStatus($statusCode) {
     return in_array((int) $statusCode, [429, 500, 502, 503, 504], true);
 }
 
-function requestGeminiGenerateContent($prompt, $apiKey, $model, $timeoutMs) {
+function buildOpenAiBiasDetectionSchema(): array
+{
+    return [
+        'type' => 'object',
+        'properties' => [
+            'items' => [
+                'type' => 'array',
+                'items' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'id' => ['type' => 'string'],
+                        'label' => ['type' => 'string', 'enum' => ['Constructive', 'Neutral', 'Biased']],
+                        'reason' => ['type' => 'string'],
+                    ],
+                    'required' => ['id', 'label', 'reason'],
+                    'additionalProperties' => false,
+                ],
+            ],
+        ],
+        'required' => ['items'],
+        'additionalProperties' => false,
+    ];
+}
+
+function buildOpenAiExplainabilitySchema(): array
+{
+    return [
+        'type' => 'object',
+        'properties' => [
+            'keywords' => [
+                'type' => 'array',
+                'items' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'term' => ['type' => 'string'],
+                        'count' => ['type' => 'integer'],
+                        'tone' => ['type' => 'string', 'enum' => ['positive', 'neutral', 'negative']],
+                    ],
+                    'required' => ['term', 'count', 'tone'],
+                    'additionalProperties' => false,
+                ],
+            ],
+            'clusters' => [
+                'type' => 'array',
+                'items' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'theme' => ['type' => 'string'],
+                        'count' => ['type' => 'integer'],
+                        'sources' => ['type' => 'array', 'items' => ['type' => 'string']],
+                        'sampleComments' => ['type' => 'array', 'items' => ['type' => 'string']],
+                    ],
+                    'required' => ['theme', 'count', 'sources', 'sampleComments'],
+                    'additionalProperties' => false,
+                ],
+            ],
+            'reasoning' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'judgment' => [
+                'type' => 'object',
+                'properties' => [
+                    'label' => ['type' => 'string', 'enum' => ['Excellent', 'Good', 'Needs Improvement', 'Critical Concern']],
+                    'rationale' => ['type' => 'string'],
+                    'confidence' => ['type' => 'integer'],
+                ],
+                'required' => ['label', 'rationale', 'confidence'],
+                'additionalProperties' => false,
+            ],
+        ],
+        'required' => ['keywords', 'clusters', 'reasoning', 'judgment'],
+        'additionalProperties' => false,
+    ];
+}
+
+function buildOpenAiFacultySectionCSchema(): array
+{
+    return [
+        'type' => 'object',
+        'properties' => [
+            'weakAreas' => [
+                'type' => 'array',
+                'items' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'name' => ['type' => 'string'],
+                        'score' => ['type' => 'number'],
+                    ],
+                    'required' => ['name', 'score'],
+                    'additionalProperties' => false,
+                ],
+            ],
+            'sectionC' => [
+                'type' => 'object',
+                'properties' => [
+                    'areas' => ['type' => 'string'],
+                    'activities' => ['type' => 'string'],
+                    'actionPlan' => ['type' => 'string'],
+                ],
+                'required' => ['areas', 'activities', 'actionPlan'],
+                'additionalProperties' => false,
+            ],
+            'reasoning' => ['type' => 'array', 'items' => ['type' => 'string']],
+        ],
+        'required' => ['weakAreas', 'sectionC', 'reasoning'],
+        'additionalProperties' => false,
+    ];
+}
+
+function normalizeOpenAiSchemaName($value): string
+{
+    $name = preg_replace('/[^A-Za-z0-9_]+/', '_', trim((string) $value));
+    $name = trim((string) $name, '_');
+    if ($name === '') {
+        return 'response_json';
+    }
+
+    return substr($name, 0, 64);
+}
+
+function requestGeminiGenerateContent($prompt, $apiKey, $model, $timeoutMs, ?array $schema = null, $schemaName = 'response_json') {
     if (!function_exists('curl_init')) {
         return [
             'success' => false,
@@ -1187,14 +1305,14 @@ function requestGeminiGenerateContent($prompt, $apiKey, $model, $timeoutMs) {
             'success' => false,
             'status' => 0,
             'raw' => '',
-            'error' => 'Gemini API key is not configured.',
+            'error' => 'OpenAI API key is not configured.',
             'model' => '',
         ];
     }
 
     $cleanModel = trim((string) $model);
     if ($cleanModel === '') {
-        $cleanModel = 'gemini-2.5-flash';
+        $cleanModel = 'gpt-5.6-luna';
     }
 
     $safeTimeoutMs = (int) $timeoutMs;
@@ -1203,34 +1321,48 @@ function requestGeminiGenerateContent($prompt, $apiKey, $model, $timeoutMs) {
     }
     $safeTimeoutMs = max(5000, min($safeTimeoutMs, 60000));
 
-    $url = sprintf(
-        'https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s',
-        rawurlencode($cleanModel),
-        rawurlencode($cleanKey)
-    );
+    $url = 'https://api.openai.com/v1/responses';
+
+    $format = ['type' => 'json_object'];
+    if (is_array($schema)) {
+        $format = [
+            'type' => 'json_schema',
+            'name' => normalizeOpenAiSchemaName($schemaName),
+            'schema' => $schema,
+            'strict' => true,
+        ];
+    }
 
     $payload = [
-        'contents' => [
+        'model' => $cleanModel,
+        'input' => [
             [
-                'parts' => [
-                    [
-                        'text' => (string) $prompt,
-                    ],
-                ],
+                'role' => 'system',
+                'content' => 'You are a JSON-only assistant. Return one valid JSON object matching the requested schema and no markdown.',
+            ],
+            [
+                'role' => 'user',
+                'content' => (string) $prompt,
             ],
         ],
-        'generationConfig' => [
-            'temperature' => 0,
-            'responseMimeType' => 'application/json',
+        'text' => [
+            'format' => $format,
         ],
+        'store' => false,
     ];
+    $reasoningEffort = strtolower(trim((string) (getenv('NAAP_OPENAI_REASONING_EFFORT') ?: (getenv('OPENAI_REASONING_EFFORT') ?: 'low'))));
+    $allowedReasoningEfforts = ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
+    if (!in_array($reasoningEffort, $allowedReasoningEfforts, true)) {
+        $reasoningEffort = 'low';
+    }
+    $payload['reasoning'] = ['effort' => $reasoningEffort];
 
-    $attempts = (int) (getenv('NAAP_GEMINI_MAX_ATTEMPTS') ?: 1);
+    $attempts = (int) (getenv('NAAP_OPENAI_MAX_ATTEMPTS') ?: (getenv('OPENAI_MAX_ATTEMPTS') ?: 2));
     if ($attempts < 1) $attempts = 1;
     if ($attempts > 4) $attempts = 4;
     $lastStatus = 0;
     $lastRaw = '';
-    $lastError = 'Gemini request failed.';
+    $lastError = 'OpenAI request failed.';
 
     for ($attempt = 1; $attempt <= $attempts; $attempt += 1) {
         $ch = curl_init($url);
@@ -1239,7 +1371,19 @@ function requestGeminiGenerateContent($prompt, $apiKey, $model, $timeoutMs) {
                 'success' => false,
                 'status' => 0,
                 'raw' => '',
-                'error' => 'Failed to initialize cURL for Gemini request.',
+                'error' => 'Failed to initialize cURL for OpenAI request.',
+                'model' => $cleanModel,
+            ];
+        }
+
+        $payloadJson = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+        if (!is_string($payloadJson) || $payloadJson === '') {
+            curl_close($ch);
+            return [
+                'success' => false,
+                'status' => 0,
+                'raw' => '',
+                'error' => 'Failed to encode OpenAI request payload.',
                 'model' => $cleanModel,
             ];
         }
@@ -1247,8 +1391,11 @@ function requestGeminiGenerateContent($prompt, $apiKey, $model, $timeoutMs) {
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-            CURLOPT_POSTFIELDS => json_encode($payload),
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/json',
+                'Authorization: Bearer ' . $cleanKey,
+            ],
+            CURLOPT_POSTFIELDS => $payloadJson,
             CURLOPT_TIMEOUT_MS => $safeTimeoutMs,
             CURLOPT_CONNECTTIMEOUT_MS => min(10000, $safeTimeoutMs),
         ]);
@@ -1259,11 +1406,13 @@ function requestGeminiGenerateContent($prompt, $apiKey, $model, $timeoutMs) {
         curl_close($ch);
 
         if (is_string($raw) && $raw !== '' && $status >= 200 && $status < 300 && $curlError === '') {
+            $decoded = json_decode($raw, true);
+            $outputText = is_array($decoded) ? extractOpenAiResponseOutputText($decoded) : '';
             return [
-                'success' => true,
+                'success' => $outputText !== '',
                 'status' => $status,
-                'raw' => $raw,
-                'error' => '',
+                'raw' => $outputText,
+                'error' => $outputText !== '' ? '' : 'OpenAI returned an empty model response.',
                 'model' => $cleanModel,
             ];
         }
@@ -1277,9 +1426,9 @@ function requestGeminiGenerateContent($prompt, $apiKey, $model, $timeoutMs) {
             if ($apiError !== '') {
                 $lastError = $apiError;
             } elseif ($status > 0) {
-                $lastError = 'HTTP ' . $status . ' from Gemini generateContent endpoint.';
+                $lastError = 'HTTP ' . $status . ' from OpenAI Responses endpoint.';
             } else {
-                $lastError = 'Gemini request failed without an HTTP response.';
+                $lastError = 'OpenAI request failed without an HTTP response.';
             }
         }
 
@@ -1300,47 +1449,58 @@ function requestGeminiGenerateContent($prompt, $apiKey, $model, $timeoutMs) {
     ];
 }
 
+function extractOpenAiResponseOutputText(array $decoded): string
+{
+    $direct = trim((string) ($decoded['output_text'] ?? ''));
+    if ($direct !== '') {
+        return $direct;
+    }
+
+    $output = is_array($decoded['output'] ?? null) ? $decoded['output'] : [];
+    foreach ($output as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        $content = is_array($item['content'] ?? null) ? $item['content'] : [];
+        foreach ($content as $part) {
+            if (!is_array($part)) {
+                continue;
+            }
+            $text = trim((string) ($part['text'] ?? ''));
+            if ($text !== '') {
+                return $text;
+            }
+        }
+    }
+
+    return '';
+}
+
 function classifyBiasCommentsWithGeminiBatch(array $batch, $apiKey, $model, $timeoutMs) {
     $request = requestGeminiGenerateContent(
         buildGeminiBiasDetectionPrompt($batch),
         $apiKey,
         $model,
-        $timeoutMs
+        $timeoutMs,
+        buildOpenAiBiasDetectionSchema(),
+        'bias_classification'
     );
 
     if (($request['success'] ?? false) !== true) {
         return [
             'items' => [],
             'status' => (int) ($request['status'] ?? 0),
-            'error' => normalizeBiasDetectionText($request['error'] ?? 'Gemini request failed.'),
+            'error' => normalizeBiasDetectionText($request['error'] ?? 'OpenAI request failed.'),
             'model' => (string) ($request['model'] ?? ''),
         ];
     }
 
-    $decoded = json_decode((string) ($request['raw'] ?? ''), true);
-    if (!is_array($decoded)) {
-        return [
-            'items' => [],
-            'status' => (int) ($request['status'] ?? 0),
-            'error' => 'Gemini returned unreadable JSON for bias detection.',
-            'model' => (string) ($request['model'] ?? ''),
-        ];
-    }
-
-    $candidateText = '';
-    $candidates = is_array($decoded['candidates'] ?? null) ? $decoded['candidates'] : [];
-    if (count($candidates) > 0) {
-        $parts = is_array($candidates[0]['content']['parts'] ?? null) ? $candidates[0]['content']['parts'] : [];
-        if (count($parts) > 0) {
-            $candidateText = (string) ($parts[0]['text'] ?? '');
-        }
-    }
-
+    $candidateText = trim((string) ($request['raw'] ?? ''));
     if ($candidateText === '') {
         return [
             'items' => [],
             'status' => (int) ($request['status'] ?? 0),
-            'error' => 'Gemini returned an empty bias-classification response.',
+            'error' => 'OpenAI returned an empty bias-classification response.',
             'model' => (string) ($request['model'] ?? ''),
         ];
     }
@@ -1350,7 +1510,7 @@ function classifyBiasCommentsWithGeminiBatch(array $batch, $apiKey, $model, $tim
         return [
             'items' => [],
             'status' => (int) ($request['status'] ?? 0),
-            'error' => 'Gemini returned bias output that could not be parsed as JSON.',
+            'error' => 'OpenAI returned bias output that could not be parsed as JSON.',
             'model' => (string) ($request['model'] ?? ''),
         ];
     }
@@ -1360,7 +1520,7 @@ function classifyBiasCommentsWithGeminiBatch(array $batch, $apiKey, $model, $tim
         return [
             'items' => [],
             'status' => (int) ($request['status'] ?? 0),
-            'error' => 'Gemini returned no bias-classification items.',
+            'error' => 'OpenAI returned no bias-classification items.',
             'model' => (string) ($request['model'] ?? ''),
         ];
     }
@@ -1377,7 +1537,7 @@ function classifyBiasCommentsWithGeminiBatch(array $batch, $apiKey, $model, $tim
         $byId[$id] = [
             'label' => normalizeBiasLabel($row['label'] ?? ''),
             'reason' => normalizeBiasDetectionText($row['reason'] ?? 'Model-generated classification.'),
-            'source' => 'gemini',
+            'source' => 'openai',
         ];
     }
 
@@ -1385,7 +1545,7 @@ function classifyBiasCommentsWithGeminiBatch(array $batch, $apiKey, $model, $tim
         return [
             'items' => [],
             'status' => (int) ($request['status'] ?? 0),
-            'error' => 'Gemini returned bias items without valid identifiers.',
+            'error' => 'OpenAI returned bias items without valid identifiers.',
             'model' => (string) ($request['model'] ?? ''),
         ];
     }
@@ -1607,7 +1767,7 @@ function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = []) {
 
     $geminiConfig = getGeminiRawConfig($pdo);
     $geminiKey = (string) ($geminiConfig['apiKey'] ?? '');
-    $geminiModel = (string) ($geminiConfig['model'] ?? 'gemini-2.5-flash');
+    $geminiModel = (string) ($geminiConfig['model'] ?? 'gpt-5.6-luna');
     $geminiTimeout = (int) ($geminiConfig['timeoutMs'] ?? 30000);
     if ($geminiTimeout <= 0) $geminiTimeout = 30000;
     if ($geminiTimeout < 30000) $geminiTimeout = 30000;
@@ -1647,16 +1807,18 @@ function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = []) {
         'source' => 'rule',
         'warning' => '',
         'geminiStatus' => 0,
-        'geminiModel' => trim((string) $geminiModel) !== '' ? trim((string) $geminiModel) : 'gemini-2.5-flash',
+        'geminiModel' => trim((string) $geminiModel) !== '' ? trim((string) $geminiModel) : 'gpt-5.6-luna',
+        'aiStatus' => 0,
+        'aiModel' => trim((string) $geminiModel) !== '' ? trim((string) $geminiModel) : 'gpt-5.6-luna',
     ];
     $hasAnyGemini = count($modelResultsById) > 0;
     $runSource = 'rule';
     if ($hasAnyGemini && !$hasGeminiCoverageGap) {
-        $runSource = 'gemini';
+        $runSource = 'openai';
     } elseif ($hasAnyGemini) {
-        $runSource = 'gemini+rule';
+        $runSource = 'openai+rule';
         if ($geminiWarning === '') {
-            $geminiWarning = 'Gemini returned partial classifications. Rule fallback filled missing items.';
+            $geminiWarning = 'OpenAI returned partial classifications. Rule fallback filled missing items.';
         }
     } else {
         $runSource = 'rule';
@@ -1670,7 +1832,7 @@ function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = []) {
             $classified = [
                 'label' => normalizeBiasLabel($geminiClassified['label'] ?? ''),
                 'reason' => normalizeBiasDetectionText($geminiClassified['reason'] ?? 'Model-generated classification.'),
-                'source' => 'gemini',
+                'source' => 'openai',
             ];
         } else {
             $classified = classifyBiasCommentByRules($item['comment'] ?? '');
@@ -1707,23 +1869,24 @@ function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = []) {
     $summary['total'] = count($items);
     $summary['source'] = $runSource;
 
-    if ($summary['source'] === 'gemini+rule') {
+    if ($summary['source'] === 'openai+rule') {
         $summary['warning'] = $geminiWarning !== ''
-            ? ('Gemini partial fallback: ' . $geminiWarning)
-            : 'Gemini returned partial classifications. Rule fallback filled missing items.';
-    } elseif ($summary['source'] === 'gemini') {
+            ? ('OpenAI partial fallback: ' . $geminiWarning)
+            : 'OpenAI returned partial classifications. Rule fallback filled missing items.';
+    } elseif ($summary['source'] === 'openai') {
         $summary['warning'] = '';
     } else {
         $summary['source'] = 'rule';
         if ($geminiConfigured) {
             $summary['warning'] = $geminiWarning !== ''
-                ? ('Gemini unavailable: ' . $geminiWarning . ' Rule fallback used.')
-                : 'Gemini was unavailable. Rule fallback used.';
+                ? ('OpenAI unavailable: ' . $geminiWarning . ' Rule fallback used.')
+                : 'OpenAI was unavailable. Rule fallback used.';
         } else {
-            $summary['warning'] = 'Gemini API key is not configured. Rule fallback used.';
+            $summary['warning'] = 'OpenAI API key is not configured. Rule fallback used.';
         }
     }
     $summary['geminiStatus'] = $geminiStatus;
+    $summary['aiStatus'] = $geminiStatus;
     foreach ($items as &$itemRow) {
         $itemRow['source'] = $summary['source'];
     }
@@ -2471,87 +2634,22 @@ function buildGeminiEvaluationExplainabilityPrompt(array $payload) {
         . "}\n"
         . "Keep rationale factual and avoid markdown.\n"
         . "Input:\n"
-        . json_encode($input, JSON_UNESCAPED_UNICODE);
+        . json_encode($input, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
 }
 
 function classifyEvaluationExplainabilityWithGemini(array $payload, $apiKey, $model, $timeoutMs) {
-    if (!function_exists('curl_init')) {
-        return null;
-    }
-
-    $cleanKey = trim((string) $apiKey);
-    if ($cleanKey === '') {
-        return null;
-    }
-
-    $cleanModel = trim((string) $model);
-    if ($cleanModel === '') {
-        $cleanModel = 'gemini-2.5-flash';
-    }
-    $safeTimeoutMs = (int) $timeoutMs;
-    if ($safeTimeoutMs <= 0) {
-        $safeTimeoutMs = 15000;
-    }
-    $safeTimeoutMs = max(5000, min($safeTimeoutMs, 60000));
-
-    $url = sprintf(
-        'https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s',
-        rawurlencode($cleanModel),
-        rawurlencode($cleanKey)
+    $request = requestGeminiGenerateContent(
+        buildGeminiEvaluationExplainabilityPrompt($payload),
+        $apiKey,
+        $model,
+        $timeoutMs,
+        buildOpenAiExplainabilitySchema(),
+        'evaluation_explainability'
     );
-
-    $payloadBody = [
-        'contents' => [
-            [
-                'parts' => [
-                    [
-                        'text' => buildGeminiEvaluationExplainabilityPrompt($payload),
-                    ],
-                ],
-            ],
-        ],
-        'generationConfig' => [
-            'temperature' => 0,
-            'responseMimeType' => 'application/json',
-        ],
-    ];
-
-    $ch = curl_init($url);
-    if ($ch === false) {
+    if (($request['success'] ?? false) !== true) {
         return null;
     }
-
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST => true,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-        CURLOPT_POSTFIELDS => json_encode($payloadBody),
-        CURLOPT_TIMEOUT_MS => $safeTimeoutMs,
-        CURLOPT_CONNECTTIMEOUT_MS => min(5000, $safeTimeoutMs),
-    ]);
-
-    $raw = curl_exec($ch);
-    $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch);
-    curl_close($ch);
-
-    if (!is_string($raw) || $raw === '' || $status < 200 || $status >= 300 || $curlError !== '') {
-        return null;
-    }
-
-    $decoded = json_decode($raw, true);
-    if (!is_array($decoded)) {
-        return null;
-    }
-
-    $candidateText = '';
-    $candidates = is_array($decoded['candidates'] ?? null) ? $decoded['candidates'] : [];
-    if (count($candidates) > 0) {
-        $parts = is_array($candidates[0]['content']['parts'] ?? null) ? $candidates[0]['content']['parts'] : [];
-        if (count($parts) > 0) {
-            $candidateText = (string) ($parts[0]['text'] ?? '');
-        }
-    }
+    $candidateText = trim((string) ($request['raw'] ?? ''));
     if ($candidateText === '') {
         return null;
     }
@@ -2643,7 +2741,7 @@ function analyzeEvaluationExplainabilitySnapshot(PDO $pdo, array $payload = []) 
 
     $geminiConfig = getGeminiRawConfig($pdo);
     $geminiKey = (string) ($geminiConfig['apiKey'] ?? '');
-    $geminiModel = (string) ($geminiConfig['model'] ?? 'gemini-2.5-flash');
+    $geminiModel = (string) ($geminiConfig['model'] ?? 'gpt-5.6-luna');
     $geminiTimeout = (string) ((int) ($geminiConfig['timeoutMs'] ?? 25000));
 
     $geminiInsight = null;
@@ -2663,13 +2761,12 @@ function analyzeEvaluationExplainabilitySnapshot(PDO $pdo, array $payload = []) 
         ];
     }
 
-    $geminiInsight['stats'] = is_array($ruleInsight['stats'] ?? null) ? $ruleInsight['stats'] : [
-        'totalComments' => 0,
-        'sourceCounts' => ['student' => 0, 'professor' => 0, 'supervisor' => 0],
-    ];
+    $mergedInsight = mergeExplainabilityInsightWithFallback($geminiInsight, $ruleInsight);
+    $insight = is_array($mergedInsight['insight'] ?? null) ? $mergedInsight['insight'] : $ruleInsight;
+
     return [
-        'source' => 'gemini',
-        'insight' => $geminiInsight,
+        'source' => !empty($mergedInsight['usedRule']) ? 'openai+rule' : 'openai',
+        'insight' => $insight,
     ];
 }
 
@@ -2982,83 +3079,22 @@ function buildGeminiFacultySectionCRecommendationPrompt(array $context) {
         . "- If weak area includes Clarity or Instruction, activities MUST include: \"Use more examples and visual aids.\" exactly.\n"
         . "- Keep sectionC text concise but actionable.\n"
         . "Input:\n"
-        . json_encode($input, JSON_UNESCAPED_UNICODE);
+        . json_encode($input, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
 }
 
 function classifyFacultySectionCRecommendationWithGemini(array $context, $apiKey, $model, $timeoutMs) {
-    if (!function_exists('curl_init')) {
-        return null;
-    }
-
-    $cleanKey = trim((string) $apiKey);
-    if ($cleanKey === '') {
-        return null;
-    }
-
-    $cleanModel = trim((string) $model);
-    if ($cleanModel === '') {
-        $cleanModel = 'gemini-2.5-flash';
-    }
-    $safeTimeoutMs = (int) $timeoutMs;
-    if ($safeTimeoutMs <= 0) {
-        $safeTimeoutMs = 15000;
-    }
-    $safeTimeoutMs = max(5000, min($safeTimeoutMs, 60000));
-
-    $url = sprintf(
-        'https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s',
-        rawurlencode($cleanModel),
-        rawurlencode($cleanKey)
+    $request = requestGeminiGenerateContent(
+        buildGeminiFacultySectionCRecommendationPrompt($context),
+        $apiKey,
+        $model,
+        $timeoutMs,
+        buildOpenAiFacultySectionCSchema(),
+        'faculty_section_c'
     );
-
-    $payloadBody = [
-        'contents' => [[
-            'parts' => [[
-                'text' => buildGeminiFacultySectionCRecommendationPrompt($context),
-            ]],
-        ]],
-        'generationConfig' => [
-            'temperature' => 0,
-            'responseMimeType' => 'application/json',
-        ],
-    ];
-
-    $ch = curl_init($url);
-    if ($ch === false) {
+    if (($request['success'] ?? false) !== true) {
         return null;
     }
-
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST => true,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-        CURLOPT_POSTFIELDS => json_encode($payloadBody),
-        CURLOPT_TIMEOUT_MS => $safeTimeoutMs,
-        CURLOPT_CONNECTTIMEOUT_MS => min(5000, $safeTimeoutMs),
-    ]);
-
-    $raw = curl_exec($ch);
-    $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch);
-    curl_close($ch);
-
-    if (!is_string($raw) || $raw === '' || $status < 200 || $status >= 300 || $curlError !== '') {
-        return null;
-    }
-
-    $decoded = json_decode($raw, true);
-    if (!is_array($decoded)) {
-        return null;
-    }
-
-    $candidateText = '';
-    $candidates = is_array($decoded['candidates'] ?? null) ? $decoded['candidates'] : [];
-    if (count($candidates) > 0) {
-        $parts = is_array($candidates[0]['content']['parts'] ?? null) ? $candidates[0]['content']['parts'] : [];
-        if (count($parts) > 0) {
-            $candidateText = (string) ($parts[0]['text'] ?? '');
-        }
-    }
+    $candidateText = trim((string) ($request['raw'] ?? ''));
     if ($candidateText === '') {
         return null;
     }
@@ -3101,7 +3137,7 @@ function mergeFacultySectionCRecommendation(array $gemini, array $rule) {
     $geminiReasoning = normalizeFacultyReasoningOutput($gemini['reasoning'] ?? []);
     $ruleReasoning = normalizeFacultyReasoningOutput($rule['reasoning'] ?? []);
     $reasoning = count($geminiReasoning) > 0 ? $geminiReasoning : $ruleReasoning;
-    // Mark partial fallback only when Gemini omitted required fields and rule content filled the gaps.
+    // Mark partial fallback only when the model omitted required fields and rule content filled the gaps.
     $usedRule = count($geminiWeak) === 0
         || $geminiSection['areas'] === ''
         || $geminiSection['activities'] === ''
@@ -3116,7 +3152,7 @@ function mergeFacultySectionCRecommendation(array $gemini, array $rule) {
     ];
 }
 
-function generateFacultySectionCRecommendationsSnapshot(array $context) {
+function generateFacultySectionCRecommendationsSnapshot(PDO $pdo, array $context) {
     $normalized = normalizeFacultyRecommendationContext($context);
     $rule = buildFacultySectionCRecommendationByRules($normalized);
 
@@ -3131,7 +3167,7 @@ function generateFacultySectionCRecommendationsSnapshot(array $context) {
 
     $geminiConfig = getGeminiRawConfig($pdo);
     $geminiKey = (string) ($geminiConfig['apiKey'] ?? '');
-    $geminiModel = (string) ($geminiConfig['model'] ?? 'gemini-2.5-flash');
+    $geminiModel = (string) ($geminiConfig['model'] ?? 'gpt-5.6-luna');
     $geminiTimeout = (string) ((int) ($geminiConfig['timeoutMs'] ?? 15000));
 
     $gemini = null;
@@ -3148,11 +3184,13 @@ function generateFacultySectionCRecommendationsSnapshot(array $context) {
         ];
     }
 
+    $merged = mergeFacultySectionCRecommendation($gemini, $rule);
+
     return [
-        'source' => 'gemini',
-        'weakAreas' => normalizeFacultyWeakAreasOutput($gemini['weakAreas'] ?? []),
-        'sectionC' => normalizeFacultySectionCOutput($gemini['sectionC'] ?? []),
-        'reasoning' => normalizeFacultyReasoningOutput($gemini['reasoning'] ?? []),
+        'source' => !empty($merged['usedRule']) ? 'openai+rule' : 'openai',
+        'weakAreas' => normalizeFacultyWeakAreasOutput($merged['weakAreas'] ?? []),
+        'sectionC' => normalizeFacultySectionCOutput($merged['sectionC'] ?? []),
+        'reasoning' => normalizeFacultyReasoningOutput($merged['reasoning'] ?? []),
     ];
 }
 
@@ -3561,6 +3599,7 @@ try {
             ]);
             break;
 
+        case 'getOpenAiConfig':
         case 'getGeminiConfig':
             if ($authenticatedRole !== 'admin') {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
@@ -3571,6 +3610,7 @@ try {
             ]);
             break;
 
+        case 'saveOpenAiConfig':
         case 'saveGeminiConfig':
             if ($authenticatedRole !== 'admin') {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
@@ -3741,7 +3781,7 @@ try {
                 $context['semesterLabel'] = (string) ($targetPaper['semester_label'] ?? '');
             }
 
-            $result = generateFacultySectionCRecommendationsSnapshot($context);
+            $result = generateFacultySectionCRecommendationsSnapshot($pdo, $context);
             $weakAreaNames = [];
             foreach ($result['weakAreas'] ?? [] as $row) {
                 $name = normalizeFacultyRecommendationCategory(is_array($row) ? ($row['name'] ?? '') : $row);

@@ -103,16 +103,56 @@ body {
 }
 
 .logo-shield.has-custom-logo {
-  background: #ffffff;
-  overflow: hidden;
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  overflow: visible !important;
 }
 
 .brand-logo-image {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  border-radius: inherit;
+  object-fit: contain;
+  border-radius: 0;
+}
+
+body.admin-panel .logo-shield.has-custom-logo,
+body.hr-panel .logo-shield.has-custom-logo,
+body.vpaa-panel .logo-shield.has-custom-logo,
+body.student-panel .logo-shield.has-custom-logo,
+body.professor-panel .logo-shield.has-custom-logo,
+body.procoor-panel .logo-shield.has-custom-logo,
+body.dean-panel .logo-shield.has-custom-logo,
+body.osa-panel .logo-shield.has-custom-logo {
+  width: 74px !important;
+  height: 74px !important;
+}
+
+body.admin-panel .top-header .logo-shield.has-custom-logo,
+body.hr-panel .top-header .logo-shield.has-custom-logo,
+body.vpaa-panel .top-header .logo-shield.has-custom-logo,
+body.student-panel .top-header .logo-shield.has-custom-logo,
+body.professor-panel .top-header .logo-shield.has-custom-logo,
+body.procoor-panel .top-header .logo-shield.has-custom-logo,
+body.dean-panel .top-header .logo-shield.has-custom-logo,
+body.osa-panel .top-header .logo-shield.has-custom-logo {
+  width: 52px !important;
+  height: 52px !important;
+}
+
+body.admin-panel .panel-branding-preview .logo-shield.has-custom-logo,
+body.hr-panel .panel-branding-preview .logo-shield.has-custom-logo,
+body.vpaa-panel .panel-branding-preview .logo-shield.has-custom-logo,
+body.student-panel .panel-branding-preview .logo-shield.has-custom-logo,
+body.professor-panel .panel-branding-preview .logo-shield.has-custom-logo,
+body.procoor-panel .panel-branding-preview .logo-shield.has-custom-logo,
+body.dean-panel .panel-branding-preview .logo-shield.has-custom-logo,
+body.osa-panel .panel-branding-preview .logo-shield.has-custom-logo {
+  width: 86px !important;
+  height: 86px !important;
 }
 
 .header-logo-text,

@@ -12,13 +12,27 @@ function credentialMailerEnsureAutoload(): void
     }
 
     $autoloadPath = __DIR__ . '/../vendor/autoload.php';
-    if (!file_exists($autoloadPath)) {
-        throw new RuntimeException('Composer autoloader not found. Please run composer install.');
+    if (file_exists($autoloadPath)) {
+        require_once $autoloadPath;
     }
 
-    require_once $autoloadPath;
     if (!class_exists(PHPMailer::class)) {
-        throw new RuntimeException('PHPMailer dependency is unavailable.');
+        $phpMailerSourceDir = __DIR__ . '/../vendor/phpmailer/phpmailer/src';
+        $phpMailerFiles = [
+            $phpMailerSourceDir . '/Exception.php',
+            $phpMailerSourceDir . '/SMTP.php',
+            $phpMailerSourceDir . '/PHPMailer.php',
+        ];
+        foreach ($phpMailerFiles as $phpMailerFile) {
+            if (!file_exists($phpMailerFile)) {
+                throw new RuntimeException('PHPMailer dependency is unavailable. Run composer install or upload the vendor/phpmailer package.');
+            }
+            require_once $phpMailerFile;
+        }
+    }
+
+    if (!class_exists(PHPMailer::class)) {
+        throw new RuntimeException('PHPMailer dependency is unavailable. Run composer install or upload the vendor/phpmailer package.');
     }
 }
 

@@ -22,6 +22,7 @@ let hrEvaluationOverviewChartInstance = null;
 let hrSemestralPerformanceChartInstance = null;
 let hrAiInsightsReady = false;
 let hrBehaviorAnalysisHasRun = false;
+let hrActivitySummaryCache = null;
 let hrMobileDrawerBound = false;
 let hrProfessorViewportBound = false;
 let hrProfessorMobileMode = null;
@@ -430,6 +431,7 @@ function handleNavigation(section) {
             const activityLogView = document.getElementById('activity-log-view');
             if (activityLogView) {
                 activityLogView.style.display = 'block';
+                loadHrActivitySummary();
                 loadHrActivityLog();
             }
             break;
@@ -1769,13 +1771,13 @@ function runAiBiasDetection() {
             const biased = Number(summary.biased || 0) || 0;
             const source = String(summary.source || 'rule').trim() || 'rule';
             const warning = String(summary.warning || '').trim();
-            const geminiModel = String(summary.geminiModel || '').trim();
-            const geminiStatus = Number(summary.geminiStatus || 0) || 0;
-            const geminiMeta = warning && (geminiModel || geminiStatus)
-                ? ` | Gemini: ${geminiModel || 'unknown'}${geminiStatus ? ` (HTTP ${geminiStatus})` : ''}`
+            const aiModel = String(summary.aiModel || summary.geminiModel || '').trim();
+            const aiStatus = Number(summary.aiStatus || summary.geminiStatus || 0) || 0;
+            const aiMeta = warning && (aiModel || aiStatus)
+                ? ` | OpenAI: ${aiModel || 'unknown'}${aiStatus ? ` (HTTP ${aiStatus})` : ''}`
                 : '';
 
-            summaryEl.textContent = `Total: ${total} | Constructive: ${constructive} | Neutral: ${neutral} | Biased: ${biased} | Source: ${source}${warning ? ` | Note: ${warning}` : ''}${geminiMeta}`;
+            summaryEl.textContent = `Total: ${total} | Constructive: ${constructive} | Neutral: ${neutral} | Biased: ${biased} | Source: ${source}${warning ? ` | Note: ${warning}` : ''}${aiMeta}`;
             feedbackEl.textContent = '';
             feedbackEl.style.display = 'none';
 
@@ -2625,11 +2627,174 @@ function syncHrExistingPromptRow(bodyEl, colCount) {
 }
 
 /**
+ * Load one-time HR activity summary from the bootstrapped SharedData snapshot.
+ */
+function loadHrActivitySummary() {
+    const list = document.getElementById('hr-activity-summary-list');
+    if (!list) return;
+
+    if (hrActivitySummaryCache) {
+        renderHrActivitySummaryRows(list, hrActivitySummaryCache);
+        return;
+    }
+
+    try {
+        hrActivitySummaryCache = buildHrActivitySummary();
+        if (!hrActivitySummaryCache.length) {
+            renderHrActivitySummaryPrompt(list, 'No activity summary available.');
+            return;
+        }
+        renderHrActivitySummaryRows(list, hrActivitySummaryCache);
+    } catch (error) {
+        console.error('[HRPanel] Failed to build activity summary.', error);
+        renderHrActivitySummaryPrompt(list, 'Failed to load activity summary.');
+    }
+}
+
+function buildHrActivitySummary() {
+    const users = SharedData.getUsers ? SharedData.getUsers() : [];
+    const evaluations = SharedData.getEvaluations ? SharedData.getEvaluations() : [];
+    const activityLog = SharedData.getActivityLog ? SharedData.getActivityLog() : [];
+    const now = SharedData.getNowDate ? SharedData.getNowDate() : new Date();
+    const oneHourAgoMs = now.getTime() - (60 * 60 * 1000);
+    const todayStart = parseHrActivitySummaryDate(SharedData.getCurrentPhilippineDateYmd ? SharedData.getCurrentPhilippineDateYmd() : '');
+    const todayStartMs = Number.isNaN(todayStart.getTime()) ? 0 : todayStart.getTime();
+
+    const activeUsers = users.filter(user => isHrActivitySummaryActiveUser(user)).length;
+    const totalUsers = Array.isArray(users) ? users.length : 0;
+    const evaluationSubmissionsLastHour = evaluations.filter(evaluation => {
+        const date = parseHrActivitySummaryDate(evaluation && (evaluation.submittedAt || evaluation.timestamp || ''));
+        if (Number.isNaN(date.getTime())) return false;
+        if (date.getTime() < oneHourAgoMs || date.getTime() > now.getTime()) return false;
+        const status = String(evaluation && evaluation.status || 'submitted').trim().toLowerCase();
+        return status !== 'draft' && status !== 'pending';
+    }).length;
+
+    const todaysLogRows = activityLog.filter(row => {
+        const date = parseHrActivitySummaryDate(row && (row.timestamp || row.happened_at || ''));
+        return !Number.isNaN(date.getTime()) && date.getTime() >= todayStartMs && date.getTime() <= now.getTime();
+    });
+
+    const loginRowsToday = todaysLogRows.filter(row => normalizeHrActivitySummaryType(row) === 'login');
+    const uniqueLoginUsersToday = new Set(loginRowsToday.map(row => String(row.user_id || row.role || row.description || '').trim()).filter(Boolean)).size;
+    const userChangesToday = todaysLogRows.filter(row => normalizeHrActivitySummaryType(row) === 'user').length;
+    const systemEventsToday = todaysLogRows.filter(row => {
+        const type = normalizeHrActivitySummaryType(row);
+        return type !== 'login' && type !== 'user' && type !== 'evaluation';
+    }).length;
+
+    return [
+        {
+            type: 'user',
+            message: `${activeUsers} active user${activeUsers === 1 ? '' : 's'}`,
+            detail: `${totalUsers} total account${totalUsers === 1 ? '' : 's'} in the system`
+        },
+        {
+            type: 'evaluation',
+            message: `${evaluationSubmissionsLastHour} evaluation submission${evaluationSubmissionsLastHour === 1 ? '' : 's'} within the hour`,
+            detail: 'Based on submitted evaluation timestamps'
+        },
+        {
+            type: 'login',
+            message: `${loginRowsToday.length} login event${loginRowsToday.length === 1 ? '' : 's'} today`,
+            detail: `${uniqueLoginUsersToday} unique account${uniqueLoginUsersToday === 1 ? '' : 's'} logged in`
+        },
+        {
+            type: 'system',
+            message: `${userChangesToday + systemEventsToday} admin/system change${(userChangesToday + systemEventsToday) === 1 ? '' : 's'} today`,
+            detail: `${userChangesToday} user change${userChangesToday === 1 ? '' : 's'}, ${systemEventsToday} system event${systemEventsToday === 1 ? '' : 's'}`
+        }
+    ];
+}
+
+function renderHrActivitySummaryRows(list, summaries) {
+    list.innerHTML = summaries.map(summary => `
+        <div class="hr-activity-summary-item">
+            <div class="hr-activity-summary-icon ${escapeHrActivitySummaryHtml(summary.type)}">
+                <i class="fas fa-${getHrActivitySummaryIcon(summary.type)}"></i>
+            </div>
+            <div class="hr-activity-summary-content">
+                <p>${escapeHrActivitySummaryHtml(summary.message)}</p>
+                <span>${escapeHrActivitySummaryHtml(summary.detail)}</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderHrActivitySummaryPrompt(list, message, iconType = 'system') {
+    list.innerHTML = `
+        <div class="hr-activity-summary-item">
+            <div class="hr-activity-summary-icon ${escapeHrActivitySummaryHtml(iconType)}">
+                <i class="fas fa-${getHrActivitySummaryIcon(iconType)}"></i>
+            </div>
+            <div class="hr-activity-summary-content">
+                <p>${escapeHrActivitySummaryHtml(message)}</p>
+                <span>Activity summary</span>
+            </div>
+        </div>
+    `;
+}
+
+function isHrActivitySummaryActiveUser(user) {
+    if (!user) return false;
+    const status = String(user.status || 'active').trim().toLowerCase();
+    return status !== 'inactive' && user.isActive !== false;
+}
+
+function normalizeHrActivitySummaryType(activity) {
+    const text = [
+        activity && activity.type,
+        activity && activity.action,
+        activity && activity.description,
+    ].map(value => String(value || '').toLowerCase()).join(' ');
+
+    if (text.includes('evaluation')) return 'evaluation';
+    if (text.includes('login') || text.includes('auth')) return 'login';
+    if (text.includes('user') || text.includes('account') || text.includes('student') || text.includes('professor')) return 'user';
+    return 'system';
+}
+
+function parseHrActivitySummaryDate(value) {
+    const raw = String(value || '').trim();
+    const localTimestamp = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (localTimestamp) {
+        const time = `${localTimestamp[4] || '00'}:${localTimestamp[5] || '00'}:${localTimestamp[6] || '00'}`;
+        return new Date(`${localTimestamp[1]}-${localTimestamp[2]}-${localTimestamp[3]}T${time}+08:00`);
+    }
+
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+
+    const altParsed = new Date(raw.replace(' ', 'T'));
+    return Number.isNaN(altParsed.getTime()) ? new Date(NaN) : altParsed;
+}
+
+function escapeHrActivitySummaryHtml(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function getHrActivitySummaryIcon(type) {
+    const icons = {
+        login: 'sign-in-alt',
+        evaluation: 'clipboard-check',
+        user: 'user-plus',
+        system: 'exclamation-triangle'
+    };
+    return icons[type] || 'info-circle';
+}
+
+/**
  * Load HR activity log from database-backed SharedData
  */
 function loadHrActivityLog() {
     const tbody = document.getElementById('hr-activity-log-body');
     if (!tbody) return;
+    const HR_ACTIVITY_LOG_LIMIT = 80;
 
     const fromInput = document.getElementById('hr-activity-from');
     const toInput = document.getElementById('hr-activity-to');
@@ -2701,7 +2866,7 @@ function loadHrActivityLog() {
             term: String(searchInput ? searchInput.value : '').trim(),
             from: String(fromInput ? fromInput.value : '').trim(),
             to: String(toInput ? toInput.value : '').trim(),
-            limit: 200,
+            limit: HR_ACTIVITY_LOG_LIMIT,
         };
 
         try {
@@ -7430,8 +7595,8 @@ function normalizeHrAiAnalyticsSourceLabel(value) {
 
 function formatHrAiInsightSource(source) {
     const token = String(source || 'rule').trim().toLowerCase();
-    if (token === 'gemini') return 'Gemini';
-    if (token === 'gemini+rule') return 'Gemini + Rule fallback';
+    if (token === 'openai' || token === 'gemini') return 'OpenAI';
+    if (token === 'openai+rule' || token === 'gemini+rule') return 'OpenAI + Rule fallback';
     return 'Rule fallback';
 }
 
@@ -7982,9 +8147,9 @@ function runHrAiAnalyticsForProfessor(professorId, semesterId, outputEl, btnEl) 
             }
             const insight = normalizeHrAiInsightData(response && response.insight, fallbackInsight);
             const source = response && response.source ? response.source : 'rule';
-            const notice = source === 'gemini'
+            const notice = source === 'openai' || source === 'gemini'
                 ? ''
-                : 'Gemini is unavailable or partial; showing rule-based fallback insights.';
+                : 'OpenAI is unavailable or partial; showing rule-based fallback insights.';
             renderHrAiInsightResult(outputEl, insight, source, notice);
         } catch (error) {
             console.error('[HRPanel] AI analytics failed, using local fallback.', error);
@@ -7992,7 +8157,7 @@ function runHrAiAnalyticsForProfessor(professorId, semesterId, outputEl, btnEl) 
                 outputEl,
                 fallbackInsight,
                 'rule',
-                'Gemini is unavailable right now. Showing rule-based fallback analytics.'
+                'OpenAI is unavailable right now. Showing rule-based fallback analytics.'
             );
         } finally {
             if (btnEl) {
@@ -10020,4 +10185,3 @@ if (typeof module !== 'undefined' && module.exports) {
         loadUserManagement
     };
 }
-

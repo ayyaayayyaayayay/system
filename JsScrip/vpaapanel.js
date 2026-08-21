@@ -2231,8 +2231,8 @@ function normalizeAiInsightData(rawInsight, fallbackInsight) {
 
 function formatAiInsightSource(source) {
     const token = String(source || "rule").trim().toLowerCase();
-    if (token === "gemini") return "Gemini";
-    if (token === "gemini+rule") return "Gemini + Rule fallback";
+    if (token === "openai" || token === "gemini") return "OpenAI";
+    if (token === "openai+rule" || token === "gemini+rule") return "OpenAI + Rule fallback";
     return "Rule fallback";
 }
 
@@ -2372,9 +2372,9 @@ function runAiAnalyticsForProfessor(profId, outputEl, btnEl) {
 
             const insight = normalizeAiInsightData(response && response.insight, fallbackInsight);
             const source = response && response.source ? response.source : "rule";
-            const notice = source === "gemini"
+            const notice = source === "openai" || source === "gemini"
                 ? ""
-                : "Gemini is unavailable or partial; showing rule-based fallback insights.";
+                : "OpenAI is unavailable or partial; showing rule-based fallback insights.";
             renderAiInsightResult(outputEl, insight, source, notice);
         } catch (error) {
             console.error("[VPAA] AI analytics failed, using local fallback.", error);
@@ -2382,7 +2382,7 @@ function runAiAnalyticsForProfessor(profId, outputEl, btnEl) {
                 outputEl,
                 fallbackInsight,
                 "rule",
-                "Gemini is unavailable right now. Showing rule-based fallback analytics."
+                "OpenAI is unavailable right now. Showing rule-based fallback analytics."
             );
         } finally {
             if (btnEl) {
@@ -2469,5 +2469,4 @@ function checkAuthentication() {
 }
 
 init();
-
 

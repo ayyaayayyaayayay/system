@@ -1430,10 +1430,31 @@ body.manual-clear-modal-open {
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        width: 38px;
+        height: 38px;
+        border-radius: 12px;
+    }
+
+    .osa-panel .top-header {
+        padding: 14px 14px;
+        border-radius: 18px;
     }
 
     .osa-panel .page-title {
-        font-size: 24px;
+        font-size: 22px;
+        line-height: 1.18;
+    }
+
+    .osa-panel .page-context {
+        font-size: 12px;
+        line-height: 1.45;
+    }
+
+    .osa-panel .user-profile {
+        min-width: 38px;
+        min-height: 38px;
+        padding: 6px;
+        border-radius: 14px;
     }
 
     .osa-panel .user-profile span {
@@ -1445,11 +1466,25 @@ body.manual-clear-modal-open {
     .osa-panel .top-header {
         flex-direction: column;
         align-items: flex-start;
+        padding: 12px;
+        border-radius: 16px;
     }
 
     .osa-panel .user-profile {
         width: 100%;
         justify-content: flex-end;
+    }
+
+    .osa-header-main {
+        gap: 10px;
+    }
+
+    .page-title-block {
+        gap: 3px;
+    }
+
+    .osa-panel .page-title {
+        font-size: 21px;
     }
 
     .osa-panel .osa-hero-card,

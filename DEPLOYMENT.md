@@ -11,7 +11,7 @@ The best practical deployment target for the current codebase is:
 - MySQL or MariaDB
 - Cron job support
 - Writable filesystem access for `files/faculty_papers/`
-- Outbound HTTPS for Google API calls
+- Outbound HTTPS for OpenAI API calls
 - Outbound SMTP for production mail delivery
 
 For most deployments, a quality shared hosting plan with cPanel, cron, SSL, and SSH is enough.
@@ -57,9 +57,19 @@ Set these environment variables in hosting if available:
 - `NAAP_SMTP_FROM_EMAIL`
 - `NAAP_SMTP_FROM_NAME`
 - `NAAP_SMTP_TIMEOUT`
-- `NAAP_GEMINI_API_KEY`
-- `NAAP_GEMINI_MODEL`
-- `NAAP_GEMINI_TIMEOUT_MS`
+- `NAAP_OPENAI_API_KEY`
+- `NAAP_OPENAI_MODEL`
+- `NAAP_OPENAI_TIMEOUT_MS`
+- `NAAP_OPENAI_REASONING_EFFORT`
+- `NAAP_OPENAI_MAX_ATTEMPTS`
+
+Standard OpenAI env names are also accepted for the AI provider:
+
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `OPENAI_TIMEOUT_MS`
+- `OPENAI_REASONING_EFFORT`
+- `OPENAI_MAX_ATTEMPTS`
 
 Legacy Gmail-oriented env vars are still supported for backward compatibility:
 
@@ -68,7 +78,8 @@ Legacy Gmail-oriented env vars are still supported for backward compatibility:
 - `NAAP_SMTP_APP_PASSWORD`
 
 Environment SMTP values take precedence over the saved `credentialDistributorConfig` value in `system_settings`. The admin UI now acts as the database fallback for shared hosting setups where env vars are not available.
-Environment Gemini values take precedence over the saved `geminiConfig` value in `system_settings`. The admin UI now acts as the database fallback for shared hosting setups where env vars are not available.
+Environment OpenAI values take precedence over the saved `openAiConfig` value in `system_settings`. The admin UI now acts as the database fallback for shared hosting setups where env vars are not available.
+Blank OpenAI env vars are ignored so a saved admin-panel API key can still be used. Defaults: `gpt-5.6-luna`, `30000` ms timeout, `low` reasoning effort, and `2` max attempts for transient cURL/429/5xx failures.
 
 ## Publish Steps
 
@@ -80,7 +91,7 @@ Environment Gemini values take precedence over the saved `geminiConfig` value in
 6. Set database and SMTP configuration.
    - Preferred: set SMTP through environment variables.
    - Shared-hosting fallback: save SMTP settings from the admin panel System Settings screen.
-   - If you use AI insights on shared hosting, save the Gemini API key from the admin panel System Settings screen.
+   - If you use AI insights on shared hosting, save the OpenAI API key from the admin panel System Settings screen.
 7. Ensure `files/faculty_papers/` is writable.
 8. Enable SSL for the domain.
 9. Visit `/` and test login, profile photo uploads, PDF generation, and mail sending.

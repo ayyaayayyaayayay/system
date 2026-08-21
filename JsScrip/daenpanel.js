@@ -162,6 +162,10 @@ function isProgramScopedSupervisorPanel() {
     return SUPERVISOR_ROLE === 'procoor';
 }
 
+function shouldHideStudentCommentIdentity() {
+    return isProgramScopedSupervisorPanel();
+}
+
 function getSupervisorLabel() {
     return String(SUPERVISOR_PANEL_CONFIG.label || (isProgramScopedSupervisorPanel() ? 'Program Coordinator' : 'Dean'));
 }
@@ -243,6 +247,23 @@ function getScopedDeanDepartment() {
 function getScopedDeanProgramCode() {
     const supervisor = resolveCurrentDeanUserAnyStatus(getUserSession() || {});
     return String((supervisor && supervisor.programCode) || '').trim().toUpperCase();
+}
+
+function getSupervisorProgramLeadLabel(supervisor) {
+    const programCode = String((supervisor && supervisor.programCode) || '').trim().toUpperCase();
+    if (!programCode) return 'N/A';
+
+    const programs = (SharedData.getPrograms && SharedData.getPrograms()) || [];
+    const matchedProgram = (Array.isArray(programs) ? programs : []).find(program =>
+        String((program && (program.programCode || program.program_code)) || '').trim().toUpperCase() === programCode
+    );
+    const programName = String(
+        (matchedProgram && (matchedProgram.programName || matchedProgram.program_name))
+        || (supervisor && (supervisor.programName || supervisor.program))
+        || ''
+    ).trim();
+
+    return programName ? `${programCode} - ${programName}` : programCode;
 }
 
 function isProfessorWithinSupervisorScope(user, scopedDepartment, scopedProgramCode) {
@@ -1343,6 +1364,7 @@ function loadUserInfo() {
         const deanEmail = String(deanUser.email || session.email || '').trim();
         const deanRank = String(deanUser.position || deanUser.employmentType || 'N/A').trim() || 'N/A';
         const deanStatus = normalizeRoleToken(deanUser.status || 'active') === 'inactive' ? 'Inactive' : 'Active';
+        const programLeadLabel = getSupervisorProgramLeadLabel(deanUser);
         const currentSemesterId = resolveSelectedSemesterId(deanSummaryState.selectedSemesterId);
         const semesterLabel = getSemesterLabelById(currentSemesterId);
 
@@ -1360,6 +1382,8 @@ function loadUserInfo() {
             if (key === 'department') value.textContent = deanDepartment;
             if (key === 'full name') value.textContent = deanName;
             if (key === 'gmail') value.textContent = deanEmail || 'N/A';
+            if (key === 'mail account') value.textContent = deanEmail || 'N/A';
+            if (key === 'program lead') value.textContent = programLeadLabel;
             if (key === 'rank') value.textContent = deanRank;
             if (key === 'status') value.textContent = deanStatus;
             if (key === 'ay/sem') value.textContent = semesterLabel || 'N/A';
@@ -3423,6 +3447,7 @@ function setupProfileActions() {
             hideAccountActionCards();
             const targetCard = document.getElementById(targetId);
             if (targetCard) {
+                setActiveAccountActionButton(targetId);
                 targetCard.style.display = 'block';
                 const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
                 targetCard.scrollIntoView({ behavior: prefersReducedMotion ? 'auto' : 'smooth', block: 'start' });
@@ -3441,8 +3466,21 @@ function setupProfileActions() {
                     clearFormMessage(form);
                 }
                 targetCard.style.display = 'none';
+                clearActiveAccountActionButtons();
             }
         });
+    });
+}
+
+function setActiveAccountActionButton(targetId) {
+    document.querySelectorAll('.js-toggle-account-form').forEach(button => {
+        button.classList.toggle('is-active', button.getAttribute('data-target') === targetId);
+    });
+}
+
+function clearActiveAccountActionButtons() {
+    document.querySelectorAll('.js-toggle-account-form').forEach(button => {
+        button.classList.remove('is-active');
     });
 }
 
@@ -3479,19 +3517,19 @@ function handleChangeEmail() {
     const confirmEmail = String((document.getElementById('confirmEmail') || {}).value || '').trim();
 
     if (!newEmail || !confirmEmail) {
-        showFormMessage(form, 'Please fill out all email fields.', 'error');
+        showFormMessage(form, 'Please fill out all mail account fields.', 'error');
         return;
     }
     if (newEmail !== confirmEmail) {
-        showFormMessage(form, 'New email and confirmation do not match.', 'error');
+        showFormMessage(form, 'New mail account and confirmation do not match.', 'error');
         return;
     }
     if (currentEmail && newEmail.toLowerCase() === currentEmail.toLowerCase()) {
-        showFormMessage(form, 'New email must be different from the current email.', 'error');
+        showFormMessage(form, 'New mail account must be different from the current mail account.', 'error');
         return;
     }
     if (!SharedData.changeOwnEmail) {
-        showFormMessage(form, 'Email update service is unavailable.', 'error');
+        showFormMessage(form, 'Mail account update service is unavailable.', 'error');
         return;
     }
 
@@ -3507,11 +3545,11 @@ function handleChangeEmail() {
         if (profileEmail) {
             profileEmail.textContent = nextEmail;
         }
-        showFormMessage(form, 'Email updated successfully.', 'success');
+        showFormMessage(form, 'Mail account updated successfully.', 'success');
         form.reset();
     } catch (error) {
-        console.error('[DeanPanel] Failed to update email.', error);
-        showFormMessage(form, error && error.message ? error.message : 'Failed to update email.', 'error');
+        console.error('[DeanPanel] Failed to update mail account.', error);
+        showFormMessage(form, error && error.message ? error.message : 'Failed to update mail account.', 'error');
     }
 }
 
@@ -4104,15 +4142,13 @@ function setupFacultyResponseView() {
             return;
         }
         const isStudentView = String(feedbackState.selectedSourceView || currentView).trim() === 'student';
+        const hideStudentIdentity = shouldHideStudentCommentIdentity();
 
         commentsList.innerHTML = comments.map(comment => {
-            const classified = classifyDeanFeedbackCommentBiasByRules(comment && comment.text);
-            const label = String(classified && classified.label || 'Neutral');
-            const studentNumberMeta = isStudentView
+            const studentNumberMeta = isStudentView && !hideStudentIdentity
                 ? '<div class="faculty-comment-meta">Student Number: ' + escapeHTML(resolveDeanCommentStudentNumber(comment)) + '</div>'
                 : '';
             return '<li>' +
-                '<div class="faculty-comment-meta"><span class="faculty-comment-tag ' + getDeanCommentBiasTagClass(label) + '">' + escapeHTML(label) + '</span></div>' +
                 '<div class="faculty-comment-text">"' + escapeHTML(String(comment && comment.text || '')) + '"</div>' +
                 studentNumberMeta +
                 '<div class="faculty-comment-meta">' + escapeHTML(String(comment && comment.source || getFeedbackViewLabel(currentView))) + ' • ' + escapeHTML(formatDisplayDate(comment && comment.date)) + '</div>' +

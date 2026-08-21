@@ -2171,8 +2171,21 @@ function applyDraftToForm(draft) {
 function formatDraftSavedAt(value) {
     const text = String(value || '').trim();
     if (!text) return '';
-    const formatted = SharedData.formatDateTimeInPhilippines(text);
+    const formatted = SharedData.formatDateTimeInPhilippines(resolveDraftSavedAtDate(text));
     return formatted || text;
+}
+
+function resolveDraftSavedAtDate(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return raw;
+
+    const localTimestamp = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (localTimestamp) {
+        const time = `${localTimestamp[4] || '00'}:${localTimestamp[5] || '00'}:${localTimestamp[6] || '00'}`;
+        return new Date(`${localTimestamp[1]}-${localTimestamp[2]}-${localTimestamp[3]}T${time}+08:00`);
+    }
+
+    return raw;
 }
 
 function updateDraftStatusIndicator(options) {
@@ -2429,6 +2442,43 @@ function setupDraftAutosaveListeners() {
     form.dataset.draftAutosaveBound = 'true';
 }
 
+function evaluationMatchesProfessorSubject(ev, professorName, subjectCode, subjectKey) {
+    const professorToken = normalizeValue(professorName);
+    const subjectToken = normalizeValue(subjectCode);
+    const targetProfessor = String(ev && ev.targetProfessor || '').trim();
+    const targetSubjectCode = String(ev && ev.targetSubjectCode || '').trim();
+    let compareProfessor = targetProfessor;
+    let compareSubjectCode = targetSubjectCode;
+
+    if (!compareProfessor) {
+        const parsed = parseProfessorSubject(ev && ev.professorSubject || '');
+        compareProfessor = compareProfessor || parsed.professorName;
+        compareSubjectCode = compareSubjectCode || parsed.subjectCode;
+    }
+
+    const compareProfessorToken = normalizeValue(compareProfessor);
+    const compareSubjectToken = normalizeValue(compareSubjectCode);
+
+    if (subjectToken) {
+        const existingKey = String(ev && ev.evaluationKey || '').trim();
+        if (subjectKey && existingKey && normalizeValue(existingKey) === normalizeValue(subjectKey)) {
+            return true;
+        }
+
+        if (compareProfessorToken !== professorToken) {
+            return false;
+        }
+
+        if (compareSubjectToken && compareSubjectToken === subjectToken) {
+            return true;
+        }
+
+        return false;
+    }
+
+    return compareProfessorToken === professorToken;
+}
+
 function isSubmittedEvaluation(studentId, semesterId, professorName, studentIdentityOverride, courseOfferingIdOverride, subjectCodeOverride) {
     const evaluations = (SharedData.getEvaluations && SharedData.getEvaluations()) || [];
     const offeringId = String(courseOfferingIdOverride || '').trim();
@@ -2436,8 +2486,6 @@ function isSubmittedEvaluation(studentId, semesterId, professorName, studentIden
     const offeringKey = offeringId ? buildEvaluationKey(studentId, semesterId, offeringId) : '';
     const subjectKey = subjectCode ? buildEvaluationKey(studentId, semesterId, `${professorName}|${subjectCode}`) : '';
     const studentIdentity = studentIdentityOverride || buildCurrentStudentIdentity(getUserSession() || {});
-    const professorToken = normalizeValue(professorName);
-    const subjectToken = normalizeValue(subjectCode);
 
     return evaluations.some(ev => {
         if (!evaluationBelongsToStudent(ev, studentIdentity)) return false;
@@ -2456,8 +2504,8 @@ function isSubmittedEvaluation(studentId, semesterId, professorName, studentIden
             }
 
             const evOfferingId = String(ev.courseOfferingId || '').trim();
-            if (evOfferingId && normalizeValue(evOfferingId) === normalizeValue(offeringId)) {
-                return true;
+            if (evOfferingId) {
+                return normalizeValue(evOfferingId) === normalizeValue(offeringId);
             }
 
             const existingKeyParts = existingKey.split('|');
@@ -2465,41 +2513,10 @@ function isSubmittedEvaluation(studentId, semesterId, professorName, studentIden
                 return true;
             }
 
-            // If an offering ID is present, never fall back to professor-level matching.
-            return false;
+            return evaluationMatchesProfessorSubject(ev, professorName, subjectCode, subjectKey);
         }
 
-        const targetProfessor = String(ev.targetProfessor || '').trim();
-        const targetSubjectCode = String(ev.targetSubjectCode || '').trim();
-        let compareProfessor = targetProfessor;
-        let compareSubjectCode = targetSubjectCode;
-
-        if (!compareProfessor) {
-            const parsed = parseProfessorSubject(ev.professorSubject || '');
-            compareProfessor = compareProfessor || parsed.professorName;
-            compareSubjectCode = compareSubjectCode || parsed.subjectCode;
-        }
-
-        const compareProfessorToken = normalizeValue(compareProfessor);
-        const compareSubjectToken = normalizeValue(compareSubjectCode);
-
-        if (subjectToken) {
-            if (compareProfessorToken !== professorToken) {
-                return false;
-            }
-
-            if (compareSubjectToken && compareSubjectToken === subjectToken) {
-                return true;
-            }
-
-            if (subjectKey && existingKey && normalizeValue(existingKey) === normalizeValue(subjectKey)) {
-                return true;
-            }
-
-            return false;
-        }
-
-        return compareProfessorToken === professorToken;
+        return evaluationMatchesProfessorSubject(ev, professorName, subjectCode, subjectKey);
     });
 }
 

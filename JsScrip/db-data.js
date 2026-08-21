@@ -995,6 +995,11 @@ const SharedData = (() => {
             return parsePhilippineDateBoundary(raw, options && options.boundary === 'end' ? 'end' : 'start');
         }
 
+        if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/.test(raw)) {
+            const normalized = raw.replace(' ', 'T');
+            return new Date(normalized + '+08:00');
+        }
+
         const parsed = new Date(raw);
         if (!Number.isNaN(parsed.getTime())) {
             return parsed;
@@ -2196,33 +2201,36 @@ const SharedData = (() => {
         };
     }
 
-    function getGeminiConfig(actor) {
+    function getOpenAiConfig(actor) {
         bootstrap();
         const body = buildActorPayload(actor || {});
-        const response = syncRequest('POST', 'getGeminiConfig', body);
+        const response = syncRequest('POST', 'getOpenAiConfig', body);
         const config = response && response.config ? response.config : {};
         return {
-            model: String(config.model || 'gemini-2.5-flash'),
+            model: String(config.model || 'gpt-5.6-luna'),
             timeoutMs: Number(config.timeoutMs || 30000),
             hasApiKey: !!config.hasApiKey,
             source: String(config.source || 'database'),
         };
     }
 
-    function saveGeminiConfig(config, actor) {
+    function saveOpenAiConfig(config, actor) {
         bootstrap();
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             config: Object.assign({}, config || {}),
         });
-        const response = syncRequest('POST', 'saveGeminiConfig', body);
+        const response = syncRequest('POST', 'saveOpenAiConfig', body);
         const savedConfig = response && response.config ? response.config : {};
         return {
-            model: String(savedConfig.model || 'gemini-2.5-flash'),
+            model: String(savedConfig.model || 'gpt-5.6-luna'),
             timeoutMs: Number(savedConfig.timeoutMs || 30000),
             hasApiKey: !!savedConfig.hasApiKey,
             source: String(savedConfig.source || 'database'),
         };
     }
+
+    const getGeminiConfig = getOpenAiConfig;
+    const saveGeminiConfig = saveOpenAiConfig;
 
     function bulkDistributeCredentials(rows, actor) {
         bootstrap();
@@ -3030,6 +3038,8 @@ const SharedData = (() => {
         addActivityLogEntry,
         getCredentialDistributorConfig,
         saveCredentialDistributorConfig,
+        getOpenAiConfig,
+        saveOpenAiConfig,
         getGeminiConfig,
         saveGeminiConfig,
         bulkDistributeCredentials,

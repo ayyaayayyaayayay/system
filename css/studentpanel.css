@@ -1598,12 +1598,22 @@ body.student-panel {
     backdrop-filter: blur(16px);
     box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
     border-right: 1px solid rgba(203, 213, 225, 0.9);
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
 }
 
 .student-panel .sidebar-header,
 .student-panel .sidebar-footer {
     border: none;
     padding: 10px 4px;
+    flex-shrink: 0;
+}
+
+.student-panel .sidebar-footer {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
 }
 
 .student-panel .logo-container {
@@ -1627,6 +1637,7 @@ body.student-panel {
 .student-panel .sidebar-nav {
     padding: 18px 0;
     gap: 10px;
+    min-height: 0;
 }
 
 .student-panel .nav-link {
@@ -1966,6 +1977,8 @@ body.student-panel {
         transform: translateX(-100%);
         transition: transform var(--motion-normal);
         z-index: 260;
+        height: 100dvh;
+        max-height: 100dvh;
     }
 
     .student-panel .sidebar .logo-text,
@@ -2008,14 +2021,17 @@ body.student-panel {
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        width: 38px;
+        height: 38px;
+        border-radius: 12px;
     }
 
     .student-panel .top-header {
         position: sticky;
         top: 12px;
         z-index: 120;
-        padding: 18px 16px;
-        border-radius: 20px;
+        padding: 14px 14px;
+        border-radius: 18px;
         transition: transform 0.22s ease, opacity 0.22s ease, box-shadow 0.22s ease;
         will-change: transform;
     }
@@ -2034,7 +2050,21 @@ body.student-panel {
     }
 
     .student-panel .page-title {
-        font-size: 24px;
+        font-size: 22px;
+        line-height: 1.18;
+    }
+
+    .student-panel .page-context {
+        font-size: 12px;
+        line-height: 1.45;
+    }
+
+    .student-panel .user-action-btn,
+    .student-panel .user-profile {
+        min-width: 38px;
+        min-height: 38px;
+        padding: 6px;
+        border-radius: 14px;
     }
 
     .student-panel .user-profile span {
@@ -2046,11 +2076,25 @@ body.student-panel {
     .student-panel .top-header {
         align-items: flex-start;
         top: 8px;
+        padding: 12px;
+        border-radius: 16px;
     }
 
     .student-panel .user-info {
         width: 100%;
         justify-content: flex-end;
+    }
+
+    .student-header-main {
+        gap: 10px;
+    }
+
+    .page-title-block {
+        gap: 3px;
+    }
+
+    .student-panel .page-title {
+        font-size: 21px;
     }
 
     .student-panel .student-hero-card,
