@@ -3436,6 +3436,7 @@ function setupProfileActions() {
             hideAccountActionCards();
             const targetCard = document.getElementById(targetId);
             if (targetCard) {
+                setActiveAccountActionButton(targetId);
                 targetCard.style.display = 'block';
                 const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
                 targetCard.scrollIntoView({ behavior: prefersReducedMotion ? 'auto' : 'smooth', block: 'start' });
@@ -3454,8 +3455,21 @@ function setupProfileActions() {
                     clearFormMessage(form);
                 }
                 targetCard.style.display = 'none';
+                clearActiveAccountActionButtons();
             }
         });
+    });
+}
+
+function setActiveAccountActionButton(targetId) {
+    document.querySelectorAll('.js-toggle-account-form').forEach(button => {
+        button.classList.toggle('is-active', button.getAttribute('data-target') === targetId);
+    });
+}
+
+function clearActiveAccountActionButtons() {
+    document.querySelectorAll('.js-toggle-account-form').forEach(button => {
+        button.classList.remove('is-active');
     });
 }
 

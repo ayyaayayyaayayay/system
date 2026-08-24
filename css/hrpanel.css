@@ -1274,6 +1274,13 @@ body {
     flex-wrap: wrap;
 }
 
+.account-action-toggle.is-active {
+    background: var(--primary-gradient);
+    color: var(--bg-secondary);
+    border-color: transparent;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
 .btn-submit {
     background: var(--primary-gradient);
     color: var(--bg-secondary);

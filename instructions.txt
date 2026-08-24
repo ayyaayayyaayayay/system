@@ -1,0 +1,613 @@
+NAAP EVALUATION SYSTEM
+Student Instruction Materials
+
+Purpose
+This guide explains how students can use the NAAP Evaluation System to complete Student to Professor evaluations. The system lets students view assigned evaluation forms, answer the questionnaire, save drafts, submit final evaluations, review past submissions, view profile information, change password, and submit proof if an evaluation was missed after the evaluation period.
+
+1. Accessing the System
+
+1. Open the NAAP Evaluation System login page.
+2. In the Student Number / Employee ID field, enter your student number.
+3. In the Password field, enter your account password.
+4. Click Login.
+5. If OTP verification appears, check your Gmail for the 6-digit code.
+6. Enter the OTP code in the OTP Verification window.
+7. Click Verify OTP.
+8. After successful login, the system will open the Student Dashboard.
+
+Important reminders:
+- Use only your own student account.
+- If the system says your account is inactive, contact the administrator.
+- If your account is already active on another device or browser, log out from the other session or wait for the system to allow another login.
+- If you forgot your password, click Forgot Password on the login page and follow the account recovery instructions.
+
+2. Student Dashboard Overview
+
+After logging in, the Student Dashboard shows the main areas of the system:
+
+- Home: Shows evaluation summary, pending evaluations, completed evaluations, and total submissions.
+- Evaluation Forms: Opens the selected evaluation form. This becomes available only after you choose a pending professor evaluation.
+- History: Shows evaluations you already submitted.
+- Profile: Shows your student information and password update form.
+- Announcements: The bell icon shows evaluation schedule updates and posted reminders.
+- Logout: Ends your session and returns you to the login page.
+
+On mobile devices, tap the menu icon to open the sidebar navigation.
+
+3. Checking Pending Evaluations
+
+1. Go to Home.
+2. Look for the My Evaluations section.
+3. Review the list of pending professor evaluations.
+4. Each pending evaluation shows:
+   - Professor name
+   - Subject code
+   - Subject name
+   - Section
+   - Due date
+   - Start Evaluation button
+
+If there are no pending evaluations, the dashboard will show a message explaining why. Possible reasons include:
+- The evaluation period is closed.
+- No evaluation period has been set.
+- You have no assigned evaluations for the current semester.
+- You already completed all assigned evaluations.
+
+4. Starting an Evaluation
+
+1. On the Home page, find the professor and subject you need to evaluate.
+2. Click Start Evaluation.
+3. The system will open the Evaluation Form.
+4. Check the Selected for evaluation area at the top of the form.
+5. Make sure the selected professor and subject are correct before answering.
+
+Important:
+- You must start from a pending evaluation on the dashboard.
+- Do not open the form directly without selecting a professor first.
+- The system will not allow submission if no professor and subject are selected.
+- If the evaluation period is closed, the system will not allow you to start or submit an evaluation.
+- If you already submitted an evaluation for the same professor and subject, the system will not allow another submission.
+
+5. Answering the Evaluation Form
+
+1. Read the form title and instructions.
+2. Answer each question honestly and constructively.
+3. The questionnaire is divided into sections.
+4. Use Next to move to the next section.
+5. Use Back to return to the previous section.
+6. Watch the progress bar to know which section you are answering.
+7. Required questions must be answered before you can continue or submit.
+8. On the last section, the Submit Evaluation button will appear.
+
+Tips for answering:
+- Read each item carefully before selecting a rating.
+- Provide clear written answers when text fields are required.
+- If the form asks for an explanation because of a specific answer, type a complete and valid explanation.
+- Avoid offensive, unrelated, or incomplete comments.
+- Submit only when you are sure your answers are final.
+
+6. Saving a Draft
+
+The system supports draft saving while answering an evaluation.
+
+Manual draft saving:
+1. While answering the form, click Save Draft.
+2. Wait for the draft status to show that the draft was saved.
+
+Automatic draft saving:
+- The system also saves changes automatically while you answer.
+- Moving between sections also saves the draft silently.
+- If you return to the same pending evaluation later, the saved draft can be restored.
+
+Important:
+- A draft is not a final submission.
+- Your evaluation is counted as completed only after clicking Submit Evaluation and receiving a success message.
+- If you click Cancel and confirm, unsaved changes may be lost and the draft for the current evaluation may be cleared.
+
+7. Submitting an Evaluation
+
+1. Complete all required questions in every section.
+2. Go to the last section of the form.
+3. Review your answers before submitting.
+4. Click Submit Evaluation.
+5. Wait while the system shows Submitting.
+6. When the system shows Evaluation submitted successfully, your evaluation is recorded.
+7. The system will return you to the dashboard.
+8. The submitted evaluation will no longer appear as pending.
+
+Important:
+- Submit only once you are finished.
+- After submission, the evaluation becomes part of your history.
+- The system prevents duplicate submissions for the same professor and subject in the same semester.
+
+8. Canceling an Evaluation
+
+1. While in the Evaluation Form, click Cancel.
+2. The system will ask if you are sure.
+3. Confirm only if you want to stop answering and leave the form.
+4. The system will return you to the dashboard.
+
+Reminder:
+- Canceling can remove unsaved changes.
+- If you still need your answers, click Save Draft before canceling.
+
+9. Viewing Evaluation History
+
+1. Click History in the sidebar.
+2. Use the filters if needed:
+   - Academic Year
+   - Semester
+   - Professor / Subject search
+3. Click Apply Filters or press Enter in the search field.
+4. The system will show matching submitted evaluations.
+5. Click View Answers to review the submitted answers.
+6. Close the answer window when done.
+
+Important:
+- History is read-only.
+- You can view submitted answers, but you cannot edit a submitted evaluation from the History page.
+
+10. Viewing Profile Information
+
+1. Click Profile in the sidebar.
+2. Review your student information, including:
+   - Student ID
+   - Full name
+   - Program
+   - Email
+   - Campus
+   - Department
+   - Year section
+   - Year level
+   - Status
+   - Academic year
+
+Profile information is view-only. If any information is wrong, report it to the administrator or authorized office.
+
+11. Changing Your Password
+
+1. Click Profile in the sidebar.
+2. Go to Change Password.
+3. Enter your current password.
+4. Enter your new password.
+5. Re-enter the new password in Confirm New Password.
+6. Click Update Password.
+7. Wait for the success message.
+
+Password reminders:
+- The new password and confirmation must match.
+- Use a password that is not easy to guess.
+- Do not share your password with anyone.
+- Use the eye icon if you need to show or hide the password while typing.
+
+12. Announcements and Schedule Updates
+
+1. Click the bell icon at the top of the dashboard.
+2. Read posted announcements and evaluation schedule reminders.
+3. Pay attention to the start and end dates of the evaluation period.
+
+Important:
+- Evaluations can only be completed while the evaluation period is open.
+- Complete all pending evaluations before the due date or before the evaluation period ends.
+
+13. Missed Evaluation Proof Requirement
+
+If the evaluation period has already ended and you still have incomplete assigned evaluations, the system may show an Evaluation Proof Requirement window.
+
+When this appears:
+1. Read the message carefully.
+2. In the Reason field, explain why you were unable to complete the evaluation.
+3. In the Google Drive Proof Link field, paste a valid shareable Google Drive link.
+4. Click Submit Proof.
+5. Wait for the message saying the proof was submitted.
+6. Your proof will be marked as pending and will wait for OSA review.
+
+Important:
+- The Google Drive link must be valid and shareable.
+- The proof request is reviewed by OSA.
+- If your proof is pending, wait for the decision.
+- If your proof is approved, the proof reminder will stop appearing.
+
+14. Logging Out
+
+1. Click Logout in the sidebar.
+2. The system will clear your session.
+3. You will be returned to the login page.
+
+Always log out after using the system, especially when using a shared computer.
+
+15. Common Student Problems and What to Do
+
+Problem: I cannot log in.
+What to do: Check your student number and password. If OTP is required, enter the correct 6-digit code. If you forgot your password, use Forgot Password.
+
+Problem: My account is inactive.
+What to do: Contact the administrator. Inactive accounts cannot access evaluations.
+
+Problem: I do not see any pending evaluations.
+What to do: Check the dashboard message. The period may be closed, no evaluation may be assigned, or all evaluations may already be completed.
+
+Problem: The Evaluation Forms menu is hidden or disabled.
+What to do: Select a pending professor evaluation from the Home page first. The form is available only when there is an active pending evaluation.
+
+Problem: The system says the evaluation period is closed.
+What to do: You cannot submit regular evaluations after the period closes. If required, submit proof through the Evaluation Proof Requirement window.
+
+Problem: I clicked Submit but the system asks me to answer more questions.
+What to do: Complete all required fields. The system will guide you to the section with missing required answers.
+
+Problem: I need to edit an evaluation I already submitted.
+What to do: Submitted evaluations are final in the student panel. Contact the authorized office if there is a serious issue.
+
+Problem: I changed my password but it failed.
+What to do: Make sure all password fields are filled in and the new password matches the confirmation. If it still fails, contact the administrator.
+
+16. Good Practices for Students
+
+- Complete evaluations as early as possible.
+- Evaluate only the professor and subject assigned to you.
+- Answer honestly, respectfully, and constructively.
+- Use Save Draft if you cannot finish immediately.
+- Review answers before final submission.
+- Check History after submission to confirm the evaluation was recorded.
+- Keep your password private.
+- Log out after every session.
+
+End of Student Instruction Materials
+
+
+NAAP EVALUATION SYSTEM
+Professor Instruction Materials
+
+Purpose
+This guide explains how professors can use the NAAP Evaluation System to manage faculty evaluation tasks. The professor panel lets professors view dashboard summaries, complete peer evaluations, review evaluation reports after the allowed period, manage faculty acknowledgement papers, view profile information, update mail account, change password, upload a profile photo, and log out securely.
+
+1. Accessing the System
+
+1. Open the NAAP Evaluation System login page.
+2. In the Student Number / Employee ID field, enter your employee ID or assigned account username.
+3. In the Password field, enter your account password.
+4. Click Login.
+5. If OTP verification appears, check your Gmail for the 6-digit code.
+6. Enter the OTP code in the OTP Verification window.
+7. Click Verify OTP.
+8. After successful login, the system will open the Professor Dashboard.
+
+Important reminders:
+- Use only your own professor account.
+- If the system says your account is inactive, contact the administrator.
+- If your login is not linked to an active professor account, contact the administrator or HR office.
+- If your account is already active on another device or browser, log out from the other session or wait for the system to allow another login.
+- If you forgot your password, click Forgot Password on the login page and follow the account recovery instructions.
+
+2. Professor Dashboard Overview
+
+After logging in, the Professor Dashboard shows the main areas of the system:
+
+- Dashboard: Shows evaluation counts, average score, response rate, deadline countdowns, and pending tasks.
+- Peer Evaluation: Lets you evaluate assigned professor colleagues.
+- Reports: Shows evaluation summaries, response rates, ratings, analytics, comments, and report generation. Reports are available only after the Student to Professor evaluation period ends.
+- Faculty Paper: Lets you create, review, edit, preview, send, or archive faculty acknowledgement papers. Faculty Paper is available only after the Student to Professor evaluation period ends.
+- Profile: Shows your faculty information, profile photo, mail account update form, and password update form.
+- Announcements: The bell icon shows faculty announcements and schedule reminders.
+- Logout: Ends your session and returns you to the login page.
+
+On mobile devices, tap the menu icon to open the sidebar navigation.
+
+3. Reading the Dashboard
+
+1. Go to Dashboard.
+2. Review the summary cards:
+   - Evaluations Received: Shows received submissions versus expected submissions.
+   - Average Score: Shows your current average rating when reports are unlocked.
+   - Response Rate: Shows participation percentage for the selected semester.
+3. Check Evaluation Deadline Countdown.
+4. Check My Pending Tasks for peer evaluations that still need to be completed.
+
+Important:
+- The Average Score card is hidden while reports are still locked.
+- Pending peer tasks appear only while the Professor to Professor evaluation period is open.
+- If there are no pending tasks, the system may show that all peer tasks are completed or that the peer evaluation period is not scheduled/open.
+
+4. Completing a Peer Evaluation
+
+1. Click Peer Evaluation in the sidebar, or click Open Peer Evaluation from the dashboard.
+2. In Select Colleague, choose the assigned professor you need to evaluate.
+3. Read the form title and instructions.
+4. Answer each required question honestly and professionally.
+5. Use Next to move to the next section.
+6. Use Back to return to a previous section.
+7. Watch the progress bar to know which section you are answering.
+8. On the last section, click Submit Evaluation.
+9. Wait for the success message.
+10. The system will return you to the dashboard after submission.
+
+Important:
+- You can evaluate only assigned peer targets.
+- The Professor to Professor evaluation period must be open before you can submit.
+- Required questions must be answered before you can continue or submit.
+- The system prevents duplicate peer evaluation submissions for the same target in the same semester.
+- If you click Cancel, the form resets and returns you to the dashboard.
+
+5. Reports Availability
+
+Reports are locked while the Student to Professor evaluation period is still open or not properly configured. Reports unlock only after the Student to Professor evaluation period has ended.
+
+If reports are locked:
+- The Reports menu may be hidden.
+- The dashboard report action may be disabled or hidden.
+- The system may show a message such as Reports not available yet.
+- Wait until after the configured Student to Professor evaluation end date.
+
+6. Viewing Evaluation Reports
+
+1. Click Reports in the sidebar after reports are available.
+2. Use the Evaluation filter to choose the type of report:
+   - Student Evaluation
+   - Professor Evaluation
+   - Supervisor Evaluation
+3. Use the Semester filter to choose the academic term.
+4. Review Faculty Response Rate & Counts.
+5. Review the Faculty Dashboard summary:
+   - Average Rating per Criteria
+   - Evaluations Received
+6. Review Evaluation Analytics for charts and detailed rating summaries.
+
+For Student Evaluation reports:
+- Results are grouped by subject.
+- Section Count shows how many sections are handled per subject.
+- Required means enrolled students expected to evaluate.
+- Received means submitted evaluations.
+- Response Rate shows the percentage of completed evaluations.
+
+For Professor or Supervisor Evaluation reports:
+- Results are grouped by evaluator or source.
+- Average rating is shown based on submitted evaluation responses.
+
+7. Viewing and Summarizing Feedback Comments
+
+1. Go to Reports.
+2. Select the evaluation type and semester.
+3. In the Anonymous Feedback or Feedback Summary panel, click View.
+4. The system will load available comments for the selected filters.
+5. Click AI Summarize to generate a summary of student feedback when student comments are available.
+6. Click Close to reset or hide the loaded feedback list.
+
+Important:
+- Student feedback is shown as anonymized feedback.
+- AI Summarize depends on available student comments.
+- If no comments are available, the system will show a message explaining that there is no feedback to summarize.
+
+8. Generating a Report PDF
+
+1. Go to Dashboard or Reports after reports are unlocked.
+2. Use the report action button, such as Generate Paper or View Reports.
+3. If reports are available, the system will open or generate the professor report PDF.
+4. If reports are still locked, the system will show the unlock date or tell you that reports are unavailable.
+
+Important:
+- Report PDF generation is not available before the Student to Professor evaluation period ends.
+- If your session is not linked to an active professor account, report actions will not work.
+
+9. Faculty Paper Availability
+
+Faculty Paper is locked while the Student to Professor evaluation period is still open. It unlocks after the Student to Professor evaluation period ends.
+
+If Faculty Paper is locked:
+- The Faculty Paper menu may be hidden.
+- Create/Refresh Draft may be disabled.
+- The system may show a message explaining when the feature will unlock.
+
+10. Creating or Refreshing a Faculty Paper Draft
+
+1. Click Faculty Paper in the sidebar after the feature is available.
+2. Choose the load type:
+   - Main Load
+   - Excess Load
+3. Click Create/Refresh Draft.
+4. Wait for the message saying the draft paper is ready.
+5. The created draft will appear in the Active tab.
+
+Important:
+- A draft can be created only when your session is linked to an active professor account.
+- The draft uses the selected semester and available evaluation summary data.
+- Create/Refresh Draft can update the draft snapshot based on available data.
+
+11. Reviewing Faculty Paper Details
+
+1. Go to Faculty Paper.
+2. Use the Active tab to view active papers.
+3. Use the Archive tab to view archived papers.
+4. Select a paper from the table.
+5. Review the Paper Detail section, including:
+   - Paper ID
+   - Status
+   - Faculty name
+   - Department
+   - Rank
+   - Semester
+   - Load type
+   - SET Rating
+   - SAF Rating
+
+Important:
+- Section A and Section B are read-only snapshots.
+- Section C is editable only while the paper is still in draft status.
+- Sent, completed, or archived papers may become read-only.
+
+12. Editing Section C of the Faculty Paper
+
+Section C includes:
+- Areas for Improvement
+- Proposed Learning and Development Activities
+- Action Plan
+
+To edit Section C:
+1. Open an active draft paper.
+2. Type the needed information in the Section C fields.
+3. Click Save Section C.
+4. Wait for the success message.
+
+Using AI Smart Recommendations:
+1. Open an active draft paper.
+2. Click AI Smart Recommendations.
+3. Review the generated text.
+4. Edit the recommendations if needed.
+5. Click Save Section C to keep the changes.
+
+Important:
+- AI recommendations are not saved automatically.
+- You must click Save Section C after applying or editing recommendations.
+- AI recommendations depend on available student feedback data.
+- Archived papers cannot generate AI recommendations.
+
+13. Previewing and Sending Faculty Paper
+
+To preview:
+1. Open a paper in Faculty Paper.
+2. Click Preview PDF.
+3. Review the generated PDF preview.
+
+To send to dean:
+1. Make sure Section C is complete and saved.
+2. Click Send to Dean.
+3. Wait for the message saying the paper was sent successfully.
+
+Important:
+- Only draft papers can be sent.
+- Once sent, the paper is routed to the dean.
+- After sending, the paper may become read-only depending on its status.
+
+14. Archiving a Faculty Paper
+
+1. Open an active draft paper.
+2. Click Archive.
+3. Wait for the message saying the paper was archived.
+4. Use the Archive tab to view archived papers.
+
+Important:
+- Only draft papers can be archived from the professor panel.
+- Archived papers are not editable.
+
+15. Viewing Profile Information
+
+1. Click Profile in the sidebar.
+2. Review your professor profile information, including:
+   - Faculty ID
+   - Full name
+   - Department
+   - Rank
+   - Mail account
+   - AY/SEM
+3. If you need to update incorrect official information, contact the administrator or HR office.
+
+Profile information is mostly view-only and synced from HR records.
+
+16. Uploading a Profile Photo
+
+1. Click Profile.
+2. In the profile photo section, click Upload Photo.
+3. Choose a JPG, JPEG, PNG, or WEBP image.
+4. Wait for the image to appear as your profile photo.
+
+Important:
+- The image must be smaller than 2MB.
+- If the upload fails, try another valid image or contact the administrator.
+
+17. Updating Your Mail Account
+
+1. Click Profile.
+2. In Account Actions, click Change Mail Account.
+3. Review the Current Mail Account field.
+4. Enter the new mail account.
+5. Re-enter the new mail account in Confirm New Mail Account.
+6. Click Update Mail Account.
+7. Wait for the success message.
+
+Important:
+- The new mail account and confirmation must match.
+- The new mail account must be different from the current mail account.
+- If the update service is unavailable, contact the administrator.
+
+18. Changing Your Password
+
+1. Click Profile.
+2. In Account Actions, click Change Password.
+3. Enter your current password.
+4. Enter your new password.
+5. Re-enter the new password in Confirm New Password.
+6. Click Update Password.
+7. Wait for the success message.
+
+Password reminders:
+- The new password and confirmation must match.
+- Use a secure password.
+- Do not share your password with anyone.
+- Use the eye icon if you need to show or hide the password while typing.
+
+19. Announcements and Schedule Updates
+
+1. Click the bell icon at the top of the page.
+2. Read posted faculty announcements and schedule reminders.
+3. Pay attention to these evaluation periods:
+   - Student to Professor
+   - Professor to Professor
+   - Supervisor to Professor
+
+Important:
+- Peer evaluations depend on the Professor to Professor evaluation period.
+- Reports and Faculty Paper depend on the Student to Professor evaluation period ending.
+
+20. Logging Out
+
+1. Click Logout in the sidebar.
+2. The system will clear your session.
+3. You will be returned to the login page.
+
+Always log out after using the system, especially when using a shared computer.
+
+21. Common Professor Problems and What to Do
+
+Problem: I cannot log in.
+What to do: Check your employee ID or username and password. If OTP is required, enter the correct 6-digit code. If you forgot your password, use Forgot Password.
+
+Problem: My account is inactive.
+What to do: Contact the administrator. Inactive professor accounts cannot access evaluation actions.
+
+Problem: The system says my session is not linked to an active professor account.
+What to do: Contact the administrator or HR office so your login account can be matched with your professor record.
+
+Problem: I cannot submit a peer evaluation.
+What to do: Make sure the Professor to Professor evaluation period is open, select an assigned colleague, and answer all required questions.
+
+Problem: The colleague list says there are no assigned peer targets.
+What to do: You may have no assigned peer evaluations for the current semester, or all assigned peer evaluations may already be completed.
+
+Problem: Reports are hidden or unavailable.
+What to do: Wait until the Student to Professor evaluation period has ended. Reports are locked before that date.
+
+Problem: Faculty Paper is hidden or unavailable.
+What to do: Wait until the Student to Professor evaluation period has ended. Faculty Paper is locked before that date.
+
+Problem: AI Smart Recommendations did not generate content.
+What to do: Check whether student feedback data is available. You can still manually type Section C details and save them.
+
+Problem: I cannot edit Section C.
+What to do: Check the paper status. Section C is editable only while the paper is in draft status.
+
+Problem: I changed my password or mail account but it failed.
+What to do: Make sure all fields are filled in correctly and the confirmation matches. If it still fails, contact the administrator.
+
+22. Good Practices for Professors
+
+- Check the dashboard regularly during evaluation periods.
+- Complete peer evaluations before the deadline.
+- Review reports only after they officially unlock.
+- Use report filters carefully before interpreting results.
+- Review comments professionally and focus on improvement areas.
+- Save Section C before previewing or sending a faculty paper.
+- Preview the PDF before sending the paper to the dean.
+- Keep your mail account and password updated.
+- Log out after every session.
+
+End of Professor Instruction Materials

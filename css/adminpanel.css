@@ -6624,3 +6624,38 @@ body.admin-panel .panel-branding-preview .logo-shield.has-custom-logo {
   width: 86px;
   height: 86px;
 }
+
+body.admin-panel .sidebar-header .logo-container {
+  gap: 20px !important;
+  align-items: center !important;
+}
+
+body.admin-panel .sidebar-header .logo-shield.has-custom-logo {
+  flex: 0 0 auto;
+  margin-bottom: 2px;
+}
+
+body.admin-panel .sidebar-header .logo-text {
+  margin-top: 0;
+  line-height: 1.25;
+}
+
+body.admin-panel .panel-branding-preview .logo-container {
+  width: 100%;
+  align-items: center !important;
+  justify-content: center;
+  gap: 16px;
+  text-align: center;
+}
+
+body.admin-panel .panel-branding-preview .logo-shield {
+  margin-inline: auto;
+}
+
+body.admin-panel .panel-branding-preview .logo-text {
+  width: 100%;
+  max-width: 100% !important;
+  margin: 0;
+  text-align: center !important;
+  line-height: 1.25;
+}
