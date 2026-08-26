@@ -8187,7 +8187,7 @@ function runHrAiAnalyticsForProfessor(professorId, semesterId, outputEl, btnEl) 
             const source = response && response.source ? response.source : 'rule';
             const notice = source === 'openai' || source === 'gemini'
                 ? ''
-                : 'OpenAI is unavailable or partial; showing rule-based fallback insights.';
+                : 'Showing rule-based analytics.';
             renderHrAiInsightResult(outputEl, insight, source, notice);
         } catch (error) {
             console.error('[HRPanel] AI analytics failed, using local fallback.', error);
@@ -8195,7 +8195,7 @@ function runHrAiAnalyticsForProfessor(professorId, semesterId, outputEl, btnEl) 
                 outputEl,
                 fallbackInsight,
                 'rule',
-                'OpenAI is unavailable right now. Showing rule-based fallback analytics.'
+                'Showing rule-based analytics.'
             );
         } finally {
             if (btnEl) {

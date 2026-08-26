@@ -470,7 +470,7 @@ function getDeanFeedbackAiSummarySourceNote(message) {
         return warning || 'Generated with OpenAI and completed with rule fallback.';
     }
     if (source === 'rule') {
-        return warning || 'Rule-based summary used.';
+        return warning || 'Rule-based summary generated.';
     }
     return warning;
 }
@@ -4219,10 +4219,9 @@ function setupFacultyResponseView() {
     }
 
     function applyCommentsAiAccessState() {
-        const enabled = isSupervisorOpenAiPanelEnabled();
-        commentsAiBtn.disabled = !enabled;
-        commentsAiBtn.title = enabled ? '' : `OpenAI features are disabled for the ${getPanelLabel()} panel by the administrator.`;
-        return enabled;
+        commentsAiBtn.disabled = false;
+        commentsAiBtn.title = '';
+        return true;
     }
 
     function getFeedbackViewLabel(view) {
@@ -4260,11 +4259,8 @@ function setupFacultyResponseView() {
         feedbackState.loadedComments = [];
         feedbackState.lastTrendRows = [];
         commentsList.innerHTML = '<li class="faculty-comments-empty">No comments loaded yet.</li>';
-        if (applyCommentsAiAccessState()) {
-            setDeanCommentsAiSummary('Click AI Summarize after opening a professor comments list.', 'info');
-        } else {
-            setDeanCommentsAiSummary(`OpenAI features are disabled for the ${getPanelLabel()} panel by the administrator.`, 'warning');
-        }
+        applyCommentsAiAccessState();
+        setDeanCommentsAiSummary('Click AI Summarize after opening a professor comments list.', 'info');
         resetDeanProfessorSemestralTrend();
         setDeanSemestralTrendVisibility(false);
         if (hidePanel) {
@@ -4403,11 +4399,6 @@ function setupFacultyResponseView() {
     });
 
     commentsAiBtn.addEventListener('click', async function () {
-        if (!applyCommentsAiAccessState()) {
-            setDeanCommentsAiSummary(`OpenAI features are disabled for the ${getPanelLabel()} panel by the administrator.`, 'warning');
-            return;
-        }
-
         if (!Array.isArray(feedbackState.loadedComments) || !feedbackState.loadedComments.length) {
             setDeanCommentsAiSummary('No comments loaded for the selected professor. Open a professor comments list first.', 'warning');
             return;
@@ -4433,7 +4424,8 @@ function setupFacultyResponseView() {
             }, { role: SUPERVISOR_ROLE });
 
             if (response && response.disabled) {
-                setDeanCommentsAiSummary(response.error || `OpenAI features are disabled for the ${getPanelLabel()} panel by the administrator.`, 'warning');
+                const fallbackSummary = buildDeanFeedbackAiSummary(feedbackState.loadedComments, { evaluationLabel: viewLabel });
+                setDeanCommentsAiSummary(fallbackSummary, 'success');
                 return;
             }
 
@@ -4445,14 +4437,14 @@ function setupFacultyResponseView() {
                 ? response.summary
                 : buildDeanFeedbackAiSummary(feedbackState.loadedComments, { evaluationLabel: viewLabel });
             const source = normalizeDeanToken(summaryData.source || response.source);
-            setDeanCommentsAiSummary(summaryData, source === 'openai' ? 'success' : 'warning');
+            setDeanCommentsAiSummary(summaryData, source === 'openai+rule' || source === 'gemini+rule' ? 'warning' : 'success');
         } catch (error) {
+            console.error('[SupervisorPanel] Feedback summary failed, using local rule-based summary.', error);
             const fallbackSummary = buildDeanFeedbackAiSummary(feedbackState.loadedComments, {
                 evaluationLabel: viewLabel
             });
-            fallbackSummary.warning = (error && error.message ? error.message : 'OpenAI summary failed.') + ' Rule-based summary used.';
             fallbackSummary.source = 'rule';
-            setDeanCommentsAiSummary(fallbackSummary, 'warning');
+            setDeanCommentsAiSummary(fallbackSummary, 'success');
         } finally {
             commentsAiBtn.innerHTML = originalHtml || '<i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> AI Summarize';
             applyCommentsAiAccessState();
@@ -4533,9 +4525,8 @@ function setupFacultyResponseView() {
                     renderDeanProfessorSemestralTrend(feedbackState.selectedProfessorUserId, selectedSemesterId);
                     if (!normalized.length) {
                         setDeanCommentsAiSummary('No comments available for this professor in the selected filters.', 'warning');
-                    } else if (!applyCommentsAiAccessState()) {
-                        setDeanCommentsAiSummary(`OpenAI features are disabled for the ${getPanelLabel()} panel by the administrator.`, 'warning');
                     } else {
+                        applyCommentsAiAccessState();
                         setDeanCommentsAiSummary('Comments loaded. Click AI Summarize to summarize this professor comments.', 'info');
                     }
                     commentsPanel.classList.add('active');

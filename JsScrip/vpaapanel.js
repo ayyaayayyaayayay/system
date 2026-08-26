@@ -2376,7 +2376,7 @@ function runAiAnalyticsForProfessor(profId, outputEl, btnEl) {
             const source = response && response.source ? response.source : "rule";
             const notice = source === "openai" || source === "gemini"
                 ? ""
-                : "OpenAI is unavailable or partial; showing rule-based fallback insights.";
+                : "Showing rule-based analytics.";
             renderAiInsightResult(outputEl, insight, source, notice);
         } catch (error) {
             console.error("[VPAA] AI analytics failed, using local fallback.", error);
@@ -2384,7 +2384,7 @@ function runAiAnalyticsForProfessor(profId, outputEl, btnEl) {
                 outputEl,
                 fallbackInsight,
                 "rule",
-                "OpenAI is unavailable right now. Showing rule-based fallback analytics."
+                "Showing rule-based analytics."
             );
         } finally {
             if (btnEl) {

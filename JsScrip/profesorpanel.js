@@ -1926,7 +1926,7 @@ function resolveFacultyRecommendationSourceLabel(source) {
     const token = normalizeToken(source);
     if (token === 'openai' || token === 'gemini') return 'OpenAI';
     if (token === 'openai+rule' || token === 'gemini+rule') return 'OpenAI with rule safety completion';
-    return 'rule fallback';
+    return 'rule-based logic';
 }
 
 function getProfessorOpenAiPanelAccess() {
@@ -1959,11 +1959,6 @@ function runFacultySectionCAiRecommendation(paper) {
     const statusToken = normalizeToken(paper.status);
     if (statusToken === 'archived') {
         setFacultyPaperAiFeedback('error', 'Archived papers cannot generate AI recommendations.');
-        return;
-    }
-
-    if (!isProfessorOpenAiPanelEnabled()) {
-        setFacultyPaperAiFeedback('warning', 'OpenAI features are disabled for the Professor panel by the administrator.');
         return;
     }
 
@@ -2035,15 +2030,15 @@ function runFacultySectionCAiRecommendation(paper) {
                 );
             } else {
                 setFacultyPaperAiFeedback(
-                    'warning',
-                    `OpenAI unavailable or partial. Recommendations applied using ${resolveFacultyRecommendationSourceLabel(response.source)}.${weakAreaText} Click Save Section C to persist.`
+                    'success',
+                    `Recommendations applied using ${resolveFacultyRecommendationSourceLabel(response.source)}.${weakAreaText} Click Save Section C to persist.`
                 );
             }
         } catch (error) {
             setFacultyPaperAiFeedback('error', error && error.message ? error.message : 'Failed to generate AI recommendations.');
         } finally {
             if (aiBtn) {
-                aiBtn.disabled = statusToken === 'archived' || !isProfessorOpenAiPanelEnabled();
+                aiBtn.disabled = statusToken === 'archived';
                 aiBtn.textContent = originalBtnText || 'AI Smart Recommendations';
             }
         }
@@ -2127,10 +2122,9 @@ function renderProfessorFacultyPaperDetail(paper) {
     if (saveSectionCBtn) saveSectionCBtn.disabled = sectionCReadOnly;
     if (sendBtn) sendBtn.disabled = !draftStatus;
     if (archiveBtn) archiveBtn.disabled = !draftStatus;
-    const professorAiEnabled = isProfessorOpenAiPanelEnabled();
     if (aiRecommendBtn) {
-        aiRecommendBtn.disabled = sectionCReadOnly || !professorAiEnabled;
-        aiRecommendBtn.title = professorAiEnabled ? '' : 'OpenAI features are disabled for the Professor panel by the administrator.';
+        aiRecommendBtn.disabled = sectionCReadOnly;
+        aiRecommendBtn.title = '';
     }
     setFacultyPaperAiFeedback('', '');
 
@@ -3697,14 +3691,9 @@ function setupProfessorSubjectComments() {
     if (!panel || !title || !meta || !list || !aiBtn || !aiSummary || !viewBtn || !closeBtn) return;
 
     function applyAiAccessState() {
-        const enabled = isProfessorOpenAiPanelEnabled();
-        aiBtn.disabled = !enabled;
-        aiBtn.title = enabled ? '' : 'OpenAI features are disabled for the Professor panel by the administrator.';
-        return enabled;
-    }
-
-    if (!applyAiAccessState()) {
-        setProfessorCommentsAiSummary('OpenAI features are disabled for the Professor panel by the administrator.', 'warning');
+        aiBtn.disabled = false;
+        aiBtn.title = '';
+        return true;
     }
 
     closeBtn.addEventListener('click', function () {
@@ -3713,11 +3702,6 @@ function setupProfessorSubjectComments() {
     });
 
     aiBtn.addEventListener('click', async function () {
-        if (!applyAiAccessState()) {
-            setProfessorCommentsAiSummary('OpenAI features are disabled for the Professor panel by the administrator.', 'warning');
-            return;
-        }
-
         const studentSummary = professorPanelState.summaryByType.student || PROFESSOR_PANEL_EMPTY_SUMMARY;
         const studentItems = Array.isArray(studentSummary.comments) ? studentSummary.comments : [];
         if (!studentItems.length) {
@@ -3744,7 +3728,8 @@ function setupProfessorSubjectComments() {
             }, { role: 'professor' });
 
             if (response && response.disabled) {
-                setProfessorCommentsAiSummary(response.error || 'OpenAI features are disabled for the Professor panel by the administrator.', 'warning');
+                const fallbackSummary = buildStudentFeedbackAiSummary(studentItems);
+                setProfessorCommentsAiSummary(fallbackSummary, 'success');
                 return;
             }
 
@@ -3756,12 +3741,12 @@ function setupProfessorSubjectComments() {
                 ? response.summary
                 : buildStudentFeedbackAiSummary(studentItems);
             const source = normalizeToken(summaryData.source || response.source);
-            setProfessorCommentsAiSummary(summaryData, source === 'openai' ? 'success' : 'warning');
+            setProfessorCommentsAiSummary(summaryData, source === 'openai+rule' || source === 'gemini+rule' ? 'warning' : 'success');
         } catch (error) {
+            console.error('[ProfessorPanel] Feedback summary failed, using local rule-based summary.', error);
             const fallbackSummary = buildStudentFeedbackAiSummary(studentItems);
-            fallbackSummary.warning = (error && error.message ? error.message : 'OpenAI summary failed.') + ' Rule-based summary used.';
             fallbackSummary.source = 'rule';
-            setProfessorCommentsAiSummary(fallbackSummary, 'warning');
+            setProfessorCommentsAiSummary(fallbackSummary, 'success');
         } finally {
             aiBtn.innerHTML = originalHtml || '<i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> AI Summarize';
             applyAiAccessState();
@@ -3871,7 +3856,7 @@ function getProfessorFeedbackAiSummarySourceNote(message) {
         return warning || 'Generated with OpenAI and completed with rule fallback.';
     }
     if (source === 'rule') {
-        return warning || 'Rule-based summary used.';
+        return warning || 'Rule-based summary generated.';
     }
     return warning;
 }
@@ -4064,11 +4049,7 @@ function resetProfessorSubjectCommentsPanel() {
         items: [],
         evaluationType: evalType,
     };
-    if (isProfessorOpenAiPanelEnabled()) {
-        setProfessorCommentsAiSummary('Click AI Summarize after loading comments to generate a summary.', 'info');
-    } else {
-        setProfessorCommentsAiSummary('OpenAI features are disabled for the Professor panel by the administrator.', 'warning');
-    }
+    setProfessorCommentsAiSummary('Click AI Summarize after loading comments to generate a summary.', 'info');
 }
 
 /**

@@ -1878,7 +1878,7 @@ function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = [], bool $allowO
     } else {
         $summary['source'] = 'rule';
         if (!$allowOpenAi) {
-            $summary['warning'] = 'OpenAI is disabled for this panel. Rule fallback used.';
+            $summary['warning'] = '';
         } elseif ($geminiConfigured) {
             $summary['warning'] = $geminiWarning !== ''
                 ? ('OpenAI unavailable: ' . $geminiWarning . ' Rule fallback used.')
@@ -2207,7 +2207,6 @@ function summarizeFeedbackCommentsSnapshot(PDO $pdo, array $payload = [], bool $
     }
 
     if (!$allowOpenAi) {
-        $ruleSummary['warning'] = 'OpenAI is disabled for this panel. Rule fallback used.';
         return $ruleSummary;
     }
 
@@ -2220,7 +2219,6 @@ function summarizeFeedbackCommentsSnapshot(PDO $pdo, array $payload = [], bool $
     if ($geminiTimeout > 60000) $geminiTimeout = 60000;
 
     if (trim((string) $geminiKey) === '') {
-        $ruleSummary['warning'] = 'OpenAI API key is not configured. Rule-based summary used.';
         $ruleSummary['aiModel'] = trim((string) $geminiModel) !== '' ? trim((string) $geminiModel) : 'gpt-5.6-luna';
         return $ruleSummary;
     }
@@ -2237,7 +2235,6 @@ function summarizeFeedbackCommentsSnapshot(PDO $pdo, array $payload = [], bool $
     $model = (string) ($request['model'] ?? $geminiModel);
     $status = (int) ($request['status'] ?? 0);
     if (($request['success'] ?? false) !== true) {
-        $ruleSummary['warning'] = 'OpenAI unavailable: ' . normalizeFeedbackSummaryText($request['error'] ?? 'OpenAI request failed.', 220) . ' Rule-based summary used.';
         $ruleSummary['aiStatus'] = $status;
         $ruleSummary['aiModel'] = $model;
         return $ruleSummary;
@@ -2245,7 +2242,6 @@ function summarizeFeedbackCommentsSnapshot(PDO $pdo, array $payload = [], bool $
 
     $parsed = extractJsonObjectFromGeminiText($request['raw'] ?? '');
     if (!is_array($parsed)) {
-        $ruleSummary['warning'] = 'OpenAI returned summary output that could not be parsed. Rule-based summary used.';
         $ruleSummary['aiStatus'] = $status;
         $ruleSummary['aiModel'] = $model;
         return $ruleSummary;
@@ -4054,15 +4050,21 @@ try {
                 is_array($filters) ? $filters : [],
                 isOpenAiEnabledForPanelRole($pdo, $authenticatedRole)
             );
+            $summary = is_array($result['summary'] ?? null) ? $result['summary'] : [
+                'total' => 0,
+                'constructive' => 0,
+                'neutral' => 0,
+                'biased' => 0,
+                'source' => 'rule',
+            ];
+            if ($authenticatedRole !== 'admin') {
+                $summary['warning'] = '';
+                $summary['geminiStatus'] = 0;
+                $summary['aiStatus'] = 0;
+            }
             sendJson([
                 'success' => true,
-                'summary' => $result['summary'] ?? [
-                    'total' => 0,
-                    'constructive' => 0,
-                    'neutral' => 0,
-                    'biased' => 0,
-                    'source' => 'rule',
-                ],
+                'summary' => $summary,
                 'items' => $result['items'] ?? [],
             ]);
             break;
@@ -4108,13 +4110,6 @@ try {
             $paperId = sanitizePaperTextValue($body['paper_id'] ?? '', 80);
             if ($actorRole !== 'professor') {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
-            }
-            if (!isOpenAiEnabledForPanelRole($pdo, $actorRole)) {
-                sendJson([
-                    'success' => false,
-                    'disabled' => true,
-                    'error' => 'OpenAI features are disabled for the Professor panel by the administrator.',
-                ]);
             }
             if ($actorUserId === '' || $paperId === '') {
                 sendJson(['success' => false, 'error' => 'paper_id is required.'], 400);
@@ -4197,14 +4192,6 @@ try {
         case 'summarizeFeedbackComments':
             if ($authenticatedRole !== 'professor' && $authenticatedRole !== 'dean' && $authenticatedRole !== 'procoor') {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
-            }
-            if (!isOpenAiEnabledForPanelRole($pdo, $authenticatedRole)) {
-                $label = $authenticatedRole === 'procoor' ? 'Program Coordinator' : ucfirst($authenticatedRole);
-                sendJson([
-                    'success' => false,
-                    'disabled' => true,
-                    'error' => 'OpenAI features are disabled for the ' . $label . ' panel by the administrator.',
-                ]);
             }
 
             $payload = is_array($body['payload'] ?? null) ? $body['payload'] : [];
