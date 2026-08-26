@@ -5,6 +5,106 @@
  * POST /api/login.php
  */
 
+ob_start();
+$GLOBALS['naapLoginOutputBufferLevel'] = ob_get_level();
+$GLOBALS['naapLoginErrorReference'] = '';
+
+function naapLoginDiscardBufferedOutput(): void {
+    $bufferLevel = (int) ($GLOBALS['naapLoginOutputBufferLevel'] ?? 0);
+    while ($bufferLevel > 0 && ob_get_level() >= $bufferLevel) {
+        @ob_end_clean();
+    }
+}
+
+function naapLoginBuildErrorReference(): string {
+    $reference = trim((string) ($GLOBALS['naapLoginErrorReference'] ?? ''));
+    if ($reference !== '') {
+        return $reference;
+    }
+
+    try {
+        $suffix = bin2hex(random_bytes(3));
+    } catch (Throwable $error) {
+        $suffix = substr(str_replace('.', '', uniqid('', true)), -6);
+    }
+
+    $reference = gmdate('Ymd-His') . '-' . $suffix;
+    $GLOBALS['naapLoginErrorReference'] = $reference;
+    return $reference;
+}
+
+function naapLoginWriteDiagnosticLog(string $reference, string $logMessage): void {
+    $line = sprintf(
+        "[%s] [%s] %s %s %s\n",
+        gmdate('c'),
+        $reference,
+        $_SERVER['REQUEST_METHOD'] ?? '',
+        $_SERVER['REQUEST_URI'] ?? '',
+        $logMessage
+    );
+
+    error_log('[NAAP Login API] [' . $reference . '] ' . $logMessage);
+
+    $logDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'files' . DIRECTORY_SEPARATOR . 'runtime_logs';
+    if (!is_dir($logDir)) {
+        @mkdir($logDir, 0755, true);
+    }
+
+    if (is_dir($logDir) && is_writable($logDir)) {
+        @file_put_contents($logDir . DIRECTORY_SEPARATOR . 'naap-login-error.log', $line, FILE_APPEND | LOCK_EX);
+    }
+}
+
+function naapLoginSendServerErrorJson(string $logMessage): void {
+    $reference = naapLoginBuildErrorReference();
+    naapLoginWriteDiagnosticLog($reference, $logMessage);
+    naapLoginDiscardBufferedOutput();
+
+    if (!headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        header('Pragma: no-cache');
+        header('Expires: 0');
+    }
+
+    echo json_encode([
+        'success' => false,
+        'error' => 'Login server error. Reference: ' . $reference . '. Please check the Z.com PHP error log.',
+    ]);
+    exit();
+}
+
+set_error_handler(function (int $severity, string $message, string $file, int $line): bool {
+    if (!(error_reporting() & $severity)) {
+        return false;
+    }
+
+    throw new ErrorException($message, 0, $severity, $file, $line);
+});
+
+set_exception_handler(function (Throwable $error): void {
+    naapLoginSendServerErrorJson(
+        get_class($error) . ': ' . $error->getMessage() . ' in ' . $error->getFile() . ':' . $error->getLine()
+    );
+});
+
+register_shutdown_function(function (): void {
+    $error = error_get_last();
+    if (!is_array($error)) {
+        return;
+    }
+
+    $fatalTypes = [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR];
+    if (!in_array((int) ($error['type'] ?? 0), $fatalTypes, true)) {
+        return;
+    }
+
+    naapLoginSendServerErrorJson(
+        'Fatal error: ' . ($error['message'] ?? 'Unknown error') . ' in ' . ($error['file'] ?? 'unknown') . ':' . ($error['line'] ?? 0)
+    );
+});
+
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/state_helpers.php';

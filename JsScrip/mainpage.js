@@ -161,6 +161,38 @@ function formatLockMessage(lockUntil) {
   return "Your account is locked until " + text + ".";
 }
 
+function readAuthApiPayload(response, fallbackMessage) {
+  return response.text().then(function (text) {
+    const raw = String(text || "").trim();
+    let data = {};
+
+    if (raw) {
+      try {
+        data = JSON.parse(raw);
+      } catch (_error) {
+        const statusText = response.status ? " (HTTP " + response.status + ")" : "";
+        const error = new Error(
+          fallbackMessage ||
+            "Login service returned a non-JSON response" + statusText + ". Please check hosting errors.",
+        );
+        error.status = response.status;
+        throw error;
+      }
+    }
+
+    if (!response.ok && !raw) {
+      const error = new Error(
+        fallbackMessage ||
+          "Login request failed with HTTP " + response.status + ". Please contact the administrator.",
+      );
+      error.status = response.status;
+      throw error;
+    }
+
+    return data || {};
+  });
+}
+
 function setOtpInlineMessage(message, type) {
   const el = document.getElementById("otpInlineMessage");
   if (!el) return;
@@ -243,7 +275,12 @@ function handleLogin() {
       password: sanitizedPassword,
     }),
   })
-    .then((response) => response.json())
+    .then((response) =>
+      readAuthApiPayload(
+        response,
+        "Login service returned a non-JSON response (HTTP " + response.status + "). Please check hosting errors.",
+      ),
+    )
     .then((data) => {
       if (data.success) {
         loginFlowState.pendingOtp = null;
@@ -285,8 +322,8 @@ function handleLogin() {
 
       showError((data && data.error) || "Invalid username or password");
     })
-    .catch(() => {
-      showError("Login service is unavailable. Please try again.");
+    .catch((error) => {
+      showError(error.message || "Login service is unavailable. Please try again.");
     })
     .finally(() => {
       loginBtn.querySelector("span").textContent = originalText;
@@ -326,7 +363,12 @@ function handleOtpVerification() {
       otpCode: otpCode,
     }),
   })
-    .then((response) => response.json())
+    .then((response) =>
+      readAuthApiPayload(
+        response,
+        "OTP verification service returned a non-JSON response (HTTP " + response.status + "). Please check hosting errors.",
+      ),
+    )
     .then((data) => {
       if (data && data.success && data.otpVerified) {
         loginFlowState.pendingOtp = null;
@@ -380,9 +422,9 @@ function handleOtpVerification() {
         "error",
       );
     })
-    .catch(() => {
+    .catch((error) => {
       setOtpInlineMessage(
-        "OTP verification service is unavailable. Please try again.",
+        error.message || "OTP verification service is unavailable. Please try again.",
         "error",
       );
     })
