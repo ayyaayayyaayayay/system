@@ -1743,7 +1743,7 @@ function classifyBiasCommentByRules($text) {
     ];
 }
 
-function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = []) {
+function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = [], bool $allowOpenAi = true) {
     $semesterId = trim((string) ($filters['semesterId'] ?? ''));
     $limit = (int) ($filters['limit'] ?? 400);
     if ($limit <= 0) $limit = 400;
@@ -1772,7 +1772,7 @@ function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = []) {
     if ($geminiTimeout <= 0) $geminiTimeout = 30000;
     if ($geminiTimeout < 30000) $geminiTimeout = 30000;
     if ($geminiTimeout > 60000) $geminiTimeout = 60000;
-    $geminiConfigured = trim((string) $geminiKey) !== '';
+    $geminiConfigured = $allowOpenAi && trim((string) $geminiKey) !== '';
 
     $modelResultsById = [];
     $geminiWarning = '';
@@ -1877,7 +1877,9 @@ function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = []) {
         $summary['warning'] = '';
     } else {
         $summary['source'] = 'rule';
-        if ($geminiConfigured) {
+        if (!$allowOpenAi) {
+            $summary['warning'] = 'OpenAI is disabled for this panel. Rule fallback used.';
+        } elseif ($geminiConfigured) {
             $summary['warning'] = $geminiWarning !== ''
                 ? ('OpenAI unavailable: ' . $geminiWarning . ' Rule fallback used.')
                 : 'OpenAI was unavailable. Rule fallback used.';
@@ -1896,6 +1898,360 @@ function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = []) {
         'summary' => $summary,
         'items' => $items,
     ];
+}
+
+function normalizeFeedbackSummaryText($value, int $maxLength = 600): string
+{
+    $text = normalizeBiasDetectionText($value);
+    if ($text === '') {
+        return '';
+    }
+    $limit = $maxLength > 0 ? $maxLength : 600;
+    if (strlen($text) > $limit) {
+        $text = substr($text, 0, $limit);
+    }
+    return trim((string) $text);
+}
+
+function normalizeFeedbackSummaryCommentLabel($value): string
+{
+    $label = strtolower(normalizeFeedbackSummaryText($value, 80));
+    $label = preg_replace('/\s+evaluation$/', '', $label);
+    $label = trim((string) $label);
+    return $label !== '' ? $label : 'evaluation';
+}
+
+function normalizeFeedbackSummaryComments($items): array
+{
+    $rows = [];
+    foreach ((is_array($items) ? $items : []) as $index => $item) {
+        $source = is_array($item) ? $item : ['text' => $item];
+        $text = normalizeFeedbackSummaryText($source['text'] ?? ($source['comment'] ?? ''), 600);
+        if ($text === '') {
+            continue;
+        }
+        $rows[] = [
+            'id' => normalizeFeedbackSummaryText($source['id'] ?? ('comment_' . ($index + 1)), 80),
+            'text' => $text,
+        ];
+        if (count($rows) >= 160) {
+            break;
+        }
+    }
+    return $rows;
+}
+
+function detectFeedbackSummaryTopicsByRules(array $comments): array
+{
+    $topicRules = [
+        [
+            'label' => 'lack of learning materials',
+            'keywords' => ['material', 'materials', 'module', 'modules', 'learning material', 'handout', 'handouts', 'slides', 'references', 'resources'],
+        ],
+        [
+            'label' => 'need clearer explanations',
+            'keywords' => ['clear', 'clearer', 'clarify', 'explains', 'explain', 'explanation', 'understand'],
+        ],
+        [
+            'label' => 'need more examples',
+            'keywords' => ['example', 'examples', 'sample', 'samples'],
+        ],
+        [
+            'label' => 'class pace is too fast',
+            'keywords' => ['pace', 'fast', 'quick', 'rushed'],
+        ],
+        [
+            'label' => 'want more interactive discussions',
+            'keywords' => ['interactive', 'discussion', 'engaging', 'participate', 'interaction'],
+        ],
+    ];
+
+    $counts = [];
+    foreach ($topicRules as $index => $rule) {
+        $counts[$index] = [
+            'label' => (string) ($rule['label'] ?? 'topic'),
+            'count' => 0,
+        ];
+    }
+
+    foreach ($comments as $comment) {
+        $lower = strtolower((string) ($comment['text'] ?? ''));
+        foreach ($topicRules as $index => $rule) {
+            $matched = false;
+            foreach ($rule['keywords'] as $keyword) {
+                if ($keyword !== '' && strpos($lower, (string) $keyword) !== false) {
+                    $matched = true;
+                    break;
+                }
+            }
+            if ($matched) {
+                $counts[$index]['count'] += 1;
+            }
+        }
+    }
+
+    $topics = array_values(array_filter($counts, function ($item) {
+        return (int) ($item['count'] ?? 0) > 0;
+    }));
+    usort($topics, function ($a, $b) {
+        return ((int) ($b['count'] ?? 0)) <=> ((int) ($a['count'] ?? 0));
+    });
+    return array_slice($topics, 0, 5);
+}
+
+function buildFeedbackSummaryByRules(array $comments, string $commentLabel): array
+{
+    $total = count($comments);
+    $constructive = 0;
+    $neutral = 0;
+    $biased = 0;
+
+    foreach ($comments as $comment) {
+        $classified = classifyBiasCommentByRules($comment['text'] ?? '');
+        $label = normalizeBiasLabel($classified['label'] ?? '');
+        if ($label === 'Constructive') {
+            $constructive += 1;
+        } elseif ($label === 'Biased') {
+            $biased += 1;
+        } else {
+            $neutral += 1;
+        }
+    }
+
+    $topics = detectFeedbackSummaryTopicsByRules($comments);
+    $top = $topics[0] ?? null;
+    $second = $topics[1] ?? null;
+    $threshold = (int) ceil(max(1, $total) * 0.4);
+
+    $summaryLine = 'Summary of ' . $total . ' ' . $commentLabel . ' comments: feedback is varied.';
+    if (is_array($top) && (int) ($top['count'] ?? 0) >= $threshold) {
+        $summaryLine = 'Summary of ' . $total . ' ' . $commentLabel . ' comments: majority mention ' . $top['label'] . '.';
+    } elseif (is_array($top) && is_array($second)) {
+        $summaryLine = 'Summary of ' . $total . ' ' . $commentLabel . ' comments: common points are ' . $top['label'] . ' and ' . $second['label'] . '.';
+    } elseif (is_array($top)) {
+        $summaryLine = 'Summary of ' . $total . ' ' . $commentLabel . ' comments: a common point is ' . $top['label'] . '.';
+    }
+
+    $toneLine = 'Overall tone is mostly neutral.';
+    if ($constructive >= $neutral && $constructive >= $biased) {
+        $toneLine = 'Overall tone is mostly constructive.';
+    } elseif ($biased > $constructive && $biased >= $neutral) {
+        $toneLine = 'Overall tone includes notable comments needing review.';
+    }
+
+    return [
+        'total' => $total,
+        'constructive' => $constructive,
+        'neutral' => $neutral,
+        'biased' => $biased,
+        'topics' => $topics,
+        'summaryLine' => $summaryLine,
+        'toneLine' => $toneLine,
+        'source' => 'rule',
+        'warning' => '',
+        'aiStatus' => 0,
+        'aiModel' => '',
+    ];
+}
+
+function buildOpenAiFeedbackSummarySchema(): array
+{
+    return [
+        'type' => 'object',
+        'properties' => [
+            'summaryLine' => ['type' => 'string'],
+            'toneLine' => ['type' => 'string'],
+            'counts' => [
+                'type' => 'object',
+                'properties' => [
+                    'constructive' => ['type' => 'integer'],
+                    'neutral' => ['type' => 'integer'],
+                    'biased' => ['type' => 'integer'],
+                ],
+                'required' => ['constructive', 'neutral', 'biased'],
+                'additionalProperties' => false,
+            ],
+            'topics' => [
+                'type' => 'array',
+                'items' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'label' => ['type' => 'string'],
+                        'count' => ['type' => 'integer'],
+                    ],
+                    'required' => ['label', 'count'],
+                    'additionalProperties' => false,
+                ],
+            ],
+        ],
+        'required' => ['summaryLine', 'toneLine', 'counts', 'topics'],
+        'additionalProperties' => false,
+    ];
+}
+
+function buildOpenAiFeedbackSummaryPrompt(array $comments, string $commentLabel): string
+{
+    $input = [
+        'commentLabel' => $commentLabel,
+        'comments' => array_map(function ($comment) {
+            return [
+                'id' => (string) ($comment['id'] ?? ''),
+                'text' => (string) ($comment['text'] ?? ''),
+            ];
+        }, $comments),
+    ];
+    $total = count($comments);
+
+    return "You are an assistant summarizing faculty evaluation comments for a school dashboard.\n"
+        . "Use only the provided anonymized comments. Do not invent details or mention student identity.\n"
+        . "Return concise JSON for the UI.\n"
+        . "Definitions for counts:\n"
+        . "- constructive: actionable, respectful improvement feedback.\n"
+        . "- neutral: general, vague, factual, or short feedback without a clear improvement request.\n"
+        . "- biased: hostile, insulting, irrelevant, unfairly personal, or otherwise needing human review.\n"
+        . "The three counts must add up to exactly " . $total . ".\n"
+        . "summaryLine must start with: Summary of " . $total . " " . $commentLabel . " comments:\n"
+        . "toneLine must be one short sentence.\n"
+        . "topics must contain up to 5 repeated themes with counts.\n"
+        . "Input:\n"
+        . json_encode($input, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+}
+
+function normalizeFeedbackSummaryTopicRows($rows, int $total): array
+{
+    $topics = [];
+    foreach ((is_array($rows) ? $rows : []) as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $label = normalizeFeedbackSummaryText($row['label'] ?? '', 80);
+        $count = (int) ($row['count'] ?? 0);
+        if ($label === '' || $count <= 0) {
+            continue;
+        }
+        if ($count > $total) {
+            $count = $total;
+        }
+        $topics[] = [
+            'label' => strtolower($label),
+            'count' => $count,
+        ];
+        if (count($topics) >= 5) {
+            break;
+        }
+    }
+    usort($topics, function ($a, $b) {
+        return ((int) ($b['count'] ?? 0)) <=> ((int) ($a['count'] ?? 0));
+    });
+    return $topics;
+}
+
+function mergeOpenAiFeedbackSummaryWithRule(array $parsed, array $ruleSummary, string $model, int $status): array
+{
+    $total = (int) ($ruleSummary['total'] ?? 0);
+    $summaryLine = normalizeFeedbackSummaryText($parsed['summaryLine'] ?? '', 260);
+    $toneLine = normalizeFeedbackSummaryText($parsed['toneLine'] ?? '', 180);
+    $counts = is_array($parsed['counts'] ?? null) ? $parsed['counts'] : [];
+    $constructive = max(0, (int) ($counts['constructive'] ?? -1));
+    $neutral = max(0, (int) ($counts['neutral'] ?? -1));
+    $biased = max(0, (int) ($counts['biased'] ?? -1));
+    $usedRule = false;
+
+    if (($constructive + $neutral + $biased) !== $total) {
+        $constructive = (int) ($ruleSummary['constructive'] ?? 0);
+        $neutral = (int) ($ruleSummary['neutral'] ?? 0);
+        $biased = (int) ($ruleSummary['biased'] ?? 0);
+        $usedRule = true;
+    }
+
+    if ($summaryLine === '') {
+        $summaryLine = (string) ($ruleSummary['summaryLine'] ?? '');
+        $usedRule = true;
+    }
+    if ($toneLine === '') {
+        $toneLine = (string) ($ruleSummary['toneLine'] ?? '');
+        $usedRule = true;
+    }
+
+    $topics = normalizeFeedbackSummaryTopicRows($parsed['topics'] ?? [], $total);
+    if (count($topics) === 0) {
+        $topics = is_array($ruleSummary['topics'] ?? null) ? $ruleSummary['topics'] : [];
+        $usedRule = true;
+    }
+
+    return [
+        'total' => $total,
+        'constructive' => $constructive,
+        'neutral' => $neutral,
+        'biased' => $biased,
+        'topics' => $topics,
+        'summaryLine' => $summaryLine,
+        'toneLine' => $toneLine,
+        'source' => $usedRule ? 'openai+rule' : 'openai',
+        'warning' => $usedRule ? 'OpenAI summary needed rule fallback for missing or inconsistent fields.' : '',
+        'aiStatus' => $status,
+        'aiModel' => $model,
+    ];
+}
+
+function summarizeFeedbackCommentsSnapshot(PDO $pdo, array $payload = [], bool $allowOpenAi = true): array
+{
+    $commentLabel = normalizeFeedbackSummaryCommentLabel(
+        $payload['commentLabel'] ?? ($payload['evaluationLabel'] ?? 'evaluation')
+    );
+    $comments = normalizeFeedbackSummaryComments($payload['comments'] ?? []);
+    $ruleSummary = buildFeedbackSummaryByRules($comments, $commentLabel);
+
+    if (count($comments) === 0) {
+        return $ruleSummary;
+    }
+
+    if (!$allowOpenAi) {
+        $ruleSummary['warning'] = 'OpenAI is disabled for this panel. Rule fallback used.';
+        return $ruleSummary;
+    }
+
+    $geminiConfig = getGeminiRawConfig($pdo);
+    $geminiKey = (string) ($geminiConfig['apiKey'] ?? '');
+    $geminiModel = (string) ($geminiConfig['model'] ?? 'gpt-5.6-luna');
+    $geminiTimeout = (int) ($geminiConfig['timeoutMs'] ?? 30000);
+    if ($geminiTimeout <= 0) $geminiTimeout = 30000;
+    if ($geminiTimeout < 30000) $geminiTimeout = 30000;
+    if ($geminiTimeout > 60000) $geminiTimeout = 60000;
+
+    if (trim((string) $geminiKey) === '') {
+        $ruleSummary['warning'] = 'OpenAI API key is not configured. Rule-based summary used.';
+        $ruleSummary['aiModel'] = trim((string) $geminiModel) !== '' ? trim((string) $geminiModel) : 'gpt-5.6-luna';
+        return $ruleSummary;
+    }
+
+    $request = requestGeminiGenerateContent(
+        buildOpenAiFeedbackSummaryPrompt($comments, $commentLabel),
+        $geminiKey,
+        $geminiModel,
+        $geminiTimeout,
+        buildOpenAiFeedbackSummarySchema(),
+        'feedback_summary'
+    );
+
+    $model = (string) ($request['model'] ?? $geminiModel);
+    $status = (int) ($request['status'] ?? 0);
+    if (($request['success'] ?? false) !== true) {
+        $ruleSummary['warning'] = 'OpenAI unavailable: ' . normalizeFeedbackSummaryText($request['error'] ?? 'OpenAI request failed.', 220) . ' Rule-based summary used.';
+        $ruleSummary['aiStatus'] = $status;
+        $ruleSummary['aiModel'] = $model;
+        return $ruleSummary;
+    }
+
+    $parsed = extractJsonObjectFromGeminiText($request['raw'] ?? '');
+    if (!is_array($parsed)) {
+        $ruleSummary['warning'] = 'OpenAI returned summary output that could not be parsed. Rule-based summary used.';
+        $ruleSummary['aiStatus'] = $status;
+        $ruleSummary['aiModel'] = $model;
+        return $ruleSummary;
+    }
+
+    return mergeOpenAiFeedbackSummaryWithRule($parsed, $ruleSummary, $model, $status);
 }
 
 function sanitizeExplainabilityText($value, $maxLength = 300) {
@@ -2728,7 +3084,7 @@ function mergeExplainabilityInsightWithFallback(array $geminiInsight, array $rul
     ];
 }
 
-function analyzeEvaluationExplainabilitySnapshot(PDO $pdo, array $payload = []) {
+function analyzeEvaluationExplainabilitySnapshot(PDO $pdo, array $payload = [], bool $allowOpenAi = true) {
     $normalized = normalizeExplainabilityPayload($payload);
     $ruleInsight = buildExplainabilityInsightByRules($normalized);
 
@@ -2745,7 +3101,7 @@ function analyzeEvaluationExplainabilitySnapshot(PDO $pdo, array $payload = []) 
     $geminiTimeout = (string) ((int) ($geminiConfig['timeoutMs'] ?? 25000));
 
     $geminiInsight = null;
-    if (trim((string) $geminiKey) !== '') {
+    if ($allowOpenAi && trim((string) $geminiKey) !== '') {
         $geminiInsight = classifyEvaluationExplainabilityWithGemini(
             $normalized,
             $geminiKey,
@@ -3152,7 +3508,7 @@ function mergeFacultySectionCRecommendation(array $gemini, array $rule) {
     ];
 }
 
-function generateFacultySectionCRecommendationsSnapshot(PDO $pdo, array $context) {
+function generateFacultySectionCRecommendationsSnapshot(PDO $pdo, array $context, bool $allowOpenAi = true) {
     $normalized = normalizeFacultyRecommendationContext($context);
     $rule = buildFacultySectionCRecommendationByRules($normalized);
 
@@ -3171,7 +3527,7 @@ function generateFacultySectionCRecommendationsSnapshot(PDO $pdo, array $context
     $geminiTimeout = (string) ((int) ($geminiConfig['timeoutMs'] ?? 15000));
 
     $gemini = null;
-    if (trim((string) $geminiKey) !== '') {
+    if ($allowOpenAi && trim((string) $geminiKey) !== '') {
         $gemini = classifyFacultySectionCRecommendationWithGemini($normalized, $geminiKey, $geminiModel, $geminiTimeout);
     }
 
@@ -3324,7 +3680,7 @@ if ($method === 'GET' && $action === 'bootstrap') {
     $sessionUser = getAuthenticatedSessionAppUser($pdo, false);
     sendJson([
         'success' => true,
-        'state' => buildBootstrapPayload($pdo, $sessionUser['id'] ?? ''),
+        'state' => buildBootstrapPayload($pdo, $sessionUser),
         'session' => buildNaapSessionPayload($sessionUser, getNaapCsrfToken()),
     ]);
 }
@@ -3623,6 +3979,17 @@ try {
             ]);
             break;
 
+        case 'getOpenAiPanelAccess':
+            $panelRole = normalizeOpenAiPanelRole($authenticatedRole);
+            sendJson([
+                'success' => true,
+                'access' => [
+                    'role' => $panelRole,
+                    'enabled' => $panelRole !== '' ? isOpenAiEnabledForPanelRole($pdo, $panelRole) : false,
+                ],
+            ]);
+            break;
+
         case 'bulkDistributeCredentials':
             $rows = is_array($body['rows'] ?? null) ? $body['rows'] : [];
             if ($authenticatedRole !== 'admin') {
@@ -3682,7 +4049,11 @@ try {
                 $filters = is_array($body) ? $body : [];
             }
 
-            $result = analyzeBiasCommentsSnapshot($pdo, is_array($filters) ? $filters : []);
+            $result = analyzeBiasCommentsSnapshot(
+                $pdo,
+                is_array($filters) ? $filters : [],
+                isOpenAiEnabledForPanelRole($pdo, $authenticatedRole)
+            );
             sendJson([
                 'success' => true,
                 'summary' => $result['summary'] ?? [
@@ -3706,7 +4077,11 @@ try {
                 $payload = is_array($body) ? $body : [];
             }
 
-            $result = analyzeEvaluationExplainabilitySnapshot($pdo, is_array($payload) ? $payload : []);
+            $result = analyzeEvaluationExplainabilitySnapshot(
+                $pdo,
+                is_array($payload) ? $payload : [],
+                isOpenAiEnabledForPanelRole($pdo, $authenticatedRole)
+            );
             sendJson([
                 'success' => true,
                 'source' => (string) ($result['source'] ?? 'rule'),
@@ -3733,6 +4108,13 @@ try {
             $paperId = sanitizePaperTextValue($body['paper_id'] ?? '', 80);
             if ($actorRole !== 'professor') {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
+            }
+            if (!isOpenAiEnabledForPanelRole($pdo, $actorRole)) {
+                sendJson([
+                    'success' => false,
+                    'disabled' => true,
+                    'error' => 'OpenAI features are disabled for the Professor panel by the administrator.',
+                ]);
             }
             if ($actorUserId === '' || $paperId === '') {
                 sendJson(['success' => false, 'error' => 'paper_id is required.'], 400);
@@ -3781,7 +4163,11 @@ try {
                 $context['semesterLabel'] = (string) ($targetPaper['semester_label'] ?? '');
             }
 
-            $result = generateFacultySectionCRecommendationsSnapshot($pdo, $context);
+            $result = generateFacultySectionCRecommendationsSnapshot(
+                $pdo,
+                $context,
+                isOpenAiEnabledForPanelRole($pdo, $actorRole)
+            );
             $weakAreaNames = [];
             foreach ($result['weakAreas'] ?? [] as $row) {
                 $name = normalizeFacultyRecommendationCategory(is_array($row) ? ($row['name'] ?? '') : $row);
@@ -3805,6 +4191,36 @@ try {
                     'actionPlan' => (string) ($sectionC['actionPlan'] ?? ''),
                 ],
                 'reasoning' => $reasoning,
+            ]);
+            break;
+
+        case 'summarizeFeedbackComments':
+            if ($authenticatedRole !== 'professor' && $authenticatedRole !== 'dean' && $authenticatedRole !== 'procoor') {
+                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
+            }
+            if (!isOpenAiEnabledForPanelRole($pdo, $authenticatedRole)) {
+                $label = $authenticatedRole === 'procoor' ? 'Program Coordinator' : ucfirst($authenticatedRole);
+                sendJson([
+                    'success' => false,
+                    'disabled' => true,
+                    'error' => 'OpenAI features are disabled for the ' . $label . ' panel by the administrator.',
+                ]);
+            }
+
+            $payload = is_array($body['payload'] ?? null) ? $body['payload'] : [];
+            if (count($payload) === 0) {
+                $payload = is_array($body) ? $body : [];
+            }
+            $summary = summarizeFeedbackCommentsSnapshot(
+                $pdo,
+                is_array($payload) ? $payload : [],
+                isOpenAiEnabledForPanelRole($pdo, $authenticatedRole)
+            );
+            sendJson([
+                'success' => true,
+                'summary' => $summary,
+                'source' => (string) ($summary['source'] ?? 'rule'),
+                'warning' => (string) ($summary['warning'] ?? ''),
             ]);
             break;
 

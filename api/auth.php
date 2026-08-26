@@ -2,6 +2,10 @@
 
 require_once __DIR__ . '/time_helper.php';
 
+if (function_exists('header_remove')) {
+    header_remove('X-Powered-By');
+}
+
 const NAAP_SESSION_NAME = 'naap_session';
 const NAAP_ACTIVE_SESSION_TOKEN_KEY = 'auth_session_token';
 const NAAP_ACTIVE_SESSION_TOUCH_KEY = 'auth_session_last_touch';

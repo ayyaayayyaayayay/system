@@ -1165,10 +1165,11 @@ function buildProfessorAnalyticsForType(typeKey, evaluations, semesterLabel) {
 function renderWordFrequencyList(target, list) {
     if (!target) return;
     target.innerHTML = list
-        .map(
-            (item) =>
-                `<li><span class="term">${capitalize(item.label)}</span><span class="count">${item.count}x</span></li>`
-        )
+        .map((item) => {
+            const label = escapeHtml(capitalize(item && item.label));
+            const count = Math.max(0, Number.parseInt(item && item.count, 10) || 0);
+            return `<li><span class="term">${label}</span><span class="count">${count}x</span></li>`;
+        })
         .join("");
 }
 
@@ -1179,10 +1180,11 @@ function renderWordFrequencyListHtml(list) {
     }
 
     return rows
-        .map(
-            (item) =>
-                "<li><span class=\"term\">" + capitalize(item.label) + "</span><span class=\"count\">" + item.count + "x</span></li>"
-        )
+        .map((item) => {
+            const label = escapeHtml(capitalize(item && item.label));
+            const count = Math.max(0, Number.parseInt(item && item.count, 10) || 0);
+            return "<li><span class=\"term\">" + label + "</span><span class=\"count\">" + count + "x</span></li>";
+        })
         .join("");
 }
 function escapeRegex(text) {
@@ -2469,4 +2471,3 @@ function checkAuthentication() {
 }
 
 init();
-

@@ -1929,6 +1929,22 @@ function resolveFacultyRecommendationSourceLabel(source) {
     return 'rule fallback';
 }
 
+function getProfessorOpenAiPanelAccess() {
+    try {
+        if (typeof SharedData !== 'undefined' && typeof SharedData.getOpenAiPanelAccess === 'function') {
+            return SharedData.getOpenAiPanelAccess({ role: 'professor' });
+        }
+    } catch (error) {
+        console.warn('[ProfessorPanel] Failed to load OpenAI panel access.', error);
+    }
+    return { role: 'professor', enabled: true };
+}
+
+function isProfessorOpenAiPanelEnabled() {
+    const access = getProfessorOpenAiPanelAccess();
+    return !access || access.enabled !== false;
+}
+
 function runFacultySectionCAiRecommendation(paper) {
     const aiBtn = document.getElementById('fpDetailAiRecommendBtn');
     const areasInput = document.getElementById('fpSectionCAreasInput');
@@ -1943,6 +1959,11 @@ function runFacultySectionCAiRecommendation(paper) {
     const statusToken = normalizeToken(paper.status);
     if (statusToken === 'archived') {
         setFacultyPaperAiFeedback('error', 'Archived papers cannot generate AI recommendations.');
+        return;
+    }
+
+    if (!isProfessorOpenAiPanelEnabled()) {
+        setFacultyPaperAiFeedback('warning', 'OpenAI features are disabled for the Professor panel by the administrator.');
         return;
     }
 
@@ -2022,7 +2043,7 @@ function runFacultySectionCAiRecommendation(paper) {
             setFacultyPaperAiFeedback('error', error && error.message ? error.message : 'Failed to generate AI recommendations.');
         } finally {
             if (aiBtn) {
-                aiBtn.disabled = statusToken === 'archived';
+                aiBtn.disabled = statusToken === 'archived' || !isProfessorOpenAiPanelEnabled();
                 aiBtn.textContent = originalBtnText || 'AI Smart Recommendations';
             }
         }
@@ -2106,7 +2127,11 @@ function renderProfessorFacultyPaperDetail(paper) {
     if (saveSectionCBtn) saveSectionCBtn.disabled = sectionCReadOnly;
     if (sendBtn) sendBtn.disabled = !draftStatus;
     if (archiveBtn) archiveBtn.disabled = !draftStatus;
-    if (aiRecommendBtn) aiRecommendBtn.disabled = sectionCReadOnly;
+    const professorAiEnabled = isProfessorOpenAiPanelEnabled();
+    if (aiRecommendBtn) {
+        aiRecommendBtn.disabled = sectionCReadOnly || !professorAiEnabled;
+        aiRecommendBtn.title = professorAiEnabled ? '' : 'OpenAI features are disabled for the Professor panel by the administrator.';
+    }
     setFacultyPaperAiFeedback('', '');
 
     if (previewBtn) {
@@ -2774,7 +2799,7 @@ function refreshPeerTargetLockState() {
  */
 function renderPeerQuestionHTML(question, index) {
     const isRequired = question.required ? 'required' : '';
-    const qid = String(question.id);
+    const qid = escapeHTML(String(question.id));
 
     // Qualitative Text Area
     if (question.type === 'qualitative') {
@@ -3671,11 +3696,28 @@ function setupProfessorSubjectComments() {
 
     if (!panel || !title || !meta || !list || !aiBtn || !aiSummary || !viewBtn || !closeBtn) return;
 
+    function applyAiAccessState() {
+        const enabled = isProfessorOpenAiPanelEnabled();
+        aiBtn.disabled = !enabled;
+        aiBtn.title = enabled ? '' : 'OpenAI features are disabled for the Professor panel by the administrator.';
+        return enabled;
+    }
+
+    if (!applyAiAccessState()) {
+        setProfessorCommentsAiSummary('OpenAI features are disabled for the Professor panel by the administrator.', 'warning');
+    }
+
     closeBtn.addEventListener('click', function () {
         resetProfessorSubjectCommentsPanel();
+        applyAiAccessState();
     });
 
-    aiBtn.addEventListener('click', function () {
+    aiBtn.addEventListener('click', async function () {
+        if (!applyAiAccessState()) {
+            setProfessorCommentsAiSummary('OpenAI features are disabled for the Professor panel by the administrator.', 'warning');
+            return;
+        }
+
         const studentSummary = professorPanelState.summaryByType.student || PROFESSOR_PANEL_EMPTY_SUMMARY;
         const studentItems = Array.isArray(studentSummary.comments) ? studentSummary.comments : [];
         if (!studentItems.length) {
@@ -3683,8 +3725,48 @@ function setupProfessorSubjectComments() {
             return;
         }
 
-        const summaryText = buildStudentFeedbackAiSummary(studentItems);
-        setProfessorCommentsAiSummary(summaryText, 'info');
+        const originalHtml = aiBtn.innerHTML;
+        aiBtn.disabled = true;
+        aiBtn.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Summarizing...';
+        setProfessorCommentsAiSummary('Generating AI summary...', 'info');
+
+        try {
+            if (typeof SharedData === 'undefined' || typeof SharedData.summarizeFeedbackComments !== 'function') {
+                throw new Error('AI summary API is unavailable.');
+            }
+
+            const response = await SharedData.summarizeFeedbackComments({
+                commentLabel: 'student',
+                comments: studentItems.map((item, index) => ({
+                    id: String(item && item.id || item && item.key || `student_comment_${index + 1}`),
+                    text: String(item && item.text || '').trim(),
+                })).filter(item => item.text)
+            }, { role: 'professor' });
+
+            if (response && response.disabled) {
+                setProfessorCommentsAiSummary(response.error || 'OpenAI features are disabled for the Professor panel by the administrator.', 'warning');
+                return;
+            }
+
+            if (!response || response.success === false) {
+                throw new Error((response && response.error) || 'Failed to generate AI summary.');
+            }
+
+            const summaryData = response.summary && typeof response.summary === 'object'
+                ? response.summary
+                : buildStudentFeedbackAiSummary(studentItems);
+            const source = normalizeToken(summaryData.source || response.source);
+            setProfessorCommentsAiSummary(summaryData, source === 'openai' ? 'success' : 'warning');
+        } catch (error) {
+            const fallbackSummary = buildStudentFeedbackAiSummary(studentItems);
+            fallbackSummary.warning = (error && error.message ? error.message : 'OpenAI summary failed.') + ' Rule-based summary used.';
+            fallbackSummary.source = 'rule';
+            setProfessorCommentsAiSummary(fallbackSummary, 'warning');
+        } finally {
+            aiBtn.innerHTML = originalHtml || '<i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> AI Summarize';
+            applyAiAccessState();
+        }
+
         setProfessorCommentsListVisibility(false);
     });
 
@@ -3725,7 +3807,6 @@ function setupProfessorSubjectComments() {
             }
             list.innerHTML = summaries.map(item =>
                 '<li>' +
-                '<div class="faculty-comment-meta"><span class="faculty-comment-tag ' + getCommentBiasTagClass(String(item.label || 'Neutral')) + '">' + escapeHTML(String(item.label || 'Neutral')) + '</span></div>' +
                 '<div class="faculty-comment-text">' + escapeHTML(item.text) + '</div>' +
                 '</li>'
             ).join('');
@@ -3747,11 +3828,52 @@ function setProfessorCommentsAiSummary(message, type = 'info') {
     const summaryEl = document.getElementById('profSubjectCommentsAiSummary');
     if (!summaryEl) return;
 
-    summaryEl.classList.remove('warning', 'error');
-    if (type === 'warning' || type === 'error') {
+    summaryEl.classList.remove('warning', 'error', 'success', 'is-generated');
+    if (type === 'warning' || type === 'error' || type === 'success') {
         summaryEl.classList.add(type);
     }
+
+    if (message && typeof message === 'object') {
+        const topics = Array.isArray(message.topics) ? message.topics : [];
+        const sourceNote = getProfessorFeedbackAiSummarySourceNote(message);
+        summaryEl.classList.add('is-generated');
+        summaryEl.innerHTML = `
+            <div class="faculty-comments-ai-kicker">AI Summary</div>
+            <div class="faculty-comments-ai-headline">${escapeHTML(message.summaryLine || '')}</div>
+            <div class="faculty-comments-ai-tone">${escapeHTML(message.toneLine || '')}</div>
+            <div class="faculty-comments-ai-stats" aria-label="Feedback classification counts">
+                <span><strong>${Number(message.total || 0)}</strong> Comments</span>
+                <span><strong>${Number(message.constructive || 0)}</strong> Actionable</span>
+                <span><strong>${Number(message.neutral || 0)}</strong> General</span>
+                <span><strong>${Number(message.biased || 0)}</strong> Needs review</span>
+            </div>
+            ${topics.length ? `
+                <div class="faculty-comments-ai-topics">
+                    ${topics.slice(0, 3).map(topic => `<span>${escapeHTML(topic.label)} (${Number(topic.count || 0)})</span>`).join('')}
+                </div>
+            ` : ''}
+            ${sourceNote ? `<div class="faculty-comments-ai-source">${escapeHTML(sourceNote)}</div>` : ''}
+        `;
+        return;
+    }
+
     summaryEl.textContent = String(message || '').trim();
+}
+
+function getProfessorFeedbackAiSummarySourceNote(message) {
+    const source = normalizeToken(message && message.source);
+    const warning = String(message && message.warning || '').trim();
+    if (source === 'openai') {
+        const model = String(message && (message.aiModel || message.model) || '').trim();
+        return model ? `Generated with OpenAI (${model}).` : 'Generated with OpenAI.';
+    }
+    if (source === 'openai+rule' || source === 'gemini+rule') {
+        return warning || 'Generated with OpenAI and completed with rule fallback.';
+    }
+    if (source === 'rule') {
+        return warning || 'Rule-based summary used.';
+    }
+    return warning;
 }
 
 function classifyFeedbackCommentBiasByRules(text) {
@@ -3859,7 +3981,17 @@ function buildStudentFeedbackAiSummary(items) {
         .map(item => String(item && item.text || '').trim())
         .filter(Boolean);
     if (!comments.length) {
-        return 'No student comments available to summarize.';
+        return {
+            total: 0,
+            constructive: 0,
+            neutral: 0,
+            biased: 0,
+            topics: [],
+            summaryLine: 'No student comments available to summarize.',
+            toneLine: '',
+            source: 'rule',
+            warning: '',
+        };
     }
 
     let constructive = 0;
@@ -3893,7 +4025,17 @@ function buildStudentFeedbackAiSummary(items) {
         toneLine = 'Overall tone includes notable biased comments.';
     }
 
-    return `${summaryLine} ${toneLine}`;
+    return {
+        total: comments.length,
+        constructive,
+        neutral,
+        biased,
+        topics,
+        summaryLine,
+        toneLine,
+        source: 'rule',
+        warning: '',
+    };
 }
 
 function resetProfessorSubjectCommentsPanel() {
@@ -3922,7 +4064,11 @@ function resetProfessorSubjectCommentsPanel() {
         items: [],
         evaluationType: evalType,
     };
-    setProfessorCommentsAiSummary('Click AI Summarize after loading comments to generate a summary.', 'info');
+    if (isProfessorOpenAiPanelEnabled()) {
+        setProfessorCommentsAiSummary('Click AI Summarize after loading comments to generate a summary.', 'info');
+    } else {
+        setProfessorCommentsAiSummary('OpenAI features are disabled for the Professor panel by the administrator.', 'warning');
+    }
 }
 
 /**

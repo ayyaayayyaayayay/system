@@ -207,6 +207,32 @@ function escapeHtml(value) {
         .replace(/'/g, "&#39;");
 }
 
+function sanitizeHttpUrl(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    try {
+        const parsed = new URL(raw);
+        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+            return parsed.href;
+        }
+    } catch (_error) {
+        return "";
+    }
+    return "";
+}
+
+function renderProofLink(value) {
+    const raw = String(value || "").trim();
+    if (!raw) {
+        return '<span class="status-progress">No link</span>';
+    }
+    const safeUrl = sanitizeHttpUrl(raw);
+    if (!safeUrl) {
+        return '<span class="status-progress">Invalid link</span>';
+    }
+    return `<a class="status-proof-link" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">Open proof</a>`;
+}
+
 function getActiveSemesterId() {
     return String((SharedData.getCurrentSemester && SharedData.getCurrentSemester()) || "").trim();
 }
@@ -754,7 +780,7 @@ function renderStatusTable(students, periodState) {
             ? `<div class="status-reason">Proof Reason: ${escapeHtml(student.proofReason || "N/A")}${student.proofSubmittedAt ? ` (${escapeHtml(formatNotedAt(student.proofSubmittedAt))})` : ""}</div>`
             : "";
         const proofLinkBlock = !student.evaluated && proofStatus && student.proofDriveLink
-            ? `<div class="status-reason">Drive Link: <a class="status-proof-link" href="${escapeHtml(student.proofDriveLink)}" target="_blank" rel="noopener noreferrer">Open proof</a></div>`
+            ? `<div class="status-reason">Drive Link: ${renderProofLink(student.proofDriveLink)}</div>`
             : "";
         const reviewNoteBlock = !student.evaluated && proofStatus === "rejected" && student.proofReviewNote
             ? `<div class="status-reason">OSA Review Note: ${escapeHtml(student.proofReviewNote)}${student.proofReviewedAt ? ` (${escapeHtml(formatNotedAt(student.proofReviewedAt))})` : ""}</div>`
@@ -989,9 +1015,7 @@ function renderProofReviewTable(periodState) {
             actionHtml = `<span class="status-progress">Rejected</span>`;
         }
 
-        const linkHtml = row.proofDriveLink
-            ? `<a class="status-proof-link" href="${escapeHtml(row.proofDriveLink)}" target="_blank" rel="noopener noreferrer">Open proof</a>`
-            : `<span class="status-progress">No link</span>`;
+        const linkHtml = renderProofLink(row.proofDriveLink);
 
         const reviewNote = row.reviewNote
             ? `${escapeHtml(row.reviewNote)}${row.reviewedAt ? ` (${escapeHtml(formatNotedAt(row.reviewedAt))})` : ""}`

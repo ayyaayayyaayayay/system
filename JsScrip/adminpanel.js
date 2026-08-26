@@ -22,6 +22,7 @@ let adminActivitySummaryCache = null;
 let credentialDistributorParsedRows = [];
 let credentialDistributorFailures = [];
 let adminMobileDrawerBound = false;
+let adminUserCardActionsBound = false;
 let credentialDistributorSmtpConfig = {
     host: '',
     port: 587,
@@ -38,8 +39,40 @@ let geminiRuntimeConfig = {
     model: 'gpt-5.6-luna',
     timeoutMs: 30000,
     hasApiKey: false,
-    source: 'database'
+    source: 'database',
+    panelAccess: {
+        admin: true,
+        hr: true,
+        vpaa: true,
+        dean: true,
+        procoor: true,
+        professor: true
+    }
 };
+
+function escapeHtml(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function escapeAttr(value) {
+    return escapeHtml(value);
+}
+
+function inlineIdLiteral(value) {
+    const text = String(value == null ? '' : value).trim();
+    if (text !== '' && /^[+-]?(?:\d+|\d*\.\d+)$/.test(text)) {
+        return String(Number(text));
+    }
+    return JSON.stringify(text)
+        .replace(/</g, '\\u003c')
+        .replace(/>/g, '\\u003e')
+        .replace(/&/g, '\\u0026');
+}
 
 /**
  * Fetch users from PHP API, falls back to hardcoded data
@@ -90,6 +123,7 @@ function initializeAdminPanel() {
     setupCampusManager();
     setupProgramManager();
     setupUserSearch();
+    setupUserCardActions();
     setupEditUserModal();
     loadDashboardData();
     initializeCharts();
@@ -1483,6 +1517,8 @@ function setupGeminiConfig() {
     const saveBtn = document.getElementById('gemini-save-config-btn');
     const clearBtn = document.getElementById('gemini-clear-key-btn');
     const status = document.getElementById('gemini-config-status');
+    const panelAccessInputs = Array.from(document.querySelectorAll('[data-openai-panel-access]'));
+    const panelAccessLabels = Array.from(document.querySelectorAll('[data-openai-panel-state]'));
 
     if (!modelInput || !timeoutInput || !apiKeyInput || !saveBtn || !clearBtn || !status) {
         return;
@@ -1513,12 +1549,70 @@ function setupGeminiConfig() {
             : 'database fallback';
     }
 
+    function normalizePanelAccess(access) {
+        const defaults = {
+            admin: true,
+            hr: true,
+            vpaa: true,
+            dean: true,
+            procoor: true,
+            professor: true
+        };
+        const source = access && typeof access === 'object' ? access : {};
+        Object.keys(defaults).forEach(role => {
+            if (Object.prototype.hasOwnProperty.call(source, role)) {
+                defaults[role] = source[role] !== false;
+            }
+        });
+        return defaults;
+    }
+
+    function updatePanelAccessStateLabels(access) {
+        const normalized = normalizePanelAccess(access);
+        panelAccessLabels.forEach(label => {
+            const role = String(label.getAttribute('data-openai-panel-state') || '').trim();
+            const enabled = normalized[role] !== false;
+            label.textContent = enabled ? 'On' : 'Off';
+            label.classList.toggle('off', !enabled);
+        });
+    }
+
+    function applyPanelAccess(access) {
+        const normalized = normalizePanelAccess(access);
+        panelAccessInputs.forEach(input => {
+            const role = String(input.getAttribute('data-openai-panel-access') || '').trim();
+            input.checked = normalized[role] !== false;
+        });
+        updatePanelAccessStateLabels(normalized);
+        return normalized;
+    }
+
+    function readPanelAccess() {
+        const access = normalizePanelAccess(geminiRuntimeConfig.panelAccess);
+        panelAccessInputs.forEach(input => {
+            const role = String(input.getAttribute('data-openai-panel-access') || '').trim();
+            if (role) {
+                access[role] = !!input.checked;
+            }
+        });
+        updatePanelAccessStateLabels(access);
+        return access;
+    }
+
+    panelAccessInputs.forEach(input => {
+        input.addEventListener('change', () => {
+            updatePanelAccessStateLabels(readPanelAccess());
+        });
+    });
+
     function applyGeminiConfig(config) {
+        const panelAccess = applyPanelAccess(config && config.panelAccess);
         geminiRuntimeConfig = {
             model: String(config && config.model || 'gpt-5.6-luna').trim() || 'gpt-5.6-luna',
             timeoutMs: Number(config && config.timeoutMs || 30000),
             hasApiKey: !!(config && config.hasApiKey),
-            source: String(config && config.source || 'database').trim() || 'database'
+            source: String(config && config.source || 'database').trim() || 'database',
+            panelAccess
         };
 
         modelInput.value = geminiRuntimeConfig.model;
@@ -1527,8 +1621,22 @@ function setupGeminiConfig() {
 
         const sourceLabel = formatGeminiConfigSource(geminiRuntimeConfig.source);
         const keyLabel = geminiRuntimeConfig.hasApiKey ? 'API key is present.' : 'API key is missing.';
+        const panelLabels = {
+            admin: 'Admin',
+            hr: 'HR',
+            vpaa: 'VPAA',
+            dean: 'Dean',
+            procoor: 'Program Coordinator',
+            professor: 'Professor'
+        };
+        const disabledPanels = Object.keys(panelAccess)
+            .filter(role => panelAccess[role] === false)
+            .map(role => panelLabels[role] || role);
+        const accessLabel = disabledPanels.length
+            ? 'Off: ' + disabledPanels.join(', ') + '.'
+            : 'All panel AI access is on.';
         setGeminiConfigStatus(
-            `OpenAI ready via ${sourceLabel}. Model: ${geminiRuntimeConfig.model}. Timeout: ${geminiRuntimeConfig.timeoutMs} ms. ${keyLabel}`,
+            `OpenAI ready via ${sourceLabel}. Model: ${geminiRuntimeConfig.model}. Timeout: ${geminiRuntimeConfig.timeoutMs} ms. ${keyLabel} ${accessLabel}`,
             geminiRuntimeConfig.hasApiKey ? 'success' : 'error'
         );
     }
@@ -1544,7 +1652,7 @@ function setupGeminiConfig() {
     }
 
     function setGeminiBusyState(isBusy) {
-        [modelInput, timeoutInput, apiKeyInput, saveBtn, clearBtn].forEach(element => {
+        [modelInput, timeoutInput, apiKeyInput, saveBtn, clearBtn, ...panelAccessInputs].forEach(element => {
             if (element) element.disabled = !!isBusy;
         });
     }
@@ -1559,7 +1667,8 @@ function setupGeminiConfig() {
         try {
             const payload = {
                 model,
-                timeoutMs
+                timeoutMs,
+                panelAccess: readPanelAccess()
             };
             if (apiKey !== '') {
                 payload.apiKey = apiKey;
@@ -1584,7 +1693,8 @@ function setupGeminiConfig() {
                 model: String(modelInput.value || '').trim() || 'gpt-5.6-luna',
                 timeoutMs: String(timeoutInput.value || '').trim() || '30000',
                 apiKey: '',
-                clearApiKey: true
+                clearApiKey: true,
+                panelAccess: readPanelAccess()
             }, actor);
             applyGeminiConfig(saved);
         } catch (error) {
@@ -2257,7 +2367,7 @@ function setupProgramManager() {
             : (campusSelect.value && campusOptions.some(campus => campus.id === campusSelect.value) ? campusSelect.value : fallbackCampus);
 
         campusSelect.innerHTML = campusOptions.map(campus => (
-            `<option value="${campus.id}">${campus.name}</option>`
+            `<option value="${escapeAttr(campus.id)}">${escapeHtml(campus.name)}</option>`
         )).join('');
 
         if (!campusOptions.length) {
@@ -2276,7 +2386,7 @@ function setupProgramManager() {
         const normalizedCurrent = String(departmentSelect.value || '').toLowerCase();
 
         departmentSelect.innerHTML = departments.map(dept => (
-            `<option value="${dept}">${getDepartmentLabel(dept)}</option>`
+            `<option value="${escapeAttr(dept)}">${escapeHtml(getDepartmentLabel(dept))}</option>`
         )).join('');
 
         if (!departments.length) {
@@ -2471,7 +2581,7 @@ function refreshCampusSelects(preselectId) {
         const currentValue = el.value || preselectId || 'all';
         const options = campusData
             .filter(c => id === 'campus-filter-select' ? true : c.id !== 'all')
-            .map(c => `<option value="${c.id}">${c.name}</option>`)
+            .map(c => `<option value="${escapeAttr(c.id)}">${escapeHtml(c.name)}</option>`)
             .join('');
         el.innerHTML = options;
         const valueToSet = campusData.some(c => c.id === currentValue) ? currentValue : (id === 'campus-filter-select' ? 'all' : campusData.find(c => c.id !== 'all')?.id);
@@ -2587,7 +2697,7 @@ function populateDepartmentOptions(selectEl, campusId) {
     }
     selectEl.innerHTML = departments.map(dept => {
         const label = getDepartmentLabel(dept);
-        return `<option value="${dept}">${label}</option>`;
+        return `<option value="${escapeAttr(dept)}">${escapeHtml(label)}</option>`;
     }).join('');
     // Preserve previous value if still present
     const current = selectEl.getAttribute('data-current');
@@ -2609,9 +2719,11 @@ function populateProgramOptions(selectEl, campusId, departmentCode, preferredVal
         return;
     }
 
-    selectEl.innerHTML = '<option value="">Select Program</option>' + programs.map(program => (
-        `<option value="${program.programCode}">${program.programCode}${program.programName ? ` - ${program.programName}` : ''}</option>`
-    )).join('');
+    selectEl.innerHTML = '<option value="">Select Program</option>' + programs.map(program => {
+        const code = String(program.programCode || '');
+        const label = code + (program.programName ? ` - ${program.programName}` : '');
+        return `<option value="${escapeAttr(code)}">${escapeHtml(label)}</option>`;
+    }).join('');
 
     const preferred = normalizeProgramCode(preferredValue || selectEl.getAttribute('data-current') || '');
     const matched = programs.find(program => normalizeProgramCode(program.programCode) === preferred);
@@ -4028,18 +4140,37 @@ function createSearchResultRow(user) {
     const statusLabel = user.status === 'inactive' ? 'Inactive' : 'Active';
 
     return `
-        <tr data-user-id="${user.id}">
-            <td>${idNumber}</td>
-            <td>${user.name}</td>
-            <td>${user.email || '-'}</td>
-            <td>${campusLabel}</td>
-            <td>${institute}</td>
-            <td>${programLabel}</td>
-            <td>${employmentType}</td>
-            <td>${position}</td>
+        <tr data-user-id="${escapeAttr(user.id)}">
+            <td>${escapeHtml(idNumber)}</td>
+            <td>${escapeHtml(user.name)}</td>
+            <td>${escapeHtml(user.email || '-')}</td>
+            <td>${escapeHtml(campusLabel)}</td>
+            <td>${escapeHtml(institute)}</td>
+            <td>${escapeHtml(programLabel)}</td>
+            <td>${escapeHtml(employmentType)}</td>
+            <td>${escapeHtml(position)}</td>
             <td><span class="status-pill ${statusLabel.toLowerCase()}">${statusLabel}</span></td>
         </tr>
     `;
+}
+
+function setupUserCardActions() {
+    if (adminUserCardActionsBound) return;
+    document.addEventListener('click', event => {
+        const editButton = event.target.closest('.user-actions-compact .edit-btn[data-user-id]');
+        if (editButton) {
+            event.preventDefault();
+            editUser(editButton.getAttribute('data-user-id') || '');
+            return;
+        }
+
+        const statusButton = event.target.closest('.user-actions-compact .status-btn[data-user-email]');
+        if (statusButton) {
+            event.preventDefault();
+            toggleUserStatus(statusButton, statusButton.getAttribute('data-user-email') || '');
+        }
+    });
+    adminUserCardActionsBound = true;
 }
 
 function toggleEditUserStudentFields(isStudent) {
@@ -4308,25 +4439,26 @@ function handleEditUserSave() {
  */
 function createUserCard(user) {
     const role = normalizeRoleCode(user.role);
-    const initials = user.name.split(' ').map(n => n[0]).join('').substring(0, 2);
+    const safeName = String(user.name || 'User').trim() || 'User';
+    const initials = safeName.split(' ').map(n => n[0]).join('').substring(0, 2);
     const baseInfo = user.yearSection || (user.campus ? user.campus.charAt(0).toUpperCase() + user.campus.slice(1) : '');
     const idLabel = user.studentNumber ? `Student No: ${user.studentNumber}` : (user.employeeId ? `Employee No: ${user.employeeId}` : '');
     const info = [baseInfo, idLabel].filter(Boolean).join('  -  ');
     const departmentLabel = normalizeDepartmentCode(user.department || user.institute);
-    const status = user.status || 'active';
+    const status = user.status === 'inactive' ? 'inactive' : 'active';
     const statusLabel = status === 'inactive' ? 'Inactive' : 'Active';
 
     return `
         <div class="user-card-compact ${status === 'inactive' ? 'inactive' : ''}">
-            <div class="user-avatar">${initials}</div>
+            <div class="user-avatar">${escapeHtml(initials)}</div>
             <div class="user-details">
-                <div class="name">${user.name}</div>
-                <div class="info">${info}</div>
-                <div class="info">${getRoleLabel(role)} - ${departmentLabel}</div>
+                <div class="name">${escapeHtml(safeName)}</div>
+                <div class="info">${escapeHtml(info)}</div>
+                <div class="info">${escapeHtml(getRoleLabel(role))} - ${escapeHtml(departmentLabel)}</div>
             </div>
             <div class="user-actions-compact">
-                <button class="edit-btn" onclick="editUser('${user.id}')"><i class="fas fa-edit"></i></button>
-                <button class="status-btn ${status}" onclick="toggleUserStatus(this, '${user.email}')">${statusLabel}</button>
+                <button class="edit-btn" data-user-id="${escapeAttr(user.id)}"><i class="fas fa-edit"></i></button>
+                <button class="status-btn ${status}" data-user-email="${escapeAttr(user.email || '')}">${statusLabel}</button>
             </div>
         </div>
     `;
@@ -4386,7 +4518,7 @@ function createEmptyState(message) {
     return `
         <div class="empty-state">
             <i class="fas fa-user-slash"></i>
-            <p>${message}</p>
+            <p>${escapeHtml(message)}</p>
         </div>
     `;
 }
@@ -4440,7 +4572,7 @@ function populateAnnouncementComposerCampusOptions() {
     campusSelect.innerHTML = '<option value="">All Campuses</option>' + realCampuses.map(campus => {
         const id = String(campus && campus.id || '').trim();
         const name = String(campus && (campus.name || campus.id) || id).trim() || id;
-        return `<option value="${id}">${name}</option>`;
+        return `<option value="${escapeAttr(id)}">${escapeHtml(name)}</option>`;
     }).join('');
 
     if (previous && realCampuses.some(campus => normalizeAnnouncementComposerToken(campus && campus.id) === previous)) {
@@ -4471,7 +4603,8 @@ function populateAnnouncementComposerProgramOptions() {
     programSelect.innerHTML = '<option value="">All Programs</option>' + filteredPrograms.map(program => {
         const code = String(program && program.programCode || '').trim();
         const name = String(program && program.programName || '').trim();
-        return `<option value="${code}">${code}${name ? ' - ' + name : ''}</option>`;
+        const label = code + (name ? ' - ' + name : '');
+        return `<option value="${escapeAttr(code)}">${escapeHtml(label)}</option>`;
     }).join('');
 
     const matchedPrevious = previous
@@ -4983,7 +5116,7 @@ function populateSubjectCampusFilter() {
     const previous = select.value || 'all';
     const campusOptions = getCampusOptions();
     select.innerHTML = '<option value="all">All Campuses</option>' + campusOptions.map(campus => (
-        `<option value="${campus.id}">${campus.name}</option>`
+        `<option value="${escapeAttr(campus.id)}">${escapeHtml(campus.name)}</option>`
     )).join('');
     select.value = campusOptions.some(campus => campus.id === previous) || previous === 'all'
         ? previous
@@ -4999,7 +5132,7 @@ function populateSubjectDepartmentFilter() {
     const previous = departmentSelect.value || 'all';
     const departments = getDepartmentsForCampus(selectedCampus === 'all' ? 'all' : selectedCampus);
     departmentSelect.innerHTML = '<option value="all">All Departments</option>' + departments.map(dept => (
-        `<option value="${dept}">${getDepartmentLabel(dept)}</option>`
+        `<option value="${escapeAttr(dept)}">${escapeHtml(getDepartmentLabel(dept))}</option>`
     )).join('');
     departmentSelect.value = departments.some(dept => dept === previous) || previous === 'all'
         ? previous
@@ -5070,7 +5203,7 @@ function openSubjectModal(subject) {
 
     const campusOptions = getCampusOptions();
     campusSelect.innerHTML = '<option value="">Select Campus</option>' + campusOptions.map(campus => (
-        `<option value="${campus.id}">${campus.name}</option>`
+        `<option value="${escapeAttr(campus.id)}">${escapeHtml(campus.name)}</option>`
     )).join('');
 
     campusSelect.value = subject ? String(subject.campusSlug || '') : (campusOptions[0] ? campusOptions[0].id : '');
@@ -5097,7 +5230,7 @@ function populateSubjectDepartmentSelect(selectedDepartment) {
     const campusId = campusSelect.value;
     const departments = getDepartmentsForCampus(campusId);
     departmentSelect.innerHTML = departments.map(dept => (
-        `<option value="${dept}">${getDepartmentLabel(dept)}</option>`
+        `<option value="${escapeAttr(dept)}">${escapeHtml(getDepartmentLabel(dept))}</option>`
     )).join('');
     if (!departments.length) {
         departmentSelect.innerHTML = '<option value="">No departments</option>';
@@ -5477,7 +5610,7 @@ function populateOfferingSemesterSelect() {
     const currentItem = semesterList.find(item => String(item && item.value || '') === currentSemester);
     const currentLabel = currentItem && currentItem.label ? currentItem.label : (currentSemester || 'Current Semester');
 
-    semesterSelect.innerHTML = `<option value="${currentSemester}">${currentLabel}</option>`;
+    semesterSelect.innerHTML = `<option value="${escapeAttr(currentSemester)}">${escapeHtml(currentLabel)}</option>`;
     semesterSelect.value = currentSemester;
     semesterSelect.disabled = true;
 }
@@ -5488,7 +5621,7 @@ function populateOfferingCampusSelect() {
     const campusOptions = getCampusOptions();
     const previous = campusSelect.value;
     campusSelect.innerHTML = campusOptions.map(campus => (
-        `<option value="${campus.id}">${campus.name}</option>`
+        `<option value="${escapeAttr(campus.id)}">${escapeHtml(campus.name)}</option>`
     )).join('');
     if (!campusOptions.length) {
         campusSelect.innerHTML = '<option value="">No campuses</option>';
@@ -5507,7 +5640,7 @@ function populateOfferingDepartmentSelect() {
     const departments = getDepartmentsForCampus(campusId);
     const previous = departmentSelect.value;
     departmentSelect.innerHTML = departments.map(dept => (
-        `<option value="${dept}">${getDepartmentLabel(dept)}</option>`
+        `<option value="${escapeAttr(dept)}">${escapeHtml(getDepartmentLabel(dept))}</option>`
     )).join('');
     if (!departments.length) {
         departmentSelect.innerHTML = '<option value="">No departments</option>';
@@ -5528,9 +5661,11 @@ function populateOfferingProgramSelect() {
     const programs = getProgramsForCampusDepartment(campusSlug, departmentCode);
     const previous = normalizeProgramCode(programSelect.value);
 
-    programSelect.innerHTML = programs.map(program => (
-        `<option value="${program.programCode}">${program.programCode}${program.programName ? ` - ${program.programName}` : ''}</option>`
-    )).join('');
+    programSelect.innerHTML = programs.map(program => {
+        const code = String(program.programCode || '');
+        const label = code + (program.programName ? ` - ${program.programName}` : '');
+        return `<option value="${escapeAttr(code)}">${escapeHtml(label)}</option>`;
+    }).join('');
     if (!programs.length) {
         programSelect.innerHTML = '<option value="">No programs available</option>';
         programSelect.value = '';
@@ -5555,9 +5690,10 @@ function populateOfferingSubjectSelect() {
     );
     const previous = subjectSelect.value;
 
-    subjectSelect.innerHTML = subjects.map(subject => (
-        `<option value="${subject.id}">${subject.subjectCode} - ${subject.subjectName}</option>`
-    )).join('');
+    subjectSelect.innerHTML = subjects.map(subject => {
+        const label = `${String(subject.subjectCode || '')} - ${String(subject.subjectName || '')}`;
+        return `<option value="${escapeAttr(subject.id)}">${escapeHtml(label)}</option>`;
+    }).join('');
     if (!subjects.length) {
         subjectSelect.innerHTML = '<option value="">No subjects available</option>';
         subjectSelect.value = '';
@@ -5588,7 +5724,7 @@ function populateOfferingProfessorSelect() {
     const previous = professorSelect.value;
 
     professorSelect.innerHTML = professors.map(professor => (
-        `<option value="${professor.employeeId}">${professor.name}</option>`
+        `<option value="${escapeAttr(professor.employeeId)}">${escapeHtml(professor.name)}</option>`
     )).join('');
     if (!professors.length) {
         professorSelect.innerHTML = '<option value="">No active professors with employee ID</option>';
@@ -5757,9 +5893,11 @@ function populateOfferingStudentsProgramFilter() {
         selectedOfferingForStudents.programCode || getUserProgramCodeByUserId(selectedOfferingForStudents.professorUserId)
     );
 
-    select.innerHTML = '<option value="all">All Programs</option>' + programs.map(program => (
-        `<option value="${program.programCode}">${program.programCode}${program.programName ? ` - ${program.programName}` : ''}</option>`
-    )).join('');
+    select.innerHTML = '<option value="all">All Programs</option>' + programs.map(program => {
+        const code = String(program.programCode || '');
+        const label = code + (program.programName ? ` - ${program.programName}` : '');
+        return `<option value="${escapeAttr(code)}">${escapeHtml(label)}</option>`;
+    }).join('');
 
     const preferred = programs.find(program => normalizeProgramCode(program.programCode) === professorProgram);
     if (preferred) {
@@ -6721,14 +6859,14 @@ function getProfessorAnalyticsSnapshot(professor, semesterId) {
 function buildSemesterOptionsHtml(selectedSemester) {
     return getSemesterOptions().map(option => {
         const selected = option.id === selectedSemester ? 'selected' : '';
-        return `<option value="${option.id}" ${selected}>${option.label}</option>`;
+        return `<option value="${escapeAttr(option.id)}" ${selected}>${escapeHtml(option.label)}</option>`;
     }).join('');
 }
 
 function buildEvaluationTypeOptionsHtml(selectedType) {
     return getEvaluationTypeOptions().map(option => {
         const selected = option.id === selectedType ? 'selected' : '';
-        return `<option value="${option.id}" ${selected}>${option.label}</option>`;
+        return `<option value="${escapeAttr(option.id)}" ${selected}>${escapeHtml(option.label)}</option>`;
     }).join('');
 }
 
@@ -9389,7 +9527,7 @@ function populateSemesterSelect(selectEl) {
     SharedData.getSemesterList().forEach(s => { labelMap[s.value] = s.label; });
     selectEl.innerHTML = semesters.map(semester => {
         const label = labelMap[semester] || semester;
-        return `<option value="${semester}">${label}</option>`;
+        return `<option value="${escapeAttr(semester)}">${escapeHtml(label)}</option>`;
     }).join('');
 }
 
@@ -9941,25 +10079,26 @@ function renderQuestions() {
     let globalQuestionIndex = 0;
 
     sortedSections.forEach(section => {
+        const sectionIdLiteral = inlineIdLiteral(section.id);
         // Get questions for this section
         const sectionQuestions = questions
             .filter(q => q.sectionId === section.id)
             .sort((a, b) => (a.order || 0) - (b.order || 0));
 
         html += `
-            <div class="question-section" data-section-id="${section.id}">
+            <div class="question-section" data-section-id="${escapeAttr(section.id)}">
                 <div class="section-header">
                     <div class="section-title-group">
                         <div class="section-title-content">
-                            <h2 class="section-title"><span class="section-letter-inline">${section.letter}.</span> ${section.title}</h2>
-                            <p class="section-description">${section.description}</p>
+                            <h2 class="section-title"><span class="section-letter-inline">${escapeHtml(section.letter)}.</span> ${escapeHtml(section.title)}</h2>
+                            <p class="section-description">${escapeHtml(section.description)}</p>
                         </div>
                     </div>
                     <div class="section-actions">
-                        <button class="action-btn edit" onclick="editSection(${section.id})" title="Edit Section">
+                        <button class="action-btn edit" onclick="editSection(${sectionIdLiteral})" title="Edit Section">
                             <i class="fas fa-edit"></i>
                         </button>
-                        <button class="action-btn delete" onclick="deleteSection(${section.id})" title="Delete Section">
+                        <button class="action-btn delete" onclick="deleteSection(${sectionIdLiteral})" title="Delete Section">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
@@ -9968,12 +10107,13 @@ function renderQuestions() {
                     ${sectionQuestions.length > 0
                 ? sectionQuestions.map((question, idx) => {
                     globalQuestionIndex++;
+                    const questionIdLiteral = inlineIdLiteral(question.id);
                     return `
-                                <div class="question-item" data-id="${question.id}">
+                                <div class="question-item" data-id="${escapeAttr(question.id)}">
                                     <div class="question-number">${globalQuestionIndex}</div>
                                     <div class="question-content">
                                         <div class="question-header">
-                                            <h3 class="question-text">${question.text}</h3>
+                                            <h3 class="question-text">${escapeHtml(question.text)}</h3>
                                             ${question.required ? '<span class="required-badge">Required</span>' : ''}
                                         </div>
                                         <div class="question-preview">
@@ -9983,16 +10123,16 @@ function renderQuestions() {
                         }
                                         </div>
                                         <div class="question-actions">
-                                            <button class="action-btn edit" onclick="editQuestion(${question.id})" title="Edit">
+                                            <button class="action-btn edit" onclick="editQuestion(${questionIdLiteral})" title="Edit">
                                                 <i class="fas fa-edit"></i>
                                             </button>
-                                            <button class="action-btn delete" onclick="deleteQuestion(${question.id})" title="Delete">
+                                            <button class="action-btn delete" onclick="deleteQuestion(${questionIdLiteral})" title="Delete">
                                                 <i class="fas fa-trash"></i>
                                             </button>
-                                            ${idx > 0 ? `<button class="action-btn move-up" onclick="moveQuestion(${question.id}, 'up')" title="Move Up">
+                                            ${idx > 0 ? `<button class="action-btn move-up" onclick="moveQuestion(${questionIdLiteral}, 'up')" title="Move Up">
                                                 <i class="fas fa-arrow-up"></i>
                                             </button>` : ''}
-                                            ${idx < sectionQuestions.length - 1 ? `<button class="action-btn move-down" onclick="moveQuestion(${question.id}, 'down')" title="Move Down">
+                                            ${idx < sectionQuestions.length - 1 ? `<button class="action-btn move-down" onclick="moveQuestion(${questionIdLiteral}, 'down')" title="Move Down">
                                                 <i class="fas fa-arrow-down"></i>
                                             </button>` : ''}
                                         </div>
@@ -10013,12 +10153,13 @@ function renderQuestions() {
         questionsWithoutSection.sort((a, b) => (a.order || 0) - (b.order || 0));
         questionsWithoutSection.forEach((question, idx) => {
             globalQuestionIndex++;
+            const questionIdLiteral = inlineIdLiteral(question.id);
             html += `
-                <div class="question-item" data-id="${question.id}">
+                <div class="question-item" data-id="${escapeAttr(question.id)}">
                     <div class="question-number">${globalQuestionIndex}</div>
                     <div class="question-content">
                         <div class="question-header">
-                            <h3 class="question-text">${question.text}</h3>
+                            <h3 class="question-text">${escapeHtml(question.text)}</h3>
                             ${question.required ? '<span class="required-badge">Required</span>' : ''}
                         </div>
                         <div class="question-preview">
@@ -10028,10 +10169,10 @@ function renderQuestions() {
                 }
                         </div>
                         <div class="question-actions">
-                            <button class="action-btn edit" onclick="editQuestion(${question.id})" title="Edit">
+                            <button class="action-btn edit" onclick="editQuestion(${questionIdLiteral})" title="Edit">
                                 <i class="fas fa-edit"></i>
                             </button>
-                            <button class="action-btn delete" onclick="deleteQuestion(${question.id})" title="Delete">
+                            <button class="action-btn delete" onclick="deleteQuestion(${questionIdLiteral})" title="Delete">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -10073,7 +10214,7 @@ function renderRatingPreview(question) {
  * Render qualitative question preview
  */
 function renderQualitativePreview(question) {
-    const maxLength = question.maxLength || 500;
+    const maxLength = Math.max(1, parseInt(question.maxLength, 10) || 500);
     return `
         <div class="qualitative-preview">
             <textarea disabled placeholder="Enter your response here..." rows="4" maxlength="${maxLength}"></textarea>

@@ -1,13 +1,27 @@
 Options -Indexes
 DirectoryIndex index.php
+ServerSignature Off
 
 <IfModule mod_rewrite.c>
 RewriteEngine On
 
 # Allow the bundled browser Excel parser asset under JsScrip/vendor.
-RewriteRule "^JsScrip/vendor/xlsx\.full\.min\.js$" - [L,NC]
+RewriteRule ^JsScrip/vendor/xlsx\.full\.min\.js$ - [L,NC]
 
 # Block direct web access to sensitive project internals.
-RewriteRule "(^|/)(?:database|vendor|\\.git|\\.vs)(?:/|$)" - [F,L,NC]
-RewriteRule "(^|/)(?:README\\.md|composer\\.json|composer\\.lock|composer\\.phar|composer-setup\\.php)$" - [F,L,NC]
+RewriteRule (^|/)\.(?!well-known/) - [F,L]
+RewriteRule (^|/)(?:database|vendor|\.git|\.vs)(?:/|$) - [F,L,NC]
+RewriteRule ^api/(?:auth|db|state_helpers|time_helper|mailer_helper|setup_db|scheduled_student_eval_reminder|faculty_(?:report|pdf|docx|xlsx)_helper)\.php$ - [F,L,NC]
+RewriteRule (^|/)(?:README\.md|composer\.json|composer\.lock|composer\.phar|composer-setup\.php|package\.json|package-lock\.json|phpunit\.xml|webpack\.config\.js|vite\.config\.js)$ - [F,L,NC]
+RewriteRule (^|/).*\.(?:sql|sqlite|db|bak|backup|old|orig|save|zip|tar|gz|7z|rar|log)$ - [F,L,NC]
+</IfModule>
+
+<IfModule mod_headers.c>
+Header unset X-Powered-By
+Header always unset X-Powered-By
+Header always set X-Content-Type-Options "nosniff"
+Header always set X-Frame-Options "DENY"
+Header always set Referrer-Policy "strict-origin-when-cross-origin"
+Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+Header always set Content-Security-Policy "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'; font-src 'self' https://cdnjs.cloudflare.com data:; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 </IfModule>

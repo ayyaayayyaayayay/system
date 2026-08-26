@@ -9,8 +9,8 @@
     <link rel="apple-touch-icon" href="../design/apple-touch-icon.png">
     <title>Admin Panel - National Aviation Academy of the Philippines</title>
     <link rel="stylesheet" href="../css/hrpanel.css?v=20260729c">
-    <link rel="stylesheet" href="../css/panel-theme.css?v=20260808a">
-    <link rel="stylesheet" href="../css/adminpanel.css?v=20260822a">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260824a">
+    <link rel="stylesheet" href="../css/adminpanel.css?v=20260826a">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -909,6 +909,82 @@
                                 <div class="credential-distributor-field" style="grid-column: 1 / -1;">
                                     <label for="gemini-api-key">OpenAI API Key</label>
                                     <input type="password" id="gemini-api-key" placeholder="Enter OpenAI API key">
+                                </div>
+                            </div>
+                            <div class="openai-panel-access" aria-label="OpenAI panel access controls">
+                                <div class="openai-panel-access-header">
+                                    <div>
+                                        <h4>Panel AI Access</h4>
+                                        <p>Turn OpenAI features on or off per panel without changing the saved API key.</p>
+                                    </div>
+                                </div>
+                                <div class="openai-panel-access-grid">
+                                    <div class="openai-panel-access-item">
+                                        <div>
+                                            <strong>Professor Panel</strong>
+                                            <span>Feedback summaries and faculty paper recommendations.</span>
+                                        </div>
+                                        <label class="switch" for="openai-access-professor">
+                                            <input type="checkbox" id="openai-access-professor" data-openai-panel-access="professor">
+                                            <span class="slider"></span>
+                                        </label>
+                                        <span class="openai-panel-access-state" data-openai-panel-state="professor">On</span>
+                                    </div>
+                                    <div class="openai-panel-access-item">
+                                        <div>
+                                            <strong>Dean Panel</strong>
+                                            <span>Professor comment summaries.</span>
+                                        </div>
+                                        <label class="switch" for="openai-access-dean">
+                                            <input type="checkbox" id="openai-access-dean" data-openai-panel-access="dean">
+                                            <span class="slider"></span>
+                                        </label>
+                                        <span class="openai-panel-access-state" data-openai-panel-state="dean">On</span>
+                                    </div>
+                                    <div class="openai-panel-access-item">
+                                        <div>
+                                            <strong>Program Coordinator Panel</strong>
+                                            <span>Professor comment summaries.</span>
+                                        </div>
+                                        <label class="switch" for="openai-access-procoor">
+                                            <input type="checkbox" id="openai-access-procoor" data-openai-panel-access="procoor">
+                                            <span class="slider"></span>
+                                        </label>
+                                        <span class="openai-panel-access-state" data-openai-panel-state="procoor">On</span>
+                                    </div>
+                                    <div class="openai-panel-access-item">
+                                        <div>
+                                            <strong>HR Panel</strong>
+                                            <span>AI insights and analytics.</span>
+                                        </div>
+                                        <label class="switch" for="openai-access-hr">
+                                            <input type="checkbox" id="openai-access-hr" data-openai-panel-access="hr">
+                                            <span class="slider"></span>
+                                        </label>
+                                        <span class="openai-panel-access-state" data-openai-panel-state="hr">On</span>
+                                    </div>
+                                    <div class="openai-panel-access-item">
+                                        <div>
+                                            <strong>Admin Panel</strong>
+                                            <span>AI analytics inside admin reports.</span>
+                                        </div>
+                                        <label class="switch" for="openai-access-admin">
+                                            <input type="checkbox" id="openai-access-admin" data-openai-panel-access="admin">
+                                            <span class="slider"></span>
+                                        </label>
+                                        <span class="openai-panel-access-state" data-openai-panel-state="admin">On</span>
+                                    </div>
+                                    <div class="openai-panel-access-item">
+                                        <div>
+                                            <strong>VPAA Panel</strong>
+                                            <span>AI-supported evaluation insights.</span>
+                                        </div>
+                                        <label class="switch" for="openai-access-vpaa">
+                                            <input type="checkbox" id="openai-access-vpaa" data-openai-panel-access="vpaa">
+                                            <span class="slider"></span>
+                                        </label>
+                                        <span class="openai-panel-access-state" data-openai-panel-state="vpaa">On</span>
+                                    </div>
                                 </div>
                             </div>
                             <div class="credential-distributor-actions">
@@ -2050,10 +2126,10 @@
     </div>
 
 
-    <script src="../JsScrip/db-data.js?v=20260802e"></script>
+    <script src="../JsScrip/db-data.js?v=20260826a"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
     <script src="../JsScrip/vendor/xlsx.full.min.js?v=20260701a"></script>
-    <script src="../JsScrip/adminpanel.js?v=20260821c"></script>
+    <script src="../JsScrip/adminpanel.js?v=20260826a"></script>
 </body>
 
 </html>

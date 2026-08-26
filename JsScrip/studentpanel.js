@@ -764,6 +764,10 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+function escapeAttr(value) {
+    return escapeHtml(value);
+}
+
 function renderAssignedEvaluationList() {
     const listContainer = document.querySelector('.evaluations-list');
     if (!listContainer) return;
@@ -1864,10 +1868,10 @@ function loadDynamicQuestionnaire() {
             <div class="question-section eval-step" data-step-index="${sectionStepIndex}">
                 <div class="section-header">
                     <div class="section-title-group">
-                        <h2 class="section-letter">${section.letter}.</h2>
+                        <h2 class="section-letter">${escapeHtml(section.letter)}.</h2>
                         <div class="section-title-content">
-                            <h2 class="section-title">${section.title}</h2>
-                            <p class="section-description">${section.description}</p>
+                            <h2 class="section-title">${escapeHtml(section.title)}</h2>
+                            <p class="section-description">${escapeHtml(section.description)}</p>
                         </div>
                     </div>
                 </div>
@@ -2571,19 +2575,22 @@ function refreshEvaluationStatuses() {
  * Render single question HTML snippet
  */
 function renderQuestionHTML(question, index) {
+    const questionId = String(question && question.id != null ? question.id : '');
+    const questionIdAttr = escapeAttr(questionId);
+    const questionText = escapeHtml(question && question.text);
     if (question.type === 'rating') {
         const scale = String(question.ratingScale || '1-5');
         const maxRating = parseInt(scale.split('-')[1], 10) || 5;
         let ratingHtml = `
             <div class="question-group">
-                <label class="question-label">${index}. ${question.text}${question.required ? ' <span style="color:red">*</span>' : ''}</label>
+                <label class="question-label">${index}. ${questionText}${question.required ? ' <span style="color:red">*</span>' : ''}</label>
                 <div class="rating-scale">
         `;
 
         for (let i = 1; i <= maxRating; i++) {
             ratingHtml += `
-                    <input type="radio" name="${question.id}" id="${question.id}-${i}" value="${i}" ${question.required ? 'required' : ''}>
-                    <label for="${question.id}-${i}" class="rating-option">${i}</label>
+                    <input type="radio" name="${questionIdAttr}" id="${questionIdAttr}-${i}" value="${i}" ${question.required ? 'required' : ''}>
+                    <label for="${questionIdAttr}-${i}" class="rating-option">${i}</label>
             `;
         }
 
@@ -2600,8 +2607,8 @@ function renderQuestionHTML(question, index) {
         const requiredMarker = `<span class="question-required-star" style="color:red;${isInitiallyRequired ? '' : ' display:none;'}">*</span>`;
         return `
             <div class="question-group">
-                <label class="question-label" for="${question.id}">${index}. ${question.text} ${requiredMarker}</label>
-                <textarea id="${question.id}" name="${question.id}" class="form-textarea" rows="4" placeholder="Your answer..." ${isInitiallyRequired ? 'required' : ''} data-base-required="${isBaseRequired ? '1' : '0'}" data-exception-reporting="${hasExceptionReporting ? '1' : '0'}"></textarea>
+                <label class="question-label" for="${questionIdAttr}">${index}. ${questionText} ${requiredMarker}</label>
+                <textarea id="${questionIdAttr}" name="${questionIdAttr}" class="form-textarea" rows="4" placeholder="Your answer..." ${isInitiallyRequired ? 'required' : ''} data-base-required="${isBaseRequired ? '1' : '0'}" data-exception-reporting="${hasExceptionReporting ? '1' : '0'}"></textarea>
             </div>
         `;
     }
@@ -3122,11 +3129,11 @@ function renderHistoryList(records) {
     historyList.innerHTML = records.map(record => `
         <div class="history-item">
             <div class="history-info">
-                <div class="history-faculty">${record.faculty}</div>
-                <div class="history-subject">${record.subject}</div>
-                <div class="history-date">Submitted: ${record.submittedAt}</div>
+                <div class="history-faculty">${escapeHtml(record.faculty)}</div>
+                <div class="history-subject">${escapeHtml(record.subject)}</div>
+                <div class="history-date">Submitted: ${escapeHtml(record.submittedAt)}</div>
             </div>
-            <button class="btn-view-answers" data-id="${record.id}">View Answers</button>
+            <button class="btn-view-answers" data-id="${escapeAttr(record.id)}">View Answers</button>
         </div>
     `).join('');
 
@@ -3150,18 +3157,18 @@ function openHistoryModal(record) {
     modalBody.innerHTML = `
         <div class="answer-item">
             <h4>Faculty</h4>
-            <p>${record.faculty}</p>
+            <p>${escapeHtml(record.faculty)}</p>
         </div>
         <div class="answer-item">
             <h4>Subject</h4>
-            <p>${record.subject}</p>
+            <p>${escapeHtml(record.subject)}</p>
         </div>
         ${(record.answerSections || []).map(section => `
             <div class="answer-item">
-                <h4>${section.title}</h4>
+                <h4>${escapeHtml(section.title)}</h4>
                 <div>
                     ${section.items.map(item => `
-                        <p><strong>${item.number ? (item.number + '.') : ''} ${item.question}</strong><br>${item.answer}</p>
+                        <p><strong>${item.number ? (escapeHtml(item.number) + '.') : ''} ${escapeHtml(item.question)}</strong><br>${escapeHtml(item.answer)}</p>
                     `).join('')}
                 </div>
             </div>

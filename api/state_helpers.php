@@ -7951,6 +7951,81 @@ function normalizeGeminiTimeoutMsValue($value, int $default = 30000): int
     return max(5000, min($timeout, 60000));
 }
 
+function getDefaultOpenAiPanelAccess(): array
+{
+    return [
+        'admin' => true,
+        'hr' => true,
+        'vpaa' => true,
+        'dean' => true,
+        'procoor' => true,
+        'professor' => true,
+    ];
+}
+
+function normalizeOpenAiPanelRole($role): string
+{
+    $token = strtolower(trim((string) $role));
+    $token = str_replace([' ', '-'], '_', $token);
+    if ($token === 'program_coordinator' || $token === 'coordinator') {
+        return 'procoor';
+    }
+    if ($token === 'supervisor') {
+        return 'dean';
+    }
+    if (in_array($token, ['admin', 'hr', 'vpaa', 'dean', 'procoor', 'professor'], true)) {
+        return $token;
+    }
+    return '';
+}
+
+function normalizeOpenAiPanelAccessValue($value): bool
+{
+    if (is_bool($value)) {
+        return $value;
+    }
+    if (is_numeric($value)) {
+        return ((int) $value) !== 0;
+    }
+    $token = strtolower(trim((string) $value));
+    if (in_array($token, ['0', 'false', 'off', 'no', 'disabled'], true)) {
+        return false;
+    }
+    if (in_array($token, ['1', 'true', 'on', 'yes', 'enabled'], true)) {
+        return true;
+    }
+    return true;
+}
+
+function normalizeOpenAiPanelAccessConfig($input): array
+{
+    $access = getDefaultOpenAiPanelAccess();
+    $source = is_array($input) ? $input : [];
+    foreach ($access as $role => $_enabled) {
+        if (array_key_exists($role, $source)) {
+            $access[$role] = normalizeOpenAiPanelAccessValue($source[$role]);
+        }
+    }
+    return $access;
+}
+
+function getOpenAiPanelAccessConfig(PDO $pdo): array
+{
+    $stored = getSettingJson($pdo, 'openAiConfig', []);
+    $stored = is_array($stored) ? $stored : [];
+    return normalizeOpenAiPanelAccessConfig($stored['panelAccess'] ?? []);
+}
+
+function isOpenAiEnabledForPanelRole(PDO $pdo, $role): bool
+{
+    $panelRole = normalizeOpenAiPanelRole($role);
+    if ($panelRole === '') {
+        return false;
+    }
+    $access = getOpenAiPanelAccessConfig($pdo);
+    return array_key_exists($panelRole, $access) ? !empty($access[$panelRole]) : true;
+}
+
 function getOpenAiOptionalEnvValue(string $name): ?string
 {
     $value = getenv($name);
@@ -8157,6 +8232,7 @@ function getGeminiRawConfig(PDO $pdo): array
     $storedApiKey = trim((string) ($stored['apiKey'] ?? ''));
     $storedModel = normalizeGeminiModelValue($stored['model'] ?? 'gpt-5.6-luna', 'gpt-5.6-luna');
     $storedTimeoutMs = normalizeGeminiTimeoutMsValue($stored['timeoutMs'] ?? 30000, 30000);
+    $panelAccess = normalizeOpenAiPanelAccessConfig($stored['panelAccess'] ?? []);
 
     $envApiKey = getFirstOpenAiOptionalEnvValue(['NAAP_OPENAI_API_KEY', 'OPENAI_API_KEY']);
     $envModel = getFirstOpenAiOptionalEnvValue(['NAAP_OPENAI_MODEL', 'OPENAI_MODEL']);
@@ -8179,6 +8255,7 @@ function getGeminiRawConfig(PDO $pdo): array
         'model' => $model,
         'timeoutMs' => $timeoutMs,
         'source' => $hasEnvOverride ? 'env' : 'database',
+        'panelAccess' => $panelAccess,
     ];
 }
 
@@ -8191,6 +8268,7 @@ function buildGeminiConfigSnapshot(PDO $pdo): array
         'timeoutMs' => (int) ($raw['timeoutMs'] ?? 30000),
         'hasApiKey' => trim((string) ($raw['apiKey'] ?? '')) !== '',
         'source' => (string) ($raw['source'] ?? 'database'),
+        'panelAccess' => normalizeOpenAiPanelAccessConfig($raw['panelAccess'] ?? []),
     ];
 }
 
@@ -8219,10 +8297,16 @@ function persistGeminiConfigSnapshot(PDO $pdo, array $input): array
         }
     }
 
+    $panelAccess = normalizeOpenAiPanelAccessConfig($stored['panelAccess'] ?? []);
+    if (array_key_exists('panelAccess', $input)) {
+        $panelAccess = normalizeOpenAiPanelAccessConfig($input['panelAccess']);
+    }
+
     setSettingJson($pdo, 'openAiConfig', [
         'apiKey' => $apiKey,
         'model' => $model,
         'timeoutMs' => $timeoutMs,
+        'panelAccess' => $panelAccess,
         'updatedAt' => getAuthoritativePhilippineIso8601(),
     ]);
 
@@ -9788,8 +9872,432 @@ function persistFacultyAcknowledgementPapersSnapshot(PDO $pdo, array $papers) {
     setSettingJson($pdo, 'facultyAcknowledgementPapers', array_values($rows));
 }
 
-function buildBootstrapPayload(PDO $pdo, $currentUserId = '') {
+function bootstrapNormalizeUserToken($value) {
+    $numeric = resolveStoredUserIdNumber($value);
+    if ($numeric > 0) {
+        return 'u' . $numeric;
+    }
+    return strtolower(trim((string) $value));
+}
+
+function bootstrapNormalizePlainToken($value) {
+    return strtolower(trim((string) $value));
+}
+
+function bootstrapFindUserByToken(array $users, $userToken) {
+    $target = bootstrapNormalizeUserToken($userToken);
+    if ($target === '') {
+        return null;
+    }
+
+    foreach ($users as $user) {
+        if (!is_array($user)) {
+            continue;
+        }
+        if (bootstrapNormalizeUserToken($user['id'] ?? ($user['userId'] ?? '')) === $target) {
+            return $user;
+        }
+    }
+
+    return null;
+}
+
+function buildBootstrapActorContext($actorInput, array $users) {
+    $actorUser = is_array($actorInput) ? $actorInput : null;
+    $actorToken = '';
+
+    if ($actorUser) {
+        $actorToken = bootstrapNormalizeUserToken($actorUser['id'] ?? ($actorUser['userId'] ?? ''));
+    } else {
+        $actorToken = bootstrapNormalizeUserToken($actorInput);
+    }
+
+    if (!$actorUser && $actorToken !== '') {
+        $actorUser = bootstrapFindUserByToken($users, $actorToken);
+    }
+    if (!$actorUser) {
+        $actorUser = [];
+    }
+    if ($actorToken === '') {
+        $actorToken = bootstrapNormalizeUserToken($actorUser['id'] ?? ($actorUser['userId'] ?? ''));
+    }
+
+    $department = strtoupper(trim((string) ($actorUser['department'] ?? ($actorUser['institute'] ?? ''))));
+    $programCode = strtoupper(trim((string) ($actorUser['programCode'] ?? '')));
+
+    return [
+        'user' => $actorUser,
+        'role' => bootstrapNormalizePlainToken($actorUser['role'] ?? ''),
+        'userId' => $actorToken,
+        'numericUserId' => resolveStoredUserIdNumber($actorToken),
+        'campus' => bootstrapNormalizePlainToken($actorUser['campus'] ?? ($actorUser['campusSlug'] ?? '')),
+        'department' => $department,
+        'departmentToken' => bootstrapNormalizePlainToken($department),
+        'programCode' => $programCode,
+        'programToken' => bootstrapNormalizePlainToken($programCode),
+        'studentNumberToken' => bootstrapNormalizePlainToken($actorUser['studentNumber'] ?? ''),
+        'employeeIdToken' => bootstrapNormalizePlainToken($actorUser['employeeId'] ?? ''),
+    ];
+}
+
+function bootstrapIsBroadStateRole($role) {
+    return in_array(bootstrapNormalizePlainToken($role), ['admin', 'hr', 'vpaa', 'osa'], true);
+}
+
+function bootstrapUserMatchesActorScope(array $user, array $ctx) {
+    $role = bootstrapNormalizePlainToken($ctx['role'] ?? '');
+    if (bootstrapIsBroadStateRole($role)) {
+        return true;
+    }
+
+    $actorUserId = bootstrapNormalizeUserToken($ctx['userId'] ?? '');
+    $userId = bootstrapNormalizeUserToken($user['id'] ?? ($user['userId'] ?? ''));
+    if ($actorUserId !== '' && $userId === $actorUserId) {
+        return true;
+    }
+
+    $userRole = bootstrapNormalizePlainToken($user['role'] ?? '');
+    $userDepartment = bootstrapNormalizePlainToken($user['department'] ?? ($user['institute'] ?? ''));
+    $userCampus = bootstrapNormalizePlainToken($user['campus'] ?? ($user['campusSlug'] ?? ''));
+    $userProgram = bootstrapNormalizePlainToken($user['programCode'] ?? '');
+    $actorDepartment = bootstrapNormalizePlainToken($ctx['departmentToken'] ?? '');
+    $actorCampus = bootstrapNormalizePlainToken($ctx['campus'] ?? '');
+    $actorProgram = bootstrapNormalizePlainToken($ctx['programToken'] ?? '');
+
+    if ($role === 'dean') {
+        return $userRole === 'professor'
+            && $actorDepartment !== ''
+            && $userDepartment === $actorDepartment
+            && ($actorCampus === '' || $userCampus === '' || $userCampus === $actorCampus);
+    }
+
+    if ($role === 'procoor') {
+        return $userRole === 'professor'
+            && $actorDepartment !== ''
+            && $userDepartment === $actorDepartment
+            && $actorProgram !== ''
+            && $userProgram === $actorProgram
+            && ($actorCampus === '' || $userCampus === '' || $userCampus === $actorCampus);
+    }
+
+    return false;
+}
+
+function filterBootstrapUsersForActor(array $users, array $ctx) {
+    return array_values(array_filter($users, function ($user) use ($ctx) {
+        return is_array($user) && bootstrapUserMatchesActorScope($user, $ctx);
+    }));
+}
+
+function bootstrapUserTokenMap(array $users) {
+    $map = [];
+    foreach ($users as $user) {
+        if (!is_array($user)) {
+            continue;
+        }
+        $token = bootstrapNormalizeUserToken($user['id'] ?? ($user['userId'] ?? ''));
+        if ($token !== '') {
+            $map[$token] = true;
+        }
+    }
+    return $map;
+}
+
+function bootstrapRowHasUserToken(array $row, array $keys, $userToken) {
+    $target = bootstrapNormalizeUserToken($userToken);
+    if ($target === '') {
+        return false;
+    }
+
+    foreach ($keys as $key) {
+        if (bootstrapNormalizeUserToken($row[$key] ?? '') === $target) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function bootstrapRowHasMappedUserToken(array $row, array $keys, array $tokenMap) {
+    if (count($tokenMap) === 0) {
+        return false;
+    }
+
+    foreach ($keys as $key) {
+        $token = bootstrapNormalizeUserToken($row[$key] ?? '');
+        if ($token !== '' && isset($tokenMap[$token])) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function bootstrapRowHasTextToken(array $row, array $keys, $targetToken) {
+    $target = bootstrapNormalizePlainToken($targetToken);
+    if ($target === '') {
+        return false;
+    }
+
+    foreach ($keys as $key) {
+        if (bootstrapNormalizePlainToken($row[$key] ?? '') === $target) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function bootstrapStudentOwnedRowMatches(array $row, array $ctx) {
+    $studentUserId = bootstrapNormalizeUserToken($ctx['userId'] ?? '');
+    if ($studentUserId !== '' && bootstrapRowHasUserToken($row, ['studentUserId', 'evaluatorUserId'], $studentUserId)) {
+        return true;
+    }
+
+    $studentNumber = bootstrapNormalizePlainToken($ctx['studentNumberToken'] ?? '');
+    return $studentNumber !== ''
+        && bootstrapRowHasTextToken($row, ['studentNumber', 'studentId', 'evaluatorStudentNumber'], $studentNumber);
+}
+
+function filterBootstrapStudentOwnedRows(array $rows, array $ctx, array $fullAccessRoles) {
+    $role = bootstrapNormalizePlainToken($ctx['role'] ?? '');
+    if (in_array($role, $fullAccessRoles, true)) {
+        return array_values($rows);
+    }
+    if ($role !== 'student') {
+        return [];
+    }
+
+    return array_values(array_filter($rows, function ($row) use ($ctx) {
+        return is_array($row) && bootstrapStudentOwnedRowMatches($row, $ctx);
+    }));
+}
+
+function bootstrapOfferingMatchesActorScope(array $offering, array $ctx, array $allowedUserTokens) {
+    $role = bootstrapNormalizePlainToken($ctx['role'] ?? '');
+    $actorUserId = bootstrapNormalizeUserToken($ctx['userId'] ?? '');
+    $professorUserId = bootstrapNormalizeUserToken($offering['professorUserId'] ?? '');
+
+    if ($role === 'professor') {
+        return $actorUserId !== '' && $professorUserId === $actorUserId;
+    }
+
+    if (($role === 'dean' || $role === 'procoor') && $professorUserId !== '' && isset($allowedUserTokens[$professorUserId])) {
+        return true;
+    }
+
+    return false;
+}
+
+function filterBootstrapSubjectManagementForActor(array $subjectManagement, array $ctx, array $allowedUserTokens) {
+    $role = bootstrapNormalizePlainToken($ctx['role'] ?? '');
+    $subjects = is_array($subjectManagement['subjects'] ?? null) ? $subjectManagement['subjects'] : [];
+    $offerings = is_array($subjectManagement['offerings'] ?? null) ? $subjectManagement['offerings'] : [];
+    $enrollments = is_array($subjectManagement['enrollments'] ?? null) ? $subjectManagement['enrollments'] : [];
+
+    if (bootstrapIsBroadStateRole($role)) {
+        return [
+            'subjects' => array_values($subjects),
+            'offerings' => array_values($offerings),
+            'enrollments' => array_values($enrollments),
+        ];
+    }
+
+    $filteredOfferings = [];
+    $filteredEnrollments = [];
+    $offeringIdMap = [];
+
+    if ($role === 'student') {
+        foreach ($enrollments as $enrollment) {
+            if (!is_array($enrollment) || !bootstrapStudentOwnedRowMatches($enrollment, $ctx)) {
+                continue;
+            }
+            $offeringId = trim((string) ($enrollment['courseOfferingId'] ?? ''));
+            if ($offeringId === '') {
+                continue;
+            }
+            $offeringIdMap[$offeringId] = true;
+            $filteredEnrollments[] = $enrollment;
+        }
+
+        foreach ($offerings as $offering) {
+            if (!is_array($offering)) {
+                continue;
+            }
+            $offeringId = trim((string) ($offering['id'] ?? ''));
+            if ($offeringId !== '' && isset($offeringIdMap[$offeringId])) {
+                $filteredOfferings[] = $offering;
+            }
+        }
+    } elseif ($role === 'professor' || $role === 'dean' || $role === 'procoor') {
+        foreach ($offerings as $offering) {
+            if (!is_array($offering) || !bootstrapOfferingMatchesActorScope($offering, $ctx, $allowedUserTokens)) {
+                continue;
+            }
+            $offeringId = trim((string) ($offering['id'] ?? ''));
+            if ($offeringId === '') {
+                continue;
+            }
+            $offeringIdMap[$offeringId] = true;
+            $filteredOfferings[] = $offering;
+        }
+
+        foreach ($enrollments as $enrollment) {
+            if (!is_array($enrollment)) {
+                continue;
+            }
+            $offeringId = trim((string) ($enrollment['courseOfferingId'] ?? ''));
+            if ($offeringId !== '' && isset($offeringIdMap[$offeringId])) {
+                $filteredEnrollments[] = $enrollment;
+            }
+        }
+    }
+
+    $subjectIdMap = [];
+    foreach ($filteredOfferings as $offering) {
+        $subjectId = trim((string) ($offering['subjectId'] ?? ''));
+        if ($subjectId !== '') {
+            $subjectIdMap[$subjectId] = true;
+        }
+    }
+
+    $filteredSubjects = array_values(array_filter($subjects, function ($subject) use ($subjectIdMap) {
+        if (!is_array($subject)) {
+            return false;
+        }
+        $subjectId = trim((string) ($subject['id'] ?? ''));
+        return $subjectId !== '' && isset($subjectIdMap[$subjectId]);
+    }));
+
+    return [
+        'subjects' => $filteredSubjects,
+        'offerings' => array_values($filteredOfferings),
+        'enrollments' => array_values($filteredEnrollments),
+    ];
+}
+
+function bootstrapCourseOfferingIdMap(array $subjectManagement) {
+    $map = [];
+    $offerings = is_array($subjectManagement['offerings'] ?? null) ? $subjectManagement['offerings'] : [];
+    foreach ($offerings as $offering) {
+        if (!is_array($offering)) {
+            continue;
+        }
+        $offeringId = trim((string) ($offering['id'] ?? ''));
+        if ($offeringId !== '') {
+            $map[$offeringId] = true;
+        }
+    }
+    return $map;
+}
+
+function filterBootstrapEvaluationsForActor(array $evaluations, array $ctx, array $allowedUserTokens, array $allowedOfferingIds) {
+    $role = bootstrapNormalizePlainToken($ctx['role'] ?? '');
+    if (bootstrapIsBroadStateRole($role)) {
+        return array_values($evaluations);
+    }
+
+    $actorUserId = bootstrapNormalizeUserToken($ctx['userId'] ?? '');
+    $userKeys = [
+        'evaluatorUserId',
+        'studentUserId',
+        'evaluateeUserId',
+        'targetProfessorId',
+        'targetId',
+        'colleagueId',
+        'professorId',
+        'professorUserId',
+    ];
+
+    return array_values(array_filter($evaluations, function ($evaluation) use ($ctx, $role, $actorUserId, $allowedUserTokens, $allowedOfferingIds, $userKeys) {
+        if (!is_array($evaluation)) {
+            return false;
+        }
+
+        if ($role === 'student') {
+            return bootstrapStudentOwnedRowMatches($evaluation, $ctx);
+        }
+
+        if ($role === 'professor') {
+            if ($actorUserId !== '' && bootstrapRowHasUserToken($evaluation, $userKeys, $actorUserId)) {
+                return true;
+            }
+
+            $actorName = bootstrapNormalizePlainToken($ctx['user']['name'] ?? '');
+            if ($actorName !== '') {
+                foreach (['targetProfessor', 'professorSubject'] as $key) {
+                    $value = bootstrapNormalizePlainToken($evaluation[$key] ?? '');
+                    if ($value === $actorName || strpos($value, $actorName . ' - ') === 0) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        if ($role === 'dean' || $role === 'procoor') {
+            if ($actorUserId !== '' && bootstrapRowHasUserToken($evaluation, ['evaluatorUserId'], $actorUserId)) {
+                return true;
+            }
+            if (bootstrapRowHasMappedUserToken($evaluation, ['evaluateeUserId', 'targetProfessorId', 'targetId', 'colleagueId', 'professorId', 'professorUserId'], $allowedUserTokens)) {
+                return true;
+            }
+            $offeringId = trim((string) ($evaluation['courseOfferingId'] ?? ''));
+            return $offeringId !== '' && isset($allowedOfferingIds[$offeringId]);
+        }
+
+        return false;
+    }));
+}
+
+function filterBootstrapFacultyPapersForActor(array $papers, array $ctx) {
+    $role = bootstrapNormalizePlainToken($ctx['role'] ?? '');
+    $actorUserId = bootstrapNormalizeUserToken($ctx['userId'] ?? '');
+    $actorDepartment = strtoupper(trim((string) ($ctx['department'] ?? '')));
+
+    return array_values(array_filter($papers, function ($paper) use ($role, $actorUserId, $actorDepartment) {
+        if (!is_array($paper)) {
+            return false;
+        }
+
+        $status = bootstrapNormalizePlainToken($paper['status'] ?? 'draft');
+        $isRouted = $status === 'sent' || $status === 'completed';
+
+        if ($role === 'professor') {
+            return $actorUserId !== ''
+                && bootstrapNormalizeUserToken($paper['professor_user_id'] ?? '') === $actorUserId;
+        }
+
+        if ($role === 'dean') {
+            $paperDepartment = strtoupper(trim((string) ($paper['department'] ?? '')));
+            return $isRouted
+                && $actorDepartment !== ''
+                && $paperDepartment !== ''
+                && $paperDepartment === $actorDepartment;
+        }
+
+        if ($role === 'procoor') {
+            return $isRouted
+                && bootstrapNormalizePlainToken($paper['recipient_role'] ?? '') === 'procoor'
+                && $actorUserId !== ''
+                && bootstrapNormalizeUserToken($paper['recipient_user_id'] ?? '') === $actorUserId;
+        }
+
+        return false;
+    }));
+}
+
+function buildBootstrapPayload(PDO $pdo, $currentUserInput = '') {
     runProfileImageMigrationsIfNeeded($pdo);
+    $users = buildUsersSnapshot($pdo);
+    $ctx = buildBootstrapActorContext($currentUserInput, $users);
+    $currentUserId = $ctx['userId'] ?? '';
+    $scopedUsers = filterBootstrapUsersForActor($users, $ctx);
+    $allowedUserTokens = bootstrapUserTokenMap($scopedUsers);
+    $subjectManagement = filterBootstrapSubjectManagementForActor(buildSubjectManagementSnapshot($pdo), $ctx, $allowedUserTokens);
+    $allowedOfferingIds = bootstrapCourseOfferingIdMap($subjectManagement);
+
     $profileData = null;
     $profilePhoto = '';
     if (resolveStoredUserIdNumber($currentUserId) > 0) {
@@ -9798,22 +10306,22 @@ function buildBootstrapPayload(PDO $pdo, $currentUserId = '') {
     }
 
     return [
-        'users' => buildUsersSnapshot($pdo),
+        'users' => $scopedUsers,
         'campuses' => buildCampusSnapshot($pdo),
         'programs' => buildProgramsSnapshot($pdo),
         'currentSemester' => getCurrentSemesterSnapshot($pdo),
         'questionnaires' => buildQuestionnairesSnapshot($pdo),
-        'activityLog' => buildActivityLogSnapshot($pdo),
+        'activityLog' => in_array($ctx['role'], ['admin', 'hr'], true) ? buildActivityLogSnapshot($pdo) : [],
         'announcements' => buildAnnouncementsSnapshot($pdo),
         'settings' => buildSettingsSnapshot($pdo),
         'evalPeriods' => buildEvalPeriodsSnapshot($pdo),
         'semesterList' => buildSemesterListSnapshot($pdo),
-        'evaluations' => buildEvaluationsSnapshot($pdo),
-        'studentEvaluationDrafts' => buildStudentEvaluationDraftsSnapshot($pdo),
-        'osaStudentClearances' => buildOsaStudentClearancesSnapshot($pdo),
-        'studentEvaluationProofRequests' => buildStudentEvaluationProofRequestsSnapshot($pdo),
-        'subjectManagement' => buildSubjectManagementSnapshot($pdo),
-        'facultyAcknowledgementPapers' => buildFacultyAcknowledgementPapersSnapshot($pdo),
+        'evaluations' => filterBootstrapEvaluationsForActor(buildEvaluationsSnapshot($pdo), $ctx, $allowedUserTokens, $allowedOfferingIds),
+        'studentEvaluationDrafts' => filterBootstrapStudentOwnedRows(buildStudentEvaluationDraftsSnapshot($pdo), $ctx, ['admin', 'hr']),
+        'osaStudentClearances' => filterBootstrapStudentOwnedRows(buildOsaStudentClearancesSnapshot($pdo), $ctx, ['admin', 'hr', 'osa']),
+        'studentEvaluationProofRequests' => filterBootstrapStudentOwnedRows(buildStudentEvaluationProofRequestsSnapshot($pdo), $ctx, ['admin', 'hr', 'osa']),
+        'subjectManagement' => $subjectManagement,
+        'facultyAcknowledgementPapers' => filterBootstrapFacultyPapersForActor(buildFacultyAcknowledgementPapersSnapshot($pdo), $ctx),
         'clock' => getAuthoritativePhilippineTimePayload(),
         'currentUserProfileData' => $profileData,
         'currentUserProfileImage' => '',

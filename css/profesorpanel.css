@@ -1849,11 +1849,20 @@ body {
 }
 
 .faculty-comments-ai-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
     padding: 7px 12px;
     font-size: 11px;
     border-radius: 8px;
-    background: linear-gradient(135deg, #4338ca, #6366f1);
+    background: linear-gradient(135deg, #1f2937, #4f46e5);
     border: none;
+    box-shadow: 0 8px 16px rgba(79, 70, 229, 0.22);
+}
+
+.faculty-comments-ai-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 20px rgba(79, 70, 229, 0.28);
 }
 
 .faculty-comments-ai-summary {
@@ -1910,6 +1919,77 @@ body {
 
 .faculty-comments-ai-summary.error::before {
     background: #dc2626;
+}
+
+.faculty-comments-ai-summary.success {
+    border-color: #86efac;
+    background: linear-gradient(135deg, #f0fdf4 0%, #ecfeff 100%);
+    color: #14532d;
+    box-shadow: 0 10px 24px rgba(16, 185, 129, 0.16);
+}
+
+.faculty-comments-ai-summary.success::before {
+    background: #059669;
+}
+
+.faculty-comments-ai-summary.is-generated {
+    padding: 14px 16px 14px 52px;
+}
+
+.faculty-comments-ai-kicker {
+    color: #047857;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+}
+
+.faculty-comments-ai-headline {
+    color: #0f172a;
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1.45;
+}
+
+.faculty-comments-ai-tone {
+    color: #334155;
+    font-size: 12px;
+    font-weight: 600;
+    margin-top: 4px;
+}
+
+.faculty-comments-ai-stats,
+.faculty-comments-ai-topics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.faculty-comments-ai-stats span,
+.faculty-comments-ai-topics span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.76);
+    color: #1f2937;
+    padding: 5px 9px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.faculty-comments-ai-stats strong {
+    color: #047857;
+}
+
+.faculty-comments-ai-source {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 600;
+    margin-top: 10px;
 }
 
 .faculty-comments-list {

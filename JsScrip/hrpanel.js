@@ -30,6 +30,30 @@ const HR_USERS_REFRESH_INTERVAL_MS = 30000;
 const HR_DRAWER_BREAKPOINT = 1000;
 const HR_PHONE_BREAKPOINT = 640;
 
+function escapeHtml(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function escapeAttr(value) {
+    return escapeHtml(value);
+}
+
+function inlineIdLiteral(value) {
+    const text = String(value == null ? '' : value).trim();
+    if (text !== '' && /^[+-]?(?:\d+|\d*\.\d+)$/.test(text)) {
+        return String(Number(text));
+    }
+    return JSON.stringify(text)
+        .replace(/</g, '\\u003c')
+        .replace(/>/g, '\\u003e')
+        .replace(/&/g, '\\u0026');
+}
+
 const HR_VIEW_META = {
     dashboard: {
         title: 'HR Dashboard',
@@ -5301,7 +5325,7 @@ function populateRankingFilters() {
 
         deptSelect.innerHTML = [
             '<option value=\"all\">All Departments</option>',
-            ...departments.map(dept => `<option value=\"${dept}\">${dept}</option>`)
+            ...departments.map(dept => `<option value=\"${escapeHrAttr(dept)}\">${escapeHrHtml(dept)}</option>`)
         ].join('');
 
         // Keep previously selected value if possible
@@ -6997,14 +7021,14 @@ function closeProfessorDetailsModal() {
 function buildSemesterOptionsHtml(selectedSemester) {
     return getSemesterOptions().map(option => {
         const selected = option.id === selectedSemester ? 'selected' : '';
-        return `<option value="${option.id}" ${selected}>${option.label}</option>`;
+        return `<option value="${escapeHrAttr(option.id)}" ${selected}>${escapeHrHtml(option.label)}</option>`;
     }).join('');
 }
 
 function buildEvaluationTypeOptionsHtml(selectedType) {
     return getEvaluationTypeOptions().map(option => {
         const selected = option.id === selectedType ? 'selected' : '';
-        return `<option value="${option.id}" ${selected}>${option.label}</option>`;
+        return `<option value="${escapeHrAttr(option.id)}" ${selected}>${escapeHrHtml(option.label)}</option>`;
     }).join('');
 }
 
@@ -8650,7 +8674,7 @@ function populateSemesterSelect(selectEl) {
     SharedData.getSemesterList().forEach(s => { labelMap[s.value] = s.label; });
     selectEl.innerHTML = semesters.map(semester => {
         const label = labelMap[semester] || semester;
-        return `<option value="${semester}">${label}</option>`;
+        return `<option value="${escapeHrAttr(semester)}">${escapeHrHtml(label)}</option>`;
     }).join('');
 }
 
@@ -9528,25 +9552,26 @@ function renderQuestions() {
     let globalQuestionIndex = 0;
 
     sortedSections.forEach(section => {
+        const sectionIdLiteral = inlineIdLiteral(section.id);
         // Get questions for this section
         const sectionQuestions = questions
             .filter(q => q.sectionId === section.id)
             .sort((a, b) => (a.order || 0) - (b.order || 0));
 
         html += `
-            <div class="question-section" data-section-id="${section.id}">
+            <div class="question-section" data-section-id="${escapeAttr(section.id)}">
                 <div class="section-header">
                     <div class="section-title-group">
                         <div class="section-title-content">
-                            <h2 class="section-title"><span class="section-letter-inline">${section.letter}.</span> ${section.title}</h2>
-                            <p class="section-description">${section.description}</p>
+                            <h2 class="section-title"><span class="section-letter-inline">${escapeHtml(section.letter)}.</span> ${escapeHtml(section.title)}</h2>
+                            <p class="section-description">${escapeHtml(section.description)}</p>
                         </div>
                     </div>
                     <div class="section-actions">
-                        <button class="action-btn edit" onclick="editSection(${section.id})" title="Edit Section">
+                        <button class="action-btn edit" onclick="editSection(${sectionIdLiteral})" title="Edit Section">
                             <i class="fas fa-edit"></i>
                         </button>
-                        <button class="action-btn delete" onclick="deleteSection(${section.id})" title="Delete Section">
+                        <button class="action-btn delete" onclick="deleteSection(${sectionIdLiteral})" title="Delete Section">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
@@ -9555,12 +9580,13 @@ function renderQuestions() {
                     ${sectionQuestions.length > 0
                 ? sectionQuestions.map((question, idx) => {
                     globalQuestionIndex++;
+                    const questionIdLiteral = inlineIdLiteral(question.id);
                     return `
-                                <div class="question-item" data-id="${question.id}">
+                                <div class="question-item" data-id="${escapeAttr(question.id)}">
                                     <div class="question-number">${globalQuestionIndex}</div>
                                     <div class="question-content">
                                         <div class="question-header">
-                                            <h3 class="question-text">${question.text}</h3>
+                                            <h3 class="question-text">${escapeHtml(question.text)}</h3>
                                             ${question.required ? '<span class="required-badge">Required</span>' : ''}
                                         </div>
                                         <div class="question-preview">
@@ -9570,16 +9596,16 @@ function renderQuestions() {
                         }
                                         </div>
                                         <div class="question-actions">
-                                            <button class="action-btn edit" onclick="editQuestion(${question.id})" title="Edit">
+                                            <button class="action-btn edit" onclick="editQuestion(${questionIdLiteral})" title="Edit">
                                                 <i class="fas fa-edit"></i>
                                             </button>
-                                            <button class="action-btn delete" onclick="deleteQuestion(${question.id})" title="Delete">
+                                            <button class="action-btn delete" onclick="deleteQuestion(${questionIdLiteral})" title="Delete">
                                                 <i class="fas fa-trash"></i>
                                             </button>
-                                            ${idx > 0 ? `<button class="action-btn move-up" onclick="moveQuestion(${question.id}, 'up')" title="Move Up">
+                                            ${idx > 0 ? `<button class="action-btn move-up" onclick="moveQuestion(${questionIdLiteral}, 'up')" title="Move Up">
                                                 <i class="fas fa-arrow-up"></i>
                                             </button>` : ''}
-                                            ${idx < sectionQuestions.length - 1 ? `<button class="action-btn move-down" onclick="moveQuestion(${question.id}, 'down')" title="Move Down">
+                                            ${idx < sectionQuestions.length - 1 ? `<button class="action-btn move-down" onclick="moveQuestion(${questionIdLiteral}, 'down')" title="Move Down">
                                                 <i class="fas fa-arrow-down"></i>
                                             </button>` : ''}
                                         </div>
@@ -9600,12 +9626,13 @@ function renderQuestions() {
         questionsWithoutSection.sort((a, b) => (a.order || 0) - (b.order || 0));
         questionsWithoutSection.forEach((question, idx) => {
             globalQuestionIndex++;
+            const questionIdLiteral = inlineIdLiteral(question.id);
             html += `
-                <div class="question-item" data-id="${question.id}">
+                <div class="question-item" data-id="${escapeAttr(question.id)}">
                     <div class="question-number">${globalQuestionIndex}</div>
                     <div class="question-content">
                         <div class="question-header">
-                            <h3 class="question-text">${question.text}</h3>
+                            <h3 class="question-text">${escapeHtml(question.text)}</h3>
                             ${question.required ? '<span class="required-badge">Required</span>' : ''}
                         </div>
                         <div class="question-preview">
@@ -9615,10 +9642,10 @@ function renderQuestions() {
                 }
                         </div>
                         <div class="question-actions">
-                            <button class="action-btn edit" onclick="editQuestion(${question.id})" title="Edit">
+                            <button class="action-btn edit" onclick="editQuestion(${questionIdLiteral})" title="Edit">
                                 <i class="fas fa-edit"></i>
                             </button>
-                            <button class="action-btn delete" onclick="deleteQuestion(${question.id})" title="Delete">
+                            <button class="action-btn delete" onclick="deleteQuestion(${questionIdLiteral})" title="Delete">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -9660,7 +9687,7 @@ function renderRatingPreview(question) {
  * Render qualitative question preview
  */
 function renderQualitativePreview(question) {
-    const maxLength = question.maxLength || 500;
+    const maxLength = Math.max(1, parseInt(question.maxLength, 10) || 500);
     return `
         <div class="qualitative-preview">
             <textarea disabled placeholder="Enter your response here..." rows="4" maxlength="${maxLength}"></textarea>

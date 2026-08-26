@@ -868,6 +868,7 @@ const SharedData = (() => {
     let heartbeatTimerId = null;
     let heartbeatInFlight = false;
     let heartbeatListenersAttached = false;
+    let sessionCsrfToken = '';
     const clockState = {
         baseUnixMs: null,
         capturedAtMs: 0,
@@ -1053,6 +1054,11 @@ const SharedData = (() => {
             return null;
         }
 
+        const csrfToken = String(source.csrfToken || '').trim();
+        if (csrfToken) {
+            sessionCsrfToken = csrfToken;
+        }
+
         return {
             username: username,
             role: role,
@@ -1064,10 +1070,16 @@ const SharedData = (() => {
             status: String(source.status || 'active').trim().toLowerCase() === 'inactive' ? 'inactive' : 'active',
             profileImage: String(source.profileImage || '').trim(),
             profileImageUrl: String(source.profileImageUrl || source.profilePhoto || '').trim(),
-            csrfToken: String(source.csrfToken || '').trim(),
+            csrfToken: csrfToken,
             loginTime: String(source.loginTime || getNowIsoString()).trim(),
             isAuthenticated: true,
         };
+    }
+
+    function sanitizeSessionForStorage(session) {
+        const storedSession = Object.assign({}, session || {});
+        delete storedSession.csrfToken;
+        return storedSession;
     }
 
     function storeSessionPayload(payload) {
@@ -1076,12 +1088,13 @@ const SharedData = (() => {
         if (!session) {
             return null;
         }
-        setJSON(KEYS.USER_SESSION, session);
+        setJSON(KEYS.USER_SESSION, sanitizeSessionForStorage(session));
         startSessionHeartbeat();
         return session;
     }
 
     function clearSessionCache() {
+        sessionCsrfToken = '';
         remove(KEYS.USER_SESSION);
         stopSessionHeartbeat();
     }
@@ -1316,6 +1329,67 @@ const SharedData = (() => {
             storeSessionPayload(response.session);
         }
         return response;
+    }
+
+    function asyncRequest(method, action, payload) {
+        bootstrap();
+        let url = API_URL + '?action=' + encodeURIComponent(action);
+        if (method === 'GET') {
+            url += '&_ts=' + Date.now();
+        }
+
+        if (typeof fetch !== 'function') {
+            return Promise.resolve(syncRequest(method, action, payload));
+        }
+
+        const headers = {
+            'Content-Type': 'application/json',
+        };
+        if (method !== 'GET') {
+            const session = getSession();
+            const csrfToken = String(session && session.csrfToken || '').trim();
+            if (csrfToken) {
+                headers['X-CSRF-Token'] = csrfToken;
+            }
+        }
+
+        return fetch(url, {
+            method,
+            headers,
+            credentials: 'same-origin',
+            body: method === 'GET' ? null : (payload ? JSON.stringify(payload) : null),
+        }).then(function (response) {
+            return response.text().then(function (text) {
+                let parsed = {};
+                if (text) {
+                    try {
+                        parsed = JSON.parse(text);
+                    } catch (_error) {
+                        parsed = {};
+                    }
+                }
+
+                if (response.status < 200 || response.status >= 300) {
+                    const message = parsed && parsed.error
+                        ? String(parsed.error)
+                        : (text || ('Request failed with status ' + response.status));
+                    if (response.status === 401 || response.status === 403) {
+                        initialized = false;
+                        clearSessionCache();
+                        clearProfilePhotoState();
+                    }
+                    const error = new Error(message);
+                    error.status = response.status;
+                    throw error;
+                }
+
+                setClockReference(parsed);
+                if (parsed && parsed.session) {
+                    storeSessionPayload(parsed.session);
+                }
+                return parsed;
+            });
+        });
     }
 
     function applyBootstrap(snapshot) {
@@ -1597,7 +1671,26 @@ const SharedData = (() => {
     }
 
     function getSession() {
-        return getJSON(KEYS.USER_SESSION, null);
+        const session = getJSON(KEYS.USER_SESSION, null);
+        if (!session || typeof session !== 'object') {
+            return session;
+        }
+
+        const storedToken = String(session.csrfToken || '').trim();
+        let cleanedSession = session;
+        if (storedToken) {
+            if (!sessionCsrfToken) {
+                sessionCsrfToken = storedToken;
+            }
+            cleanedSession = sanitizeSessionForStorage(session);
+            setJSON(KEYS.USER_SESSION, cleanedSession);
+        }
+
+        if (sessionCsrfToken) {
+            return Object.assign({}, cleanedSession, { csrfToken: sessionCsrfToken });
+        }
+
+        return cleanedSession;
     }
 
     function setSession(username, role, extra = {}) {
@@ -2201,6 +2294,24 @@ const SharedData = (() => {
         };
     }
 
+    function normalizeOpenAiPanelAccessConfig(input) {
+        const defaults = {
+            admin: true,
+            hr: true,
+            vpaa: true,
+            dean: true,
+            procoor: true,
+            professor: true,
+        };
+        const source = input && typeof input === 'object' ? input : {};
+        Object.keys(defaults).forEach(function (role) {
+            if (Object.prototype.hasOwnProperty.call(source, role)) {
+                defaults[role] = source[role] !== false;
+            }
+        });
+        return defaults;
+    }
+
     function getOpenAiConfig(actor) {
         bootstrap();
         const body = buildActorPayload(actor || {});
@@ -2211,6 +2322,7 @@ const SharedData = (() => {
             timeoutMs: Number(config.timeoutMs || 30000),
             hasApiKey: !!config.hasApiKey,
             source: String(config.source || 'database'),
+            panelAccess: normalizeOpenAiPanelAccessConfig(config.panelAccess),
         };
     }
 
@@ -2226,11 +2338,43 @@ const SharedData = (() => {
             timeoutMs: Number(savedConfig.timeoutMs || 30000),
             hasApiKey: !!savedConfig.hasApiKey,
             source: String(savedConfig.source || 'database'),
+            panelAccess: normalizeOpenAiPanelAccessConfig(savedConfig.panelAccess),
         };
     }
 
     const getGeminiConfig = getOpenAiConfig;
     const saveGeminiConfig = saveOpenAiConfig;
+
+    function getOpenAiPanelAccess(actor) {
+        bootstrap();
+        const response = syncRequest('POST', 'getOpenAiPanelAccess', buildActorPayload(actor || {}));
+        const access = response && response.access && typeof response.access === 'object'
+            ? response.access
+            : {};
+        return {
+            role: String(access.role || ''),
+            enabled: access.enabled !== false,
+        };
+    }
+
+    function summarizeFeedbackComments(payload, actor) {
+        bootstrap();
+        const body = Object.assign({}, buildActorPayload(actor || {}), {
+            payload: payload && typeof payload === 'object' ? payload : {},
+        });
+        return asyncRequest('POST', 'summarizeFeedbackComments', body).then(function (response) {
+            return {
+                success: response && response.success === true,
+                disabled: !!(response && response.disabled),
+                source: String(response && response.source || (response && response.summary && response.summary.source) || 'rule'),
+                warning: String(response && response.warning || (response && response.summary && response.summary.warning) || ''),
+                error: String(response && response.error || ''),
+                summary: response && response.summary && typeof response.summary === 'object'
+                    ? response.summary
+                    : null,
+            };
+        });
+    }
 
     function bulkDistributeCredentials(rows, actor) {
         bootstrap();
@@ -2752,7 +2896,7 @@ const SharedData = (() => {
         const current = getSession();
         if (!current || typeof current !== 'object') return null;
         const next = Object.assign({}, current, partial || {});
-        setJSON(KEYS.USER_SESSION, next);
+        setJSON(KEYS.USER_SESSION, sanitizeSessionForStorage(next));
         return next;
     }
 
@@ -3042,6 +3186,8 @@ const SharedData = (() => {
         saveOpenAiConfig,
         getGeminiConfig,
         saveGeminiConfig,
+        getOpenAiPanelAccess,
+        summarizeFeedbackComments,
         bulkDistributeCredentials,
         sendBulkTestGmail,
         sendTestSmtpEmail,

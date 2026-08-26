@@ -407,15 +407,78 @@ function getDeanCommentBiasTagClass(label) {
     return 'neutral';
 }
 
+function getSupervisorOpenAiPanelAccess() {
+    try {
+        if (typeof SharedData !== 'undefined' && typeof SharedData.getOpenAiPanelAccess === 'function') {
+            return SharedData.getOpenAiPanelAccess({ role: SUPERVISOR_ROLE });
+        }
+    } catch (error) {
+        console.warn('[SupervisorPanel] Failed to load OpenAI panel access.', error);
+    }
+    return { role: SUPERVISOR_ROLE, enabled: true };
+}
+
+function isSupervisorOpenAiPanelEnabled() {
+    const access = getSupervisorOpenAiPanelAccess();
+    return !access || access.enabled !== false;
+}
+
 function setDeanCommentsAiSummary(message, type = 'info') {
     const summaryEl = document.getElementById('facultyCommentsAiSummary');
     if (!summaryEl) return;
 
-    summaryEl.classList.remove('warning', 'error');
-    if (type === 'warning' || type === 'error') {
+    summaryEl.classList.remove('warning', 'error', 'success', 'is-generated');
+    if (type === 'warning' || type === 'error' || type === 'success') {
         summaryEl.classList.add(type);
     }
+
+    if (message && typeof message === 'object') {
+        const topics = Array.isArray(message.topics) ? message.topics : [];
+        const sourceNote = getDeanFeedbackAiSummarySourceNote(message);
+        summaryEl.classList.add('is-generated');
+        summaryEl.innerHTML = `
+            <div class="faculty-comments-ai-kicker">AI Summary</div>
+            <div class="faculty-comments-ai-headline">${escapeHTML(message.summaryLine || '')}</div>
+            <div class="faculty-comments-ai-tone">${escapeHTML(message.toneLine || '')}</div>
+            <div class="faculty-comments-ai-stats" aria-label="Feedback classification counts">
+                <span><strong>${Number(message.total || 0)}</strong> Comments</span>
+                <span><strong>${Number(message.constructive || 0)}</strong> Actionable</span>
+                <span><strong>${Number(message.neutral || 0)}</strong> General</span>
+                <span><strong>${Number(message.biased || 0)}</strong> Needs review</span>
+            </div>
+            ${topics.length ? `
+                <div class="faculty-comments-ai-topics">
+                    ${topics.slice(0, 3).map(topic => `<span>${escapeHTML(topic.label)} (${Number(topic.count || 0)})</span>`).join('')}
+                </div>
+            ` : ''}
+            ${sourceNote ? `<div class="faculty-comments-ai-source">${escapeHTML(sourceNote)}</div>` : ''}
+        `;
+        return;
+    }
+
     summaryEl.textContent = String(message || '').trim();
+}
+
+function getDeanFeedbackAiSummarySourceNote(message) {
+    const source = normalizeDeanToken(message && message.source);
+    const warning = String(message && message.warning || '').trim();
+    if (source === 'openai') {
+        const model = String(message && (message.aiModel || message.model) || '').trim();
+        return model ? `Generated with OpenAI (${model}).` : 'Generated with OpenAI.';
+    }
+    if (source === 'openai+rule' || source === 'gemini+rule') {
+        return warning || 'Generated with OpenAI and completed with rule fallback.';
+    }
+    if (source === 'rule') {
+        return warning || 'Rule-based summary used.';
+    }
+    return warning;
+}
+
+function setDeanCommentsListVisibility(isVisible) {
+    const list = document.getElementById('facultyCommentsList');
+    if (!list) return;
+    list.classList.toggle('summary-hidden', !isVisible);
 }
 
 function detectDeanFeedbackTopics(comments) {
@@ -461,10 +524,21 @@ function buildDeanFeedbackAiSummary(items, options = {}) {
         .map(item => String(item && item.text || '').trim())
         .filter(Boolean);
     if (!comments.length) {
-        return 'No comments available to summarize.';
+        return {
+            total: 0,
+            constructive: 0,
+            neutral: 0,
+            biased: 0,
+            topics: [],
+            summaryLine: 'No comments available to summarize.',
+            toneLine: '',
+            source: 'rule',
+            warning: '',
+        };
     }
 
     const evaluationLabel = String(options && options.evaluationLabel || 'evaluation').trim() || 'evaluation';
+    const commentLabel = evaluationLabel.toLowerCase().replace(/\s+evaluation$/, '').trim() || 'evaluation';
 
     let constructive = 0;
     let neutral = 0;
@@ -481,13 +555,13 @@ function buildDeanFeedbackAiSummary(items, options = {}) {
     const second = topics[1] || null;
     const threshold = Math.ceil(comments.length * 0.4);
 
-    let summaryLine = `Summary of ${comments.length} ${evaluationLabel.toLowerCase()} comments: feedback is varied.`;
+    let summaryLine = `Summary of ${comments.length} ${commentLabel} comments: feedback is varied.`;
     if (top && top.count >= threshold) {
-        summaryLine = `Summary of ${comments.length} ${evaluationLabel.toLowerCase()} comments: majority mention ${top.label}.`;
+        summaryLine = `Summary of ${comments.length} ${commentLabel} comments: majority mention ${top.label}.`;
     } else if (top && second) {
-        summaryLine = `Summary of ${comments.length} ${evaluationLabel.toLowerCase()} comments: common points are ${top.label} and ${second.label}.`;
+        summaryLine = `Summary of ${comments.length} ${commentLabel} comments: common points are ${top.label} and ${second.label}.`;
     } else if (top) {
-        summaryLine = `Summary of ${comments.length} ${evaluationLabel.toLowerCase()} comments: a common point is ${top.label}.`;
+        summaryLine = `Summary of ${comments.length} ${commentLabel} comments: a common point is ${top.label}.`;
     }
 
     let toneLine = 'Overall tone is mostly neutral.';
@@ -497,7 +571,17 @@ function buildDeanFeedbackAiSummary(items, options = {}) {
         toneLine = 'Overall tone includes notable biased comments.';
     }
 
-    return `${summaryLine} ${toneLine}`;
+    return {
+        total: comments.length,
+        constructive,
+        neutral,
+        biased,
+        topics,
+        summaryLine,
+        toneLine,
+        source: 'rule',
+        warning: '',
+    };
 }
 
 function buildDeanCommentIdentityFields(evaluation) {
@@ -3104,7 +3188,7 @@ function enableAllSupervisorStepInputs() {
 
 function renderSupervisorQuestionHTML(question, index) {
     const isRequired = question.required ? 'required' : '';
-    const qid = String(question.id);
+    const qid = escapeHTML(String(question.id));
 
     if (question.type === 'qualitative') {
         return `
@@ -3665,7 +3749,7 @@ function setupDeanEvaluationResults() {
     }).then(results => {
         const institutes = Array.from(new Set(results.map(item => item.institute))).sort();
         instituteFilter.innerHTML = `<option value="all">${isProgramScopedSupervisorPanel() ? 'Program scope' : 'Department scope'}</option>` + institutes.map(institute =>
-            '<option value="' + institute + '">' + institute + '</option>'
+            '<option value="' + escapeHTML(institute) + '">' + escapeHTML(institute) + '</option>'
         ).join('');
         renderDeanProfessorResults(results, instituteFilter.value);
         instituteFilter.addEventListener('change', function () {
@@ -4130,6 +4214,17 @@ function setupFacultyResponseView() {
     feedbackState.loadedComments = Array.isArray(feedbackState.loadedComments) ? feedbackState.loadedComments : [];
     feedbackState.lastTrendRows = Array.isArray(feedbackState.lastTrendRows) ? feedbackState.lastTrendRows : [];
 
+    function getPanelLabel() {
+        return isProgramScopedSupervisorPanel() ? 'Program Coordinator' : 'Dean';
+    }
+
+    function applyCommentsAiAccessState() {
+        const enabled = isSupervisorOpenAiPanelEnabled();
+        commentsAiBtn.disabled = !enabled;
+        commentsAiBtn.title = enabled ? '' : `OpenAI features are disabled for the ${getPanelLabel()} panel by the administrator.`;
+        return enabled;
+    }
+
     function getFeedbackViewLabel(view) {
         if (view === 'peer') return 'Professor Evaluation';
         if (view === 'supervisor') return 'Supervisor Evaluation';
@@ -4137,6 +4232,7 @@ function setupFacultyResponseView() {
     }
 
     function renderTaggedComments(comments) {
+        setDeanCommentsListVisibility(true);
         if (!Array.isArray(comments) || !comments.length) {
             commentsList.innerHTML = '<li class="faculty-comments-empty">No comments available.</li>';
             return;
@@ -4164,7 +4260,11 @@ function setupFacultyResponseView() {
         feedbackState.loadedComments = [];
         feedbackState.lastTrendRows = [];
         commentsList.innerHTML = '<li class="faculty-comments-empty">No comments loaded yet.</li>';
-        setDeanCommentsAiSummary('Click AI Summarize after opening a professor comments list.', 'info');
+        if (applyCommentsAiAccessState()) {
+            setDeanCommentsAiSummary('Click AI Summarize after opening a professor comments list.', 'info');
+        } else {
+            setDeanCommentsAiSummary(`OpenAI features are disabled for the ${getPanelLabel()} panel by the administrator.`, 'warning');
+        }
         resetDeanProfessorSemestralTrend();
         setDeanSemestralTrendVisibility(false);
         if (hidePanel) {
@@ -4302,17 +4402,62 @@ function setupFacultyResponseView() {
         resetFeedbackPanelState(true);
     });
 
-    commentsAiBtn.addEventListener('click', function () {
+    commentsAiBtn.addEventListener('click', async function () {
+        if (!applyCommentsAiAccessState()) {
+            setDeanCommentsAiSummary(`OpenAI features are disabled for the ${getPanelLabel()} panel by the administrator.`, 'warning');
+            return;
+        }
+
         if (!Array.isArray(feedbackState.loadedComments) || !feedbackState.loadedComments.length) {
             setDeanCommentsAiSummary('No comments loaded for the selected professor. Open a professor comments list first.', 'warning');
             return;
         }
 
+        const originalHtml = commentsAiBtn.innerHTML;
+        commentsAiBtn.disabled = true;
+        commentsAiBtn.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Summarizing...';
+        setDeanCommentsAiSummary('Generating AI summary...', 'info');
+
         const viewLabel = getFeedbackViewLabel(feedbackState.selectedSourceView || currentView);
-        const summaryText = buildDeanFeedbackAiSummary(feedbackState.loadedComments, {
-            evaluationLabel: viewLabel
-        });
-        setDeanCommentsAiSummary(summaryText, 'info');
+        try {
+            if (typeof SharedData === 'undefined' || typeof SharedData.summarizeFeedbackComments !== 'function') {
+                throw new Error('AI summary API is unavailable.');
+            }
+
+            const response = await SharedData.summarizeFeedbackComments({
+                evaluationLabel: viewLabel,
+                comments: feedbackState.loadedComments.map((item, index) => ({
+                    id: String(item && item.id || item && item.key || `comment_${index + 1}`),
+                    text: String(item && item.text || '').trim(),
+                })).filter(item => item.text)
+            }, { role: SUPERVISOR_ROLE });
+
+            if (response && response.disabled) {
+                setDeanCommentsAiSummary(response.error || `OpenAI features are disabled for the ${getPanelLabel()} panel by the administrator.`, 'warning');
+                return;
+            }
+
+            if (!response || response.success === false) {
+                throw new Error((response && response.error) || 'Failed to generate AI summary.');
+            }
+
+            const summaryData = response.summary && typeof response.summary === 'object'
+                ? response.summary
+                : buildDeanFeedbackAiSummary(feedbackState.loadedComments, { evaluationLabel: viewLabel });
+            const source = normalizeDeanToken(summaryData.source || response.source);
+            setDeanCommentsAiSummary(summaryData, source === 'openai' ? 'success' : 'warning');
+        } catch (error) {
+            const fallbackSummary = buildDeanFeedbackAiSummary(feedbackState.loadedComments, {
+                evaluationLabel: viewLabel
+            });
+            fallbackSummary.warning = (error && error.message ? error.message : 'OpenAI summary failed.') + ' Rule-based summary used.';
+            fallbackSummary.source = 'rule';
+            setDeanCommentsAiSummary(fallbackSummary, 'warning');
+        } finally {
+            commentsAiBtn.innerHTML = originalHtml || '<i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> AI Summarize';
+            applyCommentsAiAccessState();
+        }
+        setDeanCommentsListVisibility(false);
     });
 
     semesterFilter.addEventListener('change', function () {
@@ -4388,6 +4533,8 @@ function setupFacultyResponseView() {
                     renderDeanProfessorSemestralTrend(feedbackState.selectedProfessorUserId, selectedSemesterId);
                     if (!normalized.length) {
                         setDeanCommentsAiSummary('No comments available for this professor in the selected filters.', 'warning');
+                    } else if (!applyCommentsAiAccessState()) {
+                        setDeanCommentsAiSummary(`OpenAI features are disabled for the ${getPanelLabel()} panel by the administrator.`, 'warning');
                     } else {
                         setDeanCommentsAiSummary('Comments loaded. Click AI Summarize to summarize this professor comments.', 'info');
                     }

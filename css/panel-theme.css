@@ -291,7 +291,7 @@ body.osa-panel .sidebar-header .logo-container {
   flex-direction: column !important;
   align-items: center !important;
   justify-content: center;
-  gap: 12px !important;
+  gap: 20px !important;
   text-align: center;
 }
 
@@ -1362,6 +1362,56 @@ body.osa-panel .sidebar-header .logo-text {
   display: block;
   width: 100% !important;
   min-height: 260px;
+}
+
+@media (max-width: 1000px) {
+  body.admin-panel .sidebar,
+  body.hr-panel .sidebar,
+  body.vpaa-panel .sidebar,
+  body.student-panel .sidebar,
+  body.professor-panel .sidebar,
+  body.procoor-panel .sidebar,
+  body.dean-panel .sidebar,
+  body.osa-panel .sidebar {
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body.admin-panel .sidebar-header,
+  body.hr-panel .sidebar-header,
+  body.vpaa-panel .sidebar-header,
+  body.student-panel .sidebar-header,
+  body.professor-panel .sidebar-header,
+  body.procoor-panel .sidebar-header,
+  body.dean-panel .sidebar-header,
+  body.osa-panel .sidebar-header,
+  body.admin-panel .sidebar-footer,
+  body.hr-panel .sidebar-footer,
+  body.vpaa-panel .sidebar-footer,
+  body.student-panel .sidebar-footer,
+  body.professor-panel .sidebar-footer,
+  body.procoor-panel .sidebar-footer,
+  body.dean-panel .sidebar-footer,
+  body.osa-panel .sidebar-footer {
+    flex-shrink: 0;
+  }
+
+  body.admin-panel .sidebar-footer,
+  body.hr-panel .sidebar-footer,
+  body.vpaa-panel .sidebar-footer,
+  body.student-panel .sidebar-footer,
+  body.professor-panel .sidebar-footer,
+  body.procoor-panel .sidebar-footer,
+  body.dean-panel .sidebar-footer,
+  body.osa-panel .sidebar-footer {
+    margin-top: auto;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)) !important;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
