@@ -4324,7 +4324,7 @@ function resolveDeanScopedProgramRow(PDO $pdo, $departmentId, $programCode) {
         'SELECT p.id, p.code AS program_code, p.name AS program_name
          FROM programs p
          WHERE p.department_id = :department_id
-           AND p.code = :program_code
+           AND UPPER(p.code) = :program_code
          LIMIT 1'
     );
     $stmt->execute([

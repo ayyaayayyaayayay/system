@@ -4821,10 +4821,10 @@ function setupPeerManagementView() {
         createRoomBtn.disabled = false;
         programSelect.innerHTML = '<option value="">Select program</option>' +
             scopedPrograms.map(program =>
-                `<option value="${escapeHTML(String(program.programCode || ''))}">${escapeHTML(String(program.programCode || ''))} - ${escapeHTML(String(program.programName || ''))}</option>`
+                `<option value="${escapeHTML(normalizeProgramCode(program && program.programCode))}">${escapeHTML(String(program.programCode || ''))} - ${escapeHTML(String(program.programName || ''))}</option>`
             ).join('');
         if (isProgramScopedSupervisorPanel() && scopedPrograms.length === 1) {
-            programSelect.value = String(scopedPrograms[0].programCode || '');
+            programSelect.value = normalizeProgramCode(scopedPrograms[0] && scopedPrograms[0].programCode);
         }
     }
 

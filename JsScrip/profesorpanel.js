@@ -1181,19 +1181,11 @@ function initializeEvaluationCharts(type) {
         });
     }
 
-    const pieValues = [
-        Number(summary.ratingDistribution[5] || 0),
-        Number(summary.ratingDistribution[4] || 0),
-        Number(summary.ratingDistribution[3] || 0),
-        Number(summary.ratingDistribution[2] || 0),
-        Number(summary.ratingDistribution[1] || 0),
-    ];
-
     const pieCtx = document.getElementById(pieCanvasId);
     if (pieCtx) {
         window[pieInstanceKey] = window.AppChartDesign.renderRatingDistributionChart(pieCtx, {
-            values: pieValues,
-            averageRating: summary.averageRating
+            ratingDistribution: summary.ratingDistribution || PROFESSOR_PANEL_EMPTY_SUMMARY.ratingDistribution,
+            averageRating: Number(summary.averageRating || (summary.totals && summary.totals.averageScore) || 0)
         });
     }
 }
@@ -1489,7 +1481,7 @@ function handleActionButton(actionTitle) {
         return;
     }
 
-    if (actionTitle === 'View Reports' || actionTitle === 'Generate Paper') {
+    if (actionTitle === 'View Reports') {
         const reportGate = resolveReportsGateState();
         if (reportGate.locked) {
             const unlockText = reportGate.endDate
@@ -1498,7 +1490,8 @@ function handleActionButton(actionTitle) {
             alert('Evaluation reports are not available yet. Reports will unlock on ' + unlockText + '.');
             return;
         }
-        openProfessorReportPdf();
+        switchView('reports');
+        updateNavigation('reports');
         return;
     }
 }
@@ -1637,6 +1630,11 @@ function ensureProfessorPdfPreviewModal() {
 }
 
 function showProfessorPdfPreview(pdfBlob, downloadFilename) {
+    if (!(pdfBlob instanceof Blob) || !pdfBlob.size) {
+        alert('The PDF preview is empty. Please try again.');
+        return;
+    }
+
     const modal = ensureProfessorPdfPreviewModal();
     const frame = document.getElementById('profPdfPreviewFrame');
     if (!frame) {
@@ -1689,6 +1687,11 @@ async function openProfessorStoredPaperPdf(paper, actorUserId, versionNo) {
     }
 
     const pdfBlob = await response.blob();
+    const contentType = String(response.headers.get('Content-Type') || pdfBlob.type || '').toLowerCase();
+    if (!contentType.includes('application/pdf')) {
+        throw new Error('Stored paper response was not a PDF file.');
+    }
+
     const filename = String(paper.latest_file_name || `${paperId}.pdf`).trim() || `${paperId}.pdf`;
     showProfessorPdfPreview(pdfBlob, filename);
 }
@@ -1722,6 +1725,12 @@ async function openFacultyAcknowledgementPdf(payload, downloadFilename) {
     }
 
     const pdfBlob = await response.blob();
+    const contentType = String(response.headers.get('Content-Type') || pdfBlob.type || '').toLowerCase();
+    if (!contentType.includes('application/pdf')) {
+        alert('The PDF generator returned an invalid response. Please try again.');
+        return;
+    }
+
     showProfessorPdfPreview(pdfBlob, downloadFilename || 'faculty_acknowledgement.pdf');
 }
 
