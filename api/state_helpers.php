@@ -9798,6 +9798,27 @@ function normalizeFacultyPaperSnapshotRow(array $paper) {
     if ($paper['recipient_role'] === '' && $paper['recipient_user_id'] !== '') {
         $paper['recipient_role'] = 'dean';
     }
+    $legacyApprovalAutoFill = normalizeFacultyPaperApprovalAutoFillSnapshotValue($paper['approval_auto_fill'] ?? false);
+    $paper['approval_names_auto_fill'] = array_key_exists('approval_names_auto_fill', $paper)
+        ? normalizeFacultyPaperApprovalAutoFillSnapshotValue($paper['approval_names_auto_fill'])
+        : $legacyApprovalAutoFill;
+    $paper['approval_dates_auto_fill'] = array_key_exists('approval_dates_auto_fill', $paper)
+        ? normalizeFacultyPaperApprovalAutoFillSnapshotValue($paper['approval_dates_auto_fill'])
+        : $legacyApprovalAutoFill;
+    $paper['approval_supervisor_name'] = sanitizeFacultyPaperApprovalSnapshotText($paper['approval_supervisor_name'] ?? '', 150);
+    $paper['approval_supervisor_name_auto_fill'] = array_key_exists('approval_supervisor_name_auto_fill', $paper)
+        ? normalizeFacultyPaperApprovalAutoFillSnapshotValue($paper['approval_supervisor_name_auto_fill'])
+        : $paper['approval_supervisor_name'] !== '';
+    $paper['approval_supervisor_date_auto_fill'] = array_key_exists('approval_supervisor_date_auto_fill', $paper)
+        ? normalizeFacultyPaperApprovalAutoFillSnapshotValue($paper['approval_supervisor_date_auto_fill'])
+        : false;
+    $paper['approval_supervisor_date_signed'] = sanitizeFacultyPaperApprovalSnapshotText($paper['approval_supervisor_date_signed'] ?? '', 80);
+    $paper['approval_auto_fill'] = $paper['approval_names_auto_fill']
+        || $paper['approval_dates_auto_fill']
+        || $paper['approval_supervisor_name_auto_fill']
+        || $paper['approval_supervisor_date_auto_fill'];
+    $paper['approval_professor_name'] = sanitizeFacultyPaperApprovalSnapshotText($paper['approval_professor_name'] ?? '', 150);
+    $paper['approval_date_signed'] = sanitizeFacultyPaperApprovalSnapshotText($paper['approval_date_signed'] ?? '', 80);
     $paper['section_c_saved_by_role'] = strtolower(trim((string) ($paper['section_c_saved_by_role'] ?? '')));
     $paper['section_c_saved_by_user_id'] = trim((string) ($paper['section_c_saved_by_user_id'] ?? ''));
     $paper['latest_file_path'] = trim((string) ($paper['latest_file_path'] ?? ''));
@@ -9842,6 +9863,28 @@ function normalizeFacultyPaperSnapshotRow(array $paper) {
     }
 
     return $paper;
+}
+
+function normalizeFacultyPaperApprovalAutoFillSnapshotValue($value) {
+    if (is_bool($value)) {
+        return $value;
+    }
+    if (is_int($value) || is_float($value)) {
+        return (int) $value !== 0;
+    }
+    $token = strtolower(trim((string) $value));
+    return in_array($token, ['1', 'true', 'yes', 'on'], true);
+}
+
+function sanitizeFacultyPaperApprovalSnapshotText($value, $maxLength = 150) {
+    $text = trim((string) $value);
+    if ($text === '') {
+        return '';
+    }
+    if (strlen($text) > $maxLength) {
+        $text = substr($text, 0, $maxLength);
+    }
+    return $text;
 }
 
 function buildFacultyAcknowledgementPapersSnapshot(PDO $pdo) {

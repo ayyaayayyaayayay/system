@@ -1515,6 +1515,43 @@ function getFacultyPaperLoadTypeLabel(value) {
     return normalizeFacultyPaperLoadType(value) === 'excess' ? 'Excess Load' : 'Main Load';
 }
 
+function getFacultyPaperLoadSubmissionLimitMessage(loadType) {
+    return `Only one ${getFacultyPaperLoadTypeLabel(loadType)} faculty paper can be submitted per semester. Maximum is two papers per semester: one Main Load and one Excess Load.`;
+}
+
+function findSubmittedFacultyPaperForLoad(records, professorUserId, semesterId, loadType, excludedPaperId) {
+    const targetProfessorId = normalizeUserIdToken(professorUserId);
+    const targetSemesterId = normalizeToken(semesterId);
+    const targetLoadType = normalizeFacultyPaperLoadType(loadType);
+    const excludedId = String(excludedPaperId || '').trim();
+
+    if (!targetProfessorId || !targetSemesterId) return null;
+
+    return (records || []).find(record => {
+        if (!record) return false;
+        const recordId = String(record.id || '').trim();
+        if (excludedId && recordId === excludedId) return false;
+        const status = normalizeToken(record.status);
+        if (status !== 'sent' && status !== 'completed') return false;
+        return normalizeUserIdToken(record.professor_user_id || record.professorUserId) === targetProfessorId
+            && normalizeToken(record.semester_id || record.semesterId) === targetSemesterId
+            && normalizeFacultyPaperLoadType(record.load_type || record.loadType) === targetLoadType;
+    }) || null;
+}
+
+function normalizeFacultyPaperApprovalAutoFill(value) {
+    if (value === true || value === 1) return true;
+    const token = String(value || '').trim().toLowerCase();
+    return token === '1' || token === 'true' || token === 'yes' || token === 'on';
+}
+
+function resolveFacultyPaperApprovalFlag(paper, fieldName) {
+    if (paper && Object.prototype.hasOwnProperty.call(paper, fieldName)) {
+        return normalizeFacultyPaperApprovalAutoFill(paper[fieldName]);
+    }
+    return normalizeFacultyPaperApprovalAutoFill(paper && paper.approval_auto_fill);
+}
+
 function getSelectedFacultyPaperLoadType() {
     const select = document.getElementById('facultyPaperLoadTypeSelect');
     return normalizeFacultyPaperLoadType(select && select.value);
@@ -1789,6 +1826,18 @@ function buildFacultyPaperDraftPayload() {
             load_type: selectedLoadType,
             set_rating: paperData.set_rating,
             saf_rating: paperData.saf_rating,
+            approval_auto_fill: selectedDraftId
+                ? (
+                    resolveFacultyPaperApprovalFlag(selectedPaper, 'approval_names_auto_fill') ||
+                    resolveFacultyPaperApprovalFlag(selectedPaper, 'approval_dates_auto_fill')
+                )
+                : false,
+            approval_names_auto_fill: selectedDraftId
+                ? resolveFacultyPaperApprovalFlag(selectedPaper, 'approval_names_auto_fill')
+                : false,
+            approval_dates_auto_fill: selectedDraftId
+                ? resolveFacultyPaperApprovalFlag(selectedPaper, 'approval_dates_auto_fill')
+                : false,
         }
     };
 }
@@ -2084,6 +2133,8 @@ function renderProfessorFacultyPaperDetail(paper) {
     const areasInput = document.getElementById('fpSectionCAreasInput');
     const activitiesInput = document.getElementById('fpSectionCActivitiesInput');
     const actionPlanInput = document.getElementById('fpSectionCActionPlanInput');
+    const approvalNamesAutoFillInput = document.getElementById('fpApprovalNamesAutoFillInput');
+    const approvalDatesAutoFillInput = document.getElementById('fpApprovalDatesAutoFillInput');
 
     if (!card) return;
 
@@ -2094,6 +2145,11 @@ function renderProfessorFacultyPaperDetail(paper) {
         if (sendBtn) sendBtn.onclick = null;
         if (archiveBtn) archiveBtn.onclick = null;
         if (aiRecommendBtn) aiRecommendBtn.onclick = null;
+        [approvalNamesAutoFillInput, approvalDatesAutoFillInput].forEach(input => {
+            if (!input) return;
+            input.checked = false;
+            input.disabled = true;
+        });
         setFacultyPaperAiFeedback('', '');
         return;
     }
@@ -2122,6 +2178,8 @@ function renderProfessorFacultyPaperDetail(paper) {
     if (areasInput) areasInput.value = String(paper.section_c_areas || '');
     if (activitiesInput) activitiesInput.value = String(paper.section_c_activities || '');
     if (actionPlanInput) actionPlanInput.value = String(paper.section_c_action_plan || '');
+    if (approvalNamesAutoFillInput) approvalNamesAutoFillInput.checked = resolveFacultyPaperApprovalFlag(paper, 'approval_names_auto_fill');
+    if (approvalDatesAutoFillInput) approvalDatesAutoFillInput.checked = resolveFacultyPaperApprovalFlag(paper, 'approval_dates_auto_fill');
 
     const draftStatus = normalizeToken(paper.status) === 'draft';
     const sectionCReadOnly = !draftStatus;
@@ -2131,6 +2189,8 @@ function renderProfessorFacultyPaperDetail(paper) {
     if (saveSectionCBtn) saveSectionCBtn.disabled = sectionCReadOnly;
     if (sendBtn) sendBtn.disabled = !draftStatus;
     if (archiveBtn) archiveBtn.disabled = !draftStatus;
+    if (approvalNamesAutoFillInput) approvalNamesAutoFillInput.disabled = sectionCReadOnly;
+    if (approvalDatesAutoFillInput) approvalDatesAutoFillInput.disabled = sectionCReadOnly;
     if (aiRecommendBtn) {
         aiRecommendBtn.disabled = sectionCReadOnly;
         aiRecommendBtn.title = '';
@@ -2165,6 +2225,11 @@ function renderProfessorFacultyPaperDetail(paper) {
                 section_c_areas: areasInput ? areasInput.value : (paper.section_c_areas || ''),
                 section_c_activities: activitiesInput ? activitiesInput.value : (paper.section_c_activities || ''),
                 section_c_action_plan: actionPlanInput ? actionPlanInput.value : (paper.section_c_action_plan || ''),
+                approval_names_auto_fill: approvalNamesAutoFillInput ? approvalNamesAutoFillInput.checked : resolveFacultyPaperApprovalFlag(paper, 'approval_names_auto_fill'),
+                approval_dates_auto_fill: approvalDatesAutoFillInput ? approvalDatesAutoFillInput.checked : resolveFacultyPaperApprovalFlag(paper, 'approval_dates_auto_fill'),
+                approval_supervisor_name: paper.approval_supervisor_name || paper.recipient_name || paper.recipient_dean_name || '',
+                approval_professor_name: paper.approval_professor_name || paper.professor_name || '',
+                approval_date_signed: paper.approval_date_signed || '',
             }, `${paper.id || 'faculty_ack'}.pdf`);
         };
     }
@@ -2185,6 +2250,8 @@ function renderProfessorFacultyPaperDetail(paper) {
                         areas: areasInput ? areasInput.value : '',
                         activities: activitiesInput ? activitiesInput.value : '',
                         action_plan: actionPlanInput ? actionPlanInput.value : '',
+                        approval_names_auto_fill: approvalNamesAutoFillInput ? approvalNamesAutoFillInput.checked : false,
+                        approval_dates_auto_fill: approvalDatesAutoFillInput ? approvalDatesAutoFillInput.checked : false,
                     }
                 });
                 if (!response || response.success === false) {
@@ -2209,11 +2276,24 @@ function renderProfessorFacultyPaperDetail(paper) {
                 alert('Unable to resolve your professor account.');
                 return;
             }
+            const duplicateSubmission = findSubmittedFacultyPaperForLoad(
+                professorPanelState.facultyPaper.records,
+                actor.actorUserId,
+                paper.semester_id || paper.semesterId,
+                paper.load_type || paper.loadType,
+                paper.id
+            );
+            if (duplicateSubmission) {
+                alert(getFacultyPaperLoadSubmissionLimitMessage(paper.load_type || paper.loadType));
+                return;
+            }
             try {
                 const response = SharedData.sendFacultyPaper({
                     actor_role: actor.role,
                     actor_user_id: actor.actorUserId,
                     paper_id: paper.id,
+                    approval_names_auto_fill: approvalNamesAutoFillInput ? approvalNamesAutoFillInput.checked : resolveFacultyPaperApprovalFlag(paper, 'approval_names_auto_fill'),
+                    approval_dates_auto_fill: approvalDatesAutoFillInput ? approvalDatesAutoFillInput.checked : resolveFacultyPaperApprovalFlag(paper, 'approval_dates_auto_fill'),
                 });
                 if (!response || response.success === false) {
                     throw new Error((response && response.error) || 'Failed to send paper.');
@@ -2369,6 +2449,17 @@ function setupFacultyPaperWorkflow() {
             const payload = buildFacultyPaperDraftPayload();
             if (!payload) {
                 alert('Unable to create draft because your session is not linked to an active professor account.');
+                return;
+            }
+            const duplicateSubmission = findSubmittedFacultyPaperForLoad(
+                professorPanelState.facultyPaper.records,
+                payload.actor_user_id,
+                payload.paper && payload.paper.semester_id,
+                payload.paper && payload.paper.load_type,
+                payload.paper && payload.paper.id
+            );
+            if (duplicateSubmission) {
+                alert(getFacultyPaperLoadSubmissionLimitMessage(payload.paper && payload.paper.load_type));
                 return;
             }
 

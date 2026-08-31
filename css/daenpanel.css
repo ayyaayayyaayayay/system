@@ -2259,8 +2259,51 @@ body {
     word-break: break-all;
 }
 
-.dean-ifer-open-btn {
+.dean-files-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.dean-file-chip {
+    display: inline-flex;
+    align-items: center;
+    max-width: 180px;
+    padding: 6px 10px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dean-file-chip--ifer {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+    color: #1d4ed8;
+}
+
+.dean-file-chip--ack {
+    border-color: #a7f3d0;
+    background: #ecfdf5;
+    color: #047857;
+}
+
+.dean-files-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.dean-ifer-open-btn,
+.dean-ack-open-btn {
     min-width: 120px;
+    white-space: nowrap;
 }
 
 /* Peer Management View */
@@ -2576,6 +2619,41 @@ body {
 
 .faculty-paper-detail-card {
     margin-top: 0;
+}
+
+.faculty-paper-approval-options {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.faculty-paper-approval-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: #f8fafc;
+    color: #1e293b;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+    cursor: pointer;
+}
+
+.faculty-paper-approval-option input {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    margin-top: 1px;
+    accent-color: #2563eb;
+}
+
+.faculty-paper-approval-option:has(input:disabled) {
+    cursor: not-allowed;
+    opacity: 0.72;
 }
 
 .pdf-preview-modal {
@@ -3705,6 +3783,12 @@ body {
         border-bottom: none;
     }
 
+    .dean-panel .mobile-card-table .dean-files-actions {
+        width: 100%;
+        flex-direction: column;
+        align-items: stretch;
+    }
+
     .dean-panel .mobile-card-table tbody tr.mobile-card-empty-row {
         border: none;
         border-radius: 0;
@@ -3723,6 +3807,7 @@ body {
 
     .dean-panel .mobile-card-table .dean-paper-open-btn,
     .dean-panel .mobile-card-table .dean-ifer-open-btn,
+    .dean-panel .mobile-card-table .dean-ack-open-btn,
     .dean-panel .mobile-card-table .faculty-comments-btn,
     .dean-panel .mobile-card-table tbody td[data-label="Actions"] .btn-submit,
     .dean-panel .mobile-card-table tbody td[data-label="Actions"] .btn-cancel,
@@ -3806,6 +3891,12 @@ body {
         border-bottom: none;
     }
 
+    .dean-panel .mobile-card-table .dean-files-actions {
+        width: 100%;
+        flex-direction: column;
+        align-items: stretch;
+    }
+
     .dean-panel .mobile-card-table tbody tr.mobile-card-empty-row {
         border: none;
         border-radius: 0;
@@ -3824,6 +3915,7 @@ body {
 
     .dean-panel .mobile-card-table .dean-paper-open-btn,
     .dean-panel .mobile-card-table .dean-ifer-open-btn,
+    .dean-panel .mobile-card-table .dean-ack-open-btn,
     .dean-panel .mobile-card-table .faculty-comments-btn,
     .dean-panel .mobile-card-table tbody td[data-label="Actions"] .btn-submit,
     .dean-panel .mobile-card-table tbody td[data-label="Actions"] .btn-cancel,

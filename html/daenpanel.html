@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="../design/apple-touch-icon.png">
     <title>Dean Dashboard - National Aviation Academy of the Philippines</title>
     <link rel="stylesheet" href="../css/panel-theme.css?v=20260824a">
-    <link rel="stylesheet" href="../css/daenpanel.css?v=20260826a">
+    <link rel="stylesheet" href="../css/daenpanel.css?v=20260828a">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
 </head>
@@ -537,6 +537,17 @@
                             </div>
                         </div>
 
+                        <div class="form-section faculty-paper-approval-options">
+                            <label class="faculty-paper-approval-option" for="deanFpApprovalNamesAutoFillInput">
+                                <input type="checkbox" id="deanFpApprovalNamesAutoFillInput">
+                                <span>Auto-fill supervisor name on generated PDF</span>
+                            </label>
+                            <label class="faculty-paper-approval-option" for="deanFpApprovalDatesAutoFillInput">
+                                <input type="checkbox" id="deanFpApprovalDatesAutoFillInput">
+                                <span>Auto-fill supervisor current date signed on generated PDF</span>
+                            </label>
+                        </div>
+
                         <div class="form-actions dean-faculty-paper-actions">
                             <button type="submit" class="btn-submit" id="deanFacultyPaperSaveBtn">Save Section C</button>
                             <button type="button" class="btn-cancel" id="deanFacultyPaperPreviewBtn">Preview PDF</button>
@@ -930,8 +941,8 @@
                     <div class="dean-ifer-section" aria-labelledby="deanIferSectionTitle">
                         <div class="section-header dean-ifer-header">
                             <div class="section-title">
-                                <h2 id="deanIferSectionTitle">Professor IFER Files</h2>
-                                <p>Browse professors in your department scope and open the current IFER file.</p>
+                                <h2 id="deanIferSectionTitle">Professor Files</h2>
+                                <p>Browse professors in your department scope and open IFER files or completed acknowledgement reports.</p>
                             </div>
                             <div class="dean-ifer-header-actions">
                                 <div class="form-group dean-ifer-semester-group">
@@ -954,12 +965,12 @@
                                     placeholder="Type professor name or employee ID">
                             </div>
                             <div class="dean-ifer-actions">
-                                <button type="button" class="btn-submit" id="deanIferSearchBtn">Search IFER</button>
+                                <button type="button" class="btn-submit" id="deanIferSearchBtn">Search Files</button>
                                 <button type="button" class="btn-cancel" id="deanIferResetBtn">Reset</button>
                             </div>
                         </div>
 
-                        <p class="dean-ifer-result" id="deanIferSearchResult">Loading professor IFER directory...</p>
+                        <p class="dean-ifer-result" id="deanIferSearchResult">Loading professor files directory...</p>
 
                         <div class="table-container dean-ifer-table-wrap">
                             <table class="summary-table mobile-card-table mobile-card-table--ifer">
@@ -969,13 +980,13 @@
                                         <th>Professor Name</th>
                                         <th>Institute</th>
                                         <th>Position</th>
-                                        <th>IFER File</th>
+                                        <th>Files</th>
                                         <th>Action</th>
                                     </tr>
                                 </thead>
                                 <tbody id="deanIferTableBody">
                                     <tr class="mobile-card-empty-row">
-                                        <td colspan="6">Loading professor IFER directory...</td>
+                                        <td colspan="6">Loading professor files directory...</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -1130,9 +1141,9 @@
         </main>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <script src="../JsScrip/db-data.js?v=20260826a"></script>
+    <script src="../JsScrip/db-data.js?v=20260828a"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
-    <script src="../JsScrip/daenpanel.js?v=20260826b"></script>
+    <script src="../JsScrip/daenpanel.js?v=20260828a"></script>
 </body>
 
 </html>

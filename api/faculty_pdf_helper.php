@@ -226,6 +226,37 @@ function facultyPdfNormalizeOptionalSectionCText($value): string
     return $text;
 }
 
+function facultyPdfNormalizeApprovalAutoFillValue($value): bool
+{
+    if (is_bool($value)) {
+        return $value;
+    }
+    if (is_int($value) || is_float($value)) {
+        return (int)$value !== 0;
+    }
+
+    $token = strtolower(trim((string)$value));
+    return in_array($token, ['1', 'true', 'yes', 'on'], true);
+}
+
+function facultyPdfNormalizeApprovalText($value, int $maxLength = 150): string
+{
+    $text = trim((string)$value);
+    if ($text === '') {
+        return '';
+    }
+    if (strlen($text) > $maxLength) {
+        $text = substr($text, 0, $maxLength);
+    }
+    return $text;
+}
+
+function facultyPdfResolveApprovalDateSigned($value = ''): string
+{
+    $date = facultyPdfNormalizeApprovalText($value, 80);
+    return $date !== '' ? $date : getAuthoritativePhilippineFormatted('F j, Y');
+}
+
 function facultyPdfNormalizeRatingValue($value): string
 {
     if (is_string($value)) {
@@ -275,6 +306,27 @@ function facultyPdfBuildPaperDataFromRecord(array $paper): array
 {
     $loadType = facultyPdfNormalizeLoadType($paper['load_type'] ?? ($paper['loadType'] ?? 'main'));
     $semesterLabel = trim((string)($paper['semester_label'] ?? 'N/A')) ?: 'N/A';
+    $legacyApprovalAutoFill = facultyPdfNormalizeApprovalAutoFillValue($paper['approval_auto_fill'] ?? false);
+    $approvalNamesAutoFill = array_key_exists('approval_names_auto_fill', $paper)
+        ? facultyPdfNormalizeApprovalAutoFillValue($paper['approval_names_auto_fill'])
+        : $legacyApprovalAutoFill;
+    $approvalDatesAutoFill = array_key_exists('approval_dates_auto_fill', $paper)
+        ? facultyPdfNormalizeApprovalAutoFillValue($paper['approval_dates_auto_fill'])
+        : $legacyApprovalAutoFill;
+    $approvalSupervisorName = facultyPdfNormalizeApprovalText($paper['approval_supervisor_name'] ?? '', 150);
+    if ($approvalSupervisorName === '') {
+        $approvalSupervisorName = facultyPdfNormalizeApprovalText($paper['recipient_name'] ?? ($paper['recipient_dean_name'] ?? ''), 150);
+    }
+    $approvalSupervisorNameAutoFill = array_key_exists('approval_supervisor_name_auto_fill', $paper)
+        ? facultyPdfNormalizeApprovalAutoFillValue($paper['approval_supervisor_name_auto_fill'])
+        : $approvalSupervisorName !== '';
+    $approvalSupervisorDateAutoFill = array_key_exists('approval_supervisor_date_auto_fill', $paper)
+        ? facultyPdfNormalizeApprovalAutoFillValue($paper['approval_supervisor_date_auto_fill'])
+        : false;
+    $approvalProfessorName = facultyPdfNormalizeApprovalText($paper['approval_professor_name'] ?? '', 150);
+    if ($approvalProfessorName === '') {
+        $approvalProfessorName = facultyPdfNormalizeApprovalText($paper['professor_name'] ?? '', 150);
+    }
 
     return [
         'faculty_name' => trim((string)($paper['professor_name'] ?? 'N/A')) ?: 'N/A',
@@ -288,6 +340,15 @@ function facultyPdfBuildPaperDataFromRecord(array $paper): array
         'section_c_areas' => facultyPdfNormalizeOptionalSectionCText($paper['section_c_areas'] ?? ''),
         'section_c_activities' => facultyPdfNormalizeOptionalSectionCText($paper['section_c_activities'] ?? ''),
         'section_c_action_plan' => facultyPdfNormalizeOptionalSectionCText($paper['section_c_action_plan'] ?? ''),
+        'approval_auto_fill' => $approvalNamesAutoFill || $approvalDatesAutoFill || $approvalSupervisorNameAutoFill || $approvalSupervisorDateAutoFill,
+        'approval_names_auto_fill' => $approvalNamesAutoFill,
+        'approval_dates_auto_fill' => $approvalDatesAutoFill,
+        'approval_supervisor_name_auto_fill' => $approvalSupervisorNameAutoFill,
+        'approval_supervisor_date_auto_fill' => $approvalSupervisorDateAutoFill,
+        'approval_supervisor_name' => $approvalSupervisorNameAutoFill ? $approvalSupervisorName : '',
+        'approval_supervisor_date_signed' => $approvalSupervisorDateAutoFill ? facultyPdfResolveApprovalDateSigned($paper['approval_supervisor_date_signed'] ?? '') : '',
+        'approval_professor_name' => $approvalNamesAutoFill ? $approvalProfessorName : '',
+        'approval_date_signed' => $approvalDatesAutoFill ? facultyPdfResolveApprovalDateSigned($paper['approval_date_signed'] ?? '') : '',
     ];
 }
 
@@ -467,6 +528,7 @@ function facultyPdfGenerateBinary(array $paperData): string
             facultyPdfWriteOverlayMultilineText($pdf, 33.0, 124.6, 160.0, 18.0, $paperData['section_c_areas'], 9, 4.4);
             facultyPdfWriteOverlayMultilineText($pdf, 33.0, 148.0, 160.0, 18.0, $paperData['section_c_activities'], 9, 4.4);
             facultyPdfWriteOverlayMultilineText($pdf, 33.0, 176.0, 160.0, 18.0, $paperData['section_c_action_plan'], 9, 4.4);
+            facultyPdfWriteApprovalAutoFillFields($pdf, $paperData);
         }
     }
 
@@ -476,6 +538,45 @@ function facultyPdfGenerateBinary(array $paperData): string
     }
 
     return $binary;
+}
+
+function facultyPdfWriteApprovalAutoFillFields(Fpdi $pdf, array $paperData): void
+{
+    $legacyApprovalAutoFill = facultyPdfNormalizeApprovalAutoFillValue($paperData['approval_auto_fill'] ?? false);
+    $approvalNamesAutoFill = array_key_exists('approval_names_auto_fill', $paperData)
+        ? facultyPdfNormalizeApprovalAutoFillValue($paperData['approval_names_auto_fill'])
+        : $legacyApprovalAutoFill;
+    $approvalDatesAutoFill = array_key_exists('approval_dates_auto_fill', $paperData)
+        ? facultyPdfNormalizeApprovalAutoFillValue($paperData['approval_dates_auto_fill'])
+        : $legacyApprovalAutoFill;
+    $supervisorName = facultyPdfNormalizeApprovalText($paperData['approval_supervisor_name'] ?? '', 150);
+    $approvalSupervisorNameAutoFill = array_key_exists('approval_supervisor_name_auto_fill', $paperData)
+        ? facultyPdfNormalizeApprovalAutoFillValue($paperData['approval_supervisor_name_auto_fill'])
+        : $supervisorName !== '';
+    $approvalSupervisorDateAutoFill = array_key_exists('approval_supervisor_date_auto_fill', $paperData)
+        ? facultyPdfNormalizeApprovalAutoFillValue($paperData['approval_supervisor_date_auto_fill'])
+        : false;
+
+    if (!$approvalNamesAutoFill && !$approvalDatesAutoFill && !$approvalSupervisorNameAutoFill && !$approvalSupervisorDateAutoFill) {
+        return;
+    }
+
+    $facultyName = facultyPdfNormalizeApprovalText($paperData['approval_professor_name'] ?? ($paperData['faculty_name'] ?? ''), 150);
+    $dateSigned = facultyPdfResolveApprovalDateSigned($paperData['approval_date_signed'] ?? '');
+    $supervisorDateSigned = facultyPdfResolveApprovalDateSigned($paperData['approval_supervisor_date_signed'] ?? '');
+
+    if ($approvalSupervisorNameAutoFill && $supervisorName !== '') {
+        facultyPdfWriteOverlayFittedText($pdf, 75.0, 242.4, strtoupper($supervisorName), 118.0, 'L', 9, 7, 'B');
+    }
+    if ($approvalSupervisorDateAutoFill && $supervisorDateSigned !== '') {
+        facultyPdfWriteOverlayFittedText($pdf, 75.0, 248.6, strtoupper($supervisorDateSigned), 118.0, 'L', 9, 7, 'B');
+    }
+    if ($approvalNamesAutoFill && $facultyName !== '') {
+        facultyPdfWriteOverlayFittedText($pdf, 75.0, 267.2, strtoupper($facultyName), 118.0, 'L', 9, 7, 'B');
+    }
+    if ($approvalDatesAutoFill && $dateSigned !== '') {
+        facultyPdfWriteOverlayFittedText($pdf, 75.0, 273.6, strtoupper($dateSigned), 118.0, 'L', 9, 7, 'B');
+    }
 }
 
 function facultyPdfGenerateIferBinary(array $paperData): string
@@ -579,6 +680,24 @@ function facultyPdfNormalizeUserIdToken($value): string
 function facultyPdfNormalizePaperRecord(array $paper): array
 {
     $paper['load_type'] = facultyPdfNormalizeLoadType($paper['load_type'] ?? ($paper['loadType'] ?? 'main'));
+    $legacyApprovalAutoFill = facultyPdfNormalizeApprovalAutoFillValue($paper['approval_auto_fill'] ?? false);
+    $paper['approval_names_auto_fill'] = array_key_exists('approval_names_auto_fill', $paper)
+        ? facultyPdfNormalizeApprovalAutoFillValue($paper['approval_names_auto_fill'])
+        : $legacyApprovalAutoFill;
+    $paper['approval_dates_auto_fill'] = array_key_exists('approval_dates_auto_fill', $paper)
+        ? facultyPdfNormalizeApprovalAutoFillValue($paper['approval_dates_auto_fill'])
+        : $legacyApprovalAutoFill;
+    $paper['approval_supervisor_name'] = facultyPdfNormalizeApprovalText($paper['approval_supervisor_name'] ?? '', 150);
+    $paper['approval_supervisor_name_auto_fill'] = array_key_exists('approval_supervisor_name_auto_fill', $paper)
+        ? facultyPdfNormalizeApprovalAutoFillValue($paper['approval_supervisor_name_auto_fill'])
+        : $paper['approval_supervisor_name'] !== '';
+    $paper['approval_supervisor_date_auto_fill'] = array_key_exists('approval_supervisor_date_auto_fill', $paper)
+        ? facultyPdfNormalizeApprovalAutoFillValue($paper['approval_supervisor_date_auto_fill'])
+        : false;
+    $paper['approval_supervisor_date_signed'] = facultyPdfNormalizeApprovalText($paper['approval_supervisor_date_signed'] ?? '', 80);
+    $paper['approval_auto_fill'] = $paper['approval_names_auto_fill'] || $paper['approval_dates_auto_fill'] || $paper['approval_supervisor_name_auto_fill'] || $paper['approval_supervisor_date_auto_fill'];
+    $paper['approval_professor_name'] = facultyPdfNormalizeApprovalText($paper['approval_professor_name'] ?? '', 150);
+    $paper['approval_date_signed'] = facultyPdfNormalizeApprovalText($paper['approval_date_signed'] ?? '', 80);
     $paper['latest_file_path'] = trim((string)($paper['latest_file_path'] ?? ''));
     $paper['latest_file_name'] = trim((string)($paper['latest_file_name'] ?? ''));
     $paper['latest_file_created_at'] = $paper['latest_file_created_at'] ?? null;

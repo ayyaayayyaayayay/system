@@ -2302,6 +2302,41 @@ body {
     gap: 10px;
 }
 
+.faculty-paper-approval-options {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.faculty-paper-approval-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: #f8fafc;
+    color: #1e293b;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+    cursor: pointer;
+}
+
+.faculty-paper-approval-option input {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    margin-top: 1px;
+    accent-color: #2563eb;
+}
+
+.faculty-paper-approval-option:has(input:disabled) {
+    cursor: not-allowed;
+    opacity: 0.72;
+}
+
 .faculty-paper-ai-loader {
     display: inline-flex;
     align-items: center;

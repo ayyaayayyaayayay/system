@@ -370,6 +370,48 @@ function getFacultyPapersSorted(array $papers) {
     return array_values($papers);
 }
 
+function findSubmittedFacultyPaperForLoad(array $papers, $professorUserId, $semesterId, $loadType, $excludedPaperId = '') {
+    $targetProfessorId = normalizePaperUserIdToken($professorUserId);
+    $targetSemesterId = sanitizePaperTextValue($semesterId, 100);
+    $targetLoadType = normalizeCourseOfferingLoadType($loadType);
+    $excludedId = sanitizePaperTextValue($excludedPaperId, 80);
+
+    if ($targetProfessorId === '' || $targetSemesterId === '') {
+        return null;
+    }
+
+    foreach ($papers as $paper) {
+        if (!is_array($paper)) {
+            continue;
+        }
+
+        $paperId = sanitizePaperTextValue($paper['id'] ?? '', 80);
+        if ($excludedId !== '' && $paperId === $excludedId) {
+            continue;
+        }
+
+        $status = normalizePaperStatusValue($paper['status'] ?? '');
+        if ($status !== 'sent' && $status !== 'completed') {
+            continue;
+        }
+
+        if (
+            normalizePaperUserIdToken($paper['professor_user_id'] ?? '') === $targetProfessorId
+            && sanitizePaperTextValue($paper['semester_id'] ?? '', 100) === $targetSemesterId
+            && normalizeCourseOfferingLoadType($paper['load_type'] ?? 'main') === $targetLoadType
+        ) {
+            return $paper;
+        }
+    }
+
+    return null;
+}
+
+function getFacultyPaperLoadSubmissionLimitMessage($loadType) {
+    $label = normalizeCourseOfferingLoadType($loadType) === 'excess' ? 'Excess Load' : 'Main Load';
+    return 'Only one ' . $label . ' faculty paper can be submitted per semester. Maximum is two papers per semester: one Main Load and one Excess Load.';
+}
+
 function findUserSnapshotById(array $users, $userIdToken) {
     $target = normalizePaperUserIdToken($userIdToken);
     if ($target === '') {
@@ -4786,6 +4828,13 @@ try {
                 $setRating = normalizePaperRatingValue($payload['set_rating'] ?? 'N/A');
                 $safRating = normalizePaperRatingValue($payload['saf_rating'] ?? 'N/A');
                 $loadType = normalizeCourseOfferingLoadType($payload['load_type'] ?? 'main');
+                $legacyApprovalAutoFill = facultyPdfNormalizeApprovalAutoFillValue($payload['approval_auto_fill'] ?? false);
+                $approvalNamesAutoFill = array_key_exists('approval_names_auto_fill', $payload)
+                    ? facultyPdfNormalizeApprovalAutoFillValue($payload['approval_names_auto_fill'])
+                    : $legacyApprovalAutoFill;
+                $approvalDatesAutoFill = array_key_exists('approval_dates_auto_fill', $payload)
+                    ? facultyPdfNormalizeApprovalAutoFillValue($payload['approval_dates_auto_fill'])
+                    : $legacyApprovalAutoFill;
             } catch (InvalidArgumentException $e) {
                 sendJson(['success' => false, 'error' => $e->getMessage()], 400);
             }
@@ -4829,6 +4878,17 @@ try {
                 sendJson(['success' => false, 'error' => 'Only draft papers can be refreshed.'], 400);
             }
 
+            $submittedDuplicate = findSubmittedFacultyPaperForLoad(
+                $papers,
+                $actorUserId,
+                $semesterId,
+                $loadType,
+                $record ? sanitizePaperTextValue($record['id'] ?? '', 80) : $paperId
+            );
+            if ($submittedDuplicate) {
+                sendJson(['success' => false, 'error' => getFacultyPaperLoadSubmissionLimitMessage($loadType)], 400);
+            }
+
             if (!$record) {
                 $record = [
                     'id' => 'FP-' . getAuthoritativePhilippineUnixTimestamp() . '-' . mt_rand(1000, 9999),
@@ -4856,6 +4916,15 @@ try {
                     'section_c_saved_at' => null,
                     'section_c_saved_by_role' => '',
                     'section_c_saved_by_user_id' => '',
+                    'approval_auto_fill' => $approvalNamesAutoFill || $approvalDatesAutoFill,
+                    'approval_names_auto_fill' => $approvalNamesAutoFill,
+                    'approval_dates_auto_fill' => $approvalDatesAutoFill,
+                    'approval_supervisor_name_auto_fill' => false,
+                    'approval_supervisor_date_auto_fill' => false,
+                    'approval_supervisor_name' => '',
+                    'approval_supervisor_date_signed' => '',
+                    'approval_professor_name' => $approvalNamesAutoFill ? $professorName : '',
+                    'approval_date_signed' => $approvalDatesAutoFill ? facultyPdfResolveApprovalDateSigned() : '',
                     'latest_file_path' => '',
                     'latest_file_name' => '',
                     'latest_file_created_at' => null,
@@ -4883,6 +4952,15 @@ try {
                 $record['sent_at'] = null;
                 $record['section_c_saved_by_role'] = '';
                 $record['section_c_saved_by_user_id'] = '';
+                $record['approval_auto_fill'] = $approvalNamesAutoFill || $approvalDatesAutoFill;
+                $record['approval_names_auto_fill'] = $approvalNamesAutoFill;
+                $record['approval_dates_auto_fill'] = $approvalDatesAutoFill;
+                $record['approval_supervisor_name_auto_fill'] = false;
+                $record['approval_supervisor_date_auto_fill'] = false;
+                $record['approval_supervisor_name'] = '';
+                $record['approval_supervisor_date_signed'] = '';
+                $record['approval_professor_name'] = $approvalNamesAutoFill ? $professorName : '';
+                $record['approval_date_signed'] = $approvalDatesAutoFill ? facultyPdfResolveApprovalDateSigned($record['approval_date_signed'] ?? '') : '';
                 $papers[$recordIndex] = $record;
             }
 
@@ -4934,6 +5012,18 @@ try {
             $actorRole = $authenticatedRole;
             $actorUserId = normalizePaperUserIdToken($authenticatedUser['id'] ?? '');
             $paperId = sanitizePaperTextValue($body['paper_id'] ?? '', 80);
+            $hasLegacyApprovalAutoFill = array_key_exists('approval_auto_fill', $body);
+            $legacyApprovalAutoFillRequest = facultyPdfNormalizeApprovalAutoFillValue($body['approval_auto_fill'] ?? false);
+            $hasApprovalNamesAutoFill = array_key_exists('approval_names_auto_fill', $body);
+            $approvalNamesAutoFillRequest = $hasApprovalNamesAutoFill
+                ? facultyPdfNormalizeApprovalAutoFillValue($body['approval_names_auto_fill'])
+                : ($hasLegacyApprovalAutoFill ? $legacyApprovalAutoFillRequest : false);
+            $hasApprovalDatesAutoFill = array_key_exists('approval_dates_auto_fill', $body);
+            $approvalDatesAutoFillRequest = $hasApprovalDatesAutoFill
+                ? facultyPdfNormalizeApprovalAutoFillValue($body['approval_dates_auto_fill'])
+                : ($hasLegacyApprovalAutoFill ? $legacyApprovalAutoFillRequest : false);
+            $hasApprovalNamesPayload = $hasApprovalNamesAutoFill || $hasLegacyApprovalAutoFill;
+            $hasApprovalDatesPayload = $hasApprovalDatesAutoFill || $hasLegacyApprovalAutoFill;
             if ($actorRole !== 'professor') {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
@@ -4957,6 +5047,18 @@ try {
                     sendJson(['success' => false, 'error' => 'Only draft papers can be sent.'], 400);
                 }
 
+                $loadType = normalizeCourseOfferingLoadType($paper['load_type'] ?? 'main');
+                $submittedDuplicate = findSubmittedFacultyPaperForLoad(
+                    $papers,
+                    $actorUserId,
+                    sanitizePaperTextValue($paper['semester_id'] ?? '', 100),
+                    $loadType,
+                    $paperId
+                );
+                if ($submittedDuplicate) {
+                    sendJson(['success' => false, 'error' => getFacultyPaperLoadSubmissionLimitMessage($loadType)], 400);
+                }
+
                 $professor = buildUserSnapshotById($pdo, $authenticatedUser['id'] ?? '', false);
                 if (!$professor || normalizeActorRoleToken($professor['role'] ?? '') !== 'professor') {
                     sendJson(['success' => false, 'error' => 'Professor account not found.'], 400);
@@ -4976,6 +5078,28 @@ try {
                 $paper['recipient_name'] = sanitizePaperTextValue($recipient['recipientName'] ?? 'Supervisor', 150);
                 $paper['recipient_dean_user_id'] = normalizePaperUserIdToken($recipient['oversightDeanUserId'] ?? '');
                 $paper['recipient_dean_name'] = sanitizePaperTextValue($recipient['oversightDeanName'] ?? '', 150);
+                $legacyPaperApprovalAutoFill = facultyPdfNormalizeApprovalAutoFillValue($paper['approval_auto_fill'] ?? false);
+                $approvalNamesAutoFill = $hasApprovalNamesPayload
+                    ? $approvalNamesAutoFillRequest
+                    : (array_key_exists('approval_names_auto_fill', $paper)
+                        ? facultyPdfNormalizeApprovalAutoFillValue($paper['approval_names_auto_fill'])
+                        : $legacyPaperApprovalAutoFill);
+                $approvalDatesAutoFill = $hasApprovalDatesPayload
+                    ? $approvalDatesAutoFillRequest
+                    : (array_key_exists('approval_dates_auto_fill', $paper)
+                        ? facultyPdfNormalizeApprovalAutoFillValue($paper['approval_dates_auto_fill'])
+                        : $legacyPaperApprovalAutoFill);
+                $paper['approval_names_auto_fill'] = $approvalNamesAutoFill;
+                $paper['approval_dates_auto_fill'] = $approvalDatesAutoFill;
+                $paper['approval_auto_fill'] = $approvalNamesAutoFill || $approvalDatesAutoFill;
+                $paper['approval_supervisor_name_auto_fill'] = false;
+                $paper['approval_supervisor_date_auto_fill'] = false;
+                $paper['approval_supervisor_name'] = '';
+                $paper['approval_supervisor_date_signed'] = '';
+                $paper['approval_professor_name'] = $approvalNamesAutoFill
+                    ? sanitizePaperTextValue($paper['professor_name'] ?? '', 150)
+                    : '';
+                $paper['approval_date_signed'] = $approvalDatesAutoFill ? facultyPdfResolveApprovalDateSigned() : '';
                 $paper = facultyPdfPersistPaperVersion($paper, 'sent', $actorRole, $actorUserId);
                 $papers[$index] = $paper;
                 $found = true;
@@ -5008,6 +5132,28 @@ try {
             $areas = sanitizePaperTextValue($payload['areas'] ?? '', 4000);
             $activities = sanitizePaperTextValue($payload['activities'] ?? '', 4000);
             $actionPlan = sanitizePaperTextValue($payload['action_plan'] ?? '', 4000);
+            $hasLegacyApprovalAutoFill = array_key_exists('approval_auto_fill', $payload);
+            $legacyApprovalAutoFill = facultyPdfNormalizeApprovalAutoFillValue($payload['approval_auto_fill'] ?? false);
+            $hasApprovalNamesAutoFill = array_key_exists('approval_names_auto_fill', $payload);
+            $approvalNamesAutoFill = $hasApprovalNamesAutoFill
+                ? facultyPdfNormalizeApprovalAutoFillValue($payload['approval_names_auto_fill'])
+                : ($hasLegacyApprovalAutoFill ? $legacyApprovalAutoFill : false);
+            $hasApprovalDatesAutoFill = array_key_exists('approval_dates_auto_fill', $payload);
+            $approvalDatesAutoFill = $hasApprovalDatesAutoFill
+                ? facultyPdfNormalizeApprovalAutoFillValue($payload['approval_dates_auto_fill'])
+                : ($hasLegacyApprovalAutoFill ? $legacyApprovalAutoFill : false);
+            $hasApprovalAutoFillPayload = $hasApprovalNamesAutoFill || $hasApprovalDatesAutoFill || $hasLegacyApprovalAutoFill;
+            $hasSupervisorNameAutoFill = array_key_exists('approval_supervisor_name_auto_fill', $payload);
+            $supervisorNameAutoFill = $hasSupervisorNameAutoFill
+                ? facultyPdfNormalizeApprovalAutoFillValue($payload['approval_supervisor_name_auto_fill'])
+                : ($actorRole !== 'professor' && $hasApprovalNamesAutoFill ? $approvalNamesAutoFill : false);
+            $hasSupervisorDateAutoFill = array_key_exists('approval_supervisor_date_auto_fill', $payload);
+            $supervisorDateAutoFill = $hasSupervisorDateAutoFill
+                ? facultyPdfNormalizeApprovalAutoFillValue($payload['approval_supervisor_date_auto_fill'])
+                : ($actorRole !== 'professor' && $hasApprovalDatesAutoFill ? $approvalDatesAutoFill : false);
+            $hasSupervisorAutoFillPayload = $hasSupervisorNameAutoFill
+                || $hasSupervisorDateAutoFill
+                || ($actorRole !== 'professor' && ($hasApprovalNamesAutoFill || $hasApprovalDatesAutoFill));
 
             $papers = buildFacultyAcknowledgementPapersSnapshot($pdo);
             $found = false;
@@ -5054,6 +5200,41 @@ try {
                 $paper['section_c_action_plan'] = $actionPlan;
                 $paper['section_c_saved_by_role'] = $actorRole;
                 $paper['section_c_saved_by_user_id'] = $actorUserId;
+                if ($actorRole === 'professor' && $hasApprovalAutoFillPayload) {
+                    $paper['approval_names_auto_fill'] = $approvalNamesAutoFill;
+                    $paper['approval_dates_auto_fill'] = $approvalDatesAutoFill;
+                    $paper['approval_auto_fill'] = $approvalNamesAutoFill
+                        || $approvalDatesAutoFill
+                        || facultyPdfNormalizeApprovalAutoFillValue($paper['approval_supervisor_name_auto_fill'] ?? false)
+                        || facultyPdfNormalizeApprovalAutoFillValue($paper['approval_supervisor_date_auto_fill'] ?? false);
+                    $paper['approval_professor_name'] = $approvalNamesAutoFill
+                        ? sanitizePaperTextValue($paper['professor_name'] ?? '', 150)
+                        : '';
+                    $paper['approval_date_signed'] = $approvalDatesAutoFill
+                        ? facultyPdfResolveApprovalDateSigned($paper['approval_date_signed'] ?? '')
+                        : '';
+                } elseif ($actorRole !== 'professor' && $hasSupervisorAutoFillPayload) {
+                    $approvalSupervisorName = '';
+                    if ($supervisorNameAutoFill) {
+                        $approvalSupervisorName = resolveFacultyPaperRecipientName($paper);
+                    }
+                    if ($approvalSupervisorName === '') {
+                        $approvalSupervisorName = sanitizePaperTextValue(
+                            $authenticatedUser['name'] ?? ($authenticatedUser['fullName'] ?? ''),
+                            150
+                        );
+                    }
+                    $paper['approval_supervisor_name_auto_fill'] = $supervisorNameAutoFill;
+                    $paper['approval_supervisor_date_auto_fill'] = $supervisorDateAutoFill;
+                    $paper['approval_supervisor_name'] = $supervisorNameAutoFill ? $approvalSupervisorName : '';
+                    $paper['approval_supervisor_date_signed'] = $supervisorDateAutoFill
+                        ? facultyPdfResolveApprovalDateSigned()
+                        : '';
+                    $paper['approval_auto_fill'] = facultyPdfNormalizeApprovalAutoFillValue($paper['approval_names_auto_fill'] ?? false)
+                        || facultyPdfNormalizeApprovalAutoFillValue($paper['approval_dates_auto_fill'] ?? false)
+                        || $supervisorNameAutoFill
+                        || $supervisorDateAutoFill;
+                }
                 if (normalizePaperStatusValue($paper['status'] ?? '') === 'completed') {
                     $paper = facultyPdfPersistPaperVersion($paper, 'completed', $actorRole, $actorUserId);
                 }

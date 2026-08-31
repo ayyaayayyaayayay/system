@@ -103,7 +103,20 @@ if (!is_array($payload)) {
 
 $loadType = facultyPdfNormalizeLoadType($payload['load_type'] ?? 'main');
 $semesterLabel = normalizeRequiredString($payload, 'semester_label');
-$paperData = [  
+$legacyApprovalAutoFill = facultyPdfNormalizeApprovalAutoFillValue($payload['approval_auto_fill'] ?? false);
+$approvalNamesAutoFill = array_key_exists('approval_names_auto_fill', $payload)
+    ? facultyPdfNormalizeApprovalAutoFillValue($payload['approval_names_auto_fill'])
+    : $legacyApprovalAutoFill;
+$approvalDatesAutoFill = array_key_exists('approval_dates_auto_fill', $payload)
+    ? facultyPdfNormalizeApprovalAutoFillValue($payload['approval_dates_auto_fill'])
+    : $legacyApprovalAutoFill;
+$approvalSupervisorNameAutoFill = array_key_exists('approval_supervisor_name_auto_fill', $payload)
+    ? facultyPdfNormalizeApprovalAutoFillValue($payload['approval_supervisor_name_auto_fill'])
+    : false;
+$approvalSupervisorDateAutoFill = array_key_exists('approval_supervisor_date_auto_fill', $payload)
+    ? facultyPdfNormalizeApprovalAutoFillValue($payload['approval_supervisor_date_auto_fill'])
+    : false;
+$paperData = [
     'faculty_name' => normalizeRequiredString($payload, 'faculty_name'),
     'department' => normalizeRequiredString($payload, 'department'),
     'rank' => normalizeRequiredString($payload, 'rank'),
@@ -115,6 +128,15 @@ $paperData = [
     'section_c_areas' => facultyPdfNormalizeOptionalSectionCText($payload['section_c_areas'] ?? ''),
     'section_c_activities' => facultyPdfNormalizeOptionalSectionCText($payload['section_c_activities'] ?? ''),
     'section_c_action_plan' => facultyPdfNormalizeOptionalSectionCText($payload['section_c_action_plan'] ?? ''),
+    'approval_auto_fill' => $approvalNamesAutoFill || $approvalDatesAutoFill || $approvalSupervisorNameAutoFill || $approvalSupervisorDateAutoFill,
+    'approval_names_auto_fill' => $approvalNamesAutoFill,
+    'approval_dates_auto_fill' => $approvalDatesAutoFill,
+    'approval_supervisor_name_auto_fill' => $approvalSupervisorNameAutoFill,
+    'approval_supervisor_date_auto_fill' => $approvalSupervisorDateAutoFill,
+    'approval_supervisor_name' => $approvalSupervisorNameAutoFill ? facultyPdfNormalizeApprovalText($payload['approval_supervisor_name'] ?? '', 150) : '',
+    'approval_supervisor_date_signed' => $approvalSupervisorDateAutoFill ? facultyPdfResolveApprovalDateSigned($payload['approval_supervisor_date_signed'] ?? '') : '',
+    'approval_professor_name' => $approvalNamesAutoFill ? facultyPdfNormalizeApprovalText($payload['approval_professor_name'] ?? ($payload['faculty_name'] ?? ''), 150) : '',
+    'approval_date_signed' => $approvalDatesAutoFill ? facultyPdfResolveApprovalDateSigned($payload['approval_date_signed'] ?? '') : '',
 ];
 
 try {
