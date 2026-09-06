@@ -1,14 +1,10 @@
 -- =============================================================
 -- NAAP Evaluation System
--- Normalized MySQL / MariaDB schema for XAMPP
+-- Normalized MySQL / MariaDB schema for cPanel
 -- Schema only. Seed data lives in database/datauser.txt
 -- =============================================================
 
-CREATE DATABASE IF NOT EXISTS `naap_evaluation_system`
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
-
-USE `naap_evaluation_system`;
+USE `izgrqywp_naap`;
 
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;

@@ -131,6 +131,7 @@ function initializeAdminPanel() {
     setupQuickActions();
     setupDashboardHeroActions();
     setupAnnouncementComposer();
+    showAdminLoginAnnouncements();
     setupActivityLogButton();
     setupSecuritySettings();
     setupCredentialDistributor();
@@ -4558,6 +4559,50 @@ function normalizeAnnouncementComposerToken(value) {
     return String(value == null ? '' : value).trim().toLowerCase();
 }
 
+function getAnnouncementComposerRoleLabel(role) {
+    const labels = {
+        all: 'All users',
+        admin: 'Admin',
+        hr: 'HR Staff',
+        vpaa: 'VPAA',
+        osa: 'OSA',
+        dean: 'Dean',
+        procoor: 'Program Coordinator',
+        professor: 'Professor',
+        student: 'Student',
+    };
+    const token = normalizeAnnouncementComposerToken(role) || 'all';
+    return labels[token] || token;
+}
+
+function updateAnnouncementAudiencePreview() {
+    const preview = document.getElementById('announcement-audience-preview');
+    if (!preview) return;
+
+    const roleSelect = document.getElementById('announcement-target-role');
+    const campusSelect = document.getElementById('announcement-target-campus');
+    const programSelect = document.getElementById('announcement-target-program');
+    const completionSelect = document.getElementById('announcement-student-completion');
+    const role = normalizeAnnouncementComposerToken(roleSelect ? roleSelect.value : 'all') || 'all';
+    const campusLabel = campusSelect && campusSelect.selectedOptions && campusSelect.selectedOptions[0]
+        ? campusSelect.selectedOptions[0].textContent.trim()
+        : 'All Campuses';
+    const programLabel = programSelect && programSelect.selectedOptions && programSelect.selectedOptions[0]
+        ? programSelect.selectedOptions[0].textContent.trim()
+        : 'All Programs';
+    const completionLabel = completionSelect && completionSelect.selectedOptions && completionSelect.selectedOptions[0]
+        ? completionSelect.selectedOptions[0].textContent.trim()
+        : 'All Students';
+    const parts = [getAnnouncementComposerRoleLabel(role), campusLabel || 'All Campuses', programLabel || 'All Programs'];
+
+    if (role === 'student') {
+        parts.push(completionLabel || 'All Students');
+    }
+
+    const value = preview.querySelector('strong');
+    if (value) value.textContent = parts.join(' - ');
+}
+
 function populateAnnouncementComposerCampusOptions() {
     const campusSelect = document.getElementById('announcement-target-campus');
     if (!campusSelect) return;
@@ -4580,6 +4625,7 @@ function populateAnnouncementComposerCampusOptions() {
     } else {
         campusSelect.value = '';
     }
+    updateAnnouncementAudiencePreview();
 }
 
 function populateAnnouncementComposerProgramOptions() {
@@ -4615,6 +4661,7 @@ function populateAnnouncementComposerProgramOptions() {
     } else {
         programSelect.value = '';
     }
+    updateAnnouncementAudiencePreview();
 }
 
 function syncAnnouncementStudentCompletionVisibility() {
@@ -4626,6 +4673,7 @@ function syncAnnouncementStudentCompletionVisibility() {
     if (completionSelect && !isStudentTarget) {
         completionSelect.value = 'all';
     }
+    updateAnnouncementAudiencePreview();
 }
 
 function resetAnnouncementComposerForm() {
@@ -4670,14 +4718,15 @@ function handleAnnouncementComposeSubmit(event) {
 
     const title = String(titleInput ? titleInput.value : '').trim();
     const message = String(messageInput ? messageInput.value : '').trim();
-    const role = normalizeAnnouncementComposerToken(roleSelect ? roleSelect.value : '');
+    const selectedRole = normalizeAnnouncementComposerToken(roleSelect ? roleSelect.value : 'all') || 'all';
+    const role = selectedRole === 'all' ? '' : selectedRole;
     const campus = normalizeAnnouncementComposerToken(campusSelect ? campusSelect.value : '');
     const programCode = normalizeAnnouncementComposerToken(programSelect ? programSelect.value : '');
-    const studentCompletion = role === 'student'
+    const studentCompletion = selectedRole === 'student'
         ? normalizeAnnouncementComposerToken(completionSelect ? completionSelect.value : 'all')
         : 'all';
 
-    if (!title || !message || !role) {
+    if (!title || !message || !selectedRole) {
         if (feedback) {
             feedback.textContent = 'Please fill in title, message, and target role.';
         }
@@ -4722,6 +4771,7 @@ function handleAnnouncementComposeSubmit(event) {
 function setupAnnouncementComposer() {
     if (announcementComposerReady) return;
 
+    const settingsOpenBtn = document.getElementById('settings-announcement-compose-btn');
     const modal = document.getElementById('announcement-compose-modal');
     if (!modal) return;
 
@@ -4730,12 +4780,17 @@ function setupAnnouncementComposer() {
     const form = document.getElementById('announcement-compose-form');
     const roleSelect = document.getElementById('announcement-target-role');
     const campusSelect = document.getElementById('announcement-target-campus');
+    const programSelect = document.getElementById('announcement-target-program');
+    const completionSelect = document.getElementById('announcement-student-completion');
 
+    if (settingsOpenBtn) settingsOpenBtn.addEventListener('click', openAnnouncementComposerModal);
     if (closeBtn) closeBtn.addEventListener('click', closeAnnouncementComposerModal);
     if (cancelBtn) cancelBtn.addEventListener('click', closeAnnouncementComposerModal);
     if (form) form.addEventListener('submit', handleAnnouncementComposeSubmit);
     if (roleSelect) roleSelect.addEventListener('change', syncAnnouncementStudentCompletionVisibility);
     if (campusSelect) campusSelect.addEventListener('change', populateAnnouncementComposerProgramOptions);
+    if (programSelect) programSelect.addEventListener('change', updateAnnouncementAudiencePreview);
+    if (completionSelect) completionSelect.addEventListener('change', updateAnnouncementAudiencePreview);
     modal.addEventListener('click', function (event) {
         if (event.target === modal) {
             closeAnnouncementComposerModal();
@@ -4744,6 +4799,11 @@ function setupAnnouncementComposer() {
 
     announcementComposerReady = true;
     resetAnnouncementComposerForm();
+}
+
+function showAdminLoginAnnouncements() {
+    if (!SharedData.showUnreadAnnouncementLoginPopup) return;
+    SharedData.showUnreadAnnouncementLoginPopup();
 }
 
 function setupActivityLogButton() {
@@ -5173,13 +5233,13 @@ function renderSubjectCatalog() {
 
     body.innerHTML = subjects.map(subject => `
         <tr>
-            <td>${subject.campusName || subject.campusSlug || 'N/A'}</td>
-            <td>${getDepartmentLabel(subject.departmentCode || '')}</td>
-            <td>${subject.subjectCode || ''}</td>
-            <td>${subject.subjectName || ''}</td>
-            <td>
+            <td data-label="Campus">${subject.campusName || subject.campusSlug || 'N/A'}</td>
+            <td data-label="Department">${getDepartmentLabel(subject.departmentCode || '')}</td>
+            <td data-label="Subject Code">${subject.subjectCode || ''}</td>
+            <td data-label="Subject Name">${subject.subjectName || ''}</td>
+            <td data-label="Actions">
                 <div class="professor-actions">
-                    <button type="button" class="action-btn edit" data-action="edit-subject" data-subject-id="${subject.id}" title="Edit Subject">
+                    <button type="button" class="action-btn edit" data-action="edit-subject" data-subject-id="${subject.id}" title="Edit Subject" aria-label="Edit subject">
                         <i class="fas fa-edit"></i>
                     </button>
                 </div>
@@ -5839,29 +5899,29 @@ function renderOfferingsTable() {
         const loadType = normalizeOfferingLoadType(offering.loadType || offering.load_type);
         return `
             <tr class="${offering.isActive ? '' : 'inactive'}">
-                <td>${offering.subjectCode} - ${offering.subjectName}</td>
-                <td>${offering.sectionName}</td>
-                <td>${offering.professorName}</td>
-                <td>${offering.professorEmployeeId || '-'}</td>
-                <td>${offering.programCode || '-'}</td>
-                <td>${String(offering.campusSlug || '').toUpperCase()} / ${String(offering.departmentCode || '').toUpperCase()}</td>
-                <td>
+                <td data-label="Subject">${offering.subjectCode} - ${offering.subjectName}</td>
+                <td data-label="Section">${offering.sectionName}</td>
+                <td data-label="Professor">${offering.professorName}</td>
+                <td data-label="Employee ID">${offering.professorEmployeeId || '-'}</td>
+                <td data-label="Program">${offering.programCode || '-'}</td>
+                <td data-label="Campus/Dept">${String(offering.campusSlug || '').toUpperCase()} / ${String(offering.departmentCode || '').toUpperCase()}</td>
+                <td data-label="Load">
                     <span class="status-pill load-${loadType}">
                         ${getOfferingLoadTypeLabel(loadType)}
                     </span>
                 </td>
-                <td>
+                <td data-label="Status">
                     <span class="status-pill ${offering.isActive ? 'active' : 'inactive'}">
                         ${offering.isActive ? 'Active' : 'Inactive'}
                     </span>
                     <div style="font-size:12px; color:#64748b; margin-top:4px;">Students: ${assignedStudents}</div>
                 </td>
-                <td>
+                <td data-label="Actions">
                     <div class="professor-actions">
-                        <button type="button" class="action-btn view" data-action="manage-offering-students" data-offering-id="${offering.id}" title="Manage Students">
+                        <button type="button" class="action-btn view" data-action="manage-offering-students" data-offering-id="${offering.id}" title="Manage Students" aria-label="Manage offering students">
                             <i class="fas fa-user-check"></i>
                         </button>
-                        <button type="button" class="action-btn delete" data-action="deactivate-offering" data-offering-id="${offering.id}" title="Deactivate Offering" ${offering.isActive ? '' : 'disabled'}>
+                        <button type="button" class="action-btn delete" data-action="deactivate-offering" data-offering-id="${offering.id}" title="Deactivate Offering" aria-label="Deactivate offering" ${offering.isActive ? '' : 'disabled'}>
                             <i class="fas fa-ban"></i>
                         </button>
                     </div>
@@ -6573,6 +6633,379 @@ function getSemesterOptions() {
     return options;
 }
 
+function parseAdminFilenameFromDisposition(headerValue) {
+    const value = String(headerValue || '').trim();
+    if (!value) return '';
+
+    const utfMatch = value.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utfMatch && utfMatch[1]) {
+        try {
+            return decodeURIComponent(String(utfMatch[1]).trim());
+        } catch (_error) {
+            return String(utfMatch[1]).replace(/["']/g, '').trim();
+        }
+    }
+
+    const simpleMatch = value.match(/filename=\"?([^\";]+)\"?/i);
+    return simpleMatch && simpleMatch[1] ? String(simpleMatch[1]).trim() : '';
+}
+
+function getAdminOverallSasrSemesterChoices() {
+    return getSemesterOptions().filter(option => option && option.id && option.id !== 'all');
+}
+
+function normalizeAdminOverallSasrLoadType(value) {
+    return String(value || '').trim().toLowerCase() === 'excess' ? 'excess' : 'main';
+}
+
+function getAdminOverallSasrCurrentSemesterId() {
+    const current = String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : '').trim();
+    const options = getAdminOverallSasrSemesterChoices();
+    if (current && options.some(option => String(option.id) === current)) {
+        return current;
+    }
+    return options.length ? String(options[0].id || '').trim() : '';
+}
+
+function getAdminOverallSasrCampusOptions() {
+    const campuses = SharedData.getCampuses ? SharedData.getCampuses() : [];
+    const realCampuses = Array.isArray(campuses)
+        ? campuses.filter(campus => campus && normalizeAdminAnalyticsToken(campus.id) && normalizeAdminAnalyticsToken(campus.id) !== 'all')
+        : [];
+    return [
+        { id: 'all', label: 'All Campuses' },
+        ...realCampuses.map(campus => ({
+            id: String(campus.id || '').trim(),
+            label: String(campus.name || campus.id || '').trim(),
+        })),
+    ];
+}
+
+function getAdminOverallSasrDepartments(campusId) {
+    const campusToken = normalizeAdminAnalyticsToken(campusId || 'all');
+    const departments = new Set();
+    const campuses = SharedData.getCampuses ? SharedData.getCampuses() : [];
+
+    if (campusToken && campusToken !== 'all' && Array.isArray(campuses)) {
+        campuses.forEach(campus => {
+            if (normalizeAdminAnalyticsToken(campus && campus.id) !== campusToken) return;
+            const items = Array.isArray(campus && campus.departments) ? campus.departments : [];
+            items.forEach(dept => {
+                const value = String(dept || '').trim().toUpperCase();
+                if (value) departments.add(value);
+            });
+        });
+    }
+
+    if (departments.size === 0 && SharedData.getAllDepartments) {
+        SharedData.getAllDepartments().forEach(dept => {
+            const value = String(dept || '').trim().toUpperCase();
+            if (value) departments.add(value);
+        });
+    }
+
+    const users = SharedData.getUsers ? SharedData.getUsers() : [];
+    users.forEach(user => {
+        if (!user || normalizeAdminAnalyticsToken(user.role) !== 'professor') return;
+        if (campusToken !== 'all' && normalizeAdminAnalyticsToken(user.campus || user.campusSlug) !== campusToken) return;
+        const value = String(user.department || user.institute || '').trim().toUpperCase();
+        if (value) departments.add(value);
+    });
+
+    return Array.from(departments).sort();
+}
+
+function getAdminOverallSasrPrograms(campusId) {
+    const campusToken = normalizeAdminAnalyticsToken(campusId || 'all');
+    const programs = SharedData.getPrograms ? SharedData.getPrograms() : [];
+    return (Array.isArray(programs) ? programs : [])
+        .filter(program => {
+            const programCampus = normalizeAdminAnalyticsToken(program && program.campusSlug);
+            return campusToken === 'all' || programCampus === campusToken;
+        })
+        .map(program => {
+            const code = String(program && program.programCode || '').trim().toUpperCase();
+            const name = String(program && program.programName || '').trim();
+            const campus = String(program && program.campusSlug || '').trim().toUpperCase();
+            const dept = String(program && program.departmentCode || '').trim().toUpperCase();
+            const labelParts = [];
+            if (campus) labelParts.push(campus);
+            if (dept) labelParts.push(dept);
+            labelParts.push(name ? `${code} - ${name}` : code);
+            return {
+                id: String(program && program.id || '').trim(),
+                label: labelParts.filter(Boolean).join(' / '),
+            };
+        })
+        .filter(program => program.id && program.label)
+        .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function ensureAdminOverallSasrModal() {
+    let modal = document.getElementById('adminOverallSasrModal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'adminOverallSasrModal';
+    modal.className = 'modal overall-sasr-modal';
+    modal.innerHTML = `
+        <div class="modal-content overall-sasr-content" role="dialog" aria-modal="true" aria-label="Generate Overall SASR">
+            <div class="modal-header">
+                <h2>Generate Overall SASR</h2>
+                <button type="button" class="modal-close" id="adminOverallSasrCloseBtn" aria-label="Close Overall SASR selector">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="hr-report-modal-body">
+                <p class="overall-sasr-modal-note">Export professor-level SET and SEF ratings for a selected department or program.</p>
+                <div class="overall-sasr-grid">
+                    <div class="form-group">
+                        <label for="adminOverallSasrCampusSelect">Campus</label>
+                        <select id="adminOverallSasrCampusSelect"></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="adminOverallSasrSemesterSelect">Semester</label>
+                        <select id="adminOverallSasrSemesterSelect"></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="adminOverallSasrLoadTypeSelect">Load Type</label>
+                        <select id="adminOverallSasrLoadTypeSelect">
+                            <option value="main">Main Load</option>
+                            <option value="excess">Excess Load</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="adminOverallSasrScopeTypeSelect">Scope Type</label>
+                        <select id="adminOverallSasrScopeTypeSelect">
+                            <option value="department">Department</option>
+                            <option value="program">Program</option>
+                        </select>
+                    </div>
+                    <div class="form-group overall-sasr-field-wide" id="adminOverallSasrDepartmentGroup">
+                        <label for="adminOverallSasrDepartmentSelect">Department</label>
+                        <select id="adminOverallSasrDepartmentSelect"></select>
+                    </div>
+                    <div class="form-group overall-sasr-field-wide" id="adminOverallSasrProgramGroup" style="display:none">
+                        <label for="adminOverallSasrProgramSelect">Program</label>
+                        <select id="adminOverallSasrProgramSelect"></select>
+                    </div>
+                </div>
+                <p class="overall-sasr-empty-note" id="adminOverallSasrEmptyNote" hidden></p>
+            </div>
+            <div class="modal-actions hr-report-modal-actions">
+                <button type="button" class="btn-cancel" id="adminOverallSasrCancelBtn">Cancel</button>
+                <button type="button" class="btn-submit" id="adminOverallSasrGenerateBtn">Generate</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const close = function () {
+        modal.style.display = 'none';
+    };
+    const refresh = function () {
+        refreshAdminOverallSasrScopeOptions(modal);
+    };
+
+    modal.addEventListener('click', function (event) {
+        if (event.target === modal) close();
+    });
+
+    const closeBtn = document.getElementById('adminOverallSasrCloseBtn');
+    const cancelBtn = document.getElementById('adminOverallSasrCancelBtn');
+    const campusSelect = document.getElementById('adminOverallSasrCampusSelect');
+    const scopeSelect = document.getElementById('adminOverallSasrScopeTypeSelect');
+    const generateBtn = document.getElementById('adminOverallSasrGenerateBtn');
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    if (cancelBtn) cancelBtn.addEventListener('click', close);
+    if (campusSelect) campusSelect.addEventListener('change', refresh);
+    if (scopeSelect) scopeSelect.addEventListener('change', refresh);
+    if (generateBtn) {
+        generateBtn.addEventListener('click', async function () {
+            const payload = buildAdminOverallSasrPayload(modal);
+            if (!payload) return;
+
+            generateBtn.disabled = true;
+            const previousLabel = generateBtn.textContent;
+            generateBtn.textContent = 'Generating...';
+            const didDownload = await downloadAdminOverallSasrReport(payload);
+            generateBtn.disabled = false;
+            generateBtn.textContent = previousLabel || 'Generate';
+            if (didDownload) close();
+        });
+    }
+
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && modal.style.display === 'flex') {
+            close();
+        }
+    });
+
+    return modal;
+}
+
+function populateAdminOverallSasrBaseOptions(modal) {
+    const campusSelect = modal.querySelector('#adminOverallSasrCampusSelect');
+    const semesterSelect = modal.querySelector('#adminOverallSasrSemesterSelect');
+    const loadSelect = modal.querySelector('#adminOverallSasrLoadTypeSelect');
+    const scopeSelect = modal.querySelector('#adminOverallSasrScopeTypeSelect');
+    const campusOptions = getAdminOverallSasrCampusOptions();
+    const semesterOptions = getAdminOverallSasrSemesterChoices();
+    const preferredCampus = normalizeAdminAnalyticsToken(currentProfessorCampusFilter || 'all') || 'all';
+    const preferredSemester = getAdminOverallSasrCurrentSemesterId();
+
+    if (campusSelect) {
+        campusSelect.innerHTML = campusOptions.map(option => `
+            <option value="${escapeAttr(option.id)}">${escapeHtml(option.label || option.id)}</option>
+        `).join('');
+        const matchedCampus = campusOptions.find(option => normalizeAdminAnalyticsToken(option.id) === preferredCampus);
+        campusSelect.value = matchedCampus ? matchedCampus.id : 'all';
+    }
+    if (semesterSelect) {
+        semesterSelect.innerHTML = semesterOptions.map(option => `
+            <option value="${escapeAttr(option.id)}">${escapeHtml(option.label || option.id)}</option>
+        `).join('');
+        semesterSelect.value = preferredSemester;
+    }
+    if (loadSelect) loadSelect.value = 'main';
+    if (scopeSelect) scopeSelect.value = 'department';
+}
+
+function refreshAdminOverallSasrScopeOptions(modal) {
+    const campusSelect = modal.querySelector('#adminOverallSasrCampusSelect');
+    const scopeSelect = modal.querySelector('#adminOverallSasrScopeTypeSelect');
+    const departmentGroup = modal.querySelector('#adminOverallSasrDepartmentGroup');
+    const programGroup = modal.querySelector('#adminOverallSasrProgramGroup');
+    const departmentSelect = modal.querySelector('#adminOverallSasrDepartmentSelect');
+    const programSelect = modal.querySelector('#adminOverallSasrProgramSelect');
+    const emptyNote = modal.querySelector('#adminOverallSasrEmptyNote');
+    const campusId = String(campusSelect && campusSelect.value || 'all').trim() || 'all';
+    const scopeType = String(scopeSelect && scopeSelect.value || 'department').trim();
+
+    if (departmentGroup) departmentGroup.style.display = scopeType === 'department' ? '' : 'none';
+    if (programGroup) programGroup.style.display = scopeType === 'program' ? '' : 'none';
+    if (emptyNote) {
+        emptyNote.hidden = true;
+        emptyNote.textContent = '';
+    }
+
+    if (scopeType === 'program') {
+        const programs = getAdminOverallSasrPrograms(campusId);
+        if (programSelect) {
+            programSelect.innerHTML = '<option value="">Select Program</option>' + programs.map(program => `
+                <option value="${escapeAttr(program.id)}">${escapeHtml(program.label)}</option>
+            `).join('');
+        }
+        if (!programs.length && emptyNote) {
+            emptyNote.hidden = false;
+            emptyNote.textContent = 'No programs found for the selected campus.';
+        }
+        return;
+    }
+
+    const departments = getAdminOverallSasrDepartments(campusId);
+    if (departmentSelect) {
+        departmentSelect.innerHTML = '<option value="">Select Department</option>' + departments.map(dept => `
+            <option value="${escapeAttr(dept)}">${escapeHtml(dept)}</option>
+        `).join('');
+        const preferred = currentDepartmentFilter && currentDepartmentFilter !== 'all'
+            ? String(currentDepartmentFilter).toUpperCase()
+            : '';
+        if (preferred && departments.includes(preferred)) {
+            departmentSelect.value = preferred;
+        }
+    }
+    if (!departments.length && emptyNote) {
+        emptyNote.hidden = false;
+        emptyNote.textContent = 'No departments found for the selected campus.';
+    }
+}
+
+function buildAdminOverallSasrPayload(modal) {
+    const campusSlug = String((modal.querySelector('#adminOverallSasrCampusSelect') || {}).value || 'all').trim() || 'all';
+    const semesterId = String((modal.querySelector('#adminOverallSasrSemesterSelect') || {}).value || '').trim();
+    const loadType = normalizeAdminOverallSasrLoadType((modal.querySelector('#adminOverallSasrLoadTypeSelect') || {}).value);
+    const scopeType = String((modal.querySelector('#adminOverallSasrScopeTypeSelect') || {}).value || 'department').trim();
+    const departmentCode = String((modal.querySelector('#adminOverallSasrDepartmentSelect') || {}).value || '').trim();
+    const programId = String((modal.querySelector('#adminOverallSasrProgramSelect') || {}).value || '').trim();
+
+    if (!semesterId) {
+        alert('Select a semester first.');
+        return null;
+    }
+    if (scopeType === 'program' && !programId) {
+        alert('Select a program first.');
+        return null;
+    }
+    if (scopeType !== 'program' && !departmentCode) {
+        alert('Select a department first.');
+        return null;
+    }
+
+    return {
+        campus_slug: campusSlug,
+        semester_id: semesterId,
+        load_type: loadType,
+        scope_type: scopeType === 'program' ? 'program' : 'department',
+        department_code: departmentCode,
+        program_id: programId,
+    };
+}
+
+async function downloadAdminOverallSasrReport(payload) {
+    let response;
+    try {
+        response = await fetch('../api/generate_overall_sasr.php', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        });
+    } catch (_error) {
+        alert('Unable to connect to the Overall SASR generator.');
+        return false;
+    }
+
+    if (!response.ok) {
+        let errorMessage = 'Failed to generate Overall SASR Excel file.';
+        try {
+            const data = await response.json();
+            if (data && data.error) errorMessage = String(data.error);
+        } catch (_error) {
+            // Ignore non-JSON error bodies.
+        }
+        alert(errorMessage);
+        return false;
+    }
+
+    const excelBlob = await response.blob();
+    const fileName = parseAdminFilenameFromDisposition(response.headers.get('Content-Disposition')) || 'overall_sasr.xlsx';
+    const blobUrl = URL.createObjectURL(excelBlob);
+    const anchor = document.createElement('a');
+    anchor.href = blobUrl;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+    return true;
+}
+
+function openAdminOverallSasrModal() {
+    const modal = ensureAdminOverallSasrModal();
+    const semesterOptions = getAdminOverallSasrSemesterChoices();
+    if (!semesterOptions.length) {
+        alert('No semester is available for Overall SASR generation.');
+        return;
+    }
+
+    populateAdminOverallSasrBaseOptions(modal);
+    refreshAdminOverallSasrScopeOptions(modal);
+    modal.style.display = 'flex';
+}
+
 function getEvaluationTypeOptions() {
     return EVALUATION_TYPE_OPTIONS;
 }
@@ -6896,10 +7329,8 @@ function getEvaluationSnapshotForType(professor, semesterId, evaluationType) {
             : [];
         totalRaters = Math.max(activeProfessors.length - 1, 0, metrics.evaluatedCount);
     } else {
-        const activeSupervisors = Array.isArray(context.supervisorUsers)
-            ? context.supervisorUsers.filter(user => normalizeAdminAnalyticsToken(user && user.status) !== 'inactive')
-            : [];
-        totalRaters = Math.max(activeSupervisors.length, 1, metrics.evaluatedCount);
+        const applicableSupervisors = getAdminApplicableSupervisorUsersForProfessor(context, professor);
+        totalRaters = Math.max(applicableSupervisors.length || 1, metrics.evaluatedCount);
     }
 
     return {
@@ -6910,6 +7341,40 @@ function getEvaluationSnapshotForType(professor, semesterId, evaluationType) {
         qualitativeResponses: metrics.qualitativeResponses,
         meta
     };
+}
+
+function getAdminApplicableSupervisorUsersForProfessor(context, professor) {
+    if (!professor) return [];
+
+    const campus = normalizeAdminAnalyticsToken(professor.campus || professor.campusSlug);
+    const department = normalizeAdminAnalyticsToken(professor.department || professor.institute);
+    const program = normalizeAdminAnalyticsToken(professor.programCode || professor.program);
+    const activeSupervisors = Array.isArray(context && context.supervisorUsers)
+        ? context.supervisorUsers.filter(user => normalizeAdminAnalyticsToken(user && user.status) !== 'inactive')
+        : [];
+
+    const isSameCampusDepartment = user => {
+        const userCampus = normalizeAdminAnalyticsToken(user && (user.campus || user.campusSlug));
+        const userDepartment = normalizeAdminAnalyticsToken(user && (user.department || user.institute));
+        return (!campus || !userCampus || userCampus === campus) && department && userDepartment === department;
+    };
+
+    const programCoordinators = activeSupervisors.filter(user => {
+        if (normalizeAdminAnalyticsToken(user && user.role) !== 'procoor') return false;
+        if (!isSameCampusDepartment(user)) return false;
+        const userProgram = normalizeAdminAnalyticsToken(user && (user.programCode || user.program));
+        return program && userProgram === program;
+    });
+    if (programCoordinators.length > 0) return programCoordinators;
+
+    const departmentDeans = activeSupervisors.filter(user => {
+        return normalizeAdminAnalyticsToken(user && user.role) === 'dean' && isSameCampusDepartment(user);
+    });
+    if (departmentDeans.length > 0) return departmentDeans;
+
+    return activeSupervisors.filter(user => {
+        return normalizeAdminAnalyticsToken(user && user.role) === 'supervisor' && isSameCampusDepartment(user);
+    });
 }
 
 function escapeAdminAnalyticsHtml(value) {
@@ -7329,6 +7794,11 @@ function setupProfessorManagement() {
         addProfessorBtn.addEventListener('click', openAddProfessorModal);
     }
 
+    const overallSasrBtn = document.getElementById('overall-sasr-btn');
+    if (overallSasrBtn) {
+        overallSasrBtn.addEventListener('click', openAdminOverallSasrModal);
+    }
+
     const searchInput = document.getElementById('professor-search');
     if (searchInput) {
         searchInput.addEventListener('input', function () {
@@ -7521,32 +7991,32 @@ function renderProfessors() {
 
                         return `
                         <tr class="${professor.isActive === false ? 'inactive' : ''}" data-id="${professor.id}">
-                            <td>
+                            <td data-label="Professor">
                                 <div class="professor-table-name">
                                     <i class="fas fa-user-tie"></i>
                                     <span>${professor.name || 'N/A'}</span>
                                 </div>
                             </td>
-                            <td>${professor.email || 'N/A'}</td>
-                            <td>${professor.employeeId || 'N/A'}</td>
-                            <td><span class="dept-badge dept-${professor.department}">${professor.department || 'N/A'}</span></td>
-                            <td>${professor.position || 'Professor'}</td>
-                            <td>${formatEmploymentType(professor.employmentType)}</td>
-                            <td>${studentsEvaluated}</td>
-                            <td>
+                            <td data-label="Email">${professor.email || 'N/A'}</td>
+                            <td data-label="Employee ID">${professor.employeeId || 'N/A'}</td>
+                            <td data-label="Department"><span class="dept-badge dept-${professor.department}">${professor.department || 'N/A'}</span></td>
+                            <td data-label="Position">${professor.position || 'Professor'}</td>
+                            <td data-label="Employment">${formatEmploymentType(professor.employmentType)}</td>
+                            <td data-label="Students Evaluated">${studentsEvaluated}</td>
+                            <td data-label="Status">
                                 <span class="status-pill ${professor.isActive ? 'active' : 'inactive'}">
                                     ${professor.isActive ? 'Active' : 'Inactive'}
                                 </span>
                             </td>
-                            <td>
+                            <td data-label="Actions">
                                 <div class="professor-actions">
-                                    <button class="action-btn view" data-action="view" data-professor-id="${professor.id}" title="View Details">
+                                    <button class="action-btn view" data-action="view" data-professor-id="${professor.id}" title="View Details" aria-label="View professor details">
                                         <i class="fas fa-eye"></i>
                                     </button>
-                                    <button class="action-btn analytics" data-action="analytics" data-professor-id="${professor.id}" title="Analytics">
+                                    <button class="action-btn analytics" data-action="analytics" data-professor-id="${professor.id}" title="Analytics" aria-label="View professor analytics">
                                         <i class="fas fa-chart-line"></i>
                                     </button>
-                                    <button class="action-btn edit" data-action="edit" data-professor-id="${professor.id}" title="Edit">
+                                    <button class="action-btn edit" data-action="edit" data-professor-id="${professor.id}" title="Edit" aria-label="Edit professor">
                                         <i class="fas fa-edit"></i>
                                     </button>
                                 </div>
@@ -9301,6 +9771,11 @@ let currentEditingQuestionId = null;
 let currentEditingSectionId = null;
 let currentQuestionnaireType = 'student-to-professor';
 let activeSemester = null;
+const QUESTIONNAIRE_TYPE_LABELS = {
+    'student-to-professor': 'Student to Professor',
+    'professor-to-professor': 'Professor to Professor',
+    'supervisor-to-professor': 'Supervisor to Professor'
+};
 const DEFAULT_QUESTIONNAIRE_HEADERS = {
     'student-to-professor': {
         title: 'Student Evaluation Form',
@@ -9315,6 +9790,63 @@ const DEFAULT_QUESTIONNAIRE_HEADERS = {
         description: "Please provide your evaluation of the professor's performance."
     }
 };
+const DEFAULT_PRIVACY_NOTICE_PARAGRAPHS = [
+    'This questionnaire collects your user identity, role, evaluation assignment details, ratings, written feedback, submission timing, and limited interaction data needed to process the evaluation.',
+    'The school uses this information to administer evaluations, verify completion, generate academic quality reports, review feedback quality, detect inappropriate or biased submissions, and keep audit records.',
+    'Your responses may be reviewed by authorized school personnel and may be summarized for faculty evaluation, quality assurance, compliance, and institutional improvement. Records are retained according to school policy and applicable law.',
+    'By continuing, you confirm that you have read this notice and agree that your evaluation data will be processed for these purposes.'
+];
+
+function getQuestionnaireTypeLabel(type) {
+    return QUESTIONNAIRE_TYPE_LABELS[type] || 'Questionnaire';
+}
+
+function getDefaultQuestionnairePrivacyConsent(type) {
+    const typeCode = QUESTIONNAIRE_TYPE_LABELS[type] ? type : 'student-to-professor';
+    return {
+        enabled: typeCode === 'student-to-professor',
+        version: `${typeCode}-privacy-v1`,
+        textIdentifier: `${typeCode}-privacy-notice`,
+        title: 'Data Privacy Notice',
+        description: `${getQuestionnaireTypeLabel(typeCode)} privacy agreement`,
+        paragraphs: [...DEFAULT_PRIVACY_NOTICE_PARAGRAPHS],
+        agreementText: 'I have read and agree to the Data Privacy Notice for this questionnaire.'
+    };
+}
+
+function splitPrivacyNoticeText(value) {
+    return String(value || '')
+        .split(/\n\s*\n|\r?\n/)
+        .map(function (paragraph) { return paragraph.trim(); })
+        .filter(function (paragraph) { return paragraph !== ''; });
+}
+
+function normalizeQuestionnairePrivacyConsent(config, type) {
+    const defaults = getDefaultQuestionnairePrivacyConsent(type);
+    const input = config && typeof config === 'object' ? config : {};
+    let paragraphs = Array.isArray(input.paragraphs)
+        ? input.paragraphs.map(function (paragraph) { return String(paragraph || '').trim(); }).filter(Boolean)
+        : splitPrivacyNoticeText(input.noticeText);
+    if (paragraphs.length === 0) {
+        paragraphs = [...defaults.paragraphs];
+    }
+
+    const version = String(input.version || '').trim();
+    const textIdentifier = String(input.textIdentifier || input.consentTextIdentifier || '').trim();
+    const title = String(input.title || '').trim();
+    const description = String(input.description || '').trim();
+    const agreementText = String(input.agreementText || '').trim();
+
+    return {
+        enabled: Object.prototype.hasOwnProperty.call(input, 'enabled') ? !!input.enabled : defaults.enabled,
+        version: version || defaults.version,
+        textIdentifier: textIdentifier || defaults.textIdentifier,
+        title: title || defaults.title,
+        description: description || defaults.description,
+        paragraphs: paragraphs,
+        agreementText: agreementText || defaults.agreementText
+    };
+}
 
 /**
  * Setup questionnaire functionality
@@ -9333,6 +9865,7 @@ function setupQuestionnaire() {
     }
     syncSectionDescriptionRequirement();
     setupFormHeaderEditing();
+    setupQuestionnairePrivacySettings();
 
     // Add section button
     const addSectionBtn = document.getElementById('add-section-btn');
@@ -9791,6 +10324,7 @@ function setActiveSemester(semester) {
 
     applyQuestionnaireEditMode(isQuestionnaireEditable());
     updateFormHeader(currentQuestionnaireType);
+    renderQuestionnairePrivacySettings();
     renderQuestions();
 }
 
@@ -9821,10 +10355,16 @@ function applyQuestionnaireEditMode(editable) {
     const descEl = document.getElementById('form-description-preview');
     if (titleEl) titleEl.setAttribute('contenteditable', editable ? 'true' : 'false');
     if (descEl) descEl.setAttribute('contenteditable', editable ? 'true' : 'false');
+
+    document.querySelectorAll('#questionnaire-privacy-settings input, #questionnaire-privacy-settings textarea')
+        .forEach(function (field) {
+            field.disabled = !editable;
+        });
 }
 
 function persistQuestionsData() {
     if (!activeSemester) return false;
+    collectQuestionnairePrivacySettings();
     questionnairesBySemester[activeSemester] = questionsData;
     const savedQuestionnaires = SharedData.setQuestionnaires(questionnairesBySemester);
     if (!savedQuestionnaires) return false;
@@ -9836,9 +10376,9 @@ function persistQuestionsData() {
 
 function buildEmptyQuestionsData() {
     return {
-        'student-to-professor': { sections: [], questions: [] },
-        'professor-to-professor': { sections: [], questions: [] },
-        'supervisor-to-professor': { sections: [], questions: [] }
+        'student-to-professor': { sections: [], questions: [], privacyConsent: getDefaultQuestionnairePrivacyConsent('student-to-professor') },
+        'professor-to-professor': { sections: [], questions: [], privacyConsent: getDefaultQuestionnairePrivacyConsent('professor-to-professor') },
+        'supervisor-to-professor': { sections: [], questions: [], privacyConsent: getDefaultQuestionnairePrivacyConsent('supervisor-to-professor') }
     };
 }
 
@@ -9864,7 +10404,7 @@ function normalizeQuestionsData(parsed) {
             title: 'General Questions',
             description: 'General evaluation questions'
         };
-        return {
+        return normalizeQuestionsData({
             'student-to-professor': {
                 sections: [defaultSection],
                 questions: parsed.map((q, idx) => ({
@@ -9877,7 +10417,7 @@ function normalizeQuestionsData(parsed) {
             },
             'professor-to-professor': { sections: [], questions: [] },
             'supervisor-to-professor': { sections: [], questions: [] }
-        };
+        });
     }
 
     if (parsed['student-to-professor'] && Array.isArray(parsed['student-to-professor'])) {
@@ -9888,7 +10428,7 @@ function normalizeQuestionsData(parsed) {
             title: 'General Questions',
             description: 'General evaluation questions'
         };
-        return {
+        return normalizeQuestionsData({
             'student-to-professor': {
                 sections: [defaultSection],
                 questions: parsed['student-to-professor'].map((q, idx) => ({
@@ -9919,13 +10459,17 @@ function normalizeQuestionsData(parsed) {
                     exceptionReporting: !!q.exceptionReporting
                 })) : []
             }
-        };
+        });
     }
 
     const normalized = { ...buildEmptyQuestionsData(), ...parsed };
     Object.keys(normalized).forEach(type => {
+        if (!normalized[type] || typeof normalized[type] !== 'object' || Array.isArray(normalized[type])) {
+            normalized[type] = { sections: [], questions: [] };
+        }
         if (!Array.isArray(normalized[type].sections)) normalized[type].sections = [];
         if (!Array.isArray(normalized[type].questions)) normalized[type].questions = [];
+        normalized[type].privacyConsent = normalizeQuestionnairePrivacyConsent(normalized[type].privacyConsent, type);
         normalized[type].questions = normalized[type].questions.map(question => ({
             ...question,
             required: !!question.exceptionReporting ? false : !!question.required,
@@ -9936,11 +10480,7 @@ function normalizeQuestionsData(parsed) {
 }
 
 function buildSampleQuestionsData() {
-    return {
-        'student-to-professor': { sections: [], questions: [] },
-        'professor-to-professor': { sections: [], questions: [] },
-        'supervisor-to-professor': { sections: [], questions: [] }
-    };
+    return buildEmptyQuestionsData();
 }
 
 /**
@@ -9956,8 +10496,10 @@ function generateSampleQuestions() {
 function handleQuestionnaireTypeChange() {
     const select = document.getElementById('questionnaire-type-select');
     if (select) {
+        collectQuestionnairePrivacySettings();
         currentQuestionnaireType = select.value;
         updateFormHeader(currentQuestionnaireType);
+        renderQuestionnairePrivacySettings();
         syncSectionDescriptionRequirement();
         renderQuestions();
     }
@@ -10014,6 +10556,86 @@ function saveQuestionnaireHeader(type, updates) {
     const existingHeader = getQuestionnaireHeader(type);
     currentData.header = { ...existingHeader, ...updates };
     questionsData[type] = currentData;
+}
+
+function getQuestionnairePrivacyConsent(type) {
+    const currentData = questionsData[type] || { sections: [], questions: [] };
+    return normalizeQuestionnairePrivacyConsent(currentData.privacyConsent, type);
+}
+
+function hasQuestionnairePrivacyConsentChanges(type) {
+    return JSON.stringify(getQuestionnairePrivacyConsent(type)) !== JSON.stringify(getDefaultQuestionnairePrivacyConsent(type));
+}
+
+function saveQuestionnairePrivacyConsent(type, updates) {
+    const currentData = questionsData[type] || { sections: [], questions: [] };
+    const existingConfig = getQuestionnairePrivacyConsent(type);
+    currentData.privacyConsent = normalizeQuestionnairePrivacyConsent({ ...existingConfig, ...updates }, type);
+    questionsData[type] = currentData;
+}
+
+function renderQuestionnairePrivacySettings() {
+    const settingsEl = document.getElementById('questionnaire-privacy-settings');
+    if (!settingsEl) return;
+
+    const config = getQuestionnairePrivacyConsent(currentQuestionnaireType);
+    const requiredEl = document.getElementById('questionnaire-privacy-required');
+    const versionEl = document.getElementById('questionnaire-privacy-version');
+    const identifierEl = document.getElementById('questionnaire-privacy-identifier');
+    const titleEl = document.getElementById('questionnaire-privacy-title');
+    const textEl = document.getElementById('questionnaire-privacy-text');
+    const agreementEl = document.getElementById('questionnaire-privacy-agreement');
+    const noteEl = document.getElementById('questionnaire-privacy-note');
+
+    if (requiredEl) requiredEl.checked = !!config.enabled;
+    if (versionEl) versionEl.value = config.version || '';
+    if (identifierEl) identifierEl.value = config.textIdentifier || '';
+    if (titleEl) titleEl.value = config.title || '';
+    if (textEl) textEl.value = Array.isArray(config.paragraphs) ? config.paragraphs.join('\n\n') : '';
+    if (agreementEl) agreementEl.value = config.agreementText || '';
+    if (noteEl) {
+        noteEl.textContent = `Applies to ${getQuestionnaireTypeLabel(currentQuestionnaireType)}. Change the consent version when the notice text changes so users sign the updated version.`;
+    }
+    applyQuestionnaireEditMode(isQuestionnaireEditable());
+}
+
+function collectQuestionnairePrivacySettings() {
+    const settingsEl = document.getElementById('questionnaire-privacy-settings');
+    if (!settingsEl || !questionsData || !currentQuestionnaireType) return;
+
+    const requiredEl = document.getElementById('questionnaire-privacy-required');
+    const versionEl = document.getElementById('questionnaire-privacy-version');
+    const identifierEl = document.getElementById('questionnaire-privacy-identifier');
+    const titleEl = document.getElementById('questionnaire-privacy-title');
+    const textEl = document.getElementById('questionnaire-privacy-text');
+    const agreementEl = document.getElementById('questionnaire-privacy-agreement');
+
+    saveQuestionnairePrivacyConsent(currentQuestionnaireType, {
+        enabled: !!(requiredEl && requiredEl.checked),
+        version: versionEl ? versionEl.value : '',
+        textIdentifier: identifierEl ? identifierEl.value : '',
+        title: titleEl ? titleEl.value : '',
+        paragraphs: textEl ? splitPrivacyNoticeText(textEl.value) : [],
+        agreementText: agreementEl ? agreementEl.value : ''
+    });
+}
+
+function setupQuestionnairePrivacySettings() {
+    const settingsEl = document.getElementById('questionnaire-privacy-settings');
+    if (!settingsEl) return;
+
+    ['questionnaire-privacy-required', 'questionnaire-privacy-version', 'questionnaire-privacy-identifier', 'questionnaire-privacy-title', 'questionnaire-privacy-text', 'questionnaire-privacy-agreement']
+        .forEach(function (id) {
+            const field = document.getElementById(id);
+            if (!field) return;
+            const eventName = field.type === 'checkbox' ? 'change' : 'input';
+            field.addEventListener(eventName, function () {
+                if (!isQuestionnaireEditable()) return;
+                collectQuestionnairePrivacySettings();
+            });
+        });
+
+    renderQuestionnairePrivacySettings();
 }
 
 function setupFormHeaderEditing() {
@@ -10540,7 +11162,9 @@ function moveQuestion(questionId, direction) {
 function saveQuestionnaire() {
     if (!ensureQuestionnaireEditable()) return;
     const currentData = questionsData[currentQuestionnaireType] || { sections: [], questions: [] };
-    if (currentData.sections.length === 0 && currentData.questions.length === 0) {
+    const sections = Array.isArray(currentData.sections) ? currentData.sections : [];
+    const questions = Array.isArray(currentData.questions) ? currentData.questions : [];
+    if (sections.length === 0 && questions.length === 0 && !hasQuestionnairePrivacyConsentChanges(currentQuestionnaireType)) {
         alert('Please add at least one section or question before saving.');
         return;
     }

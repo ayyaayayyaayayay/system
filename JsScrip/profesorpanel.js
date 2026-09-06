@@ -571,6 +571,18 @@ function initializeDashboard() {
     initializeReports();
     setupProfessorDataSync();
     refreshProfessorPanelData({ preserveSelection: false });
+    showProfessorLoginAnnouncements();
+}
+
+function showProfessorLoginAnnouncements() {
+    if (!SharedData.showUnreadAnnouncementLoginPopup) return;
+    SharedData.showUnreadAnnouncementLoginPopup({
+        onDismiss: function () {
+            if (professorPanelState.context) {
+                renderAnnouncementPanels(professorPanelState.context);
+            }
+        },
+    });
 }
 
 /**
@@ -2891,6 +2903,28 @@ function refreshPeerTargetLockState() {
  * @param {Object} question - The question object
  * @param {Number} index - The global count for IDs
  */
+const MANIFESTED_RATING_LABELS = {
+    5: 'Always manifested',
+    4: 'Often manifested',
+    3: 'Sometimes manifested',
+    2: 'Seldom manifested',
+    1: 'Never/Rarely manifested'
+};
+
+function renderManifestedRatingScaleTable(maxRatingInput) {
+    const maxRating = Math.max(1, parseInt(maxRatingInput, 10) || 5);
+    const rows = [];
+    for (let rating = maxRating; rating >= 1; rating -= 1) {
+        const label = MANIFESTED_RATING_LABELS[rating] || `Rating ${rating}`;
+        rows.push(`<tr><th scope="row">${rating}</th><td>${escapeHTML(label)}</td></tr>`);
+    }
+    return `
+        <table class="rating-legend-table" aria-label="Rating scale">
+            <tbody>${rows.join('')}</tbody>
+        </table>
+    `;
+}
+
 function renderPeerQuestionHTML(question, index) {
     const isRequired = question.required ? 'required' : '';
     const qid = escapeHTML(String(question.id));
@@ -2929,7 +2963,7 @@ function renderPeerQuestionHTML(question, index) {
                 <input type="radio" name="${qid}" id="q${qid}-5" value="5" ${isRequired}>
                 <label for="q${qid}-5" class="rating-option">5</label>
             </div>
-            <p class="rating-legend">5 = Excellent, 1 = Poor</p>
+            ${renderManifestedRatingScaleTable(5)}
         </div>
     `;
 }
@@ -3050,6 +3084,50 @@ function escapeHTML(str) {
     );
 }
 
+function ensureQuestionnairePrivacyConsentForSubmission(questionnaireType, semesterId, form) {
+    const notice = SharedData.getDataPrivacyConsentNotice
+        ? SharedData.getDataPrivacyConsentNotice(questionnaireType)
+        : null;
+    if (notice && notice.enabled === false) {
+        return true;
+    }
+
+    const version = String(notice && notice.version || '').trim();
+    if (
+        SharedData.hasStudentDataPrivacyConsent
+        && SharedData.hasStudentDataPrivacyConsent(semesterId, version, questionnaireType)
+    ) {
+        return true;
+    }
+
+    const paragraphs = Array.isArray(notice && notice.paragraphs) ? notice.paragraphs : [];
+    const message = [
+        String(notice && notice.title || 'Data Privacy Notice').trim(),
+        paragraphs.join('\n\n'),
+        String(notice && notice.agreementText || 'I have read and agree to the Data Privacy Notice for this questionnaire.').trim(),
+        'Select OK to agree and continue.'
+    ].filter(Boolean).join('\n\n');
+
+    if (!confirm(message)) {
+        showFormMessage(form, 'Please agree to the Data Privacy Notice before submitting this questionnaire.', 'error');
+        return false;
+    }
+
+    try {
+        if (!SharedData.recordStudentDataPrivacyConsent) {
+            throw new Error('Privacy consent saving is not available.');
+        }
+        SharedData.recordStudentDataPrivacyConsent({
+            semesterId: semesterId,
+            questionnaireType: questionnaireType
+        });
+        return true;
+    } catch (error) {
+        showFormMessage(form, error && error.message ? error.message : 'Privacy consent could not be saved. Please try again.', 'error');
+        return false;
+    }
+}
+
 /**
  * Handle Peer Evaluation Submission (Dynamic Data Extraction)
  */
@@ -3141,6 +3219,9 @@ function handlePeerEvaluation() {
     const session = getUserSession() || {};
     const semesterId = getPeerSemesterId();
     const targetProfessorId = formData.get('peerProfessor') || '';
+    if (!ensureQuestionnairePrivacyConsentForSubmission('professor-to-professor', semesterId, form)) {
+        return;
+    }
     const evaluationKey = buildPeerEvaluationKey(context.professor.id, semesterId, targetProfessorId);
     const payload = {
         evaluatorId: context.professor.id,

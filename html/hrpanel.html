@@ -8,8 +8,8 @@
     <link rel="icon" type="image/png" sizes="32x32" href="../design/favicon-32x32.png">
     <link rel="apple-touch-icon" href="../design/apple-touch-icon.png">
     <title>HR Dashboard - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/panel-theme.css?v=20260824a">
-    <link rel="stylesheet" href="../css/hrpanel.css?v=20260821a">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260904c">
+    <link rel="stylesheet" href="../css/hrpanel.css?v=20260906e">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -591,7 +591,7 @@
                                         <h3>Announcements</h3>
                                         <p>Enable system-wide announcements</p>
                                     </div>
-                                    <button class="btn-setting purple">Create Announcement</button>
+                                    <button class="btn-setting purple" id="hr-settings-announcement-compose-btn" type="button">Create Announcement</button>
                                 </div>
 
                                 <div class="setting-item">
@@ -641,10 +641,16 @@
                                     Clear
                                 </button>
                             </div>
-                            <button class="btn-add-professor" id="add-professor-btn">
-                                <i class="fas fa-user-plus"></i>
-                                Add Professor
-                            </button>
+                            <div class="professor-toolbar-actions">
+                                <button class="btn-add-professor" id="add-professor-btn">
+                                    <i class="fas fa-user-plus"></i>
+                                    Add Professor
+                                </button>
+                                <button class="btn-overall-sasr" id="overall-sasr-btn" type="button">
+                                    <i class="fas fa-file-excel"></i>
+                                    Overall SASR
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Department Tabs -->
@@ -1150,6 +1156,42 @@
                                     honest feedback about your professors.</p>
                             </div>
 
+                            <section class="questionnaire-privacy-settings" id="questionnaire-privacy-settings">
+                                <div class="questionnaire-privacy-settings__header">
+                                    <div>
+                                        <h3><i class="fas fa-shield-alt"></i> Data Privacy Agreement</h3>
+                                        <p>Control whether this questionnaire requires a privacy agreement before answering.</p>
+                                    </div>
+                                    <label class="questionnaire-privacy-toggle" for="questionnaire-privacy-required">
+                                        <input type="checkbox" id="questionnaire-privacy-required">
+                                        <span>Require agreement</span>
+                                    </label>
+                                </div>
+                                <div class="questionnaire-privacy-grid">
+                                    <div class="form-group">
+                                        <label for="questionnaire-privacy-version">Consent Version</label>
+                                        <input type="text" id="questionnaire-privacy-version" maxlength="100">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="questionnaire-privacy-identifier">Text Identifier</label>
+                                        <input type="text" id="questionnaire-privacy-identifier" maxlength="150">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="questionnaire-privacy-title">Notice Title</label>
+                                        <input type="text" id="questionnaire-privacy-title" maxlength="200">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="questionnaire-privacy-text">Notice Text</label>
+                                    <textarea id="questionnaire-privacy-text" rows="6"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label for="questionnaire-privacy-agreement">Agreement Checkbox Text</label>
+                                    <input type="text" id="questionnaire-privacy-agreement" maxlength="500">
+                                </div>
+                                <p class="questionnaire-privacy-note" id="questionnaire-privacy-note"></p>
+                            </section>
+
                             <div class="questions-list" id="questions-list">
                                 <!-- Questions will be dynamically loaded here -->
                             </div>
@@ -1171,49 +1213,62 @@
     <div id="hr-announcement-compose-modal" class="modal">
         <div class="modal-content hr-announcement-compose-modal-content">
             <div class="modal-header">
-                <h2>Create Professor/Dean/Student Announcement</h2>
-                <button class="modal-close" id="hr-close-announcement-compose-modal">
+                <h2>Create Announcement</h2>
+                <button class="modal-close" id="hr-close-announcement-compose-modal" type="button">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
             <form id="hr-announcement-compose-form">
-                <div class="form-group">
-                    <label for="hr-announcement-compose-title">Title</label>
-                    <input type="text" id="hr-announcement-compose-title" maxlength="200" required>
+                <p class="announcement-compose-subtitle">Publish a targeted notice that users will see when they log in.</p>
+                <div class="announcement-compose-grid">
+                    <div class="form-group announcement-field-wide">
+                        <label for="hr-announcement-compose-title">Title</label>
+                        <input type="text" id="hr-announcement-compose-title" maxlength="200" required>
+                    </div>
+                    <div class="form-group announcement-field-wide">
+                        <label for="hr-announcement-compose-message">Message</label>
+                        <textarea id="hr-announcement-compose-message" rows="5" maxlength="3000" required></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="hr-announcement-target-role">Target Role</label>
+                        <select id="hr-announcement-target-role" required>
+                            <option value="all">All Users</option>
+                            <option value="admin">Admin</option>
+                            <option value="hr">HR Staff</option>
+                            <option value="vpaa">VPAA</option>
+                            <option value="osa">OSA</option>
+                            <option value="dean">Dean</option>
+                            <option value="procoor">Program Coordinator</option>
+                            <option value="professor">Professor</option>
+                            <option value="student">Student</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="hr-announcement-target-campus">Campus (Optional)</label>
+                        <select id="hr-announcement-target-campus">
+                            <option value="">All Campuses</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="hr-announcement-target-program">Program (Optional)</label>
+                        <select id="hr-announcement-target-program">
+                            <option value="">All Programs</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="hr-announcement-student-completion-wrap" style="display:none;">
+                        <label for="hr-announcement-student-completion">Student Completion Filter</label>
+                        <select id="hr-announcement-student-completion">
+                            <option value="all">All Students</option>
+                            <option value="completed">Completed</option>
+                            <option value="not_completed">Not Completed</option>
+                        </select>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="hr-announcement-compose-message">Message</label>
-                    <textarea id="hr-announcement-compose-message" rows="5" maxlength="3000" required></textarea>
+                <div class="announcement-audience-preview" id="hr-announcement-audience-preview">
+                    <span>Audience</span>
+                    <strong>All users</strong>
                 </div>
-                <div class="form-group">
-                    <label for="hr-announcement-target-role">Target Role</label>
-                    <select id="hr-announcement-target-role" required>
-                        <option value="student">Student</option>
-                        <option value="dean">Dean</option>
-                        <option value="professor">Professor</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="hr-announcement-target-campus">Campus (Optional)</label>
-                    <select id="hr-announcement-target-campus">
-                        <option value="">All Campuses</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="hr-announcement-target-program">Program (Optional)</label>
-                    <select id="hr-announcement-target-program">
-                        <option value="">All Programs</option>
-                    </select>
-                </div>
-                <div class="form-group" id="hr-announcement-student-completion-wrap" style="display:none;">
-                    <label for="hr-announcement-student-completion">Student Completion Filter</label>
-                    <select id="hr-announcement-student-completion">
-                        <option value="all">All Students</option>
-                        <option value="completed">Completed</option>
-                        <option value="not_completed">Not Completed</option>
-                    </select>
-                </div>
-                <p class="form-hint">If campus/program are blank, the announcement targets all users of the selected role.</p>
+                <p class="form-hint">Campus and program filters narrow the selected role. Leave them blank to target everyone in that role.</p>
                 <p class="hr-announcement-compose-feedback" id="hr-announcement-compose-feedback" aria-live="polite"></p>
                 <div class="modal-actions">
                     <button type="button" class="btn-cancel" id="hr-cancel-announcement-compose-btn">Cancel</button>
@@ -1472,9 +1527,9 @@
         </div>
     </div>
 
-    <script src="../JsScrip/db-data.js?v=20260802e"></script>
+    <script src="../JsScrip/db-data.js?v=20260904c"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
-    <script src="../JsScrip/hrpanel.js?v=20260826a"></script>
+    <script src="../JsScrip/hrpanel.js?v=20260906a"></script>
 </body>
 
 </html>

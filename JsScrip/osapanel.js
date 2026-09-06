@@ -17,6 +17,7 @@ document.addEventListener("DOMContentLoaded", function () {
     setupProfileActionToggle();
     setupPasswordVisibility();
     setupDashboardHeroActions();
+    showOsaLoginAnnouncements();
 });
 
 let allStudents = [];
@@ -35,6 +36,11 @@ function checkAuthentication() {
 
 function redirectToLogin() {
     window.location.href = "mainpage.html";
+}
+
+function showOsaLoginAnnouncements() {
+    if (!SharedData.showUnreadAnnouncementLoginPopup) return;
+    SharedData.showUnreadAnnouncementLoginPopup();
 }
 
 function loadUserInfo() {

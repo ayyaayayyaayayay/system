@@ -947,8 +947,98 @@ body {
 }
 
 .hr-announcement-compose-modal-content {
-    max-width: 680px;
+    max-width: 760px;
     width: 95%;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+#hr-announcement-compose-form {
+    padding: 24px 32px 28px;
+}
+
+#hr-announcement-compose-form .form-group {
+    margin-bottom: 0;
+}
+
+#hr-announcement-compose-form label {
+    color: #111827;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+#hr-announcement-compose-form input,
+#hr-announcement-compose-form select,
+#hr-announcement-compose-form textarea {
+    width: 100%;
+    box-sizing: border-box;
+    border: 2px solid var(--border-color);
+    border-radius: 10px;
+    background: #f9fafb;
+    color: #111827;
+    font-family: inherit;
+    font-size: 14px;
+    outline: none;
+    padding: 12px 16px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+#hr-announcement-compose-form input:hover,
+#hr-announcement-compose-form select:hover,
+#hr-announcement-compose-form textarea:hover {
+    background: #fff;
+    border-color: #d1d5db;
+}
+
+#hr-announcement-compose-form input:focus,
+#hr-announcement-compose-form select:focus,
+#hr-announcement-compose-form textarea:focus {
+    background: #fff;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.12);
+}
+
+.announcement-compose-subtitle {
+    margin: -4px 0 18px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.announcement-compose-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 16px;
+}
+
+.announcement-field-wide {
+    grid-column: 1 / -1;
+}
+
+.announcement-audience-preview {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 14px 0 12px;
+    padding: 12px 14px;
+    border: 1px solid #dbeafe;
+    border-radius: 8px;
+    background: #eff6ff;
+}
+
+.announcement-audience-preview span {
+    color: #1d4ed8;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.announcement-audience-preview strong {
+    color: #0f172a;
+    font-size: 13px;
+    text-align: right;
 }
 
 #hr-announcement-compose-form .form-hint {
@@ -956,6 +1046,11 @@ body {
     margin-bottom: 6px;
     font-size: 12px;
     color: var(--text-secondary);
+}
+
+#hr-announcement-compose-form textarea {
+    min-height: 150px;
+    resize: vertical;
 }
 
 .hr-announcement-compose-feedback {
@@ -983,6 +1078,23 @@ body {
 }
 
 @media (max-width: 768px) {
+    #hr-announcement-compose-form {
+        padding: 20px;
+    }
+
+    .announcement-compose-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .announcement-audience-preview {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .announcement-audience-preview strong {
+        text-align: left;
+    }
+
     .sidebar {
         width: 80px;
     }
@@ -1424,6 +1536,20 @@ body {
     gap: 10px;
 }
 
+.professor-toolbar-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex: 0 0 auto;
+    align-items: stretch;
+}
+
+.professor-toolbar-actions .btn-add-professor,
+.professor-toolbar-actions .btn-overall-sasr {
+    justify-content: center;
+    width: 100%;
+}
+
 .btn-add-professor {
     background: var(--primary-gradient);
     color: var(--bg-secondary);
@@ -1443,6 +1569,54 @@ body {
 .btn-add-professor:hover {
     transform: translateY(-2px);
     box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+}
+
+.btn-overall-sasr {
+    background: #ecfdf5;
+    color: #047857;
+    border: 1px solid #a7f3d0;
+    padding: 12px 22px;
+    border-radius: 12px;
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 42px;
+    white-space: nowrap;
+    transition: all 0.3s ease;
+}
+
+.btn-overall-sasr:hover {
+    background: #d1fae5;
+    border-color: #6ee7b7;
+    transform: translateY(-1px);
+}
+
+.overall-sasr-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.overall-sasr-field-wide {
+    grid-column: 1 / -1;
+}
+
+.overall-sasr-modal-note {
+    margin: 0 0 18px;
+    color: #6b7280;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.overall-sasr-empty-note {
+    margin: 8px 0 0;
+    color: #b45309;
+    font-size: 12px;
+    font-weight: 600;
 }
 
 /* Department Tabs */
@@ -3154,8 +3328,14 @@ body {
 
     .professor-campus-filter,
     .btn-professor-search,
-    .btn-professor-clear {
+    .btn-professor-clear,
+    .professor-toolbar-actions,
+    .btn-overall-sasr {
         width: 100%;
+    }
+
+    .overall-sasr-grid {
+        grid-template-columns: 1fr;
     }
 
     .department-tabs {
@@ -4258,6 +4438,77 @@ body {
     border-radius: 12px;
     padding: 40px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.questionnaire-privacy-settings {
+    background: #f8fafc;
+    border: 1px solid #dbe2ea;
+    border-radius: 10px;
+    margin: 22px 0;
+    padding: 20px;
+}
+
+.questionnaire-privacy-settings__header {
+    align-items: flex-start;
+    display: flex;
+    gap: 16px;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+
+.questionnaire-privacy-settings__header h3 {
+    color: #111827;
+    font-size: 16px;
+    margin: 0 0 6px 0;
+}
+
+.questionnaire-privacy-settings__header p,
+.questionnaire-privacy-note {
+    color: #64748b;
+    font-size: 13px;
+    line-height: 1.5;
+    margin: 0;
+}
+
+.questionnaire-privacy-toggle {
+    align-items: center;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    color: #1f2937;
+    cursor: pointer;
+    display: inline-flex;
+    flex: 0 0 auto;
+    font-size: 13px;
+    font-weight: 700;
+    gap: 8px;
+    min-height: 40px;
+    padding: 8px 12px;
+}
+
+.questionnaire-privacy-toggle input {
+    height: 16px;
+    width: 16px;
+}
+
+.questionnaire-privacy-grid {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.questionnaire-privacy-settings input[type="text"],
+.questionnaire-privacy-settings textarea {
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font: inherit;
+    padding: 10px 12px;
+    width: 100%;
+}
+
+.questionnaire-privacy-settings textarea {
+    line-height: 1.5;
+    resize: vertical;
 }
 
 .form-header-preview {
@@ -6087,5 +6338,1019 @@ body {
 
     .hr-report-type-grid {
         grid-template-columns: 1fr;
+    }
+}
+
+/* Compact HR mobile pass: keep controls visible and scroll data areas only. */
+@media (max-width: 640px) {
+    .hr-panel {
+        overflow-x: hidden;
+    }
+
+    .hr-panel .main-content {
+        padding: 10px 10px 18px;
+        overflow-x: hidden;
+    }
+
+    .hr-panel .top-header {
+        gap: 8px;
+        margin-bottom: 14px;
+        padding: 10px;
+        border-radius: 14px;
+    }
+
+    .hr-panel .hr-header-main {
+        gap: 8px;
+    }
+
+    .hr-panel .mobile-nav-toggle,
+    .hr-panel .notification-icon,
+    .hr-panel .user-profile {
+        min-width: 36px;
+        min-height: 36px;
+        border-radius: 10px;
+    }
+
+    .hr-panel .mobile-nav-toggle,
+    .hr-panel .notification-icon {
+        width: 36px;
+        height: 36px;
+    }
+
+    .hr-panel .user-profile {
+        padding: 5px;
+    }
+
+    .hr-panel .header-right,
+    .hr-panel .top-header .header-right {
+        gap: 8px;
+    }
+
+    .hr-panel .page-title {
+        font-size: 18px;
+        line-height: 1.15;
+    }
+
+    .hr-panel .page-context,
+    .hr-panel .view-header p,
+    .hr-settings-view-header p,
+    .hr-panel .section-title p,
+    .hr-panel .reports-title p,
+    .hr-panel .form-header p,
+    .hr-panel .ai-insights-feedback,
+    .hr-panel .ai-insights-summary,
+    .hr-panel .questionnaire-privacy-note {
+        font-size: 11px;
+        line-height: 1.35;
+    }
+
+    .hr-panel .hr-hero-card,
+    .hr-panel .overview-card,
+    .hr-panel .admin-section,
+    .hr-panel .section-card,
+    .hr-panel .reports-container,
+    .hr-panel .form-card,
+    .hr-panel .table-card,
+    .hr-panel .questionnaire-form-preview,
+    .hr-panel .hr-activity-summary-section,
+    .hr-panel .ai-insights-table-wrap,
+    .hr-panel .questionnaire-privacy-settings {
+        margin-bottom: 12px;
+        padding: 14px 10px;
+        border-radius: 14px;
+    }
+
+    .hr-panel .hr-hero-card {
+        gap: 12px;
+    }
+
+    .hr-panel .hr-hero-badge {
+        min-height: 24px;
+        margin-bottom: 8px;
+        padding: 0 9px;
+        font-size: 10px;
+        letter-spacing: 0.04em;
+    }
+
+    .hr-panel .hr-hero-copy h2 {
+        margin-bottom: 8px;
+        font-size: 20px;
+        line-height: 1.12;
+    }
+
+    .hr-panel .hr-hero-copy p {
+        font-size: 12px;
+        line-height: 1.45;
+    }
+
+    .hr-panel .hr-hero-actions,
+    .hr-panel .overview-cards,
+    .hr-panel .content-grid,
+    .hr-panel .settings-list,
+    .hr-panel .profile-page-body,
+    .hr-panel .questionnaire-actions,
+    .hr-panel .questionnaire-semester-selector,
+    .hr-panel .questionnaire-type-selector,
+    .hr-panel .form-actions,
+    .hr-panel .form-actions-preview,
+    .hr-panel .modal-actions,
+    .hr-panel .settings-action-row,
+    .hr-panel .settings-action-row--footer,
+    .hr-panel .ai-insights-controls,
+    .hr-panel .activity-log-controls,
+    .hr-panel .professor-toolbar,
+    .hr-panel .professor-filter-controls,
+    .hr-panel .hr-system-notification-actions {
+        gap: 8px;
+    }
+
+    .hr-panel .overview-card {
+        align-items: center;
+        gap: 10px;
+    }
+
+    .hr-panel .overview-card .card-icon {
+        width: 38px;
+        height: 38px;
+        border-radius: 10px;
+        font-size: 16px;
+    }
+
+    .hr-panel .overview-card .card-content h3 {
+        font-size: 12px;
+        line-height: 1.25;
+    }
+
+    .hr-panel .overview-card .card-number {
+        font-size: 22px;
+        line-height: 1.1;
+    }
+
+    .hr-panel .card-caption {
+        margin-top: 4px;
+        font-size: 10px;
+        line-height: 1.35;
+    }
+
+    .hr-panel .section-header,
+    .hr-panel .questionnaire-header,
+    .hr-panel #questionnaire-view .section-header,
+    .hr-panel .view-header,
+    .hr-panel .form-header,
+    .hr-panel .reports-header,
+    .hr-panel .hr-activity-summary-header {
+        gap: 10px;
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+    }
+
+    .hr-panel .section-title h2,
+    .hr-panel .reports-title h1,
+    .hr-panel .questionnaire-title-section h1,
+    .hr-panel .view-header h1,
+    .hr-panel .form-header h2,
+    .hr-panel .settings-view-title,
+    .hr-panel .hr-activity-summary-title h2 {
+        font-size: 18px;
+        line-height: 1.2;
+    }
+
+    .hr-panel .section-card-title,
+    .hr-panel .ai-insights-table-wrap h3,
+    .hr-panel .questionnaire-privacy-settings__header h3 {
+        font-size: 15px;
+        line-height: 1.25;
+    }
+
+    .hr-panel .form-section {
+        margin-bottom: 14px;
+    }
+
+    .hr-panel .form-group {
+        margin-bottom: 10px;
+    }
+
+    .hr-panel .form-group label,
+    .hr-panel .log-control label,
+    .hr-panel .questionnaire-semester-selector label,
+    .hr-panel .questionnaire-type-selector label {
+        margin-bottom: 5px;
+        font-size: 12px;
+    }
+
+    .hr-panel .form-input,
+    .hr-panel .form-select,
+    .hr-panel .filter-select,
+    .hr-panel .settings-select,
+    .hr-panel .questionnaire-type-dropdown,
+    .hr-panel .professor-campus-filter,
+    .hr-panel .log-control input,
+    .hr-panel .log-control select,
+    .hr-panel .eval-period-range .eval-date,
+    .hr-panel .eval-term-card select,
+    .hr-panel #new-term-preview,
+    .hr-panel input[type="text"],
+    .hr-panel input[type="email"],
+    .hr-panel input[type="password"],
+    .hr-panel input[type="date"],
+    .hr-panel select,
+    .hr-panel textarea {
+        min-height: 38px;
+        padding: 9px 10px;
+        font-size: 12px;
+        border-radius: 10px;
+    }
+
+    .hr-panel .btn-submit,
+    .hr-panel .btn-cancel,
+    .hr-panel .btn-add-user,
+    .hr-panel .btn-add-professor,
+    .hr-panel .btn-professor-search,
+    .hr-panel .btn-professor-clear,
+    .hr-panel .btn-overall-sasr,
+    .hr-panel .btn-setting,
+    .hr-panel .btn-add-term,
+    .hr-panel .btn-add-section,
+    .hr-panel .btn-copy-questionnaire,
+    .hr-panel .btn-add-question,
+    .hr-panel .btn-save-questionnaire,
+    .hr-panel .btn-save,
+    .hr-panel .hero-action-btn,
+    .hr-panel .profile-photo-btn,
+    .hr-panel .form-actions > button,
+    .hr-panel .form-actions-preview > button,
+    .hr-panel .modal-actions > button {
+        min-height: 38px;
+        padding: 9px 12px;
+        border-radius: 10px;
+        font-size: 12px;
+    }
+
+    .hr-panel .department-tabs {
+        gap: 8px;
+        margin-bottom: 14px;
+    }
+
+    .hr-panel .dept-tab {
+        padding: 9px 8px;
+        border-radius: 10px;
+        font-size: 11px;
+    }
+
+    .hr-panel .professor-search {
+        margin-bottom: 12px;
+        padding: 8px 10px;
+        border-radius: 12px;
+    }
+
+    .hr-panel .professors-list.is-mobile-cards,
+    .hr-panel .professor-table-wrap {
+        max-height: min(52vh, 420px);
+        overflow: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .hr-panel #professor-ranking-list,
+    .hr-panel #hr-system-notifications {
+        max-height: min(42vh, 320px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding-right: 2px;
+    }
+
+    .hr-panel #activity-log-view .hr-activity-log-table {
+        max-height: min(46vh, 360px);
+        min-height: 180px;
+        overflow: auto;
+        overscroll-behavior: contain;
+    }
+
+    .hr-panel .ai-insights-table-wrap .activity-log-table {
+        max-height: min(38vh, 300px);
+        overflow: auto;
+        overscroll-behavior: contain;
+    }
+
+    .hr-panel .questions-list {
+        max-height: min(56vh, 520px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding-right: 2px;
+    }
+
+    .hr-panel .hr-mobile-card-list,
+    .hr-panel .professors-list.is-mobile-cards {
+        gap: 8px;
+    }
+
+    .hr-panel .hr-mobile-data-card,
+    .hr-panel .professors-list.is-mobile-cards .professor-card {
+        padding: 10px;
+        border-radius: 12px;
+    }
+
+    .hr-panel .hr-mobile-card-title {
+        margin-bottom: 8px;
+        font-size: 13px;
+    }
+
+    .hr-panel .hr-mobile-card-field {
+        gap: 3px;
+        padding: 7px 0;
+    }
+
+    .hr-panel .hr-mobile-card-label {
+        font-size: 9px;
+        letter-spacing: 0.04em;
+    }
+
+    .hr-panel .hr-mobile-card-value,
+    .hr-panel .hr-mobile-card-empty {
+        font-size: 12px;
+        line-height: 1.35;
+    }
+
+    .hr-panel .professors-list.is-mobile-cards .professor-info {
+        gap: 10px;
+        margin-bottom: 10px;
+    }
+
+    .hr-panel .professors-list.is-mobile-cards .professor-avatar {
+        width: 44px;
+        height: 44px;
+    }
+
+    .hr-panel .professors-list.is-mobile-cards .professor-actions {
+        gap: 8px;
+    }
+
+    .hr-panel .activity-log-controls {
+        padding: 10px;
+        margin-bottom: 12px;
+        border-radius: 12px;
+    }
+
+    .hr-panel .activity-log-table table {
+        min-width: 620px;
+    }
+
+    .hr-panel .ai-insights-table {
+        min-width: 640px;
+    }
+
+    .hr-panel .profile-grid,
+    .hr-panel .questionnaire-privacy-grid,
+    .hr-panel .overall-sasr-grid {
+        gap: 10px;
+    }
+
+    .hr-panel .profile-item,
+    .hr-panel .hr-activity-summary-item,
+    .hr-panel .notification-alert,
+    .hr-panel .user-list {
+        padding: 10px;
+        border-radius: 12px;
+    }
+
+    .hr-panel .modal-content,
+    .hr-panel #section-modal .modal-content,
+    .hr-panel #question-modal .modal-content,
+    .hr-panel .hr-announcement-compose-modal-content,
+    .hr-panel .copy-questionnaire-modal-content {
+        max-height: calc(100dvh - 20px);
+        border-radius: 14px;
+    }
+
+    .hr-panel .modal-header,
+    .hr-panel .copy-questionnaire-modal-content .modal-header,
+    .hr-panel #professor-form,
+    .hr-panel #section-form,
+    .hr-panel #question-form {
+        padding: 14px;
+    }
+}
+
+@media (max-width: 1000px) and (orientation: landscape) {
+    .hr-panel .main-content {
+        padding: 10px 14px 18px;
+    }
+
+    .hr-panel .top-header {
+        gap: 8px;
+        margin-bottom: 12px;
+        padding: 10px 14px;
+        border-radius: 14px;
+    }
+
+    .hr-panel .page-title {
+        font-size: 18px;
+    }
+
+    .hr-panel .page-context,
+    .hr-panel .view-header p,
+    .hr-panel .section-title p {
+        font-size: 11px;
+        line-height: 1.35;
+    }
+
+    .hr-panel .hr-hero-card,
+    .hr-panel .overview-card,
+    .hr-panel .admin-section,
+    .hr-panel .section-card,
+    .hr-panel .reports-container,
+    .hr-panel .form-card,
+    .hr-panel .table-card,
+    .hr-panel .questionnaire-form-preview,
+    .hr-panel .hr-activity-summary-section,
+    .hr-panel .ai-insights-table-wrap {
+        margin-bottom: 12px;
+        padding: 14px;
+        border-radius: 14px;
+    }
+
+    .hr-panel .hr-hero-card {
+        flex-direction: row;
+        align-items: stretch;
+        gap: 12px;
+    }
+
+    .hr-panel .hr-hero-copy h2 {
+        font-size: 20px;
+        line-height: 1.12;
+    }
+
+    .hr-panel .hr-hero-copy p {
+        font-size: 12px;
+        line-height: 1.45;
+    }
+
+    .hr-panel .hr-hero-actions {
+        min-width: 180px;
+        gap: 8px;
+    }
+
+    .hr-panel .section-header,
+    .hr-panel .questionnaire-header,
+    .hr-panel .view-header,
+    .hr-panel .form-header {
+        gap: 10px;
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+    }
+
+    .hr-panel .filter-select,
+    .hr-panel .form-input,
+    .hr-panel .form-select,
+    .hr-panel .settings-select,
+    .hr-panel .questionnaire-type-dropdown,
+    .hr-panel .log-control input,
+    .hr-panel .log-control select,
+    .hr-panel .btn-submit,
+    .hr-panel .btn-cancel,
+    .hr-panel .btn-add-user,
+    .hr-panel .btn-add-professor,
+    .hr-panel .btn-professor-search,
+    .hr-panel .btn-professor-clear,
+    .hr-panel .btn-overall-sasr,
+    .hr-panel .btn-setting,
+    .hr-panel .btn-add-term,
+    .hr-panel .btn-add-section,
+    .hr-panel .btn-copy-questionnaire,
+    .hr-panel .btn-add-question,
+    .hr-panel .btn-save-questionnaire,
+    .hr-panel .btn-save,
+    .hr-panel .hero-action-btn {
+        min-height: 38px;
+        padding: 9px 12px;
+        border-radius: 10px;
+        font-size: 12px;
+    }
+
+    .hr-panel .professors-list.is-mobile-cards,
+    .hr-panel .professor-table-wrap {
+        max-height: min(52vh, 420px);
+        overflow: auto;
+        overscroll-behavior: contain;
+    }
+
+    .hr-panel #professor-ranking-list,
+    .hr-panel #hr-system-notifications {
+        max-height: min(42vh, 320px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+
+    .hr-panel #activity-log-view .hr-activity-log-table {
+        max-height: min(46vh, 360px);
+        min-height: 160px;
+        overflow: auto;
+        overscroll-behavior: contain;
+    }
+
+    .hr-panel .ai-insights-table-wrap .activity-log-table {
+        max-height: min(38vh, 300px);
+        overflow: auto;
+        overscroll-behavior: contain;
+    }
+
+    .hr-panel .questions-list {
+        max-height: min(56vh, 520px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+
+    .hr-panel .hr-mobile-data-card,
+    .hr-panel .professors-list.is-mobile-cards .professor-card {
+        padding: 10px;
+        border-radius: 12px;
+    }
+}
+
+/* HR questionnaire list container: one bounded scroll panel for all sections. */
+@media (max-width: 640px) {
+    .hr-panel #questions-list.questions-list {
+        max-height: min(54vh, 440px);
+        padding: 10px;
+        gap: 8px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        overscroll-behavior: contain;
+        scrollbar-gutter: stable;
+        border: 1px solid #dbe3ee;
+        border-radius: 14px;
+        background: #f8fafc;
+    }
+
+    .hr-panel #questions-list.questions-list > * {
+        min-width: 0;
+    }
+
+    .hr-panel #questions-list.questions-list .question-section {
+        margin: 0;
+        padding: 12px;
+        border: 1px solid #dbe3ee;
+        border-left: 3px solid var(--primary-color);
+        border-radius: 12px;
+        background: #ffffff;
+        box-shadow: none;
+    }
+
+    .hr-panel #questions-list.questions-list .question-section > .section-header {
+        margin-bottom: 10px;
+        padding-bottom: 10px;
+    }
+
+    .hr-panel #questions-list.questions-list .section-description {
+        display: -webkit-box;
+        -webkit-line-clamp: 4;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .hr-panel #questions-list.questions-list .question-section:focus-within .section-description {
+        display: block;
+    }
+}
+
+@media (max-width: 1000px) and (orientation: landscape) {
+    .hr-panel #questions-list.questions-list {
+        max-height: min(56vh, 520px);
+        padding: 10px;
+        gap: 8px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        overscroll-behavior: contain;
+        border: 1px solid #dbe3ee;
+        border-radius: 14px;
+        background: #f8fafc;
+    }
+
+    .hr-panel #questions-list.questions-list .question-section {
+        margin: 0;
+        box-shadow: none;
+    }
+}
+
+/* HR questionnaire mobile section cards. */
+@media (max-width: 640px) {
+    .hr-panel .questions-list {
+        gap: 12px;
+        padding-right: 0;
+    }
+
+    .hr-panel #questionnaire-view .question-section {
+        margin-bottom: 12px;
+        padding: 12px;
+        border: 1px solid #dbe3ee;
+        border-left: 4px solid var(--primary-color);
+        border-radius: 14px;
+        background: #ffffff;
+        box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+        overflow: hidden;
+    }
+
+    .hr-panel #questionnaire-view .question-section > .section-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start;
+        gap: 10px;
+        margin-bottom: 12px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid #e2e8f0;
+    }
+
+    .hr-panel #questionnaire-view .section-title-group,
+    .hr-panel #questionnaire-view .section-title-content {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .hr-panel #questionnaire-view .section-title {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        margin: 0 0 8px;
+        color: #0f172a;
+        font-size: 20px;
+        line-height: 1.22;
+        letter-spacing: 0;
+        overflow-wrap: normal;
+        word-break: normal;
+    }
+
+    .hr-panel #questionnaire-view .section-letter-inline {
+        display: inline-flex;
+        flex: 0 0 32px;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        margin: 0;
+        border-radius: 10px;
+        background: rgba(99, 102, 241, 0.12);
+        color: var(--primary-color);
+        font-size: 18px;
+        font-weight: 800;
+        line-height: 1;
+        white-space: nowrap;
+        overflow-wrap: normal;
+        word-break: normal;
+    }
+
+    .hr-panel #questionnaire-view .section-title-text {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow-wrap: break-word;
+        word-break: normal;
+    }
+
+    .hr-panel #questionnaire-view .section-description {
+        display: block;
+        max-width: 100%;
+        margin: 0;
+        color: #475569;
+        font-size: 12px;
+        line-height: 1.45;
+        overflow-wrap: break-word;
+        word-break: normal;
+    }
+
+    .hr-panel #questionnaire-view .section-actions {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 6px;
+    }
+
+    .hr-panel #questionnaire-view .section-actions .action-btn {
+        width: 32px;
+        height: 30px;
+        border-radius: 8px;
+    }
+
+    .hr-panel #questionnaire-view .section-questions {
+        gap: 10px;
+        margin-top: 10px;
+    }
+
+    .hr-panel .question-item {
+        border-left-width: 3px;
+        border-radius: 12px;
+        background: #f8fafc;
+    }
+
+    .hr-panel .question-number {
+        width: 30px;
+        height: 28px;
+        font-size: 13px;
+    }
+}
+
+@media (max-width: 1000px) and (orientation: landscape) {
+    .hr-panel #questionnaire-view .section-title {
+        display: flex;
+        gap: 10px;
+        overflow-wrap: normal;
+        word-break: normal;
+    }
+
+    .hr-panel #questionnaire-view .section-letter-inline {
+        display: inline-flex;
+        flex: 0 0 32px;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        margin: 0;
+        border-radius: 10px;
+        background: rgba(99, 102, 241, 0.12);
+        color: var(--primary-color);
+        font-size: 18px;
+        line-height: 1;
+        white-space: nowrap;
+    }
+
+    .hr-panel #questionnaire-view .section-title-text {
+        min-width: 0;
+        overflow-wrap: break-word;
+        word-break: normal;
+    }
+}
+
+/* HR mobile polish fixes for oversized search controls and questionnaire overflow. */
+@media (max-width: 640px) {
+    .hr-panel .professor-search {
+        flex: none;
+        width: 100%;
+        min-width: 0;
+        min-height: 40px;
+        height: auto;
+        padding: 8px 10px;
+        align-items: center;
+    }
+
+    .hr-panel .professor-search input {
+        min-height: 24px;
+        padding: 0;
+    }
+
+    .hr-panel .activity-log-controls {
+        align-items: stretch;
+    }
+
+    .hr-panel .activity-log-controls .log-control,
+    .hr-panel .activity-log-controls .log-search {
+        flex: none;
+        width: 100%;
+        min-width: 0;
+    }
+
+    .hr-panel .activity-log-controls .btn-save {
+        margin-top: 0;
+    }
+
+    .hr-panel #questionnaire-view .question-section,
+    .hr-panel .question-item,
+    .hr-panel .question-content,
+    .hr-panel .question-header,
+    .hr-panel .question-preview,
+    .hr-panel .rating-preview,
+    .hr-panel .number-rating-preview,
+    .hr-panel .star-rating-preview {
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .hr-panel #questionnaire-view .question-section {
+        padding: 12px 8px;
+        overflow-x: hidden;
+    }
+
+    .hr-panel .question-item {
+        gap: 10px;
+        padding: 14px 10px;
+        overflow: hidden;
+    }
+
+    .hr-panel .question-content {
+        width: 100%;
+    }
+
+    .hr-panel .question-header {
+        gap: 8px;
+        margin-bottom: 10px;
+    }
+
+    .hr-panel .question-text,
+    .hr-panel #questionnaire-view .section-title,
+    .hr-panel #questionnaire-view .section-description,
+    .hr-panel .form-title-preview,
+    .hr-panel .form-description-preview {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+
+    .hr-panel .rating-preview {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        padding: 10px;
+        overflow: hidden;
+    }
+
+    .hr-panel .number-rating-preview,
+    .hr-panel .star-rating-preview {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .hr-panel .rating-num-box {
+        flex: 1 1 42px;
+        max-width: 54px;
+        height: 30px;
+    }
+
+    .hr-panel .rating-label {
+        display: block;
+        width: 100%;
+        font-size: 11px;
+        line-height: 1.35;
+        white-space: normal;
+    }
+
+    .hr-panel .required-badge {
+        flex: 0 0 auto;
+    }
+}
+
+@media (max-width: 1000px) and (orientation: landscape) {
+    .hr-panel .professor-search,
+    .hr-panel .activity-log-controls .log-search {
+        flex: none;
+        min-width: 0;
+    }
+
+    .hr-panel .activity-log-controls {
+        align-items: stretch;
+    }
+
+    .hr-panel .rating-preview {
+        flex-wrap: wrap;
+        gap: 8px;
+        overflow: hidden;
+    }
+
+    .hr-panel .number-rating-preview,
+    .hr-panel .star-rating-preview {
+        flex-wrap: wrap;
+    }
+
+    .hr-panel .rating-label,
+    .hr-panel .question-text,
+    .hr-panel #questionnaire-view .section-title,
+    .hr-panel #questionnaire-view .section-description {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        white-space: normal;
+    }
+}
+
+/* Final HR questionnaire mobile list override. */
+@media (max-width: 640px) {
+    .hr-panel #questionnaire-view #questions-list.questions-list {
+        display: flex;
+        flex-direction: column;
+        height: min(38vh, 300px);
+        min-height: 260px;
+        max-height: 300px;
+        gap: 0;
+        padding: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+        overscroll-behavior: contain;
+        scrollbar-gutter: stable;
+        border: 1px solid #dbe3ee;
+        border-radius: 14px;
+        background: #ffffff;
+        box-shadow: inset 0 0 0 1px rgba(248, 250, 252, 0.9);
+    }
+
+    .hr-panel #questionnaire-view #questions-list.questions-list > .question-section {
+        margin: 0;
+        padding: 12px;
+        border: 0;
+        border-bottom: 1px solid #e2e8f0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        overflow: visible;
+    }
+
+    .hr-panel #questionnaire-view #questions-list.questions-list > .question-section:last-child {
+        border-bottom: 0;
+    }
+
+    .hr-panel #questionnaire-view #questions-list.questions-list .question-section > .section-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        border: 0;
+    }
+
+    .hr-panel #questionnaire-view #questions-list.questions-list .section-title-group,
+    .hr-panel #questionnaire-view #questions-list.questions-list .section-title-content {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .hr-panel #questionnaire-view #questions-list.questions-list .section-title {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        margin: 0 0 6px;
+        font-size: 19px;
+        line-height: 1.2;
+        letter-spacing: 0;
+        overflow-wrap: normal;
+        word-break: normal;
+    }
+
+    .hr-panel #questionnaire-view #questions-list.questions-list .section-letter-inline {
+        display: inline-flex;
+        flex: 0 0 30px;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        margin: 0;
+        border-radius: 10px;
+        background: rgba(99, 102, 241, 0.12);
+        color: var(--primary-color);
+        font-size: 17px;
+        font-weight: 800;
+        line-height: 1;
+        white-space: nowrap;
+    }
+
+    .hr-panel #questionnaire-view #questions-list.questions-list .section-title-text {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow-wrap: break-word;
+        word-break: normal;
+    }
+
+    .hr-panel #questionnaire-view #questions-list.questions-list .section-description {
+        display: -webkit-box;
+        max-width: 100%;
+        margin: 0;
+        color: #475569;
+        font-size: 12px;
+        line-height: 1.4;
+        overflow: hidden;
+        overflow-wrap: break-word;
+        word-break: normal;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+    }
+
+    .hr-panel #questionnaire-view #questions-list.questions-list .question-section:focus-within .section-description {
+        display: block;
+        -webkit-line-clamp: unset;
+    }
+
+    .hr-panel #questionnaire-view #questions-list.questions-list .section-actions {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 6px;
+    }
+
+    .hr-panel #questionnaire-view #questions-list.questions-list .section-actions .action-btn {
+        width: 32px;
+        height: 30px;
+        border-radius: 8px;
+    }
+}
+
+@media (max-width: 1000px) and (orientation: landscape) {
+    .hr-panel #questionnaire-view #questions-list.questions-list {
+        height: min(50vh, 360px);
+        max-height: 360px;
+        gap: 0;
+        padding: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+        border: 1px solid #dbe3ee;
+        border-radius: 14px;
+        background: #ffffff;
+    }
+
+    .hr-panel #questionnaire-view #questions-list.questions-list > .question-section {
+        margin: 0;
+        border: 0;
+        border-bottom: 1px solid #e2e8f0;
+        border-radius: 0;
+        box-shadow: none;
     }
 }

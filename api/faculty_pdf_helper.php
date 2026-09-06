@@ -945,7 +945,7 @@ function facultyPdfCanAccessStoredFile(array $paper, string $actorRole, string $
             && ($status === 'sent' || $status === 'completed');
     }
 
-    if ($role === 'hr') {
+    if ($role === 'hr' || $role === 'vpaa') {
         return true;
     }
 

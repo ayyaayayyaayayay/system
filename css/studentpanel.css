@@ -951,6 +951,19 @@ body {
 }
 
 @media (max-width: 768px) {
+    .student-privacy-gate {
+        padding: 20px;
+    }
+
+    .student-privacy-gate__actions {
+        flex-direction: column-reverse;
+    }
+
+    .student-privacy-gate__actions .btn-cancel,
+    .student-privacy-gate__actions .btn-submit {
+        width: 100%;
+    }
+
     .history-modal {
         align-items: flex-start;
         padding: 12px;
@@ -1119,6 +1132,102 @@ body {
 
 .evaluation-draft-status.is-error {
     color: #991b1b;
+}
+
+.student-privacy-gate {
+    background: #ffffff;
+    border: 1px solid #dbe2ea;
+    border-radius: 12px;
+    box-shadow: 0 6px 20px rgba(15, 23, 42, 0.06);
+    margin-bottom: 24px;
+    padding: 28px;
+}
+
+.student-privacy-gate__header {
+    border-bottom: 1px solid #e5e7eb;
+    margin-bottom: 20px;
+    padding-bottom: 18px;
+}
+
+.student-privacy-gate__eyebrow {
+    color: #334155;
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+}
+
+.student-privacy-gate h2 {
+    color: #111827;
+    font-size: 24px;
+    line-height: 1.25;
+    margin: 0 0 10px 0;
+}
+
+.student-privacy-gate__header p,
+.student-privacy-gate__body p {
+    color: #4b5563;
+    font-size: 14px;
+    line-height: 1.7;
+    margin: 0;
+}
+
+.student-privacy-gate__body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.student-privacy-agreement {
+    align-items: flex-start;
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    color: #1f2937;
+    cursor: pointer;
+    display: flex;
+    gap: 12px;
+    line-height: 1.55;
+    margin-bottom: 12px;
+    padding: 14px 16px;
+}
+
+.student-privacy-agreement input {
+    flex: 0 0 auto;
+    height: 18px;
+    margin-top: 2px;
+    width: 18px;
+}
+
+.student-privacy-agreement span {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.student-privacy-gate__message {
+    color: #991b1b;
+    font-size: 13px;
+    min-height: 20px;
+    margin: 0 0 14px 0;
+}
+
+.student-privacy-gate__message.is-success {
+    color: #065f46;
+}
+
+.student-privacy-gate__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+.student-privacy-gate__actions .btn-cancel,
+.student-privacy-gate__actions .btn-submit {
+    min-height: 44px;
 }
 
 .evaluation-form .form-section {

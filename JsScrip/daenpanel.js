@@ -1359,6 +1359,7 @@ function redirectToLogin() {
 function initializeDashboard() {
     loadUserInfo();
     renderDeanAnnouncementPanels();
+    showDeanLoginAnnouncements();
     setupNavigation();
     setupLogout();
     setupMobileDrawer();
@@ -1383,6 +1384,13 @@ function initializeDashboard() {
     initializeReports();
     scheduleDeanViewportRefresh(120);
     setupDeanDataSync();
+}
+
+function showDeanLoginAnnouncements() {
+    if (!SharedData.showUnreadAnnouncementLoginPopup) return;
+    SharedData.showUnreadAnnouncementLoginPopup({
+        onDismiss: renderDeanAnnouncementPanels,
+    });
 }
 
 function setupDeanDataSync() {
@@ -3010,6 +3018,9 @@ function handlePeerEvaluation() {
     const session = SharedData.getSession() || {};
     const semesterId = getSupervisorSemesterId();
     const targetProfessorId = formData.get('peerProfessor') || '';
+    if (!ensureQuestionnairePrivacyConsentForSubmission('supervisor-to-professor', semesterId, form)) {
+        return;
+    }
     const evaluationKey = buildSupervisorEvaluationKey(session.username || '', semesterId, targetProfessorId);
     const payload = {
         evaluatorId: session.username || '',
@@ -3327,6 +3338,50 @@ function escapeHTML(str) {
             '"': '&quot;'
         }[tag] || tag)
     );
+}
+
+function ensureQuestionnairePrivacyConsentForSubmission(questionnaireType, semesterId, form) {
+    const notice = SharedData.getDataPrivacyConsentNotice
+        ? SharedData.getDataPrivacyConsentNotice(questionnaireType)
+        : null;
+    if (notice && notice.enabled === false) {
+        return true;
+    }
+
+    const version = String(notice && notice.version || '').trim();
+    if (
+        SharedData.hasStudentDataPrivacyConsent
+        && SharedData.hasStudentDataPrivacyConsent(semesterId, version, questionnaireType)
+    ) {
+        return true;
+    }
+
+    const paragraphs = Array.isArray(notice && notice.paragraphs) ? notice.paragraphs : [];
+    const message = [
+        String(notice && notice.title || 'Data Privacy Notice').trim(),
+        paragraphs.join('\n\n'),
+        String(notice && notice.agreementText || 'I have read and agree to the Data Privacy Notice for this questionnaire.').trim(),
+        'Select OK to agree and continue.'
+    ].filter(Boolean).join('\n\n');
+
+    if (!confirm(message)) {
+        showFormMessage(form, 'Please agree to the Data Privacy Notice before submitting this questionnaire.', 'error');
+        return false;
+    }
+
+    try {
+        if (!SharedData.recordStudentDataPrivacyConsent) {
+            throw new Error('Privacy consent saving is not available.');
+        }
+        SharedData.recordStudentDataPrivacyConsent({
+            semesterId: semesterId,
+            questionnaireType: questionnaireType
+        });
+        return true;
+    } catch (error) {
+        showFormMessage(form, error && error.message ? error.message : 'Privacy consent could not be saved. Please try again.', 'error');
+        return false;
+    }
 }
 
 /**

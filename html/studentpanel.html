@@ -8,7 +8,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="../design/favicon-32x32.png">
     <link rel="apple-touch-icon" href="../design/apple-touch-icon.png">
     <title>Student Dashboard - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/panel-theme.css?v=20260824a">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260904c">
     <link rel="stylesheet" href="../css/studentpanel.css?v=20260820b">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
@@ -251,8 +251,26 @@
             <!-- Evaluation Form View -->
             <div id="evaluationFormView" class="content-view" style="display: none;">
 
+                <div class="student-privacy-gate" id="studentDataPrivacyGate">
+                    <div class="student-privacy-gate__header">
+                        <span class="student-privacy-gate__eyebrow" id="studentPrivacyVersion">Privacy notice</span>
+                        <h2 id="studentPrivacyTitle">Student Data Privacy Notice</h2>
+                        <p id="studentPrivacyLead">Please review and agree before opening the professor questionnaire.</p>
+                    </div>
+                    <div class="student-privacy-gate__body" id="studentPrivacyBody"></div>
+                    <label class="student-privacy-agreement" for="studentPrivacyAgreement">
+                        <input type="checkbox" id="studentPrivacyAgreement">
+                        <span id="studentPrivacyAgreementText">I have read and agree to the Student Data Privacy Notice for the professor evaluation questionnaire.</span>
+                    </label>
+                    <p class="student-privacy-gate__message" id="studentPrivacyMessage" aria-live="polite"></p>
+                    <div class="student-privacy-gate__actions">
+                        <button type="button" class="btn-cancel" id="studentPrivacyBackBtn">Back to Dashboard</button>
+                        <button type="button" class="btn-submit" id="studentPrivacyContinueBtn" disabled>Agree and Continue</button>
+                    </div>
+                </div>
+
                 <!-- Form Card -->
-                <div class="form-card">
+                <div class="form-card" id="studentQuestionnaireCard">
                     <div class="form-header" id="dynamic-form-header">
                         <h2 id="dynamic-form-title">Student Professor Evaluation Form</h2>
                         <p id="dynamic-form-description">Please rate your Professor honestly and constructively. Your
@@ -502,9 +520,9 @@
             <div class="history-modal-body" id="historyModalBody"></div>
         </div>
     </div>
-    <script src="../JsScrip/db-data.js?v=20260821a"></script>
+    <script src="../JsScrip/db-data.js?v=20260904c"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
-    <script src="../JsScrip/studentpanel.js?v=20260821a"></script>
+    <script src="../JsScrip/studentpanel.js?v=20260904c"></script>
 </body>
 
 </html>

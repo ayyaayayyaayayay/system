@@ -44,7 +44,7 @@ if (strtolower(trim((string) ($sessionUser['status'] ?? 'active'))) === 'inactiv
 
 $actorRole = strtolower(trim((string) ($sessionUser['role'] ?? '')));
 $actorUserId = trim((string) ($sessionUser['id'] ?? ''));
-if (!in_array($actorRole, ['professor', 'dean', 'procoor', 'hr'], true)) {
+if (!in_array($actorRole, ['professor', 'dean', 'procoor', 'hr', 'vpaa'], true)) {
     sendFileJsonError('Permission denied.', 403);
 }
 

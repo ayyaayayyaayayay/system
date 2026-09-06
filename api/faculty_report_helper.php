@@ -45,6 +45,11 @@ function facultyReportGetRequiredPayloadString(array $payload, string $key, call
 
 function facultyReportRequireAuthorizedUser(PDO $pdo, callable $sendError): array
 {
+    return facultyReportRequireAuthorizedUserForRoles($pdo, $sendError, ['dean', 'procoor', 'hr', 'vpaa']);
+}
+
+function facultyReportRequireAuthorizedUserForRoles(PDO $pdo, callable $sendError, array $allowedRoles): array
+{
     $session = requireNaapAuthenticatedSession($pdo);
     $sessionUser = buildUserSnapshotById($pdo, $session['userId'], false);
     if (!$sessionUser) {
@@ -58,7 +63,10 @@ function facultyReportRequireAuthorizedUser(PDO $pdo, callable $sendError): arra
     }
 
     $role = strtolower(trim((string)($sessionUser['role'] ?? '')));
-    if (!in_array($role, ['dean', 'procoor', 'hr'], true)) {
+    $normalizedAllowedRoles = array_map(static function ($allowedRole) {
+        return strtolower(trim((string)$allowedRole));
+    }, $allowedRoles);
+    if (!in_array($role, $normalizedAllowedRoles, true)) {
         facultyReportSendJsonError($sendError, 'Permission denied.', 403);
     }
 
@@ -94,7 +102,7 @@ function facultyReportResolveEvaluationType(array $evaluation): string
     if ($token === 'peer' || $token === 'professor' || $token === 'professor-to-professor' || $token === 'professor-professor') {
         return 'professor';
     }
-    if ($token === 'supervisor' || $token === 'dean' || $token === 'procoor' || $token === 'supervisor-to-professor') {
+    if ($token === 'supervisor' || $token === 'dean' || $token === 'procoor' || $token === 'hr' || $token === 'vpaa' || $token === 'supervisor-to-professor' || $token === 'supervisor-professor') {
         return 'supervisor';
     }
     return '';
@@ -563,7 +571,7 @@ function facultyReportResolveRequestContext(PDO $pdo, array $payload, array $ses
 
     $actorRole = strtolower(trim((string)($sessionUser['role'] ?? '')));
     if (
-        $actorRole !== 'hr'
+        !in_array($actorRole, ['hr', 'vpaa'], true)
         && strtolower(trim((string)($professor['status'] ?? 'active'))) === 'inactive'
     ) {
         facultyReportSendJsonError($sendError, 'Professor account is inactive.', 404);
@@ -676,4 +684,275 @@ function facultyReportBuildIferPaperDataFromPayload(
     $context['load_label'] = facultyReportGetLoadTypeLabel($loadType);
 
     return $context;
+}
+
+function facultyReportResolveOverallSasrSemesterLabel(PDO $pdo, string $semesterId, callable $sendError): string
+{
+    foreach (buildSemesterListSnapshot($pdo) as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        if (trim((string)($item['value'] ?? '')) !== $semesterId) {
+            continue;
+        }
+        $label = trim((string)($item['label'] ?? ''));
+        return $label !== '' ? $label : $semesterId;
+    }
+
+    facultyReportSendJsonError($sendError, 'Invalid semester selected.', 404);
+}
+
+function facultyReportNormalizeOverallSasrCampus($value): string
+{
+    $campus = strtolower(trim((string)$value));
+    return $campus === 'all' ? '' : $campus;
+}
+
+function facultyReportResolveOverallSasrCampusLabel(PDO $pdo, string $campusSlug, callable $sendError): string
+{
+    if ($campusSlug === '') {
+        return 'All Campuses';
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT name
+         FROM campuses
+         WHERE LOWER(slug) = :campus_slug
+         LIMIT 1'
+    );
+    $stmt->execute([':campus_slug' => $campusSlug]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        facultyReportSendJsonError($sendError, 'Invalid campus selected.', 404);
+    }
+
+    $name = trim((string)($row['name'] ?? ''));
+    return $name !== '' ? $name : strtoupper($campusSlug);
+}
+
+function facultyReportResolveOverallSasrScope(PDO $pdo, array $payload, string $campusSlug, callable $sendError): array
+{
+    $scopeType = strtolower(trim((string)($payload['scope_type'] ?? $payload['scopeType'] ?? 'department')));
+    if (!in_array($scopeType, ['department', 'program'], true)) {
+        facultyReportSendJsonError($sendError, 'Invalid scope type selected.', 400);
+    }
+
+    if ($scopeType === 'department') {
+        $departmentCode = strtoupper(trim((string)($payload['department_code'] ?? $payload['departmentCode'] ?? '')));
+        if ($departmentCode === '' || $departmentCode === 'ALL') {
+            facultyReportSendJsonError($sendError, 'Department is required.', 400);
+        }
+
+        $sql = 'SELECT d.code, d.name
+                FROM departments d
+                JOIN campuses c ON c.id = d.campus_id
+                WHERE UPPER(d.code) = :department_code';
+        $params = [':department_code' => $departmentCode];
+        if ($campusSlug !== '') {
+            $sql .= ' AND LOWER(c.slug) = :campus_slug';
+            $params[':campus_slug'] = $campusSlug;
+        }
+        $sql .= ' ORDER BY c.slug ASC, d.code ASC LIMIT 1';
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $row = $stmt->fetch();
+        if (!$row) {
+            facultyReportSendJsonError($sendError, 'Invalid department selected.', 404);
+        }
+
+        $labelName = trim((string)($row['name'] ?? ''));
+        return [
+            'scope_type' => 'department',
+            'department_code' => $departmentCode,
+            'program_id' => null,
+            'scope_label' => $labelName !== '' && strcasecmp($labelName, $departmentCode) !== 0
+                ? 'Department ' . $departmentCode . ' - ' . $labelName
+                : 'Department ' . $departmentCode,
+            'filename_scope' => 'department-' . $departmentCode,
+        ];
+    }
+
+    $programId = (int)($payload['program_id'] ?? $payload['programId'] ?? 0);
+    if ($programId <= 0) {
+        facultyReportSendJsonError($sendError, 'Program is required.', 400);
+    }
+
+    $sql = 'SELECT
+                p.id,
+                p.code AS program_code,
+                p.name AS program_name,
+                d.code AS department_code,
+                c.slug AS campus_slug,
+                c.name AS campus_name
+            FROM programs p
+            JOIN departments d ON d.id = p.department_id
+            JOIN campuses c ON c.id = d.campus_id
+            WHERE p.id = :program_id';
+    $params = [':program_id' => $programId];
+    if ($campusSlug !== '') {
+        $sql .= ' AND LOWER(c.slug) = :campus_slug';
+        $params[':campus_slug'] = $campusSlug;
+    }
+    $sql .= ' LIMIT 1';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $row = $stmt->fetch();
+    if (!$row) {
+        facultyReportSendJsonError($sendError, 'Invalid program selected.', 404);
+    }
+
+    $programCode = strtoupper(trim((string)($row['program_code'] ?? '')));
+    $programName = trim((string)($row['program_name'] ?? ''));
+    $departmentCode = strtoupper(trim((string)($row['department_code'] ?? '')));
+    $programCampusSlug = strtolower(trim((string)($row['campus_slug'] ?? '')));
+    $programCampusName = trim((string)($row['campus_name'] ?? ''));
+
+    return [
+        'scope_type' => 'program',
+        'department_code' => $departmentCode,
+        'program_id' => $programId,
+        'scope_label' => $programName !== '' && strcasecmp($programName, $programCode) !== 0
+            ? 'Program ' . $programCode . ' - ' . $programName
+            : 'Program ' . $programCode,
+        'filename_scope' => 'program-' . $programCode,
+        'scope_campus_slug' => $programCampusSlug,
+        'scope_campus_label' => $programCampusName !== '' ? $programCampusName : strtoupper($programCampusSlug),
+    ];
+}
+
+function facultyReportFetchOverallSasrProfessors(PDO $pdo, string $campusSlug, array $scope): array
+{
+    $sql = 'SELECT
+                u.id,
+                u.name,
+                u.status,
+                c.slug AS campus_slug,
+                d.code AS department_code,
+                sp.employee_id,
+                sp.position,
+                p.id AS program_id,
+                p.code AS program_code,
+                p.name AS program_name
+            FROM users u
+            JOIN roles r ON r.id = u.role_id
+            JOIN campuses c ON c.id = u.campus_id
+            LEFT JOIN departments d ON d.id = u.department_id
+            LEFT JOIN staff_profiles sp ON sp.user_id = u.id
+            LEFT JOIN programs p ON p.id = sp.program_id
+            WHERE r.code = :role_code
+              AND LOWER(TRIM(COALESCE(u.status, \'active\'))) = \'active\'';
+    $params = [':role_code' => 'professor'];
+
+    if ($campusSlug !== '') {
+        $sql .= ' AND LOWER(c.slug) = :campus_slug';
+        $params[':campus_slug'] = $campusSlug;
+    }
+
+    if (($scope['scope_type'] ?? '') === 'program') {
+        $sql .= ' AND p.id = :program_id';
+        $params[':program_id'] = (int)($scope['program_id'] ?? 0);
+    } else {
+        $sql .= ' AND UPPER(COALESCE(d.code, \'\')) = :department_code';
+        $params[':department_code'] = strtoupper(trim((string)($scope['department_code'] ?? '')));
+    }
+
+    $sql .= ' ORDER BY c.slug ASC, d.code ASC, p.code ASC, u.name ASC';
+
+    $stmt = $pdo->prepare($sql);
+    foreach ($params as $key => $value) {
+        $stmt->bindValue($key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+    }
+    $stmt->execute();
+
+    $professors = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $departmentCode = strtoupper(trim((string)($row['department_code'] ?? '')));
+        $programCode = strtoupper(trim((string)($row['program_code'] ?? '')));
+        $professors[] = [
+            'id' => 'u' . (int)($row['id'] ?? 0),
+            'name' => trim((string)($row['name'] ?? '')),
+            'role' => 'professor',
+            'campus' => trim((string)($row['campus_slug'] ?? '')),
+            'department' => $departmentCode,
+            'institute' => $departmentCode,
+            'employeeId' => trim((string)($row['employee_id'] ?? '')),
+            'position' => trim((string)($row['position'] ?? '')),
+            'programCode' => $programCode,
+            'programName' => trim((string)($row['program_name'] ?? '')),
+            'status' => trim((string)($row['status'] ?? 'active')) ?: 'active',
+        ];
+    }
+
+    return $professors;
+}
+
+function facultyReportFormatOverallSasrDepartmentProgram(array $professor): string
+{
+    $department = strtoupper(trim((string)($professor['department'] ?? $professor['institute'] ?? '')));
+    $program = strtoupper(trim((string)($professor['programCode'] ?? $professor['program'] ?? '')));
+
+    if ($department !== '' && $program !== '') {
+        return $department . ' / ' . $program;
+    }
+    if ($department !== '') {
+        return $department;
+    }
+    if ($program !== '') {
+        return $program;
+    }
+    return 'UNASSIGNED';
+}
+
+function facultyReportBuildOverallSasrDataFromPayload(
+    PDO $pdo,
+    array $payload,
+    array $sessionUser,
+    callable $sendError
+): array {
+    $semesterId = facultyReportGetRequiredPayloadString($payload, 'semester_id', $sendError);
+    $semesterLabel = facultyReportResolveOverallSasrSemesterLabel($pdo, $semesterId, $sendError);
+    $loadType = facultyReportNormalizeLoadType($payload['load_type'] ?? $payload['loadType'] ?? 'main');
+    $campusSlug = facultyReportNormalizeOverallSasrCampus($payload['campus_slug'] ?? $payload['campusSlug'] ?? 'all');
+    $campusLabel = facultyReportResolveOverallSasrCampusLabel($pdo, $campusSlug, $sendError);
+    $scope = facultyReportResolveOverallSasrScope($pdo, $payload, $campusSlug, $sendError);
+    if ($campusSlug === '' && ($scope['scope_type'] ?? '') === 'program' && trim((string)($scope['scope_campus_label'] ?? '')) !== '') {
+        $campusLabel = trim((string)$scope['scope_campus_label']);
+    }
+    $professors = facultyReportFetchOverallSasrProfessors($pdo, $campusSlug, $scope);
+
+    $rows = [];
+    foreach ($professors as $index => $professor) {
+        $professorUserId = trim((string)($professor['id'] ?? ''));
+        $setSummary = facultyReportBuildSetSummaryRows($pdo, $professorUserId, $semesterId, $loadType);
+        $totalStudents = (int)($setSummary['total_students'] ?? 0);
+        $totalWeightedScore = (float)($setSummary['total_weighted_score'] ?? 0);
+        $setRating = $totalStudents > 0 ? ($totalWeightedScore / $totalStudents) : 0.0;
+        $sefRating = facultyReportBuildSefRating($pdo, $professor, $semesterId);
+
+        $rows[] = [
+            'seq' => $index + 1,
+            'employee_id' => trim((string)($professor['employeeId'] ?? '')),
+            'faculty_name' => trim((string)($professor['name'] ?? 'Professor')),
+            'department_program' => facultyReportFormatOverallSasrDepartmentProgram($professor),
+            'set_rating' => $setRating,
+            'sef_rating' => $sefRating,
+        ];
+    }
+
+    return [
+        'semester_id' => $semesterId,
+        'semester_label' => $semesterLabel,
+        'load_type' => $loadType,
+        'load_label' => facultyReportGetLoadTypeLabel($loadType),
+        'campus_slug' => $campusSlug === '' ? 'all' : $campusSlug,
+        'campus_label' => $campusLabel,
+        'scope_type' => $scope['scope_type'],
+        'scope_label' => $scope['scope_label'],
+        'filename_scope' => $scope['filename_scope'],
+        'generated_date' => facultyReportBuildFormattedDate(),
+        'generated_by' => trim((string)($sessionUser['name'] ?? '')),
+        'rows' => $rows,
+    ];
 }

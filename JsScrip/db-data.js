@@ -808,6 +808,7 @@ const SharedData = (() => {
         SEMESTER_LIST: 'sharedSemesterList',
         EVALUATIONS: 'sharedEvaluations',
         STUDENT_EVAL_DRAFTS: 'studentEvaluationDrafts',
+        STUDENT_DATA_PRIVACY_CONSENTS: 'studentDataPrivacyConsents',
         OSA_STUDENT_CLEARANCES: 'osaStudentClearances',
         STUDENT_EVAL_PROOF_REQUESTS: 'studentEvaluationProofRequests',
         SUBJECT_MANAGEMENT: 'subjectManagement',
@@ -825,6 +826,18 @@ const SharedData = (() => {
     const SESSION_HEARTBEAT_INTERVAL_MS = 60000;
     const SESSION_HEARTBEAT_CHECK_MS = 15000;
     const SESSION_IDLE_WINDOW_MS = 5 * 60 * 1000;
+    const ANNOUNCEMENT_ALLOWED_ROLES = ['admin', 'hr', 'vpaa', 'osa', 'dean', 'procoor', 'professor', 'student'];
+    const ANNOUNCEMENT_ROLE_LABELS = {
+        admin: 'Administrator',
+        hr: 'HR Staff',
+        vpaa: 'VPAA',
+        osa: 'OSA',
+        dean: 'Dean',
+        procoor: 'Program Coordinator',
+        professor: 'Professor',
+        student: 'Student',
+    };
+    const announcementPopupShownIds = new Set();
 
     const state = {
         users: [],
@@ -849,6 +862,9 @@ const SharedData = (() => {
         semesterList: [],
         evaluations: [],
         studentEvaluationDrafts: [],
+        studentDataPrivacyConsents: [],
+        dataPrivacyConsentNotice: null,
+        dataPrivacyConsentNotices: {},
         osaStudentClearances: [],
         studentEvaluationProofRequests: [],
         subjectManagement: {
@@ -1403,12 +1419,19 @@ const SharedData = (() => {
         state.currentSemester = snapshot.currentSemester || '';
         state.questionnaires = snapshot.questionnaires || {};
         state.activityLog = Array.isArray(snapshot.activityLog) ? snapshot.activityLog : [];
-        state.announcements = Array.isArray(snapshot.announcements) ? snapshot.announcements : [];
+        state.announcements = normalizeAnnouncementList(snapshot.announcements);
         state.settings = Object.assign({}, state.settings, snapshot.settings || {});
         state.evalPeriods = Object.assign({}, state.evalPeriods, snapshot.evalPeriods || {});
         state.semesterList = Array.isArray(snapshot.semesterList) ? snapshot.semesterList : [];
         state.evaluations = Array.isArray(snapshot.evaluations) ? snapshot.evaluations : [];
         state.studentEvaluationDrafts = Array.isArray(snapshot.studentEvaluationDrafts) ? snapshot.studentEvaluationDrafts : [];
+        state.studentDataPrivacyConsents = Array.isArray(snapshot.studentDataPrivacyConsents) ? snapshot.studentDataPrivacyConsents : [];
+        state.dataPrivacyConsentNotice = snapshot.dataPrivacyConsentNotice && typeof snapshot.dataPrivacyConsentNotice === 'object'
+            ? snapshot.dataPrivacyConsentNotice
+            : null;
+        state.dataPrivacyConsentNotices = snapshot.dataPrivacyConsentNotices && typeof snapshot.dataPrivacyConsentNotices === 'object'
+            ? snapshot.dataPrivacyConsentNotices
+            : {};
         state.osaStudentClearances = Array.isArray(snapshot.osaStudentClearances) ? snapshot.osaStudentClearances : [];
         state.studentEvaluationProofRequests = Array.isArray(snapshot.studentEvaluationProofRequests) ? snapshot.studentEvaluationProofRequests : [];
         const subjectManagement = snapshot.subjectManagement || {};
@@ -1966,6 +1989,12 @@ const SharedData = (() => {
             const response = syncRequest('POST', 'setQuestionnaires', { data: state.questionnaires });
             if (response && response.success && response.questionnaires) {
                 state.questionnaires = response.questionnaires || {};
+                if (response.dataPrivacyConsentNotice && typeof response.dataPrivacyConsentNotice === 'object') {
+                    state.dataPrivacyConsentNotice = response.dataPrivacyConsentNotice;
+                }
+                if (response.dataPrivacyConsentNotices && typeof response.dataPrivacyConsentNotices === 'object') {
+                    state.dataPrivacyConsentNotices = response.dataPrivacyConsentNotices;
+                }
                 dispatchChange(KEYS.QUESTIONNAIRES, deepClone(state.questionnaires));
             }
             return deepClone(state.questionnaires);
@@ -2068,6 +2097,71 @@ const SharedData = (() => {
             state.studentEvaluationDrafts = response.studentEvaluationDrafts;
             dispatchChange(KEYS.STUDENT_EVAL_DRAFTS, deepClone(state.studentEvaluationDrafts));
         }
+        return response || {};
+    }
+
+    function getDataPrivacyConsentNotice(questionnaireType) {
+        bootstrap();
+        const typeToken = String(questionnaireType || '').trim();
+        if (typeToken && state.dataPrivacyConsentNotices && state.dataPrivacyConsentNotices[typeToken]) {
+            return deepClone(state.dataPrivacyConsentNotices[typeToken] || {});
+        }
+        return deepClone(state.dataPrivacyConsentNotice || {});
+    }
+
+    function getStudentDataPrivacyConsents() {
+        bootstrap();
+        return deepClone(state.studentDataPrivacyConsents || []);
+    }
+
+    function hasStudentDataPrivacyConsent(semesterId, consentVersion, questionnaireType) {
+        bootstrap();
+        const semesterToken = String(semesterId || state.currentSemester || '').trim().toLowerCase();
+        const typeToken = String(questionnaireType || 'student-to-professor').trim();
+        const notice = typeToken && state.dataPrivacyConsentNotices && state.dataPrivacyConsentNotices[typeToken]
+            ? state.dataPrivacyConsentNotices[typeToken]
+            : (state.dataPrivacyConsentNotice || {});
+        if (notice && notice.enabled === false) {
+            return true;
+        }
+        const versionToken = String(consentVersion || notice.version || '').trim().toLowerCase();
+        if (!semesterToken || !versionToken) {
+            return false;
+        }
+
+        return (state.studentDataPrivacyConsents || []).some(function (row) {
+            if (!row) return false;
+            return String(row.semesterId || '').trim().toLowerCase() === semesterToken
+                && String(row.questionnaireType || 'student-to-professor').trim().toLowerCase() === typeToken.toLowerCase()
+                && String(row.consentVersion || '').trim().toLowerCase() === versionToken;
+        });
+    }
+
+    function recordStudentDataPrivacyConsent(payload) {
+        bootstrap();
+        const response = syncRequest('POST', 'recordStudentDataPrivacyConsent', payload || {});
+        if (Array.isArray(response && response.studentDataPrivacyConsents)) {
+            state.studentDataPrivacyConsents = response.studentDataPrivacyConsents;
+        } else if (response && response.consent) {
+            const next = Array.isArray(state.studentDataPrivacyConsents) ? [...state.studentDataPrivacyConsents] : [];
+            const consent = response.consent;
+            const semesterToken = String(consent.semesterId || '').trim().toLowerCase();
+            const typeToken = String(consent.questionnaireType || 'student-to-professor').trim().toLowerCase();
+            const versionToken = String(consent.consentVersion || '').trim().toLowerCase();
+            const index = next.findIndex(function (row) {
+                return row
+                    && String(row.semesterId || '').trim().toLowerCase() === semesterToken
+                    && String(row.questionnaireType || 'student-to-professor').trim().toLowerCase() === typeToken
+                    && String(row.consentVersion || '').trim().toLowerCase() === versionToken;
+            });
+            if (index >= 0) {
+                next[index] = consent;
+            } else {
+                next.push(consent);
+            }
+            state.studentDataPrivacyConsents = next;
+        }
+        dispatchChange(KEYS.STUDENT_DATA_PRIVACY_CONSENTS, deepClone(state.studentDataPrivacyConsents));
         return response || {};
     }
 
@@ -2481,6 +2575,14 @@ const SharedData = (() => {
         return String(value == null ? '' : value).trim().toLowerCase();
     }
 
+    function normalizeAnnouncementRole(value) {
+        const role = normalizeAnnouncementToken(value);
+        if (!role || role === 'all' || role === 'all-users' || role === 'all_users') {
+            return '';
+        }
+        return ANNOUNCEMENT_ALLOWED_ROLES.includes(role) ? role : role;
+    }
+
     function normalizeAnnouncementUserId(value) {
         const raw = normalizeAnnouncementToken(value);
         if (!raw) return '';
@@ -2489,9 +2591,21 @@ const SharedData = (() => {
         return raw;
     }
 
+    function normalizeAnnouncementReadBy(input) {
+        const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+        const readBy = {};
+        Object.keys(source).forEach(function (key) {
+            const normalizedKey = normalizeAnnouncementToken(key);
+            if (!normalizedKey) return;
+            const timestamp = String(source[key] || '').trim();
+            readBy[normalizedKey] = timestamp || getNowIsoString();
+        });
+        return readBy;
+    }
+
     function normalizeAnnouncementAudience(input) {
         const source = input && typeof input === 'object' ? input : {};
-        const role = normalizeAnnouncementToken(source.role || source.targetRole || '');
+        const role = normalizeAnnouncementRole(source.role || source.targetRole || '');
         const campus = normalizeAnnouncementToken(source.campus || source.campusSlug || '');
         const programCode = normalizeAnnouncementToken(source.programCode || source.program || '');
         const studentCompletionRaw = normalizeAnnouncementToken(
@@ -2502,11 +2616,40 @@ const SharedData = (() => {
             : 'all';
 
         return {
-            role: role === 'all' ? '' : role,
+            role: role,
             campus: campus === 'all' ? '' : campus,
             programCode: programCode === 'all' ? '' : programCode,
             studentCompletion: studentCompletion,
         };
+    }
+
+    function normalizeAnnouncementEntry(input, index) {
+        const source = input && typeof input === 'object' ? input : {};
+        const nowIso = getNowIsoString();
+        const createdAt = String(source.createdAt || source.timestamp || nowIso).trim() || nowIso;
+        const id = String(source.id || ('ANN-' + Date.now() + '-' + (Number(index) || 0))).trim();
+        const audienceSource = source.audience && typeof source.audience === 'object' ? source.audience : source;
+
+        return Object.assign({}, source, {
+            id: id,
+            title: String(source.title || '').trim() || 'Announcement',
+            message: String(source.message || '').trim() || 'No details available.',
+            timestamp: createdAt,
+            createdAt: createdAt,
+            createdByRole: normalizeAnnouncementToken(source.createdByRole || ''),
+            createdByUserId: String(source.createdByUserId || '').trim(),
+            audience: normalizeAnnouncementAudience(audienceSource),
+            read: !!source.read,
+            readBy: normalizeAnnouncementReadBy(source.readBy || {}),
+        });
+    }
+
+    function normalizeAnnouncementList(items) {
+        return (Array.isArray(items) ? items : [])
+            .map(function (item, index) {
+                return normalizeAnnouncementEntry(item, index);
+            })
+            .slice(0, 50);
     }
 
     function resolveCurrentUserFromSession(users, session) {
@@ -2588,6 +2731,32 @@ const SharedData = (() => {
         add(session && session.username, false);
 
         return tokens;
+    }
+
+    function getAnnouncementCurrentUserKey(context) {
+        const cfg = context && typeof context === 'object' ? context : {};
+        const session = cfg.session || getSession() || {};
+        const currentUser = cfg.currentUser || resolveCurrentUserFromSession(state.users || [], session);
+        const userId = normalizeAnnouncementUserId((currentUser && currentUser.id) || session.userId);
+        if (userId) return userId;
+
+        const email = normalizeAnnouncementToken((currentUser && currentUser.email) || session.email);
+        if (email) return 'email:' + email;
+
+        return '';
+    }
+
+    function isAnnouncementReadForUser(announcement, userKey) {
+        const key = normalizeAnnouncementToken(userKey);
+        if (!key) return false;
+        const readBy = normalizeAnnouncementReadBy(announcement && announcement.readBy);
+        return Object.prototype.hasOwnProperty.call(readBy, key);
+    }
+
+    function decorateAnnouncementForUser(announcement, userKey) {
+        const entry = normalizeAnnouncementEntry(announcement, 0);
+        entry.read = isAnnouncementReadForUser(entry, userKey);
+        return entry;
     }
 
     function isAnnouncementStudentEvaluationRecord(evaluation) {
@@ -2721,7 +2890,8 @@ const SharedData = (() => {
 
     function getAnnouncements() {
         bootstrap();
-        return state.announcements || [];
+        state.announcements = normalizeAnnouncementList(state.announcements || []);
+        return deepClone(state.announcements);
     }
 
     function getAnnouncementsForCurrentUser(options) {
@@ -2735,10 +2905,14 @@ const SharedData = (() => {
             currentUser: currentUser,
             semesterId: cfg.semesterId || state.currentSemester || '',
         };
+        const userKey = getAnnouncementCurrentUserKey(context);
 
+        state.announcements = normalizeAnnouncementList(state.announcements || []);
         const announcements = Array.isArray(state.announcements) ? state.announcements : [];
         const visible = announcements.filter(function (item) {
             return announcementMatchesCurrentUser(item, context);
+        }).map(function (item) {
+            return decorateAnnouncementForUser(item, userKey);
         });
 
         const limit = Number(cfg.limit);
@@ -2749,9 +2923,20 @@ const SharedData = (() => {
         return deepClone(visible);
     }
 
+    function getUnreadAnnouncementsForCurrentUser(options) {
+        const visible = getAnnouncementsForCurrentUser(options);
+        return visible.filter(function (announcement) {
+            return !announcement.read;
+        });
+    }
+
     function persistAnnouncements() {
         try {
-            syncRequest('POST', 'setAnnouncements', { announcements: state.announcements });
+            state.announcements = normalizeAnnouncementList(state.announcements || []);
+            const response = syncRequest('POST', 'setAnnouncements', { announcements: state.announcements });
+            if (response && Array.isArray(response.announcements)) {
+                state.announcements = normalizeAnnouncementList(response.announcements);
+            }
             dispatchChange(KEYS.ANNOUNCEMENTS, deepClone(state.announcements));
         } catch (error) {
             console.error('[DBData] Failed to persist announcements.', error);
@@ -2776,36 +2961,188 @@ const SharedData = (() => {
             },
             read: false,
         }, announcement || {});
+        entry.readBy = normalizeAnnouncementReadBy(entry.readBy || {});
         entry.createdAt = String(entry.createdAt || entry.timestamp || nowIso);
         entry.timestamp = entry.createdAt;
         entry.createdByRole = normalizeAnnouncementToken(entry.createdByRole || session.role || '');
         entry.createdByUserId = String(entry.createdByUserId || session.userId || '').trim();
         entry.audience = normalizeAnnouncementAudience(entry.audience || {});
-        state.announcements.unshift(entry);
+        const normalizedEntry = normalizeAnnouncementEntry(entry, 0);
+        state.announcements.unshift(normalizedEntry);
         if (state.announcements.length > 50) {
             state.announcements.length = 50;
         }
         persistAnnouncements();
-        return entry;
+        return deepClone(normalizedEntry);
+    }
+
+    function markAnnouncementsRead(ids) {
+        bootstrap();
+        const targetIds = (Array.isArray(ids) ? ids : [ids])
+            .map(function (id) { return String(id || '').trim(); })
+            .filter(Boolean);
+        if (!targetIds.length) {
+            return getAnnouncementsForCurrentUser();
+        }
+
+        const userKey = getAnnouncementCurrentUserKey();
+        if (!userKey) {
+            return getAnnouncementsForCurrentUser();
+        }
+
+        const targetIdSet = new Set(targetIds);
+        const nowIso = getNowIsoString();
+        state.announcements = normalizeAnnouncementList(state.announcements || []);
+        state.announcements.forEach(function (announcement) {
+            if (!targetIdSet.has(String(announcement.id || '').trim())) return;
+            announcement.readBy = normalizeAnnouncementReadBy(announcement.readBy || {});
+            announcement.readBy[userKey] = announcement.readBy[userKey] || nowIso;
+        });
+
+        try {
+            const response = syncRequest('POST', 'markAnnouncementsRead', { ids: targetIds });
+            if (response && Array.isArray(response.announcements)) {
+                state.announcements = normalizeAnnouncementList(response.announcements);
+            }
+        } catch (error) {
+            console.error('[DBData] Failed to mark announcements read.', error);
+        }
+
+        dispatchChange(KEYS.ANNOUNCEMENTS, deepClone(state.announcements));
+        return getAnnouncementsForCurrentUser();
     }
 
     function markAnnouncementRead(id) {
-        bootstrap();
-        const item = state.announcements.find(function (announcement) {
-            return announcement.id === id;
-        });
-        if (item) {
-            item.read = true;
-            persistAnnouncements();
-        }
+        return markAnnouncementsRead([id]);
     }
 
     function getUnreadAnnouncementCount() {
         bootstrap();
-        const visibleAnnouncements = getAnnouncementsForCurrentUser();
-        return visibleAnnouncements.filter(function (announcement) {
-            return !announcement.read;
-        }).length;
+        return getUnreadAnnouncementsForCurrentUser().length;
+    }
+
+    function escapeAnnouncementHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function formatAnnouncementDateLabel(value) {
+        const raw = String(value || '').trim();
+        if (!raw) return 'Recent update';
+        const parsed = new Date(raw);
+        if (Number.isNaN(parsed.getTime())) return raw;
+        return formatDateTimeInPhilippines(parsed);
+    }
+
+    function ensureAnnouncementLoginModal() {
+        if (typeof document === 'undefined') return null;
+        let modal = document.getElementById('naap-announcement-login-modal');
+        if (modal) return modal;
+
+        modal = document.createElement('div');
+        modal.id = 'naap-announcement-login-modal';
+        modal.className = 'naap-announcement-login-modal';
+        modal.hidden = true;
+        modal.innerHTML = `
+            <div class="naap-announcement-login-dialog" role="dialog" aria-modal="true" aria-labelledby="naapAnnouncementLoginTitle">
+                <div class="naap-announcement-login-header">
+                    <div class="naap-announcement-login-title-wrap">
+                        <span class="naap-announcement-login-icon" aria-hidden="true">
+                            <i class="fas fa-bullhorn"></i>
+                        </span>
+                        <div>
+                            <h2 id="naapAnnouncementLoginTitle">Announcements</h2>
+                            <p>Important updates for your account.</p>
+                        </div>
+                    </div>
+                    <button type="button" class="naap-announcement-login-close" aria-label="Dismiss announcements">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="naap-announcement-login-list"></div>
+                <div class="naap-announcement-login-actions">
+                    <button type="button" class="naap-announcement-login-dismiss">Dismiss</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        const dismiss = function () {
+            if (typeof modal.__announcementDismiss === 'function') {
+                modal.__announcementDismiss();
+            }
+        };
+        const closeBtn = modal.querySelector('.naap-announcement-login-close');
+        const dismissBtn = modal.querySelector('.naap-announcement-login-dismiss');
+        if (closeBtn) closeBtn.addEventListener('click', dismiss);
+        if (dismissBtn) dismissBtn.addEventListener('click', dismiss);
+        modal.addEventListener('click', function (event) {
+            if (event.target === modal) dismiss();
+        });
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape' && !modal.hidden) dismiss();
+        });
+
+        return modal;
+    }
+
+    function showUnreadAnnouncementLoginPopup(options) {
+        bootstrap();
+        if (typeof document === 'undefined' || !document.body) return [];
+
+        const cfg = options && typeof options === 'object' ? options : {};
+        const unread = getUnreadAnnouncementsForCurrentUser({ limit: cfg.limit || 20 })
+            .filter(function (announcement) {
+                const id = String(announcement && announcement.id || '').trim();
+                return id && !announcementPopupShownIds.has(id);
+            });
+        if (!unread.length) return [];
+
+        unread.forEach(function (announcement) {
+            announcementPopupShownIds.add(String(announcement.id || '').trim());
+        });
+
+        const modal = ensureAnnouncementLoginModal();
+        if (!modal) return [];
+
+        const list = modal.querySelector('.naap-announcement-login-list');
+        const ids = unread.map(function (announcement) {
+            return String(announcement.id || '').trim();
+        }).filter(Boolean);
+
+        if (list) {
+            list.innerHTML = unread.map(function (announcement) {
+                return `
+                    <article class="naap-announcement-login-item">
+                        <div class="naap-announcement-login-item-head">
+                            <h3>${escapeAnnouncementHtml(announcement.title || 'Announcement')}</h3>
+                            <span>${escapeAnnouncementHtml(formatAnnouncementDateLabel(announcement.timestamp || announcement.createdAt))}</span>
+                        </div>
+                        <p>${escapeAnnouncementHtml(announcement.message || 'No details available.')}</p>
+                    </article>
+                `;
+            }).join('');
+        }
+
+        modal.__announcementDismiss = function () {
+            modal.hidden = true;
+            modal.classList.remove('is-open');
+            markAnnouncementsRead(ids);
+            if (typeof cfg.onDismiss === 'function') {
+                cfg.onDismiss();
+            }
+        };
+        modal.hidden = false;
+        modal.classList.add('is-open');
+
+        const dismissBtn = modal.querySelector('.naap-announcement-login-dismiss');
+        if (dismissBtn) dismissBtn.focus();
+
+        return deepClone(unread);
     }
 
     function getSettings() {
@@ -3164,6 +3501,10 @@ const SharedData = (() => {
         getStudentEvaluationDrafts,
         upsertStudentEvaluationDraft,
         removeStudentEvaluationDraft,
+        getDataPrivacyConsentNotice,
+        getStudentDataPrivacyConsents,
+        hasStudentDataPrivacyConsent,
+        recordStudentDataPrivacyConsent,
         getOsaStudentClearances,
         upsertOsaStudentClearance,
         getStudentEvaluationProofRequests,
@@ -3196,9 +3537,12 @@ const SharedData = (() => {
         generateFacultyPaperSectionCRecommendations,
         getAnnouncements,
         getAnnouncementsForCurrentUser,
+        getUnreadAnnouncementsForCurrentUser,
         addAnnouncement,
         markAnnouncementRead,
+        markAnnouncementsRead,
         getUnreadAnnouncementCount,
+        showUnreadAnnouncementLoginPopup,
         getSettings,
         updateSettings,
         getEvalPeriods,

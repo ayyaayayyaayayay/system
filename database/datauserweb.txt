@@ -1,0 +1,250 @@
+-- =============================================================
+-- NAAP Evaluation System
+-- Seed data for the normalized MySQL / MariaDB schema on cPanel
+-- Import after database/dataweb.txt
+-- =============================================================
+
+USE `izgrqywp_naap`;
+
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- -------------------------------------------------------------
+-- Lookup data
+-- -------------------------------------------------------------
+INSERT IGNORE INTO `roles` (`code`, `label`) VALUES
+    ('admin', 'Administrator'),
+    ('hr', 'Human Resources'),
+    ('osa', 'Office of Student Affairs'),
+    ('vpaa', 'Vice President for Academic Affairs'),
+    ('dean', 'Dean'),
+    ('procoor', 'Program Coordinator'),
+    ('professor', 'Professor'),
+    ('student', 'Student');
+
+INSERT IGNORE INTO `employment_types` (`code`, `label`) VALUES
+    ('regular', 'Regular'),
+    ('temporary', 'Temporary');
+
+INSERT IGNORE INTO `evaluation_types` (`code`, `label`) VALUES
+    ('student-professor', 'Student to Professor'),
+    ('professor-professor', 'Professor to Professor'),
+    ('supervisor-professor', 'Supervisor to Professor');
+
+INSERT IGNORE INTO `question_types` (`code`, `label`) VALUES
+    ('rating', 'Rating'),
+    ('qualitative', 'Qualitative');
+
+-- -------------------------------------------------------------
+-- Campuses and departments
+-- -------------------------------------------------------------
+INSERT IGNORE INTO `campuses` (`slug`, `name`) VALUES
+    ('villamor', 'Villamor Campus'),
+    ('mactan', 'Mactan Campus');
+
+INSERT IGNORE INTO `departments` (`campus_id`, `code`, `name`)
+SELECT c.id, d.code, d.name
+FROM (
+    SELECT 'villamor' AS campus_slug, 'ics' AS code, 'ICS Department' AS name
+    UNION ALL SELECT 'villamor', 'ilas', 'ILAS'
+    UNION ALL SELECT 'mactan', 'inet', 'INET Department'
+) AS d
+JOIN `campuses` c ON c.slug = d.campus_slug;
+
+INSERT IGNORE INTO `programs` (`department_id`, `code`, `name`)
+SELECT d.id, src.program_code, src.program_name
+FROM (
+    SELECT 'villamor' AS campus_slug, 'ics' AS dept_code, 'BSAIS' AS program_code, 'Bachelor of Science in Accounting Information Systems' AS program_name
+    UNION ALL SELECT 'villamor', 'ics', 'BSIT', 'Bachelor of Science in Information Technology'
+    UNION ALL SELECT 'villamor', 'ilas', 'BSAVTour', 'Bachelor of Science in Aviation Tourism'
+    UNION ALL SELECT 'villamor', 'ilas', 'BSAVComm', 'Bachelor of Science in Aviation Communication'
+    UNION ALL SELECT 'mactan', 'inet', 'BSAET', 'Bachelor of Science in Aviation Electronics Technology'
+    UNION ALL SELECT 'mactan', 'inet', 'BSAMT', 'Bachelor of Science in Aviation Maintenance Technology'
+) AS src
+JOIN `campuses` c ON c.slug = src.campus_slug
+JOIN `departments` d
+    ON d.campus_id = c.id
+   AND d.code = src.dept_code;
+
+-- -------------------------------------------------------------
+-- Semester and global settings
+-- -------------------------------------------------------------
+INSERT IGNORE INTO `semesters` (
+    `slug`,
+    `label`,
+    `academic_year`,
+    `is_current`,
+    `start_date`,
+    `end_date`
+) VALUES
+    ('2nd-semester-2025-2026', '2nd Semester 2025-2026', '2025-2026', 1, '2025-11-03', '2026-03-28');
+
+    INSERT IGNORE INTO `system_settings` (`setting_key`, `setting_value`) VALUES
+        ('systemName', 'NAAP Evaluation System'),
+        ('academicYear', '2025-2026'),
+        ('evaluationPeriodOpen', 'false'),
+        ('credentialDistributorConfig', '{"senderEmail":"","senderName":"NAAP Evaluation System","appPassword":""}');
+
+INSERT IGNORE INTO `evaluation_periods` (`semester_id`, `evaluation_type_id`, `start_date`, `end_date`)
+SELECT s.id, et.id, src.start_date, src.end_date
+FROM (
+    SELECT 'student-professor' AS evaluation_type_code, '2026-02-01' AS start_date, '2026-02-15' AS end_date
+    UNION ALL SELECT 'professor-professor', '2026-02-08', '2026-02-18'
+    UNION ALL SELECT 'supervisor-professor', '2026-02-10', '2026-02-20'
+) AS src
+JOIN `semesters` s ON s.slug = '2nd-semester-2025-2026'
+JOIN `evaluation_types` et ON et.code = src.evaluation_type_code;
+
+-- -------------------------------------------------------------
+-- Users
+-- -------------------------------------------------------------
+INSERT IGNORE INTO `users` (
+    `role_id`,
+    `campus_id`,
+    `department_id`,
+    `name`,
+    `email`,
+    `password`,
+    `status`
+)
+SELECT
+    r.id,
+    c.id,
+    d.id,
+    src.name,
+    src.email,
+    src.password,
+    src.status
+FROM (
+    SELECT 'Damin' AS name, 'damin@naap.edu.ph' AS email, '$2y$10$lJnEH72bQq58IL6Ei5ragOnxK/cqKcVq6fSjgnKq6WOgler.yftLu' AS password, 'admin' AS role_code, 'villamor' AS campus_slug, NULL AS dept_code, 'active' AS status
+) AS src
+JOIN `roles` r ON r.code = src.role_code
+JOIN `campuses` c ON c.slug = src.campus_slug
+LEFT JOIN `departments` d
+    ON d.campus_id = c.id
+   AND d.code = src.dept_code;
+
+-- -------------------------------------------------------------
+-- Staff and student profiles
+-- -------------------------------------------------------------
+INSERT IGNORE INTO `staff_profiles` (
+    `user_id`,
+    `employee_id`,
+    `employment_type_id`,
+    `program_id`,
+    `position`
+)
+SELECT
+    u.id,
+    src.employee_id,
+    et.id,
+    p.id,
+    src.position
+FROM (
+    SELECT 'damin@naap.edu.ph' AS email, 'damin' AS employee_id, 'regular' AS employment_type_code, NULL AS program_code, 'System Administrator' AS position
+) AS src
+JOIN `users` u ON u.email = src.email
+LEFT JOIN `employment_types` et ON et.code = src.employment_type_code
+LEFT JOIN `departments` d ON d.id = u.department_id
+LEFT JOIN `programs` p
+    ON p.department_id = d.id
+   AND p.code = src.program_code;
+
+-- -------------------------------------------------------------
+-- Questionnaires and questions
+-- -------------------------------------------------------------
+INSERT IGNORE INTO `questionnaires` (
+    `semester_id`,
+    `evaluation_type_id`,
+    `title`,
+    `description`,
+    `status`
+)
+SELECT
+    sem.id,
+    et.id,
+    src.title,
+    src.description,
+    src.status
+FROM (
+    SELECT 'student-professor' AS evaluation_type_code, 'Student Evaluation Form' AS title, 'Questionnaire for students evaluating professors.' AS description, 'published' AS status
+    UNION ALL SELECT 'professor-professor', 'Peer Evaluation Form', 'Questionnaire for professors evaluating fellow professors.', 'published'
+    UNION ALL SELECT 'supervisor-professor', 'Supervisor Evaluation Form', 'Questionnaire for academic supervisors evaluating professors.', 'published'
+) AS src
+JOIN `semesters` sem ON sem.slug = '2nd-semester-2025-2026'
+JOIN `evaluation_types` et ON et.code = src.evaluation_type_code;
+
+INSERT IGNORE INTO `questionnaire_sections` (
+    `questionnaire_id`,
+    `section_code`,
+    `title`,
+    `description`,
+    `sort_order`
+)
+SELECT
+    qn.id,
+    src.section_code,
+    src.title,
+    src.description,
+    src.sort_order
+FROM (
+    SELECT 'student-professor' AS evaluation_type_code, 'A' AS section_code, 'Teaching Effectiveness' AS title, 'Instructional delivery and preparation.' AS description, 1 AS sort_order
+    UNION ALL SELECT 'student-professor', 'B', 'Classroom Environment', 'Respect and learning climate.', 2
+    UNION ALL SELECT 'professor-professor', 'A', 'Collegiality', 'Collaboration and teamwork.', 1
+    UNION ALL SELECT 'professor-professor', 'B', 'Professional Contribution', 'Professional conduct and support.', 2
+    UNION ALL SELECT 'supervisor-professor', 'A', 'Instructional Leadership', 'Planning and academic alignment.', 1
+    UNION ALL SELECT 'supervisor-professor', 'B', 'Compliance and Development', 'Reports, initiatives, and growth.', 2
+) AS src
+JOIN `semesters` sem ON sem.slug = '2nd-semester-2025-2026'
+JOIN `evaluation_types` et ON et.code = src.evaluation_type_code
+JOIN `questionnaires` qn
+    ON qn.semester_id = sem.id
+   AND qn.evaluation_type_id = et.id;
+
+INSERT INTO `questions` (
+    `questionnaire_id`,
+    `section_id`,
+    `question_type_id`,
+    `question_text`,
+    `rating_max`,
+    `max_length`,
+    `is_required`,
+    `sort_order`
+)
+SELECT
+    qn.id,
+    qs.id,
+    qt.id,
+    src.question_text,
+    src.rating_max,
+    src.max_length,
+    src.is_required,
+    src.sort_order
+FROM (
+    SELECT 'student-professor' AS evaluation_type_code, 'A' AS section_code, 'rating' AS question_type_code, 'The professor explains concepts clearly.' AS question_text, 5 AS rating_max, 500 AS max_length, 1 AS is_required, 1 AS sort_order
+    UNION ALL SELECT 'student-professor', 'A', 'rating', 'The professor comes to class prepared.', 5, 500, 1, 2
+    UNION ALL SELECT 'student-professor', 'B', 'rating', 'The professor treats students with respect.', 5, 500, 1, 3
+    UNION ALL SELECT 'student-professor', 'B', 'qualitative', 'What should the professor continue doing?', 5, 500, 0, 4
+    UNION ALL SELECT 'professor-professor', 'A', 'rating', 'This professor collaborates well with colleagues.', 5, 500, 1, 1
+    UNION ALL SELECT 'professor-professor', 'A', 'rating', 'This professor shares resources and best practices.', 5, 500, 1, 2
+    UNION ALL SELECT 'professor-professor', 'B', 'rating', 'This professor demonstrates professionalism in the department.', 5, 500, 1, 3
+    UNION ALL SELECT 'professor-professor', 'B', 'qualitative', 'What peer contribution stands out the most?', 5, 500, 0, 4
+    UNION ALL SELECT 'supervisor-professor', 'A', 'rating', 'This professor submits required reports on time.', 5, 500, 1, 1
+    UNION ALL SELECT 'supervisor-professor', 'A', 'rating', 'This professor aligns instruction with program outcomes.', 5, 500, 1, 2
+    UNION ALL SELECT 'supervisor-professor', 'B', 'rating', 'This professor shows initiative in academic improvement.', 5, 500, 1, 3
+    UNION ALL SELECT 'supervisor-professor', 'B', 'qualitative', 'What development area should be prioritized?', 5, 500, 0, 4
+) AS src
+JOIN `question_types` qt ON qt.code = src.question_type_code
+JOIN `semesters` sem ON sem.slug = '2nd-semester-2025-2026'
+JOIN `evaluation_types` et ON et.code = src.evaluation_type_code
+JOIN `questionnaires` qn
+    ON qn.semester_id = sem.id
+   AND qn.evaluation_type_id = et.id
+JOIN `questionnaire_sections` qs
+    ON qs.questionnaire_id = qn.id
+   AND qs.section_code = src.section_code
+LEFT JOIN `questions` existing
+    ON existing.questionnaire_id = qn.id
+   AND existing.question_text = src.question_text
+WHERE existing.id IS NULL;
+
+SET FOREIGN_KEY_CHECKS = 1;

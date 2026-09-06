@@ -58,34 +58,116 @@ function facultyDocxReadZipParts(string $path): array
 
 function facultyDocxCreateZipBinary(array $parts): string
 {
-    $tempBase = tempnam(sys_get_temp_dir(), 'ifer_docx_');
-    if ($tempBase === false) {
-        throw new RuntimeException('Unable to create a temporary Word file.');
+    $normalizedParts = [];
+    foreach ($parts as $path => $contents) {
+        $normalizedPath = str_replace('\\', '/', trim((string)$path));
+        $normalizedPath = ltrim($normalizedPath, '/');
+        if ($normalizedPath === '' || substr($normalizedPath, -1) === '/') {
+            continue;
+        }
+        if (strlen($normalizedPath) > 65535) {
+            throw new RuntimeException('Generated Word file contains an invalid part path.');
+        }
+        $normalizedParts[$normalizedPath] = (string)$contents;
     }
 
-    @unlink($tempBase);
-    $tempZip = $tempBase . '.zip';
-
-    try {
-        $archive = new PharData($tempZip, 0, null, Phar::ZIP);
-        foreach ($parts as $path => $contents) {
-            $normalizedPath = str_replace('\\', '/', trim((string)$path));
-            if ($normalizedPath === '' || substr($normalizedPath, -1) === '/') {
-                continue;
-            }
-            $archive->addFromString($normalizedPath, (string)$contents);
-        }
-        unset($archive);
-
-        $binary = file_get_contents($tempZip);
-        if (!is_string($binary) || $binary === '') {
-            throw new RuntimeException('Generated Word file is empty.');
-        }
-
-        return $binary;
-    } finally {
-        @unlink($tempZip);
+    if (count($normalizedParts) === 0) {
+        throw new RuntimeException('Generated Word file is empty.');
     }
+
+    [$dosTime, $dosDate] = facultyDocxDosDateTime(time());
+    $localRecords = '';
+    $centralRecords = '';
+    $entryCount = 0;
+
+    foreach ($normalizedParts as $path => $contents) {
+        $offset = strlen($localRecords);
+        $size = strlen($contents);
+        if ($size > 4294967295 || $offset > 4294967295) {
+            throw new RuntimeException('Generated Word file is too large.');
+        }
+
+        $crc = facultyDocxCrc32($contents);
+        $pathLength = strlen($path);
+        $localRecords .= pack(
+            'VvvvvvVVVvv',
+            0x04034b50,
+            20,
+            0x0800,
+            0,
+            $dosTime,
+            $dosDate,
+            $crc,
+            $size,
+            $size,
+            $pathLength,
+            0
+        ) . $path . $contents;
+
+        $centralRecords .= pack(
+            'VvvvvvvVVVvvvvvVV',
+            0x02014b50,
+            20,
+            20,
+            0x0800,
+            0,
+            $dosTime,
+            $dosDate,
+            $crc,
+            $size,
+            $size,
+            $pathLength,
+            0,
+            0,
+            0,
+            0,
+            0,
+            $offset
+        ) . $path;
+        $entryCount += 1;
+    }
+
+    $centralOffset = strlen($localRecords);
+    $centralSize = strlen($centralRecords);
+    if ($entryCount > 65535 || $centralOffset > 4294967295 || $centralSize > 4294967295) {
+        throw new RuntimeException('Generated Word file is too large.');
+    }
+
+    $endRecord = pack(
+        'VvvvvVVv',
+        0x06054b50,
+        0,
+        0,
+        $entryCount,
+        $entryCount,
+        $centralSize,
+        $centralOffset,
+        0
+    );
+
+    return $localRecords . $centralRecords . $endRecord;
+}
+
+function facultyDocxDosDateTime(int $timestamp): array
+{
+    $parts = getdate($timestamp);
+    $year = max(1980, min(2107, (int)$parts['year']));
+    $month = max(1, min(12, (int)$parts['mon']));
+    $day = max(1, min(31, (int)$parts['mday']));
+    $hour = max(0, min(23, (int)$parts['hours']));
+    $minute = max(0, min(59, (int)$parts['minutes']));
+    $second = max(0, min(59, (int)$parts['seconds']));
+
+    $dosTime = ($hour << 11) | ($minute << 5) | intdiv($second, 2);
+    $dosDate = (($year - 1980) << 9) | ($month << 5) | $day;
+
+    return [$dosTime, $dosDate];
+}
+
+function facultyDocxCrc32(string $contents): int
+{
+    $crc = crc32($contents);
+    return $crc < 0 ? $crc + 4294967296 : $crc;
 }
 
 function facultyDocxBuildIferDocumentXml(string $documentXml, array $paperData): string

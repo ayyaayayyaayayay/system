@@ -16,6 +16,42 @@ let vpaaChartDataByType = {
     supervisor: createEmptyChartData()
 };
 let vpaaMobileDrawerBound = false;
+let selectedVpaaAnalyticsDepartment = "";
+let selectedVpaaAnalyticsCampus = "all";
+let latestVpaaAnalyticsSnapshot = null;
+let currentVpaaAnalyticsSemester = "all";
+let currentVpaaAnalyticsEvaluationType = "student";
+let currentVpaaAnalyticsProfessorId = null;
+
+const VPAA_EVALUATION_TYPE_OPTIONS = [
+    {
+        id: "student",
+        label: "Student Evaluation",
+        unitLabel: "Students",
+        totalLabel: "Total Students",
+        statusTitle: "Student Evaluation Status",
+        icon: "fas fa-user-graduate",
+        feedbackIcon: "fas fa-user-graduate"
+    },
+    {
+        id: "professor",
+        label: "Peer Evaluation",
+        unitLabel: "Peers",
+        totalLabel: "Total Peers",
+        statusTitle: "Peer Evaluation Status",
+        icon: "fas fa-users",
+        feedbackIcon: "fas fa-users"
+    },
+    {
+        id: "supervisor",
+        label: "Supervisor Evaluation",
+        unitLabel: "Supervisors",
+        totalLabel: "Total Supervisors",
+        statusTitle: "Supervisor Evaluation Status",
+        icon: "fas fa-user-tie",
+        feedbackIcon: "fas fa-user-tie"
+    }
+];
 
 function createEmptyChartData(categoriesInput) {
     const categories = Array.isArray(categoriesInput) && categoriesInput.length
@@ -272,6 +308,54 @@ function resolveTargetProfessorIdFromEvaluation(evaluation, evaluationType, cont
     return "";
 }
 
+function normalizeVpaaProfessorUserId(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const base = raw.includes("|") ? raw.split("|")[0] : raw;
+    return normalizeVpaaUserId(base);
+}
+
+function getVpaaApplicableSupervisorUsersForProfessor(context, professorId) {
+    const professorToken = normalizeVpaaProfessorUserId(professorId);
+    const professor = (context.professors || []).find(function (user) {
+        return normalizeVpaaProfessorUserId(user && user.id) === professorToken;
+    });
+    if (!professor) return [];
+
+    const campus = normalizeVpaaToken(professor.campus || professor.campusSlug);
+    const department = normalizeVpaaToken(professor.department || professor.institute);
+    const program = normalizeVpaaToken(professor.programCode || professor.program);
+    const activeSupervisors = (context.users || []).filter(function (user) {
+        if (normalizeVpaaToken(user && user.status || "active") === "inactive") return false;
+        const role = normalizeVpaaToken(user && user.role);
+        return role === "procoor" || role === "dean" || role === "supervisor";
+    });
+
+    const isSameCampusDepartment = function (user) {
+        const userCampus = normalizeVpaaToken(user && (user.campus || user.campusSlug));
+        const userDepartment = normalizeVpaaToken(user && (user.department || user.institute));
+        const campusMatches = !campus || !userCampus || userCampus === campus;
+        return campusMatches && department && userDepartment === department;
+    };
+
+    const programCoordinators = activeSupervisors.filter(function (user) {
+        if (normalizeVpaaToken(user && user.role) !== "procoor") return false;
+        if (!isSameCampusDepartment(user)) return false;
+        const userProgram = normalizeVpaaToken(user && (user.programCode || user.program));
+        return program && userProgram === program;
+    });
+    if (programCoordinators.length > 0) return programCoordinators;
+
+    const departmentDeans = activeSupervisors.filter(function (user) {
+        return normalizeVpaaToken(user && user.role) === "dean" && isSameCampusDepartment(user);
+    });
+    if (departmentDeans.length > 0) return departmentDeans;
+
+    return activeSupervisors.filter(function (user) {
+        return normalizeVpaaToken(user && user.role) === "supervisor" && isSameCampusDepartment(user);
+    });
+}
+
 function buildVpaaChartDataForType(typeKey, semesterLabel, context) {
     const questionMeta = buildVpaaQuestionMeta(typeKey, semesterLabel);
     const baseCategories = questionMeta.categoryOrder.length ? questionMeta.categoryOrder.slice() : criteriaKeys.slice();
@@ -372,12 +456,6 @@ function buildProfessorDataFromSharedData() {
         return normalizeVpaaToken(prof && prof.status || "active") !== "inactive";
     }).length;
 
-    const supervisorCount = context.users.filter(function (user) {
-        if (normalizeVpaaToken(user && user.status || "active") === "inactive") return false;
-        const role = normalizeVpaaToken(user && user.role);
-        return role === "dean" || role === "hr" || role === "vpaa";
-    }).length;
-
     const resultRows = [];
 
     context.professors.forEach(function (professor, index) {
@@ -436,15 +514,21 @@ function buildProfessorDataFromSharedData() {
                 professor: buildProfessorAnalyticsForType("professor", peerEvals, semesterLabel)
             };
 
+            const supervisorCount = getVpaaApplicableSupervisorUsersForProfessor(context, professorId).length || 1;
             const totalRequired = requiredStudentRaters + Math.max(activeProfessorCount - 1, 0) + supervisorCount;
             const totalReceived = allEvals.length;
             const responseRate = totalRequired > 0 ? Math.round((totalReceived / totalRequired) * 100) : 0;
 
             resultRows.push({
                 id: (professor.id || ("prof-" + (index + 1))) + "|" + semesterLabel,
+                userId: professorId,
                 employeeId: String(professor.employeeId || ("FAC-" + (10000 + index))).trim(),
                 name: String(professor.name || ("Professor " + (index + 1))).trim(),
                 campus: String(professor.campus || "").trim(),
+                program: String(professor.programCode || professor.program || "").trim(),
+                programCode: String(professor.programCode || professor.program || "").trim(),
+                email: String(professor.email || "").trim(),
+                isActive: normalizeVpaaToken(professor.status || "active") !== "inactive",
                 department: String(professor.department || professor.institute || "General").trim(),
                 rank: String(professor.position || "Instructor").trim(),
                 photoData: String(professor.photoData || "").trim(),
@@ -526,16 +610,23 @@ const elements = {
     departmentFilter: document.getElementById("departmentFilter"),
     sortFilter: document.getElementById("sortFilter"),
     resetFilters: document.getElementById("resetFilters"),
+    overallSasrBtn: document.getElementById("vpaa-overall-sasr-btn"),
     keyHighlightsGrid: document.getElementById("vpaaKeyHighlightsGrid"),
     highlightsEmpty: document.getElementById("vpaaHighlightsEmpty"),
     highlightTopRating: document.getElementById("vpaaHighlightTopRating"),
     highlightMostComments: document.getElementById("vpaaHighlightMostComments"),
     highlightNeedsAttention: document.getElementById("vpaaHighlightNeedsAttention"),
+    analyticsCampusSelect: document.getElementById("vpaaAnalyticsCampusSelect"),
+    departmentAnalyticsBody: document.getElementById("vpaaDepartmentAnalyticsBody"),
+    departmentProgramsBody: document.getElementById("vpaaDepartmentProgramsBody"),
+    departmentProgramsTitle: document.getElementById("vpaaDepartmentProgramsTitle"),
+    departmentProgramsEmpty: document.getElementById("vpaaDepartmentProgramsEmpty"),
+    analyticsEmptyState: document.getElementById("vpaaAnalyticsEmptyState"),
     professorGrid: document.getElementById("professorGrid"),
-    reportModal: document.getElementById("vpaaReportModal"),
-    reportModalClose: document.getElementById("vpaaReportModalClose"),
-    reportModalBody: document.getElementById("vpaaReportModalBody"),
-    reportModalTitle: document.getElementById("vpaaReportModalTitle")
+    reportModal: document.getElementById("professor-analytics-modal"),
+    reportModalClose: document.getElementById("close-analytics-modal"),
+    reportModalBody: document.getElementById("professor-analytics-content"),
+    reportModalTitle: document.getElementById("vpaaProfessorAnalyticsTitle")
 };
 
 const dashboardCharts = {
@@ -559,12 +650,21 @@ function init() {
     populateCampuses();
     setupReportModalEvents();
     applyFilters();
+    setupVpaaAnalyticsInteractions();
+    refreshVpaaDescriptiveAnalytics();
+    setupDataSubscriptions();
     bindEvents();
     setupProfilePhotoUpload();
     setupProfileActions();
     setupChangeEmailForm();
     setupChangePasswordForm();
     setupPasswordToggles();
+    showVpaaLoginAnnouncements();
+}
+
+function showVpaaLoginAnnouncements() {
+    if (!SharedData.showUnreadAnnouncementLoginPopup) return;
+    SharedData.showUnreadAnnouncementLoginPopup();
 }
 
 function setupNavigation() {
@@ -603,6 +703,54 @@ function setupLogout() {
         SharedData.clearSession();
         window.location.href = "mainpage.html";
     });
+}
+
+function setupDataSubscriptions() {
+    if (!SharedData.onDataChange || !SharedData.KEYS) return;
+
+    SharedData.onDataChange(function (key) {
+        if (
+            key === SharedData.KEYS.EVALUATIONS ||
+            key === SharedData.KEYS.SUBJECT_MANAGEMENT ||
+            key === SharedData.KEYS.CURRENT_SEMESTER ||
+            key === SharedData.KEYS.USERS ||
+            key === SharedData.KEYS.SEMESTER_LIST ||
+            key === SharedData.KEYS.CAMPUSES ||
+            key === SharedData.KEYS.QUESTIONNAIRES ||
+            key === SharedData.KEYS.FACULTY_PAPERS
+        ) {
+            const previousSemester = elements.semesterFilter ? elements.semesterFilter.value : "";
+            const previousCampus = elements.campusFilter ? elements.campusFilter.value : "";
+            const previousDepartment = elements.departmentFilter ? elements.departmentFilter.value : "";
+            const previousSort = elements.sortFilter ? elements.sortFilter.value : "";
+
+            loadDashboardDataFromDb();
+            populateDepartments();
+            populateSemesters();
+            populateCampuses();
+
+            restoreSelectValue(elements.semesterFilter, previousSemester);
+            restoreSelectValue(elements.campusFilter, previousCampus);
+            restoreSelectValue(elements.departmentFilter, previousDepartment);
+            restoreSelectValue(elements.sortFilter, previousSort);
+
+            applyFilters();
+            refreshVpaaDescriptiveAnalytics();
+            if (currentVpaaAnalyticsProfessorId && isReportModalOpen()) {
+                viewVpaaProfessorAnalytics(currentVpaaAnalyticsProfessorId);
+            }
+        }
+    });
+}
+
+function restoreSelectValue(select, value) {
+    if (!select || !value) return;
+    const hasOption = Array.from(select.options || []).some(function (option) {
+        return option.value === value;
+    });
+    if (hasOption) {
+        select.value = value;
+    }
 }
 
 function setupMobileDrawer() {
@@ -785,6 +933,9 @@ function bindEvents() {
     elements.departmentFilter.addEventListener("change", applyFilters);
     elements.sortFilter.addEventListener("change", applyFilters);
     elements.resetFilters.addEventListener("click", resetFilters);
+    if (elements.overallSasrBtn) {
+        elements.overallSasrBtn.addEventListener("click", openVpaaOverallSasrModal);
+    }
 }
 
 function resetFilters() {
@@ -992,6 +1143,396 @@ function renderKeyHighlights(cards) {
     } : null);
 }
 
+function isVpaaStudentEvaluationRecord(record) {
+    const role = normalizeVpaaToken(record && (record.evaluatorRole || record.evaluationType));
+    return role === "" || role === "student" || role === "student-to-professor" || role === "student-professor";
+}
+
+function isVpaaSubmittedEvaluation(record) {
+    const status = normalizeVpaaToken(record && record.status);
+    return status === "" || status === "submitted";
+}
+
+function buildVpaaStudentDirectory() {
+    const users = (SharedData.getUsers && SharedData.getUsers()) || [];
+    const directoryByUserId = new Map();
+    const userIdByStudentNumber = new Map();
+
+    users.forEach(function (user) {
+        if (!user || normalizeVpaaToken(user.role) !== "student") return;
+        if (normalizeVpaaToken(user.status || "active") === "inactive") return;
+
+        const userId = normalizeVpaaUserId(user.id);
+        if (!userId) return;
+
+        const studentNumber = String(user.studentNumber || "").trim();
+        directoryByUserId.set(userId, {
+            studentUserId: userId,
+            studentNumber: studentNumber,
+            fullName: String(user.name || "").trim() || "Unknown Student",
+            department: String(user.department || user.institute || "UNASSIGNED").trim().toUpperCase() || "UNASSIGNED",
+            program: String(user.programCode || user.programName || "UNASSIGNED").trim().toUpperCase() || "UNASSIGNED",
+            campus: String(user.campus || user.campusSlug || "UNASSIGNED").trim().toUpperCase() || "UNASSIGNED",
+            yearSection: String(user.yearSection || "").trim() || "N/A"
+        });
+
+        if (studentNumber) {
+            userIdByStudentNumber.set(normalizeVpaaToken(studentNumber), userId);
+        }
+    });
+
+    return { directoryByUserId: directoryByUserId, userIdByStudentNumber: userIdByStudentNumber };
+}
+
+function buildVpaaStudentAnalyticsRows() {
+    const semesterId = String((SharedData.getCurrentSemester && SharedData.getCurrentSemester()) || currentSemesterLabel || "").trim();
+    const directory = buildVpaaStudentDirectory();
+    const directoryByUserId = directory.directoryByUserId;
+    const userIdByStudentNumber = directory.userIdByStudentNumber;
+    const subjectManagement = SharedData.getSubjectManagement
+        ? SharedData.getSubjectManagement()
+        : { offerings: [], enrollments: [] };
+    const offerings = Array.isArray(subjectManagement.offerings) ? subjectManagement.offerings : [];
+    const enrollments = Array.isArray(subjectManagement.enrollments) ? subjectManagement.enrollments : [];
+    const evaluations = SharedData.getEvaluations ? SharedData.getEvaluations() : [];
+
+    const activeOfferingsById = new Map(
+        offerings
+            .filter(function (offering) {
+                if (!offering || !offering.isActive) return false;
+                const offeringSemester = String(offering.semesterSlug || "").trim();
+                if (!semesterId) return true;
+                return !offeringSemester || offeringSemester === semesterId;
+            })
+            .map(function (offering) {
+                return [String(offering.id || "").trim(), offering];
+            })
+    );
+
+    const expectedByStudent = new Map();
+    const studentMetaById = new Map();
+
+    enrollments.forEach(function (enrollment) {
+        if (!enrollment || normalizeVpaaToken(enrollment.status) !== "enrolled") return;
+
+        const offeringId = String(enrollment.courseOfferingId || "").trim();
+        if (!offeringId || !activeOfferingsById.has(offeringId)) return;
+
+        let studentUserId = normalizeVpaaUserId(enrollment.studentUserId || enrollment.studentId);
+        const studentNumber = String(enrollment.studentNumber || "").trim();
+        if (!studentUserId && studentNumber) {
+            studentUserId = userIdByStudentNumber.get(normalizeVpaaToken(studentNumber)) || "";
+        }
+        if (!studentUserId) return;
+
+        if (!expectedByStudent.has(studentUserId)) {
+            expectedByStudent.set(studentUserId, new Set());
+        }
+        expectedByStudent.get(studentUserId).add(offeringId);
+
+        const baseMeta = directoryByUserId.get(studentUserId);
+        studentMetaById.set(studentUserId, {
+            studentUserId: studentUserId,
+            studentNumber: studentNumber || (baseMeta && baseMeta.studentNumber) || "",
+            fullName: String(enrollment.studentName || "").trim() || (baseMeta && baseMeta.fullName) || "Unknown Student",
+            department: (baseMeta && baseMeta.department) || "UNASSIGNED",
+            program: (baseMeta && baseMeta.program) || "UNASSIGNED",
+            campus: (baseMeta && baseMeta.campus) || "UNASSIGNED",
+            yearSection: (baseMeta && baseMeta.yearSection) || "N/A"
+        });
+    });
+
+    const completedByStudent = new Map();
+    evaluations.forEach(function (evaluation) {
+        if (!isVpaaStudentEvaluationRecord(evaluation)) return;
+        if (!isVpaaSubmittedEvaluation(evaluation)) return;
+        if (!isVpaaEvaluationInSemester(evaluation, semesterId)) return;
+
+        const offeringId = String(evaluation.courseOfferingId || "").trim();
+        if (!offeringId) return;
+
+        let studentUserId = normalizeVpaaUserId(
+            evaluation.studentUserId ||
+            evaluation.studentId ||
+            evaluation.evaluatorId ||
+            evaluation.userId
+        );
+        const evalStudentNumber = String(evaluation.studentNumber || "").trim();
+        if (!studentUserId && evalStudentNumber) {
+            studentUserId = userIdByStudentNumber.get(normalizeVpaaToken(evalStudentNumber)) || "";
+        }
+        if (!studentUserId) return;
+        if (!expectedByStudent.has(studentUserId)) return;
+        if (!expectedByStudent.get(studentUserId).has(offeringId)) return;
+
+        if (!completedByStudent.has(studentUserId)) {
+            completedByStudent.set(studentUserId, new Set());
+        }
+        completedByStudent.get(studentUserId).add(offeringId);
+    });
+
+    const rows = [];
+    expectedByStudent.forEach(function (expectedSet, studentUserId) {
+        const meta = studentMetaById.get(studentUserId) || directoryByUserId.get(studentUserId) || {
+            studentUserId: studentUserId,
+            studentNumber: "",
+            fullName: "Unknown Student",
+            department: "UNASSIGNED",
+            program: "UNASSIGNED",
+            campus: "UNASSIGNED",
+            yearSection: "N/A"
+        };
+        const expectedCount = expectedSet.size;
+        const completedCount = (completedByStudent.get(studentUserId) || new Set()).size;
+
+        rows.push({
+            studentUserId: studentUserId,
+            studentNumber: meta.studentNumber || "",
+            fullName: meta.fullName || "Unknown Student",
+            department: meta.department || "UNASSIGNED",
+            program: meta.program || "UNASSIGNED",
+            campus: meta.campus || "UNASSIGNED",
+            yearSection: meta.yearSection || "N/A",
+            expectedCount: expectedCount,
+            completedCount: completedCount,
+            evaluated: expectedCount > 0 && completedCount >= expectedCount
+        });
+    });
+
+    rows.sort(function (a, b) {
+        return String(a.fullName || "").localeCompare(String(b.fullName || ""));
+    });
+
+    return rows;
+}
+
+function buildVpaaAnalyticsSummary(rows) {
+    const assigned = rows.length;
+    const evaluated = rows.filter(function (row) { return row.evaluated; }).length;
+    const notEvaluated = Math.max(assigned - evaluated, 0);
+    const completionRate = assigned > 0 ? Math.round((evaluated / assigned) * 100) : 0;
+    return { assigned: assigned, evaluated: evaluated, notEvaluated: notEvaluated, completionRate: completionRate };
+}
+
+function buildVpaaDepartmentBreakdown(rows) {
+    const map = new Map();
+    rows.forEach(function (row) {
+        const key = row.department || "UNASSIGNED";
+        if (!map.has(key)) {
+            map.set(key, { department: key, assigned: 0, evaluated: 0, notEvaluated: 0, completionRate: 0 });
+        }
+        const item = map.get(key);
+        item.assigned += 1;
+        if (row.evaluated) item.evaluated += 1;
+    });
+
+    const list = Array.from(map.values()).map(function (item) {
+        item.notEvaluated = Math.max(item.assigned - item.evaluated, 0);
+        item.completionRate = item.assigned > 0 ? Math.round((item.evaluated / item.assigned) * 100) : 0;
+        return item;
+    });
+
+    list.sort(function (a, b) {
+        return b.completionRate - a.completionRate || a.department.localeCompare(b.department);
+    });
+    return list;
+}
+
+function buildVpaaProgramBreakdown(rows) {
+    const map = new Map();
+    rows.forEach(function (row) {
+        const program = row.program || "UNASSIGNED";
+        const department = row.department || "UNASSIGNED";
+        const key = `${department}|${program}`;
+        if (!map.has(key)) {
+            map.set(key, { program: program, department: department, assigned: 0, evaluated: 0, notEvaluated: 0, completionRate: 0 });
+        }
+        const item = map.get(key);
+        item.assigned += 1;
+        if (row.evaluated) item.evaluated += 1;
+    });
+
+    const list = Array.from(map.values()).map(function (item) {
+        item.notEvaluated = Math.max(item.assigned - item.evaluated, 0);
+        item.completionRate = item.assigned > 0 ? Math.round((item.evaluated / item.assigned) * 100) : 0;
+        return item;
+    });
+
+    list.sort(function (a, b) {
+        return b.completionRate - a.completionRate
+            || a.department.localeCompare(b.department)
+            || a.program.localeCompare(b.program);
+    });
+    return list;
+}
+
+function getVpaaAnalyticsRowsForSelectedCampus(rows) {
+    const source = Array.isArray(rows) ? rows : [];
+    const selectedCampus = String(selectedVpaaAnalyticsCampus || "all").trim();
+    if (!selectedCampus || selectedCampus === "all") return source;
+
+    return source.filter(function (row) {
+        return String(row && row.campus || "UNASSIGNED").trim() === selectedCampus;
+    });
+}
+
+function buildVpaaAnalyticsSnapshotFromRows(rows) {
+    return {
+        rows: rows,
+        summary: buildVpaaAnalyticsSummary(rows),
+        departmentBreakdown: buildVpaaDepartmentBreakdown(rows),
+        programBreakdown: buildVpaaProgramBreakdown(rows)
+    };
+}
+
+function renderVpaaAnalyticsCampusFilter(rows) {
+    const select = elements.analyticsCampusSelect;
+    if (!select) return;
+
+    const campuses = Array.from(new Set((Array.isArray(rows) ? rows : []).map(function (row) {
+        return String(row && row.campus || "UNASSIGNED").trim() || "UNASSIGNED";
+    }))).sort(function (a, b) {
+        return a.localeCompare(b);
+    });
+
+    const currentValue = campuses.includes(selectedVpaaAnalyticsCampus) ? selectedVpaaAnalyticsCampus : "all";
+    if (selectedVpaaAnalyticsCampus !== currentValue) {
+        selectedVpaaAnalyticsCampus = currentValue;
+        selectedVpaaAnalyticsDepartment = "";
+    }
+
+    const options = ['<option value="all">All Campuses</option>'].concat(campuses.map(function (campus) {
+        const selected = campus === selectedVpaaAnalyticsCampus ? " selected" : "";
+        return `<option value="${escapeHtml(campus)}"${selected}>${escapeHtml(campus)}</option>`;
+    }));
+
+    select.innerHTML = options.join("");
+    select.value = selectedVpaaAnalyticsCampus;
+}
+
+function refreshVpaaDescriptiveAnalytics() {
+    const rows = buildVpaaStudentAnalyticsRows();
+    latestVpaaAnalyticsSnapshot = buildVpaaAnalyticsSnapshotFromRows(rows);
+    renderVpaaAnalyticsCampusFilter(rows);
+    renderVpaaDescriptiveAnalytics(latestVpaaAnalyticsSnapshot);
+}
+
+function renderVpaaDescriptiveAnalytics(sourceSnapshot) {
+    const analyticsSnapshot = buildVpaaAnalyticsSnapshotFromRows(
+        getVpaaAnalyticsRowsForSelectedCampus(sourceSnapshot && sourceSnapshot.rows)
+    );
+
+    const deptBody = elements.departmentAnalyticsBody;
+    const progBody = elements.departmentProgramsBody;
+    const progTitle = elements.departmentProgramsTitle;
+    const progEmpty = elements.departmentProgramsEmpty;
+    const emptyEl = elements.analyticsEmptyState;
+    if (!deptBody || !progBody || !progTitle || !progEmpty || !emptyEl) return;
+
+    if (!analyticsSnapshot.rows.length) {
+        deptBody.innerHTML = "";
+        progBody.innerHTML = "";
+        selectedVpaaAnalyticsDepartment = "";
+        progTitle.textContent = "Programs by Department";
+        progEmpty.textContent = "Select a department above to view its programs.";
+        progEmpty.style.display = "block";
+        emptyEl.style.display = "block";
+        emptyEl.textContent = selectedVpaaAnalyticsCampus === "all"
+            ? "No assigned students found for analytics."
+            : "No assigned students found for the selected campus.";
+        return;
+    }
+
+    emptyEl.style.display = "none";
+    const hasSelectedDepartment = analyticsSnapshot.departmentBreakdown.some(function (item) {
+        return item.department === selectedVpaaAnalyticsDepartment;
+    });
+    if (!hasSelectedDepartment) {
+        selectedVpaaAnalyticsDepartment = "";
+    }
+
+    deptBody.innerHTML = analyticsSnapshot.departmentBreakdown.map(function (item) {
+        const isActive = item.department === selectedVpaaAnalyticsDepartment;
+        return `
+            <tr class="vpaa-analytics-dept-row${isActive ? " active" : ""}" data-department="${escapeAttr(item.department)}" tabindex="0" role="button" aria-label="Show programs for ${escapeAttr(item.department)}">
+                <td>${escapeHtml(item.department)}</td>
+                <td>${item.assigned}</td>
+                <td>${item.evaluated}</td>
+                <td>${item.notEvaluated}</td>
+                <td>${item.completionRate}%</td>
+            </tr>
+        `;
+    }).join("");
+
+    if (!selectedVpaaAnalyticsDepartment) {
+        progBody.innerHTML = "";
+        progTitle.textContent = "Programs by Department";
+        progEmpty.textContent = "Select a department above to view its programs.";
+        progEmpty.style.display = "block";
+        return;
+    }
+
+    const filteredPrograms = analyticsSnapshot.programBreakdown.filter(function (item) {
+        return item.department === selectedVpaaAnalyticsDepartment;
+    });
+    progTitle.textContent = `Programs under ${selectedVpaaAnalyticsDepartment}`;
+
+    if (!filteredPrograms.length) {
+        progBody.innerHTML = "";
+        progEmpty.textContent = "No program data available for this department.";
+        progEmpty.style.display = "block";
+        return;
+    }
+
+    progEmpty.style.display = "none";
+    progBody.innerHTML = filteredPrograms.map(function (item) {
+        return `
+            <tr>
+                <td>${escapeHtml(item.program)}</td>
+                <td>${item.assigned}</td>
+                <td>${item.evaluated}</td>
+                <td>${item.notEvaluated}</td>
+                <td>${item.completionRate}%</td>
+            </tr>
+        `;
+    }).join("");
+}
+
+function setupVpaaAnalyticsInteractions() {
+    const deptBody = elements.departmentAnalyticsBody;
+    const campusSelect = elements.analyticsCampusSelect;
+
+    if (deptBody) {
+        deptBody.addEventListener("click", function (event) {
+            const row = event.target.closest("tr[data-department]");
+            if (!row) return;
+            const department = String(row.dataset.department || "").trim();
+            if (!department || department === selectedVpaaAnalyticsDepartment) return;
+            selectedVpaaAnalyticsDepartment = department;
+            renderVpaaDescriptiveAnalytics(latestVpaaAnalyticsSnapshot);
+        });
+
+        deptBody.addEventListener("keydown", function (event) {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            const row = event.target.closest("tr[data-department]");
+            if (!row) return;
+            event.preventDefault();
+            const department = String(row.dataset.department || "").trim();
+            if (!department || department === selectedVpaaAnalyticsDepartment) return;
+            selectedVpaaAnalyticsDepartment = department;
+            renderVpaaDescriptiveAnalytics(latestVpaaAnalyticsSnapshot);
+        });
+    }
+
+    if (campusSelect) {
+        campusSelect.addEventListener("change", function () {
+            selectedVpaaAnalyticsCampus = String(campusSelect.value || "all").trim() || "all";
+            selectedVpaaAnalyticsDepartment = "";
+            renderVpaaDescriptiveAnalytics(latestVpaaAnalyticsSnapshot);
+        });
+    }
+}
+
 function getVpaaActiveStudentCount() {
     const users = (SharedData.getUsers && SharedData.getUsers()) || [];
     return users.filter((user) => {
@@ -1159,6 +1700,765 @@ function buildProfessorAnalyticsForType(typeKey, evaluations, semesterLabel) {
         }),
         ratingDistribution: distribution,
         totalEvaluations: list.length
+    };
+}
+
+function normalizeVpaaAnalyticsEvaluationType(value) {
+    const token = normalizeVpaaToken(value);
+    if (token === "peer" || token === "professor" || token === "professor-to-professor") return "professor";
+    if (token === "supervisor" || token === "supervisor-to-professor") return "supervisor";
+    return "student";
+}
+
+function getVpaaEvaluationTypeOptions() {
+    return VPAA_EVALUATION_TYPE_OPTIONS;
+}
+
+function getVpaaEvaluationTypeMeta(id) {
+    const normalized = normalizeVpaaAnalyticsEvaluationType(id);
+    return VPAA_EVALUATION_TYPE_OPTIONS.find(function (item) {
+        return item.id === normalized;
+    }) || VPAA_EVALUATION_TYPE_OPTIONS[0];
+}
+
+function getVpaaSemesterOptions() {
+    const options = [{ id: "all", label: "All Semesters" }];
+    const seen = new Set(["all"]);
+    const semesterList = SharedData.getSemesterList ? SharedData.getSemesterList() : [];
+
+    (Array.isArray(semesterList) ? semesterList : []).forEach(function (item) {
+        const value = String(item && (item.value || item.id || item.slug || item.label) || "").trim();
+        if (!value || seen.has(value)) return;
+        seen.add(value);
+        options.push({
+            id: value,
+            label: String(item && item.label || value).trim() || value
+        });
+    });
+
+    const current = String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : currentSemesterLabel || "").trim();
+    if (current && !seen.has(current)) {
+        seen.add(current);
+        options.push({ id: current, label: current });
+    }
+
+    (Array.isArray(availableSemesterLabels) ? availableSemesterLabels : []).forEach(function (semester) {
+        const value = String(semester || "").trim();
+        if (!value || seen.has(value)) return;
+        seen.add(value);
+        options.push({ id: value, label: value });
+    });
+
+    return options;
+}
+
+function getVpaaSemesterLabel(id) {
+    const value = String(id || "").trim();
+    const option = getVpaaSemesterOptions().find(function (item) {
+        return item.id === value;
+    });
+    return option ? option.label : (value || "Semester");
+}
+
+function buildVpaaSemesterOptionsHtml(selectedSemester) {
+    return getVpaaSemesterOptions().map(function (option) {
+        const selected = option.id === selectedSemester ? " selected" : "";
+        return `<option value="${escapeAttr(option.id)}"${selected}>${escapeHtml(option.label)}</option>`;
+    }).join("");
+}
+
+function buildVpaaEvaluationTypeOptionsHtml(selectedType) {
+    const normalized = normalizeVpaaAnalyticsEvaluationType(selectedType);
+    return getVpaaEvaluationTypeOptions().map(function (option) {
+        const selected = option.id === normalized ? " selected" : "";
+        return `<option value="${escapeAttr(option.id)}"${selected}>${escapeHtml(option.label)}</option>`;
+    }).join("");
+}
+
+function formatVpaaAnalyticsDate(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "-";
+    if (SharedData.formatDateTimeInPhilippines) {
+        return SharedData.formatDateTimeInPhilippines(raw) || raw;
+    }
+    if (SharedData.formatDateInPhilippines) {
+        const parsed = new Date(raw);
+        if (!Number.isNaN(parsed.getTime())) {
+            return SharedData.formatDateInPhilippines(parsed) || raw;
+        }
+    }
+    return raw;
+}
+
+function collectVpaaQualitativeResponses(evaluation) {
+    const responses = [];
+    const sourceDate = evaluation && (evaluation.submittedAt || evaluation.timestamp || "");
+    const dateLabel = formatVpaaAnalyticsDate(sourceDate);
+    const evaluatorName = String(
+        evaluation && (evaluation.evaluatorName || evaluation.studentName || evaluation.evaluatorUsername) || "Anonymous"
+    ).trim() || "Anonymous";
+    const evaluatorIdentity = String(
+        evaluation && (
+            evaluation.studentNumber ||
+            evaluation.evaluatorStudentNumber ||
+            evaluation.studentUserId ||
+            evaluation.studentId ||
+            evaluation.evaluatorUserId ||
+            evaluation.evaluatorId ||
+            evaluation.evaluatorUsername
+        ) || "N/A"
+    ).trim() || "N/A";
+    const semesterId = String(evaluation && evaluation.semesterId || "").trim();
+    const prefix = String(
+        evaluation && (evaluation.evaluationKey || evaluation.id || evaluation.submittedAt || Date.now())
+    ).trim();
+    const seen = new Set();
+
+    const pushResponse = function (keySuffix, value) {
+        const text = String(value || "").trim();
+        if (!text || seen.has(text)) return;
+        seen.add(text);
+        responses.push({
+            id: `${prefix}-${keySuffix}`,
+            text: text,
+            date: dateLabel,
+            studentName: evaluatorName,
+            studentNumber: evaluatorIdentity,
+            semesterId: semesterId
+        });
+    };
+
+    const qualitative = evaluation && typeof evaluation.qualitative === "object" && evaluation.qualitative
+        ? evaluation.qualitative
+        : {};
+    Object.keys(qualitative).forEach(function (questionKey, index) {
+        pushResponse(`qual-${questionKey || index}`, qualitative[questionKey]);
+    });
+
+    const qualitativeResponses = Array.isArray(evaluation && evaluation.qualitativeResponses)
+        ? evaluation.qualitativeResponses
+        : [];
+    qualitativeResponses.forEach(function (item, index) {
+        if (typeof item === "string") {
+            pushResponse(`response-${index}`, item);
+            return;
+        }
+        if (item && typeof item === "object") {
+            pushResponse(`response-${index}`, item.text || item.answer || item.comment || item.response);
+        }
+    });
+
+    pushResponse("comment", evaluation && evaluation.comments);
+    pushResponse("feedback", evaluation && evaluation.feedback);
+    pushResponse("legacy-comment", evaluation && evaluation.comment);
+
+    return responses;
+}
+
+function aggregateVpaaEvaluationData(options) {
+    const settings = options || {};
+    const context = settings.context || buildVpaaDatabaseContext();
+    const typeKey = normalizeVpaaAnalyticsEvaluationType(settings.typeKey);
+    const semesterId = String(settings.semesterId || "all").trim() || "all";
+    const targetProfessorId = settings.targetProfessorId ? normalizeVpaaProfessorUserId(settings.targetProfessorId) : "";
+    const includeCategoryScores = !!settings.includeCategoryScores;
+    const questionMeta = includeCategoryScores
+        ? buildVpaaQuestionMeta(typeKey, semesterId)
+        : { categoryByQuestionId: {}, categoryOrder: [] };
+    const categoryOrder = Array.isArray(questionMeta.categoryOrder) ? questionMeta.categoryOrder.slice() : [];
+    const categoryStats = {};
+    categoryOrder.forEach(function (category) {
+        categoryStats[category] = { sum: 0, count: 0 };
+    });
+
+    const ratingDistribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    let totalRatingValue = 0;
+    let totalRatingCount = 0;
+    let totalEvaluations = 0;
+    const uniqueTargetProfessorIds = new Set();
+    const uniqueTargetTokens = new Set();
+    const uniqueRaterTokens = new Set();
+    let qualitativeResponses = [];
+
+    (context.evaluations || []).forEach(function (evaluation) {
+        const evaluationType = resolveVpaaEvaluationType(evaluation);
+        if (evaluationType !== typeKey) return;
+        if (!isVpaaEvaluationInSemester(evaluation, semesterId)) return;
+
+        const targetId = resolveTargetProfessorIdFromEvaluation(evaluation, typeKey, context);
+        if (targetProfessorId && targetId !== targetProfessorId) return;
+        if (targetId) uniqueTargetProfessorIds.add(targetId);
+
+        const fallbackTargetToken = normalizeVpaaToken(
+            evaluation && (
+                evaluation.targetProfessorId ||
+                evaluation.targetId ||
+                evaluation.colleagueId ||
+                evaluation.targetProfessor ||
+                evaluation.professorSubject
+            )
+        );
+        if (fallbackTargetToken) uniqueTargetTokens.add(fallbackTargetToken);
+
+        const raterToken = normalizeVpaaToken(
+            evaluation && (
+                evaluation.studentUserId ||
+                evaluation.studentId ||
+                evaluation.evaluatorUserId ||
+                evaluation.evaluatorId ||
+                evaluation.evaluatorUsername ||
+                evaluation.evaluatorName
+            )
+        );
+        if (raterToken) uniqueRaterTokens.add(raterToken);
+
+        totalEvaluations += 1;
+
+        const ratings = evaluation && typeof evaluation.ratings === "object" && evaluation.ratings ? evaluation.ratings : {};
+        const evaluationValues = [];
+        Object.keys(ratings).forEach(function (questionId) {
+            const parsed = parseFloat(ratings[questionId]);
+            if (!Number.isFinite(parsed)) return;
+
+            const numericRating = Math.min(5, Math.max(1, parsed));
+            evaluationValues.push(numericRating);
+            totalRatingValue += numericRating;
+            totalRatingCount += 1;
+
+            if (includeCategoryScores) {
+                const questionToken = String(questionId || "").trim();
+                const category = questionMeta.categoryByQuestionId[questionToken]
+                    || questionMeta.categoryByQuestionId[questionToken.toLowerCase()]
+                    || "General Questions";
+                if (!categoryStats[category]) {
+                    categoryStats[category] = { sum: 0, count: 0 };
+                    categoryOrder.push(category);
+                }
+                categoryStats[category].sum += numericRating;
+                categoryStats[category].count += 1;
+            }
+        });
+
+        if (evaluationValues.length > 0) {
+            const average = evaluationValues.reduce(function (sum, value) { return sum + value; }, 0) / evaluationValues.length;
+            const bucket = Math.min(5, Math.max(1, Math.round(average)));
+            ratingDistribution[bucket] = (ratingDistribution[bucket] || 0) + 1;
+        }
+
+        qualitativeResponses = qualitativeResponses.concat(collectVpaaQualitativeResponses(evaluation));
+    });
+
+    const orderedCategories = categoryOrder.concat(
+        Object.keys(categoryStats).filter(function (category) {
+            return !categoryOrder.includes(category);
+        })
+    );
+    let categoryScores = orderedCategories.map(function (category) {
+        const stat = categoryStats[category] || { sum: 0, count: 0 };
+        return {
+            category: category,
+            score: stat.count > 0 ? parseFloat((stat.sum / stat.count).toFixed(2)) : 0
+        };
+    });
+    if (includeCategoryScores && categoryScores.length === 0) {
+        categoryScores = [{ category: "General Questions", score: 0 }];
+    }
+
+    qualitativeResponses.sort(function (left, right) {
+        const leftTime = Date.parse(String(left && left.date || "")) || 0;
+        const rightTime = Date.parse(String(right && right.date || "")) || 0;
+        return rightTime - leftTime;
+    });
+
+    return {
+        averageRating: totalRatingCount > 0 ? parseFloat((totalRatingValue / totalRatingCount).toFixed(2)) : 0,
+        totalEvaluations: totalEvaluations,
+        ratingDistribution: ratingDistribution,
+        categoryScores: categoryScores,
+        uniqueTargetCount: Math.max(uniqueTargetProfessorIds.size, uniqueTargetTokens.size),
+        uniqueRaterCount: uniqueRaterTokens.size,
+        qualitativeResponses: qualitativeResponses
+    };
+}
+
+function getVpaaProfessorStudentTotals(context, professorId, semesterId) {
+    const professorToken = normalizeVpaaProfessorUserId(professorId);
+    const expectedPairs = new Set();
+
+    (context.enrollments || []).forEach(function (enrollment) {
+        if (!enrollment) return;
+        if (normalizeVpaaToken(enrollment.status || "enrolled") !== "enrolled") return;
+
+        const offeringId = String(enrollment.courseOfferingId || "").trim();
+        const offering = context.offeringsById[offeringId];
+        if (!offering || offering.isActive === false) return;
+        if (!isVpaaEvaluationInSemester({ semesterId: offering.semesterSlug || "" }, semesterId)) return;
+
+        const offeringProfessorId = normalizeVpaaProfessorUserId(offering.professorUserId);
+        if (offeringProfessorId !== professorToken) return;
+
+        const studentToken = normalizeVpaaToken(enrollment.studentUserId || enrollment.studentId || enrollment.studentNumber || enrollment.studentName);
+        const offeringToken = normalizeVpaaToken(offeringId);
+        if (!studentToken || !offeringToken) return;
+        expectedPairs.add(`${studentToken}|${offeringToken}`);
+    });
+
+    const completedPairs = new Set();
+    (context.evaluations || []).forEach(function (evaluation) {
+        if (resolveVpaaEvaluationType(evaluation) !== "student") return;
+        if (!isVpaaEvaluationInSemester(evaluation, semesterId)) return;
+
+        const targetId = resolveTargetProfessorIdFromEvaluation(evaluation, "student", context);
+        if (targetId !== professorToken) return;
+
+        const studentToken = normalizeVpaaToken(
+            evaluation.studentUserId ||
+            evaluation.studentId ||
+            evaluation.evaluatorUserId ||
+            evaluation.evaluatorId ||
+            evaluation.evaluatorUsername
+        );
+        if (!studentToken) return;
+
+        const offeringToken = normalizeVpaaToken(evaluation.courseOfferingId);
+        if (expectedPairs.size > 0) {
+            if (!offeringToken) return;
+            const pairKey = `${studentToken}|${offeringToken}`;
+            if (expectedPairs.has(pairKey)) {
+                completedPairs.add(pairKey);
+            }
+            return;
+        }
+
+        completedPairs.add(`${studentToken}|${offeringToken || "direct"}`);
+    });
+
+    return {
+        totalRaters: expectedPairs.size,
+        evaluatedPairs: completedPairs.size
+    };
+}
+
+function getVpaaProfessorEvaluationSnapshot(professor, semesterId, evaluationType, contextInput) {
+    const meta = getVpaaEvaluationTypeMeta(evaluationType);
+    if (!professor) {
+        return {
+            totalRaters: 0,
+            evaluatedCount: 0,
+            notEvaluatedCount: 0,
+            averageRating: 0,
+            qualitativeResponses: [],
+            meta: meta
+        };
+    }
+
+    const context = contextInput || buildVpaaDatabaseContext();
+    const professorId = normalizeVpaaProfessorUserId(professor.userId || professor.id);
+    const normalizedSemester = String(semesterId || "all").trim() || "all";
+    const normalizedType = getVpaaEvaluationTypeMeta(evaluationType).id;
+    const aggregate = aggregateVpaaEvaluationData({
+        context: context,
+        typeKey: normalizedType,
+        semesterId: normalizedSemester,
+        targetProfessorId: professorId,
+        includeCategoryScores: true
+    });
+
+    if (normalizedType === "student") {
+        const studentTotals = getVpaaProfessorStudentTotals(context, professorId, normalizedSemester);
+        const fallbackRaters = aggregate.uniqueRaterCount;
+        const totalRaters = studentTotals.totalRaters > 0 ? studentTotals.totalRaters : fallbackRaters;
+        const evaluatedCount = studentTotals.totalRaters > 0 ? studentTotals.evaluatedPairs : aggregate.uniqueRaterCount;
+        return {
+            totalRaters: totalRaters,
+            evaluatedCount: evaluatedCount,
+            notEvaluatedCount: Math.max(totalRaters - evaluatedCount, 0),
+            averageRating: aggregate.averageRating,
+            qualitativeResponses: aggregate.qualitativeResponses,
+            categoryScores: aggregate.categoryScores,
+            ratingDistribution: aggregate.ratingDistribution,
+            totalEvaluations: aggregate.totalEvaluations,
+            meta: meta
+        };
+    }
+
+    const activeProfessors = (context.professors || []).filter(function (user) {
+        return normalizeVpaaToken(user && user.status || "active") !== "inactive";
+    });
+    const professorPool = Math.max(activeProfessors.length - 1, 0);
+    const supervisorPool = getVpaaApplicableSupervisorUsersForProfessor(context, professorId).length || 1;
+    let totalRaters = normalizedType === "professor" ? professorPool : supervisorPool;
+    if (totalRaters < aggregate.uniqueRaterCount) {
+        totalRaters = aggregate.uniqueRaterCount;
+    }
+
+    const evaluatedCount = aggregate.uniqueRaterCount;
+    return {
+        totalRaters: totalRaters,
+        evaluatedCount: evaluatedCount,
+        notEvaluatedCount: Math.max(totalRaters - evaluatedCount, 0),
+        averageRating: aggregate.averageRating,
+        qualitativeResponses: aggregate.qualitativeResponses,
+        categoryScores: aggregate.categoryScores,
+        ratingDistribution: aggregate.ratingDistribution,
+        totalEvaluations: aggregate.totalEvaluations,
+        meta: meta
+    };
+}
+
+function resolveVpaaHistoricalTrendSourceAverage(aggregate) {
+    const total = Number(aggregate && aggregate.totalEvaluations);
+    const average = Number(aggregate && aggregate.averageRating);
+    if (!Number.isFinite(total) || total <= 0) return null;
+    if (!Number.isFinite(average) || average <= 0) return null;
+    return average;
+}
+
+function getVpaaLatestSemestersForTrend(context, limit) {
+    const desired = Number(limit) > 0 ? Number(limit) : 4;
+    const orderedSemesters = [];
+    const seen = new Set();
+
+    (context.semesterList || []).forEach(function (item) {
+        const value = String(item && (item.value || item.id || item.slug || item.label) || "").trim();
+        if (!value || seen.has(value)) return;
+        seen.add(value);
+        orderedSemesters.push({
+            id: value,
+            label: String(item && item.label || value).trim() || value
+        });
+    });
+
+    const currentSemester = String(context.currentSemester || currentSemesterLabel || "").trim();
+    if (currentSemester && !seen.has(currentSemester)) {
+        orderedSemesters.unshift({
+            id: currentSemester,
+            label: currentSemester
+        });
+    }
+
+    if (orderedSemesters.length > 0) {
+        return orderedSemesters.slice(0, desired).reverse();
+    }
+
+    const latestBySemester = new Map();
+    (context.evaluations || []).forEach(function (evaluation) {
+        const semesterId = String(evaluation && evaluation.semesterId || "").trim();
+        if (!semesterId) return;
+
+        const rawTs = evaluation && (evaluation.submittedAt || evaluation.timestamp || "");
+        const ts = Date.parse(rawTs);
+        const score = Number.isFinite(ts) ? ts : 0;
+        const previous = latestBySemester.get(semesterId);
+        if (previous === undefined || score > previous) {
+            latestBySemester.set(semesterId, score);
+        }
+    });
+
+    return Array.from(latestBySemester.entries())
+        .sort(function (a, b) {
+            if (b[1] !== a[1]) return b[1] - a[1];
+            return String(b[0]).localeCompare(String(a[0]));
+        })
+        .slice(0, desired)
+        .reverse()
+        .map(function (entry) {
+            return { id: entry[0], label: entry[0] };
+        });
+}
+
+function buildVpaaProfessorHistoricalTrend(professorId, contextInput) {
+    const context = contextInput || buildVpaaDatabaseContext();
+    const normalizedProfessorId = normalizeVpaaProfessorUserId(professorId);
+    const semesters = getVpaaLatestSemestersForTrend(context, 4);
+    const weights = { student: 0.50, professor: 0.25, supervisor: 0.25 };
+
+    const points = semesters.map(function (semester) {
+        const semesterId = String(semester && semester.id || "").trim();
+        const semesterLabel = String(semester && (semester.label || semester.id) || semesterId).trim() || semesterId;
+        const sourceScores = {
+            student: resolveVpaaHistoricalTrendSourceAverage(aggregateVpaaEvaluationData({
+                context: context,
+                typeKey: "student",
+                semesterId: semesterId,
+                targetProfessorId: normalizedProfessorId,
+                includeCategoryScores: false
+            })),
+            professor: resolveVpaaHistoricalTrendSourceAverage(aggregateVpaaEvaluationData({
+                context: context,
+                typeKey: "professor",
+                semesterId: semesterId,
+                targetProfessorId: normalizedProfessorId,
+                includeCategoryScores: false
+            })),
+            supervisor: resolveVpaaHistoricalTrendSourceAverage(aggregateVpaaEvaluationData({
+                context: context,
+                typeKey: "supervisor",
+                semesterId: semesterId,
+                targetProfessorId: normalizedProfessorId,
+                includeCategoryScores: false
+            }))
+        };
+
+        let weightedSum = 0;
+        let availableWeight = 0;
+        Object.keys(weights).forEach(function (key) {
+            const value = Number(sourceScores[key]);
+            if (!Number.isFinite(value)) return;
+            const weight = Number(weights[key]);
+            weightedSum += value * weight;
+            availableWeight += weight;
+        });
+
+        return {
+            semesterId: semesterId,
+            semesterLabel: semesterLabel,
+            score: availableWeight > 0 ? parseFloat((weightedSum / availableWeight).toFixed(2)) : null,
+            delta: null
+        };
+    });
+
+    let previousScore = null;
+    points.forEach(function (point) {
+        const score = Number(point && point.score);
+        if (!Number.isFinite(score)) {
+            point.delta = null;
+            return;
+        }
+        point.delta = Number.isFinite(previousScore)
+            ? parseFloat((score - previousScore).toFixed(2))
+            : null;
+        previousScore = score;
+    });
+
+    return {
+        points: points,
+        windowSize: 4,
+        summary: computeVpaaHistoricalTrendSummary(points)
+    };
+}
+
+function formatVpaaHistoricalTrendSignedPercent(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return "N/A";
+    return `${numeric >= 0 ? "+" : ""}${numeric.toFixed(1)}%`;
+}
+
+function formatVpaaHistoricalTrendDelta(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return "-";
+    return `${numeric >= 0 ? "+" : ""}${numeric.toFixed(2)}`;
+}
+
+function computeVpaaHistoricalTrendSummary(pointsInput) {
+    const points = Array.isArray(pointsInput) ? pointsInput : [];
+    const validPoints = points.filter(function (point) {
+        return Number.isFinite(Number(point && point.score));
+    }).map(function (point) {
+        return Number(point.score);
+    });
+
+    if (validPoints.length < 2) {
+        return {
+            hasSufficientData: false,
+            direction: "insufficient",
+            percentChange: null,
+            variationPercent: null,
+            isConsistent: false,
+            declinePatternDetected: false,
+            semesterCount: validPoints.length,
+            statement: "Insufficient historical data to determine performance trend."
+        };
+    }
+
+    const earliest = validPoints[0];
+    const latest = validPoints[validPoints.length - 1];
+    const safeBaseline = earliest > 0 ? earliest : 0.01;
+    const percentChange = ((latest - earliest) / safeBaseline) * 100;
+
+    let direction = "stable";
+    if (percentChange >= 10) {
+        direction = "improved";
+    } else if (percentChange <= -10) {
+        direction = "declined";
+    }
+
+    const mean = validPoints.reduce(function (sum, value) { return sum + value; }, 0) / validPoints.length;
+    const variance = validPoints.reduce(function (sum, value) {
+        return sum + Math.pow(value - mean, 2);
+    }, 0) / validPoints.length;
+    const variationPercent = mean > 0 ? (Math.sqrt(variance) / mean) * 100 : 0;
+    const isConsistent = variationPercent <= 5;
+
+    let maxConsecutiveDrops = 0;
+    let consecutiveDrops = 0;
+    for (let index = 1; index < validPoints.length; index += 1) {
+        if (validPoints[index] < validPoints[index - 1]) {
+            consecutiveDrops += 1;
+            maxConsecutiveDrops = Math.max(maxConsecutiveDrops, consecutiveDrops);
+        } else {
+            consecutiveDrops = 0;
+        }
+    }
+
+    const declinePatternDetected = maxConsecutiveDrops >= 2;
+    const semesterCount = validPoints.length;
+    let statement = `Faculty remained stable (${formatVpaaHistoricalTrendSignedPercent(percentChange)}) over ${semesterCount} semester${semesterCount === 1 ? "" : "s"}.`;
+    if (direction === "improved") {
+        statement = `Faculty improved by ${Math.abs(percentChange).toFixed(1)}% over ${semesterCount} semester${semesterCount === 1 ? "" : "s"}.`;
+    } else if (direction === "declined") {
+        statement = `Faculty declined by ${Math.abs(percentChange).toFixed(1)}% over ${semesterCount} semester${semesterCount === 1 ? "" : "s"}.`;
+    }
+
+    return {
+        hasSufficientData: true,
+        direction: direction,
+        percentChange: percentChange,
+        variationPercent: variationPercent,
+        isConsistent: isConsistent,
+        declinePatternDetected: declinePatternDetected,
+        semesterCount: semesterCount,
+        statement: statement
+    };
+}
+
+function getVpaaHistoricalTrendDirectionLabel(direction) {
+    if (direction === "improved") return "Improving";
+    if (direction === "declined") return "Declining";
+    if (direction === "stable") return "Stable";
+    return "Insufficient Data";
+}
+
+function getVpaaHistoricalTrendDirectionClass(direction) {
+    if (direction === "improved") return "positive";
+    if (direction === "declined") return "negative";
+    if (direction === "stable") return "neutral";
+    return "neutral";
+}
+
+function getVpaaHistoricalTrendConsistencyLabel(summary) {
+    if (!summary || !summary.hasSufficientData) return "Unknown";
+    return summary.isConsistent ? "Consistent" : "Variable";
+}
+
+function getVpaaHistoricalTrendConsistencyClass(summary) {
+    if (!summary || !summary.hasSufficientData) return "neutral";
+    return summary.isConsistent ? "positive" : "warning";
+}
+
+function getVpaaHistoricalTrendDeclinePatternLabel(summary) {
+    if (!summary || !summary.hasSufficientData) return "Unknown";
+    return summary.declinePatternDetected ? "Detected" : "Not detected";
+}
+
+function getVpaaHistoricalTrendDeclinePatternClass(summary) {
+    if (!summary || !summary.hasSufficientData) return "neutral";
+    return summary.declinePatternDetected ? "negative" : "positive";
+}
+
+function generateVpaaStarRating(rating) {
+    const numRating = parseFloat(rating) || 0;
+    const fullStars = Math.floor(numRating);
+    const hasHalfStar = (numRating % 1) >= 0.5;
+    const emptyStars = 5 - fullStars - (hasHalfStar ? 1 : 0);
+
+    let stars = "";
+    for (let index = 0; index < fullStars; index += 1) {
+        stars += '<i class="fas fa-star"></i>';
+    }
+    if (hasHalfStar) {
+        stars += '<i class="fas fa-star-half-alt"></i>';
+    }
+    for (let index = 0; index < emptyStars; index += 1) {
+        stars += '<i class="far fa-star"></i>';
+    }
+    return stars;
+}
+
+function buildVpaaProfessorAvatarHtml(professor, avatarClassName) {
+    const className = String(avatarClassName || "").trim();
+    const photoSource = sanitizePhotoSource(
+        professor && (professor.profileImageUrl || professor.photoData || professor.profileImage)
+    );
+    if (photoSource) {
+        return `<div class="${escapeAttr(className)}"><img src="${escapeAttr(photoSource)}" alt="${escapeAttr(professor && professor.name ? professor.name : "Professor")} photo"></div>`;
+    }
+
+    const initials = escapeHtml(getInitials(professor && professor.name ? professor.name : "") || "PR");
+    return `<div class="${escapeAttr(className)}"><span class="avatar-fallback-text">${initials}</span></div>`;
+}
+
+function getVpaaProfessorById(professorId, semesterId) {
+    const rawId = String(professorId || "").trim();
+    if (!rawId) return null;
+
+    const baseId = normalizeVpaaProfessorUserId(rawId);
+    const selectedSemester = String(semesterId || "").trim();
+    const rows = allProfessorData.filter(function (item) {
+        if (!item) return false;
+        if (String(item.id || "").trim() === rawId) return true;
+        return baseId && normalizeVpaaProfessorUserId(item.userId || item.id) === baseId;
+    });
+
+    let selected = null;
+    if (selectedSemester && selectedSemester !== "all") {
+        selected = rows.find(function (item) {
+            return String(item && item.semester || "").trim() === selectedSemester;
+        }) || null;
+    }
+
+    if (!selected) {
+        const current = String((SharedData.getCurrentSemester && SharedData.getCurrentSemester()) || currentSemesterLabel || "").trim();
+        selected = rows.find(function (item) {
+            return current && String(item && item.semester || "").trim() === current;
+        }) || null;
+    }
+
+    if (!selected) {
+        selected = rows.find(function (item) {
+            return String(item && item.id || "").trim() === rawId;
+        }) || rows[0] || null;
+    }
+
+    if (selected) {
+        return Object.assign({}, selected, {
+            userId: normalizeVpaaProfessorUserId(selected.userId || selected.id)
+        });
+    }
+
+    const users = SharedData.getUsers ? SharedData.getUsers() : [];
+    const sourceUser = (Array.isArray(users) ? users : []).find(function (user) {
+        return normalizeVpaaToken(user && user.role) === "professor"
+            && normalizeVpaaProfessorUserId(user && user.id) === baseId;
+    });
+    if (!sourceUser) return null;
+
+    const displaySemester = selectedSemester && selectedSemester !== "all"
+        ? selectedSemester
+        : (String((SharedData.getCurrentSemester && SharedData.getCurrentSemester()) || currentSemesterLabel || "").trim());
+    return {
+        id: `${baseId}|${displaySemester || "all"}`,
+        userId: baseId,
+        employeeId: String(sourceUser.employeeId || "").trim(),
+        name: String(sourceUser.name || "Professor").trim(),
+        campus: String(sourceUser.campus || "").trim(),
+        department: String(sourceUser.department || sourceUser.institute || "General").trim(),
+        program: String(sourceUser.programCode || sourceUser.program || "").trim(),
+        programCode: String(sourceUser.programCode || sourceUser.program || "").trim(),
+        email: String(sourceUser.email || "").trim(),
+        rank: String(sourceUser.position || "Professor").trim(),
+        photoData: String(sourceUser.photoData || sourceUser.profileImageUrl || sourceUser.profileImage || "").trim(),
+        semester: displaySemester || "",
+        overall: 0,
+        responseRate: 0,
+        evaluations: 0,
+        students: 0,
+        subjects: [],
+        analyticsByType: {},
+        studentComments: [],
+        peerComments: [],
+        supervisorComments: [],
+        isActive: normalizeVpaaToken(sourceUser.status || "active") !== "inactive"
     };
 }
 
@@ -1585,8 +2885,18 @@ function createProfessorCard(prof) {
     card.className = "professor-card professor-card-compact";
     card.setAttribute("role", "button");
     card.setAttribute("tabindex", "0");
-    card.setAttribute("aria-label", `Open evaluation report for ${prof.name}`);
-    card.innerHTML = buildProfessorIdentityBlock(prof);
+    card.setAttribute("aria-label", `Open professor analytics for ${prof.name}`);
+    card.innerHTML = `
+        ${buildProfessorIdentityBlock(prof)}
+        <div class="vpaa-professor-card-actions">
+            <button type="button" class="action-btn analytics" data-vpaa-action="analytics" data-professor-id="${escapeAttr(prof.userId || normalizeVpaaProfessorUserId(prof.id))}" title="Analytics" aria-label="Open analytics for ${escapeAttr(prof.name)}">
+                <i class="fas fa-chart-line"></i>
+            </button>
+            <button type="button" class="action-btn file" data-vpaa-action="faculty-files" data-professor-id="${escapeAttr(prof.userId || normalizeVpaaProfessorUserId(prof.id))}" title="Faculty Files" aria-label="Open faculty files for ${escapeAttr(prof.name)}">
+                <i class="fas fa-folder-open"></i>
+            </button>
+        </div>
+    `;
 
     const openReport = () => openProfessorReportModal(prof);
     card.addEventListener("click", openReport);
@@ -1595,6 +2905,20 @@ function createProfessorCard(prof) {
             event.preventDefault();
             openReport();
         }
+    });
+
+    card.querySelectorAll("[data-vpaa-action]").forEach(function (button) {
+        button.addEventListener("click", function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            const action = String(button.getAttribute("data-vpaa-action") || "").trim();
+            const professorId = String(button.getAttribute("data-professor-id") || "").trim();
+            if (action === "faculty-files") {
+                openVpaaProfessorFileOptions(professorId);
+                return;
+            }
+            viewVpaaProfessorAnalytics(professorId);
+        });
     });
 
     return card;
@@ -1772,6 +3096,268 @@ function renderPopupAnalyticsForType(prof, typeKey) {
     scope.setAttribute("data-popup-type", normalized);
 }
 
+function viewVpaaProfessorAnalytics(professorId) {
+    const selectedSemester = currentVpaaAnalyticsSemester || "all";
+    const semesterOptions = getVpaaSemesterOptions();
+    const normalizedSemester = semesterOptions.some(function (option) {
+        return option.id === selectedSemester;
+    }) ? selectedSemester : "all";
+    currentVpaaAnalyticsSemester = normalizedSemester;
+
+    const normalizedEvaluationType = getVpaaEvaluationTypeMeta(currentVpaaAnalyticsEvaluationType).id;
+    currentVpaaAnalyticsEvaluationType = normalizedEvaluationType;
+
+    const professor = getVpaaProfessorById(professorId, normalizedSemester);
+    if (!professor) {
+        alert("Professor not found. Please try again.");
+        return;
+    }
+
+    const baseProfessorId = normalizeVpaaProfessorUserId(professor.userId || professor.id);
+    currentVpaaAnalyticsProfessorId = baseProfessorId;
+
+    const evaluationMeta = getVpaaEvaluationTypeMeta(normalizedEvaluationType);
+    const analyticsContext = buildVpaaDatabaseContext();
+    const snapshot = getVpaaProfessorEvaluationSnapshot(professor, normalizedSemester, normalizedEvaluationType, analyticsContext);
+    const trend = buildVpaaProfessorHistoricalTrend(baseProfessorId, analyticsContext);
+    const trendSummary = trend && trend.summary ? trend.summary : {
+        hasSufficientData: false,
+        direction: "insufficient",
+        percentChange: null,
+        variationPercent: null,
+        isConsistent: false,
+        declinePatternDetected: false,
+        statement: "Insufficient historical data to determine performance trend."
+    };
+    const trendRows = Array.isArray(trend && trend.points) ? trend.points : [];
+
+    const totalRaters = Number(snapshot.totalRaters || 0);
+    const evaluatedCount = Number(snapshot.evaluatedCount || 0);
+    const notEvaluatedCount = Number(snapshot.notEvaluatedCount || Math.max(totalRaters - evaluatedCount, 0));
+    const averageRating = parseFloat(snapshot.averageRating) || 0;
+    const completionPercentage = totalRaters > 0 ? Math.round((evaluatedCount / totalRaters) * 100) : 0;
+    const evaluatorLabel = evaluationMeta.unitLabel.endsWith("s")
+        ? evaluationMeta.unitLabel.slice(0, -1)
+        : evaluationMeta.unitLabel;
+    const displaySemesterLabel = normalizedSemester === "all"
+        ? "all semesters"
+        : getVpaaSemesterLabel(normalizedSemester);
+
+    let status = "Excellent";
+    let statusColor = "#10b981";
+    if (completionPercentage < 50) {
+        status = "Needs Attention";
+        statusColor = "#ef4444";
+    } else if (completionPercentage < 75) {
+        status = "Good";
+        statusColor = "#f59e0b";
+    }
+
+    const feedbackRows = Array.isArray(snapshot.qualitativeResponses) ? snapshot.qualitativeResponses : [];
+    const deptClass = toDeptClass(professor.department);
+
+    elements.reportModalBody.innerHTML = `
+        <div class="analytics-view">
+            <div class="analytics-header vpaa-analytics-header">
+                ${buildVpaaProfessorAvatarHtml(professor, "analytics-avatar")}
+                <div class="analytics-name">
+                    <h2>${escapeHtml(professor.name || "Professor")}</h2>
+                    <span class="dept-badge ${escapeAttr(deptClass)}">${escapeHtml(professor.department || "N/A")}</span>
+                </div>
+                <div class="vpaa-analytics-header-actions">
+                    <button type="button" class="btn-faculty-files" data-vpaa-action="faculty-files" data-professor-id="${escapeAttr(baseProfessorId)}">
+                        <i class="fas fa-folder-open"></i>
+                        Faculty Files
+                    </button>
+                </div>
+            </div>
+
+            <div class="analytics-filters">
+                <div class="analytics-filter">
+                    <label for="analytics-semester-select">Semester</label>
+                    <select id="analytics-semester-select">
+                        ${buildVpaaSemesterOptionsHtml(normalizedSemester)}
+                    </select>
+                </div>
+                <div class="analytics-filter">
+                    <label for="analytics-evaluation-type">Evaluation Type</label>
+                    <select id="analytics-evaluation-type">
+                        ${buildVpaaEvaluationTypeOptionsHtml(normalizedEvaluationType)}
+                    </select>
+                </div>
+                <div class="analytics-filter-summary">
+                    <span>${normalizedSemester === "all" ? "Showing overall data" : `Showing ${escapeHtml(displaySemesterLabel)} data`} &bull; ${escapeHtml(evaluationMeta.label)}</span>
+                </div>
+            </div>
+
+            <div class="analytics-stats-grid">
+                <div class="stat-card rating">
+                    <div class="stat-icon">
+                        <i class="fas fa-star"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3>Average Rating</h3>
+                        <p class="stat-value">${averageRating.toFixed(1)}<span class="stat-unit">/5.0</span></p>
+                        <div class="rating-stars">
+                            ${generateVpaaStarRating(averageRating)}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stat-card status">
+                    <div class="stat-icon">
+                        <i class="fas fa-info-circle"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3>Current Status</h3>
+                        <p class="stat-value status-badge" style="color: ${escapeAttr(statusColor)}">${escapeHtml(status)}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="analytics-section">
+                <h3 class="section-title">
+                    <i class="${escapeAttr(evaluationMeta.icon)}"></i>
+                    ${escapeHtml(evaluationMeta.statusTitle)}
+                </h3>
+                <div class="evaluation-stats">
+                    <div class="evaluation-item evaluated">
+                        <div class="evaluation-icon">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <div class="evaluation-info">
+                            <h4>Evaluated</h4>
+                            <p class="evaluation-count">${evaluatedCount} ${escapeHtml(evaluationMeta.unitLabel)}</p>
+                            <div class="progress-bar">
+                                <div class="progress-fill evaluated-fill" style="width: ${totalRaters > 0 ? (evaluatedCount / totalRaters) * 100 : 0}%"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="evaluation-item not-evaluated">
+                        <div class="evaluation-icon">
+                            <i class="fas fa-clock"></i>
+                        </div>
+                        <div class="evaluation-info">
+                            <h4>Not Yet Evaluated</h4>
+                            <p class="evaluation-count">${notEvaluatedCount} ${escapeHtml(evaluationMeta.unitLabel)}</p>
+                            <div class="progress-bar">
+                                <div class="progress-fill not-evaluated-fill" style="width: ${totalRaters > 0 ? (notEvaluatedCount / totalRaters) * 100 : 0}%"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="evaluation-item total">
+                        <div class="evaluation-icon">
+                            <i class="${escapeAttr(evaluationMeta.icon)}"></i>
+                        </div>
+                        <div class="evaluation-info">
+                            <h4>${escapeHtml(evaluationMeta.totalLabel)}</h4>
+                            <p class="evaluation-count">${totalRaters} ${escapeHtml(evaluationMeta.unitLabel)}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="analytics-section historical-trend-section">
+                <h3 class="section-title">
+                    <i class="fas fa-chart-line"></i>
+                    Historical Trend Analytics
+                </h3>
+                <div class="historical-trend-banner">
+                    <p class="historical-trend-statement">${escapeHtml(trendSummary.statement || "Insufficient historical data to determine performance trend.")}</p>
+                    <p class="historical-trend-note">Combined source metric uses Student 50%, Peer 25%, Supervisor 25%, across latest 4 semesters.</p>
+                    <div class="historical-trend-chips">
+                        <span class="historical-trend-chip ${escapeAttr(getVpaaHistoricalTrendDirectionClass(trendSummary.direction))}">
+                            Direction: ${escapeHtml(getVpaaHistoricalTrendDirectionLabel(trendSummary.direction))}
+                        </span>
+                        <span class="historical-trend-chip neutral">
+                            Change: ${escapeHtml(formatVpaaHistoricalTrendSignedPercent(trendSummary.percentChange))}
+                        </span>
+                        <span class="historical-trend-chip ${escapeAttr(getVpaaHistoricalTrendConsistencyClass(trendSummary))}">
+                            Consistency: ${escapeHtml(getVpaaHistoricalTrendConsistencyLabel(trendSummary))}
+                        </span>
+                        <span class="historical-trend-chip ${escapeAttr(getVpaaHistoricalTrendDeclinePatternClass(trendSummary))}">
+                            Decline Pattern: ${escapeHtml(getVpaaHistoricalTrendDeclinePatternLabel(trendSummary))}
+                        </span>
+                    </div>
+                </div>
+                <div class="historical-trend-table-wrap">
+                    <table class="historical-trend-table">
+                        <thead>
+                            <tr>
+                                <th>Semester</th>
+                                <th>Combined Score (/5)</th>
+                                <th>Delta vs Prior</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${trendRows.length > 0 ? trendRows.map(function (point) {
+                                return `
+                                    <tr>
+                                        <td>${escapeHtml(String(point.semesterLabel || point.semesterId || "Semester"))}</td>
+                                        <td>${Number.isFinite(Number(point.score)) ? Number(point.score).toFixed(2) : "N/A"}</td>
+                                        <td>${escapeHtml(formatVpaaHistoricalTrendDelta(point.delta))}</td>
+                                    </tr>
+                                `;
+                            }).join("") : `
+                                <tr>
+                                    <td colspan="3" style="text-align:center; padding:14px;">No semester trend data available.</td>
+                                </tr>
+                            `}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="qualitative-responses-section">
+                <div class="section-header-with-button">
+                    <h3 class="section-title">
+                        <i class="fas fa-comments"></i>
+                        ${escapeHtml(evaluationMeta.label)} Feedback
+                    </h3>
+                    <button type="button" class="btn-ai-analytics" id="vpaa-ai-analytics-btn" data-prof-id="${escapeAttr(professor.id)}">
+                        <i class="fas fa-robot"></i>
+                        AI Analytics
+                    </button>
+                </div>
+                <div class="vpaa-ai-insights" data-ai-insight-output aria-live="polite"></div>
+                <div class="qualitative-responses-list">
+                    ${feedbackRows.length > 0 ? feedbackRows.map(function (response) {
+                        return `
+                            <div class="response-card compact">
+                                <div class="response-header">
+                                    <div class="response-icon">
+                                        <i class="${escapeAttr(evaluationMeta.feedbackIcon)}"></i>
+                                    </div>
+                                    <div class="response-meta">
+                                        <span class="response-label">${escapeHtml(evaluationMeta.label)} Feedback</span>
+                                        <span class="response-student">${escapeHtml(response.studentName || evaluatorLabel)} &bull; ${escapeHtml(response.studentNumber || "N/A")}</span>
+                                    </div>
+                                    <span class="response-date">${escapeHtml(response.date || "-")}</span>
+                                </div>
+                                <p class="response-text">"${escapeHtml(response.text || "")}"</p>
+                            </div>
+                        `;
+                    }).join("") : `
+                        <div class="no-responses">
+                            <p>No ${escapeHtml(evaluationMeta.label.toLowerCase())} feedback available for ${escapeHtml(displaySemesterLabel)}.</p>
+                        </div>
+                    `}
+                </div>
+            </div>
+        </div>
+    `;
+
+    if (elements.reportModalTitle) {
+        elements.reportModalTitle.textContent = "Professor Analytics";
+    }
+    elements.reportModal.classList.add("active");
+    elements.reportModal.style.display = "flex";
+    elements.reportModal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("vpaa-modal-open");
+}
+
 function setupReportModalEvents() {
     if (!elements.reportModal || !elements.reportModalBody) return;
 
@@ -1786,21 +3372,37 @@ function setupReportModalEvents() {
     });
 
     elements.reportModalBody.addEventListener("click", (event) => {
+        const fileBtn = event.target.closest("[data-vpaa-action='faculty-files']");
+        if (fileBtn) {
+            const professorId = String(fileBtn.getAttribute("data-professor-id") || "").trim();
+            openVpaaProfessorFileOptions(professorId);
+            return;
+        }
+
         const analyticsBtn = event.target.closest(".btn-ai-analytics[data-prof-id]");
         if (!analyticsBtn) return;
         const profId = String(analyticsBtn.getAttribute("data-prof-id") || "");
-        const scope = analyticsBtn.closest(".vpaa-report-details");
+        const scope = analyticsBtn.closest(".analytics-view");
         const outputEl = scope ? scope.querySelector("[data-ai-insight-output]") : null;
         runAiAnalyticsForProfessor(profId, outputEl, analyticsBtn);
     });
 
     elements.reportModalBody.addEventListener("change", (event) => {
-        const typeSelect = event.target.closest(".vpaa-popup-eval-type");
+        const semesterSelect = event.target.closest("#analytics-semester-select");
+        if (semesterSelect) {
+            currentVpaaAnalyticsSemester = String(semesterSelect.value || "all").trim() || "all";
+            if (currentVpaaAnalyticsProfessorId) {
+                viewVpaaProfessorAnalytics(currentVpaaAnalyticsProfessorId);
+            }
+            return;
+        }
+
+        const typeSelect = event.target.closest("#analytics-evaluation-type");
         if (!typeSelect) return;
-        const profId = String(typeSelect.getAttribute("data-prof-id") || "");
-        const prof = allProfessorData.find((item) => String(item.id) === profId);
-        if (!prof) return;
-        renderPopupAnalyticsForType(prof, typeSelect.value);
+        currentVpaaAnalyticsEvaluationType = normalizeVpaaAnalyticsEvaluationType(typeSelect.value);
+        if (currentVpaaAnalyticsProfessorId) {
+            viewVpaaProfessorAnalytics(currentVpaaAnalyticsProfessorId);
+        }
     });
 
     document.addEventListener("keydown", (event) => {
@@ -1811,26 +3413,1093 @@ function setupReportModalEvents() {
 }
 
 function openProfessorReportModal(prof) {
-    if (!prof || !elements.reportModal || !elements.reportModalBody) return;
-
-    elements.reportModalBody.innerHTML = buildProfessorReportDetailsHtml(prof);
-    renderPopupAnalyticsForType(prof, "student");
-    elements.reportModal.classList.add("active");
-    elements.reportModal.setAttribute("aria-hidden", "false");
-    document.body.classList.add("vpaa-modal-open");
+    const professorId = normalizeVpaaProfessorUserId(prof && (prof.userId || prof.id));
+    if (!professorId) return;
+    viewVpaaProfessorAnalytics(professorId);
 }
 
 function closeReportModal() {
     if (!elements.reportModal || !elements.reportModalBody) return;
 
     elements.reportModal.classList.remove("active");
+    elements.reportModal.style.display = "none";
     elements.reportModal.setAttribute("aria-hidden", "true");
     elements.reportModalBody.innerHTML = "";
+    currentVpaaAnalyticsProfessorId = null;
     document.body.classList.remove("vpaa-modal-open");
 }
 
 function isReportModalOpen() {
-    return !!(elements.reportModal && elements.reportModal.classList.contains("active"));
+    return !!(elements.reportModal && (elements.reportModal.classList.contains("active") || elements.reportModal.style.display === "flex"));
+}
+
+function parseVpaaFileNameFromDisposition(headerValue) {
+    const value = String(headerValue || "").trim();
+    if (!value) return "";
+
+    const utfMatch = value.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utfMatch && utfMatch[1]) {
+        try {
+            return decodeURIComponent(String(utfMatch[1]).trim());
+        } catch (_error) {
+            return String(utfMatch[1]).replace(/["']/g, "").trim();
+        }
+    }
+
+    const simpleMatch = value.match(/filename="?([^";]+)"?/i);
+    return simpleMatch && simpleMatch[1] ? String(simpleMatch[1]).trim() : "";
+}
+
+function getVpaaReportSemesterChoices() {
+    return getVpaaSemesterOptions().filter(function (option) {
+        return option && option.id && option.id !== "all";
+    });
+}
+
+function normalizeVpaaReportLoadType(value) {
+    return String(value || "").trim().toLowerCase() === "excess" ? "excess" : "main";
+}
+
+function getVpaaReportLoadTypeLabel(value) {
+    return normalizeVpaaReportLoadType(value) === "excess" ? "Excess Load" : "Main Load";
+}
+
+function getVpaaFacultyPaperSnapshot() {
+    if (typeof SharedData.getFacultyPapers === "function") {
+        return SharedData.getFacultyPapers();
+    }
+    return [];
+}
+
+function hasVpaaStoredFacultyPaperFile(paper) {
+    if (!paper || typeof paper !== "object") return false;
+    if (String(paper.latest_file_path || paper.latestFilePath || "").trim()) return true;
+    const versions = Array.isArray(paper.pdf_versions) ? paper.pdf_versions : (Array.isArray(paper.pdfVersions) ? paper.pdfVersions : []);
+    return versions.some(function (version) {
+        return String(version && (version.file_path || version.filePath) || "").trim();
+    });
+}
+
+function getVpaaStoredFacultyPaperVersionNo(paper) {
+    const versions = Array.isArray(paper && paper.pdf_versions)
+        ? paper.pdf_versions
+        : (Array.isArray(paper && paper.pdfVersions) ? paper.pdfVersions : []);
+    let latest = 0;
+    versions.forEach(function (version) {
+        const versionNo = Number(version && (version.version_no || version.versionNo));
+        if (Number.isFinite(versionNo) && versionNo > latest) {
+            latest = versionNo;
+        }
+    });
+    return latest > 0 ? latest : null;
+}
+
+function buildVpaaAcknowledgementSemesterChoices(professor, loadType) {
+    const professorId = normalizeVpaaProfessorUserId(professor && (professor.userId || professor.id));
+    if (!professorId) return [];
+    const selectedLoadType = loadType ? normalizeVpaaReportLoadType(loadType) : "";
+    const papers = getVpaaFacultyPaperSnapshot();
+    const bySemester = new Map();
+
+    (Array.isArray(papers) ? papers : []).forEach(function (paper) {
+        if (!paper || typeof paper !== "object") return;
+        if (normalizeVpaaProfessorUserId(paper.professor_user_id || paper.professorUserId) !== professorId) return;
+        if (!hasVpaaStoredFacultyPaperFile(paper)) return;
+
+        const paperLoadType = normalizeVpaaReportLoadType(paper.load_type || paper.loadType);
+        if (selectedLoadType && paperLoadType !== selectedLoadType) return;
+
+        const semesterId = String(paper.semester_id || paper.semesterId || "").trim();
+        if (!semesterId) return;
+
+        bySemester.set(`${semesterId}|${paperLoadType}`, {
+            id: semesterId,
+            label: String(paper.semester_label || paper.semesterLabel || getVpaaSemesterLabel(semesterId) || semesterId).trim(),
+            loadType: paperLoadType,
+            paper: paper
+        });
+    });
+
+    const order = getVpaaReportSemesterChoices().map(function (option) {
+        return option.id;
+    });
+    return Array.from(bySemester.values()).sort(function (left, right) {
+        const leftIndex = order.indexOf(left.id);
+        const rightIndex = order.indexOf(right.id);
+        if (leftIndex === -1 && rightIndex === -1) return String(left.label).localeCompare(String(right.label));
+        if (leftIndex === -1) return 1;
+        if (rightIndex === -1) return -1;
+        return leftIndex - rightIndex;
+    });
+}
+
+function ensureVpaaReportSemesterModal() {
+    let modal = document.getElementById("vpaaReportSemesterModal");
+    if (modal) return modal;
+
+    modal = document.createElement("div");
+    modal.id = "vpaaReportSemesterModal";
+    modal.className = "modal hr-report-modal vpaa-report-modal-picker";
+    modal.innerHTML = `
+        <div class="modal-content hr-report-modal-content" role="dialog" aria-modal="true" aria-label="Select report semester">
+            <div class="modal-header">
+                <h2 id="vpaaReportSemesterTitle">Select Semester</h2>
+                <button type="button" class="modal-close" id="vpaaReportSemesterCloseBtn" aria-label="Close semester selector">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="hr-report-modal-body">
+                <p class="hr-report-modal-note" id="vpaaReportSemesterNote">Choose the semester for this report.</p>
+                <div class="form-group" id="vpaaReportLoadTypeGroup" style="display:none">
+                    <label for="vpaaReportLoadTypeSelect">Load Type</label>
+                    <select id="vpaaReportLoadTypeSelect"></select>
+                </div>
+                <div class="form-group">
+                    <label for="vpaaReportSemesterSelect">Semester</label>
+                    <select id="vpaaReportSemesterSelect"></select>
+                </div>
+            </div>
+            <div class="modal-actions hr-report-modal-actions">
+                <button type="button" class="btn-cancel" id="vpaaReportSemesterCancelBtn">Cancel</button>
+                <button type="button" class="btn-submit" id="vpaaReportSemesterConfirmBtn">Continue</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const close = function () {
+        modal.style.display = "none";
+        modal._onConfirm = null;
+    };
+
+    modal.addEventListener("click", function (event) {
+        if (event.target === modal) close();
+    });
+
+    const closeBtn = document.getElementById("vpaaReportSemesterCloseBtn");
+    const cancelBtn = document.getElementById("vpaaReportSemesterCancelBtn");
+    if (closeBtn) closeBtn.addEventListener("click", close);
+    if (cancelBtn) cancelBtn.addEventListener("click", close);
+
+    const confirmBtn = document.getElementById("vpaaReportSemesterConfirmBtn");
+    if (confirmBtn) {
+        confirmBtn.addEventListener("click", function () {
+            const select = document.getElementById("vpaaReportSemesterSelect");
+            const loadSelect = document.getElementById("vpaaReportLoadTypeSelect");
+            const semesterId = String(select && select.value || "").trim();
+            const loadType = normalizeVpaaReportLoadType(loadSelect && loadSelect.value);
+            if (!semesterId) {
+                alert("Select a semester first.");
+                return;
+            }
+            const handler = modal._onConfirm;
+            close();
+            if (typeof handler === "function") {
+                handler(semesterId, loadType);
+            }
+        });
+    }
+
+    document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && modal.style.display === "flex") {
+            close();
+        }
+    });
+
+    return modal;
+}
+
+function openVpaaReportSemesterPicker(config) {
+    const modal = ensureVpaaReportSemesterModal();
+    const title = document.getElementById("vpaaReportSemesterTitle");
+    const note = document.getElementById("vpaaReportSemesterNote");
+    const select = document.getElementById("vpaaReportSemesterSelect");
+    const loadGroup = document.getElementById("vpaaReportLoadTypeGroup");
+    const loadSelect = document.getElementById("vpaaReportLoadTypeSelect");
+    const confirmBtn = document.getElementById("vpaaReportSemesterConfirmBtn");
+    const baseOptions = Array.isArray(config && config.options) ? config.options : [];
+    const scopedOptionsProvider = typeof (config && config.loadScopedOptionsProvider) === "function"
+        ? config.loadScopedOptionsProvider
+        : null;
+    const preferredSemesterId = String(config && config.selectedSemesterId || "").trim();
+    const showLoadType = !!(config && config.showLoadType);
+    const preferredLoadType = normalizeVpaaReportLoadType(config && config.selectedLoadType);
+
+    if (loadSelect) {
+        loadSelect.innerHTML = `
+            <option value="main">Main Load</option>
+            <option value="excess">Excess Load</option>
+        `;
+        loadSelect.value = preferredLoadType;
+    }
+
+    const resolveOptions = function () {
+        const currentLoadType = normalizeVpaaReportLoadType(loadSelect && loadSelect.value || preferredLoadType);
+        const scoped = scopedOptionsProvider ? scopedOptionsProvider(currentLoadType) : baseOptions;
+        return Array.isArray(scoped) ? scoped : [];
+    };
+
+    if (!select || !resolveOptions().length) {
+        alert("No semester is available for this report.");
+        return;
+    }
+
+    if (title) title.textContent = String(config && config.title || "Select Semester");
+    if (note) note.textContent = String(config && config.note || "Choose the semester for this report.");
+    if (confirmBtn) confirmBtn.textContent = String(config && config.confirmLabel || "Continue");
+    if (loadGroup) loadGroup.style.display = showLoadType ? "" : "none";
+
+    const renderSemesterOptions = function () {
+        const currentOptions = resolveOptions();
+        if (!currentOptions.length) {
+            select.innerHTML = '<option value="">No stored paper for this load</option>';
+            return;
+        }
+        select.innerHTML = currentOptions.map(function (option) {
+            return `<option value="${escapeAttr(option.id)}">${escapeHtml(option.label || option.id)}</option>`;
+        }).join("");
+
+        const selectedOption = currentOptions.some(function (option) {
+            return option.id === preferredSemesterId;
+        }) ? preferredSemesterId : String(currentOptions[0].id || "").trim();
+        select.value = selectedOption;
+    };
+
+    renderSemesterOptions();
+    if (loadSelect) {
+        loadSelect.onchange = renderSemesterOptions;
+    }
+
+    modal._onConfirm = typeof config.onConfirm === "function" ? config.onConfirm : null;
+    modal.style.display = "flex";
+}
+
+function getVpaaOverallSasrCurrentSemesterId() {
+    const current = String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : "").trim();
+    const options = getVpaaReportSemesterChoices();
+    if (current && options.some(function (option) { return String(option.id) === current; })) {
+        return current;
+    }
+    return options.length ? String(options[0].id || "").trim() : "";
+}
+
+function getVpaaOverallSasrCampusOptions() {
+    const campuses = SharedData.getCampuses ? SharedData.getCampuses() : [];
+    const realCampuses = Array.isArray(campuses)
+        ? campuses.filter(function (campus) {
+            const id = normalizeVpaaToken(campus && campus.id);
+            return id && id !== "all";
+        })
+        : [];
+    return [
+        { id: "all", label: "All Campuses" }
+    ].concat(realCampuses.map(function (campus) {
+        return {
+            id: String(campus && campus.id || "").trim(),
+            label: String(campus && (campus.name || campus.id) || "").trim()
+        };
+    }));
+}
+
+function getVpaaOverallSasrDepartments(campusId) {
+    const campusToken = normalizeVpaaToken(campusId || "all");
+    const departments = new Set();
+    const campuses = SharedData.getCampuses ? SharedData.getCampuses() : [];
+
+    if (campusToken && campusToken !== "all" && Array.isArray(campuses)) {
+        campuses.forEach(function (campus) {
+            if (normalizeVpaaToken(campus && campus.id) !== campusToken) return;
+            const items = Array.isArray(campus && campus.departments) ? campus.departments : [];
+            items.forEach(function (dept) {
+                const value = String(dept || "").trim().toUpperCase();
+                if (value) departments.add(value);
+            });
+        });
+    }
+
+    if (departments.size === 0 && SharedData.getAllDepartments) {
+        SharedData.getAllDepartments().forEach(function (dept) {
+            const value = String(dept || "").trim().toUpperCase();
+            if (value) departments.add(value);
+        });
+    }
+
+    const users = SharedData.getUsers ? SharedData.getUsers() : [];
+    (Array.isArray(users) ? users : []).forEach(function (user) {
+        if (!user || normalizeVpaaToken(user.role) !== "professor") return;
+        if (campusToken !== "all" && normalizeVpaaToken(user.campus || user.campusSlug) !== campusToken) return;
+        const value = String(user.department || user.institute || "").trim().toUpperCase();
+        if (value) departments.add(value);
+    });
+
+    return Array.from(departments).sort();
+}
+
+function getVpaaOverallSasrPrograms(campusId) {
+    const campusToken = normalizeVpaaToken(campusId || "all");
+    const programs = SharedData.getPrograms ? SharedData.getPrograms() : [];
+    return (Array.isArray(programs) ? programs : [])
+        .filter(function (program) {
+            const programCampus = normalizeVpaaToken(program && program.campusSlug);
+            return campusToken === "all" || programCampus === campusToken;
+        })
+        .map(function (program) {
+            const code = String(program && program.programCode || "").trim().toUpperCase();
+            const name = String(program && program.programName || "").trim();
+            const campus = String(program && program.campusSlug || "").trim().toUpperCase();
+            const dept = String(program && program.departmentCode || "").trim().toUpperCase();
+            const labelParts = [];
+            if (campus) labelParts.push(campus);
+            if (dept) labelParts.push(dept);
+            labelParts.push(name ? `${code} - ${name}` : code);
+            return {
+                id: String(program && program.id || "").trim(),
+                label: labelParts.filter(Boolean).join(" / ")
+            };
+        })
+        .filter(function (program) { return program.id && program.label; })
+        .sort(function (left, right) { return left.label.localeCompare(right.label); });
+}
+
+function ensureVpaaOverallSasrModal() {
+    let modal = document.getElementById("vpaaOverallSasrModal");
+    if (modal) return modal;
+
+    modal = document.createElement("div");
+    modal.id = "vpaaOverallSasrModal";
+    modal.className = "modal hr-report-modal overall-sasr-modal";
+    modal.innerHTML = `
+        <div class="modal-content hr-report-modal-content overall-sasr-content" role="dialog" aria-modal="true" aria-label="Generate Overall SASR">
+            <div class="modal-header">
+                <h2>Generate Overall SASR</h2>
+                <button type="button" class="modal-close" id="vpaaOverallSasrCloseBtn" aria-label="Close Overall SASR selector">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="hr-report-modal-body">
+                <p class="overall-sasr-modal-note">Export professor-level SET and SEF ratings for a selected department or program.</p>
+                <div class="overall-sasr-grid">
+                    <div class="form-group">
+                        <label for="vpaaOverallSasrCampusSelect">Campus</label>
+                        <select id="vpaaOverallSasrCampusSelect"></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="vpaaOverallSasrSemesterSelect">Semester</label>
+                        <select id="vpaaOverallSasrSemesterSelect"></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="vpaaOverallSasrLoadTypeSelect">Load Type</label>
+                        <select id="vpaaOverallSasrLoadTypeSelect">
+                            <option value="main">Main Load</option>
+                            <option value="excess">Excess Load</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="vpaaOverallSasrScopeTypeSelect">Scope Type</label>
+                        <select id="vpaaOverallSasrScopeTypeSelect">
+                            <option value="department">Department</option>
+                            <option value="program">Program</option>
+                        </select>
+                    </div>
+                    <div class="form-group overall-sasr-field-wide" id="vpaaOverallSasrDepartmentGroup">
+                        <label for="vpaaOverallSasrDepartmentSelect">Department</label>
+                        <select id="vpaaOverallSasrDepartmentSelect"></select>
+                    </div>
+                    <div class="form-group overall-sasr-field-wide" id="vpaaOverallSasrProgramGroup" style="display:none">
+                        <label for="vpaaOverallSasrProgramSelect">Program</label>
+                        <select id="vpaaOverallSasrProgramSelect"></select>
+                    </div>
+                </div>
+                <p class="overall-sasr-empty-note" id="vpaaOverallSasrEmptyNote" hidden></p>
+            </div>
+            <div class="modal-actions hr-report-modal-actions">
+                <button type="button" class="btn-cancel" id="vpaaOverallSasrCancelBtn">Cancel</button>
+                <button type="button" class="btn-submit" id="vpaaOverallSasrGenerateBtn">Generate</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const close = function () {
+        modal.style.display = "none";
+    };
+    const refresh = function () {
+        refreshVpaaOverallSasrScopeOptions(modal);
+    };
+
+    modal.addEventListener("click", function (event) {
+        if (event.target === modal) close();
+    });
+
+    const closeBtn = document.getElementById("vpaaOverallSasrCloseBtn");
+    const cancelBtn = document.getElementById("vpaaOverallSasrCancelBtn");
+    const campusSelect = document.getElementById("vpaaOverallSasrCampusSelect");
+    const scopeSelect = document.getElementById("vpaaOverallSasrScopeTypeSelect");
+    const generateBtn = document.getElementById("vpaaOverallSasrGenerateBtn");
+    if (closeBtn) closeBtn.addEventListener("click", close);
+    if (cancelBtn) cancelBtn.addEventListener("click", close);
+    if (campusSelect) campusSelect.addEventListener("change", refresh);
+    if (scopeSelect) scopeSelect.addEventListener("change", refresh);
+    if (generateBtn) {
+        generateBtn.addEventListener("click", async function () {
+            const payload = buildVpaaOverallSasrPayload(modal);
+            if (!payload) return;
+
+            generateBtn.disabled = true;
+            const previousLabel = generateBtn.textContent;
+            generateBtn.textContent = "Generating...";
+            const didDownload = await downloadVpaaOverallSasrReport(payload);
+            generateBtn.disabled = false;
+            generateBtn.textContent = previousLabel || "Generate";
+            if (didDownload) close();
+        });
+    }
+
+    document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && modal.style.display === "flex") {
+            close();
+        }
+    });
+
+    return modal;
+}
+
+function populateVpaaOverallSasrBaseOptions(modal) {
+    const campusSelect = modal.querySelector("#vpaaOverallSasrCampusSelect");
+    const semesterSelect = modal.querySelector("#vpaaOverallSasrSemesterSelect");
+    const loadSelect = modal.querySelector("#vpaaOverallSasrLoadTypeSelect");
+    const scopeSelect = modal.querySelector("#vpaaOverallSasrScopeTypeSelect");
+    const campusOptions = getVpaaOverallSasrCampusOptions();
+    const semesterOptions = getVpaaReportSemesterChoices();
+    const preferredCampus = normalizeVpaaToken(elements.campusFilter && elements.campusFilter.value || "all") || "all";
+    const preferredSemester = getVpaaOverallSasrCurrentSemesterId();
+
+    if (campusSelect) {
+        campusSelect.innerHTML = campusOptions.map(function (option) {
+            return `<option value="${escapeAttr(option.id)}">${escapeHtml(option.label || option.id)}</option>`;
+        }).join("");
+        const matchedCampus = campusOptions.find(function (option) {
+            return normalizeVpaaToken(option.id) === preferredCampus;
+        });
+        campusSelect.value = matchedCampus ? matchedCampus.id : "all";
+    }
+    if (semesterSelect) {
+        semesterSelect.innerHTML = semesterOptions.map(function (option) {
+            return `<option value="${escapeAttr(option.id)}">${escapeHtml(option.label || option.id)}</option>`;
+        }).join("");
+        semesterSelect.value = preferredSemester;
+    }
+    if (loadSelect) loadSelect.value = "main";
+    if (scopeSelect) scopeSelect.value = "department";
+}
+
+function refreshVpaaOverallSasrScopeOptions(modal) {
+    const campusSelect = modal.querySelector("#vpaaOverallSasrCampusSelect");
+    const scopeSelect = modal.querySelector("#vpaaOverallSasrScopeTypeSelect");
+    const departmentGroup = modal.querySelector("#vpaaOverallSasrDepartmentGroup");
+    const programGroup = modal.querySelector("#vpaaOverallSasrProgramGroup");
+    const departmentSelect = modal.querySelector("#vpaaOverallSasrDepartmentSelect");
+    const programSelect = modal.querySelector("#vpaaOverallSasrProgramSelect");
+    const emptyNote = modal.querySelector("#vpaaOverallSasrEmptyNote");
+    const campusId = String(campusSelect && campusSelect.value || "all").trim() || "all";
+    const scopeType = String(scopeSelect && scopeSelect.value || "department").trim();
+
+    if (departmentGroup) departmentGroup.style.display = scopeType === "department" ? "" : "none";
+    if (programGroup) programGroup.style.display = scopeType === "program" ? "" : "none";
+    if (emptyNote) {
+        emptyNote.hidden = true;
+        emptyNote.textContent = "";
+    }
+
+    if (scopeType === "program") {
+        const programs = getVpaaOverallSasrPrograms(campusId);
+        if (programSelect) {
+            programSelect.innerHTML = '<option value="">Select Program</option>' + programs.map(function (program) {
+                return `<option value="${escapeAttr(program.id)}">${escapeHtml(program.label)}</option>`;
+            }).join("");
+        }
+        if (!programs.length && emptyNote) {
+            emptyNote.hidden = false;
+            emptyNote.textContent = "No programs found for the selected campus.";
+        }
+        return;
+    }
+
+    const departments = getVpaaOverallSasrDepartments(campusId);
+    if (departmentSelect) {
+        departmentSelect.innerHTML = '<option value="">Select Department</option>' + departments.map(function (dept) {
+            return `<option value="${escapeAttr(dept)}">${escapeHtml(dept)}</option>`;
+        }).join("");
+        const preferred = elements.departmentFilter && elements.departmentFilter.value && elements.departmentFilter.value !== "all"
+            ? String(elements.departmentFilter.value).toUpperCase()
+            : "";
+        if (preferred && departments.includes(preferred)) {
+            departmentSelect.value = preferred;
+        }
+    }
+    if (!departments.length && emptyNote) {
+        emptyNote.hidden = false;
+        emptyNote.textContent = "No departments found for the selected campus.";
+    }
+}
+
+function buildVpaaOverallSasrPayload(modal) {
+    const campusSlug = String((modal.querySelector("#vpaaOverallSasrCampusSelect") || {}).value || "all").trim() || "all";
+    const semesterId = String((modal.querySelector("#vpaaOverallSasrSemesterSelect") || {}).value || "").trim();
+    const loadType = normalizeVpaaReportLoadType((modal.querySelector("#vpaaOverallSasrLoadTypeSelect") || {}).value);
+    const scopeType = String((modal.querySelector("#vpaaOverallSasrScopeTypeSelect") || {}).value || "department").trim();
+    const departmentCode = String((modal.querySelector("#vpaaOverallSasrDepartmentSelect") || {}).value || "").trim();
+    const programId = String((modal.querySelector("#vpaaOverallSasrProgramSelect") || {}).value || "").trim();
+
+    if (!semesterId) {
+        alert("Select a semester first.");
+        return null;
+    }
+    if (scopeType === "program" && !programId) {
+        alert("Select a program first.");
+        return null;
+    }
+    if (scopeType !== "program" && !departmentCode) {
+        alert("Select a department first.");
+        return null;
+    }
+
+    return {
+        campus_slug: campusSlug,
+        semester_id: semesterId,
+        load_type: loadType,
+        scope_type: scopeType === "program" ? "program" : "department",
+        department_code: departmentCode,
+        program_id: programId
+    };
+}
+
+async function downloadVpaaOverallSasrReport(payload) {
+    let response;
+    try {
+        response = await fetch("../api/generate_overall_sasr.php", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        });
+    } catch (_error) {
+        alert("Unable to connect to the Overall SASR generator.");
+        return false;
+    }
+
+    if (!response.ok) {
+        let errorMessage = "Failed to generate Overall SASR Excel file.";
+        try {
+            const data = await response.json();
+            if (data && data.error) errorMessage = String(data.error);
+        } catch (_error) {
+            // Ignore non-JSON error bodies.
+        }
+        alert(errorMessage);
+        return false;
+    }
+
+    const excelBlob = await response.blob();
+    const fileName = parseVpaaFileNameFromDisposition(response.headers.get("Content-Disposition")) || "overall_sasr.xlsx";
+    const blobUrl = URL.createObjectURL(excelBlob);
+    const anchor = document.createElement("a");
+    anchor.href = blobUrl;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.setTimeout(function () { URL.revokeObjectURL(blobUrl); }, 30000);
+    return true;
+}
+
+function openVpaaOverallSasrModal() {
+    const modal = ensureVpaaOverallSasrModal();
+    const semesterOptions = getVpaaReportSemesterChoices();
+    if (!semesterOptions.length) {
+        alert("No semester is available for Overall SASR generation.");
+        return;
+    }
+
+    populateVpaaOverallSasrBaseOptions(modal);
+    refreshVpaaOverallSasrScopeOptions(modal);
+    modal.style.display = "flex";
+}
+
+function ensureVpaaReportTypeModal() {
+    let modal = document.getElementById("vpaaReportTypeModal");
+    if (modal) return modal;
+
+    modal = document.createElement("div");
+    modal.id = "vpaaReportTypeModal";
+    modal.className = "modal hr-report-type-modal vpaa-report-type-modal";
+    modal.innerHTML = `
+        <div class="modal-content hr-report-type-modal-content" role="dialog" aria-modal="true" aria-label="Select faculty file">
+            <div class="modal-header">
+                <h2 id="vpaaReportTypeTitle">Select File Type</h2>
+                <button type="button" class="modal-close" id="vpaaReportTypeCloseBtn" aria-label="Close file selector">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="hr-report-type-body">
+                <p class="hr-report-modal-note" id="vpaaReportTypeNote">Choose which faculty file to open.</p>
+                <div class="hr-report-type-grid">
+                    <button type="button" class="hr-report-type-card" data-report-type="ifer">
+                        <i class="fas fa-file-word"></i>
+                        <strong>IFER</strong>
+                        <span>Generate the Individual Faculty Evaluation Report for a selected semester.</span>
+                    </button>
+                    <button type="button" class="hr-report-type-card" data-report-type="sasr">
+                        <i class="fas fa-file-excel"></i>
+                        <strong>SASR</strong>
+                        <span>Generate the SET and SEF rating summary as an Excel file.</span>
+                    </button>
+                    <button type="button" class="hr-report-type-card" data-report-type="acknowledgement">
+                        <i class="fas fa-file-pdf"></i>
+                        <strong>Acknowledgement</strong>
+                        <span>Open the stored Faculty Evaluation and Development Acknowledgement PDF.</span>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-actions hr-report-modal-actions">
+                <button type="button" class="btn-cancel" id="vpaaReportTypeCancelBtn">Cancel</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const close = function () {
+        modal.style.display = "none";
+        modal._professorId = "";
+    };
+
+    modal.addEventListener("click", function (event) {
+        if (event.target === modal) close();
+    });
+
+    const closeBtn = document.getElementById("vpaaReportTypeCloseBtn");
+    const cancelBtn = document.getElementById("vpaaReportTypeCancelBtn");
+    if (closeBtn) closeBtn.addEventListener("click", close);
+    if (cancelBtn) cancelBtn.addEventListener("click", close);
+
+    modal.querySelectorAll("[data-report-type]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            const reportType = String(button.getAttribute("data-report-type") || "").trim();
+            const professorId = String(modal._professorId || "").trim();
+            close();
+
+            if (!professorId || !reportType) {
+                alert("Unable to open the selected file option.");
+                return;
+            }
+
+            if (reportType === "ifer") {
+                openVpaaProfessorIferFlow(professorId);
+                return;
+            }
+            if (reportType === "sasr") {
+                openVpaaProfessorSasrFlow(professorId);
+                return;
+            }
+            if (reportType === "acknowledgement") {
+                openVpaaProfessorAcknowledgementFlow(professorId);
+            }
+        });
+    });
+
+    document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && modal.style.display === "flex") {
+            close();
+        }
+    });
+
+    return modal;
+}
+
+function openVpaaProfessorFileOptions(professorId) {
+    const professor = getVpaaProfessorById(professorId, currentVpaaAnalyticsSemester || currentSemesterLabel);
+    if (!professor) {
+        alert("Professor not found. Please try again.");
+        return;
+    }
+
+    const baseProfessorId = normalizeVpaaProfessorUserId(professor.userId || professor.id);
+    const modal = ensureVpaaReportTypeModal();
+    const title = document.getElementById("vpaaReportTypeTitle");
+    const note = document.getElementById("vpaaReportTypeNote");
+    const acknowledgementButton = modal.querySelector('[data-report-type="acknowledgement"]');
+    const acknowledgementAvailable = buildVpaaAcknowledgementSemesterChoices(professor).length > 0;
+
+    if (title) {
+        title.textContent = `Faculty Files for ${String(professor.name || "Professor")}`;
+    }
+    if (note) {
+        note.textContent = acknowledgementAvailable
+            ? "Choose which faculty file to open."
+            : "Choose which faculty file to open. Stored acknowledgement PDF is currently unavailable.";
+    }
+    if (acknowledgementButton) {
+        acknowledgementButton.classList.toggle("is-unavailable", !acknowledgementAvailable);
+    }
+
+    modal._professorId = baseProfessorId;
+    modal.style.display = "flex";
+}
+
+function closeVpaaPdfPreviewModal() {
+    const modal = document.getElementById("vpaaPdfPreviewModal");
+    const frame = document.getElementById("vpaaPdfPreviewFrame");
+    if (frame) frame.src = "about:blank";
+    if (modal) modal.classList.remove("active");
+
+    if (openVpaaPdfBlobPreview._blobUrl) {
+        URL.revokeObjectURL(openVpaaPdfBlobPreview._blobUrl);
+        openVpaaPdfBlobPreview._blobUrl = "";
+    }
+    openVpaaPdfBlobPreview._filename = "";
+}
+
+function ensureVpaaPdfPreviewModal() {
+    let modal = document.getElementById("vpaaPdfPreviewModal");
+    if (modal) return modal;
+
+    modal = document.createElement("div");
+    modal.id = "vpaaPdfPreviewModal";
+    modal.className = "pdf-preview-modal";
+    modal.innerHTML = `
+        <div class="pdf-preview-dialog" role="dialog" aria-modal="true" aria-label="PDF preview">
+            <div class="pdf-preview-toolbar">
+                <div>
+                    <h3 id="vpaaPdfPreviewTitle">PDF Preview</h3>
+                    <div class="pdf-preview-filename" id="vpaaPdfPreviewFilename">report.pdf</div>
+                </div>
+                <div class="pdf-preview-actions">
+                    <button type="button" class="btn-submit pdf-preview-download-btn" id="vpaaPdfPreviewDownloadBtn">Download</button>
+                    <button type="button" class="btn-cancel pdf-preview-close-btn" id="vpaaPdfPreviewCloseBtn">Close</button>
+                </div>
+            </div>
+            <iframe id="vpaaPdfPreviewFrame" class="pdf-preview-frame" title="PDF Preview"></iframe>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const closeBtn = document.getElementById("vpaaPdfPreviewCloseBtn");
+    const downloadBtn = document.getElementById("vpaaPdfPreviewDownloadBtn");
+    if (closeBtn) {
+        closeBtn.addEventListener("click", closeVpaaPdfPreviewModal);
+    }
+    if (downloadBtn) {
+        downloadBtn.addEventListener("click", function () {
+            if (!openVpaaPdfBlobPreview._blobUrl) return;
+            const anchor = document.createElement("a");
+            anchor.href = openVpaaPdfBlobPreview._blobUrl;
+            anchor.download = openVpaaPdfBlobPreview._filename || "report.pdf";
+            document.body.appendChild(anchor);
+            anchor.click();
+            document.body.removeChild(anchor);
+        });
+    }
+    modal.addEventListener("click", function (event) {
+        if (event.target === modal) {
+            closeVpaaPdfPreviewModal();
+        }
+    });
+    document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && modal.classList.contains("active")) {
+            closeVpaaPdfPreviewModal();
+        }
+    });
+
+    return modal;
+}
+
+function openVpaaPdfBlobPreview(config) {
+    const blob = config && config.blob;
+    if (!(blob instanceof Blob)) {
+        alert("Unable to preview the requested PDF file.");
+        return;
+    }
+
+    const modal = ensureVpaaPdfPreviewModal();
+    const frame = document.getElementById("vpaaPdfPreviewFrame");
+    const title = document.getElementById("vpaaPdfPreviewTitle");
+    const filename = document.getElementById("vpaaPdfPreviewFilename");
+    const fileName = String(config && config.fileName || "report.pdf").trim() || "report.pdf";
+    const dialogTitle = String(config && config.title || "PDF Preview").trim() || "PDF Preview";
+    const blobUrl = URL.createObjectURL(blob);
+
+    if (openVpaaPdfBlobPreview._blobUrl) {
+        URL.revokeObjectURL(openVpaaPdfBlobPreview._blobUrl);
+    }
+    openVpaaPdfBlobPreview._blobUrl = blobUrl;
+    openVpaaPdfBlobPreview._filename = fileName;
+
+    if (title) title.textContent = dialogTitle;
+    if (filename) filename.textContent = fileName;
+    if (frame) frame.src = `${blobUrl}#toolbar=1&navpanes=0&scrollbar=1`;
+    if (modal) modal.classList.add("active");
+}
+
+async function openVpaaIferTemplateDownload(professor, semesterId, loadType) {
+    const professorUserId = normalizeVpaaProfessorUserId(professor && (professor.userId || professor.id));
+    const selectedLoadType = normalizeVpaaReportLoadType(loadType);
+    if (!professorUserId) {
+        alert("Unable to resolve professor account for IFER download.");
+        return;
+    }
+    if (!semesterId) {
+        alert("Select a semester first.");
+        return;
+    }
+
+    let response;
+    try {
+        response = await fetch("../api/generate_ifer.php", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                professor_user_id: professorUserId,
+                semester_id: semesterId,
+                load_type: selectedLoadType
+            })
+        });
+    } catch (_error) {
+        alert("Unable to connect to the IFER generator.");
+        return;
+    }
+
+    if (!response.ok) {
+        let errorMessage = "Failed to generate IFER Word file.";
+        try {
+            const data = await response.json();
+            if (data && data.error) errorMessage = String(data.error);
+        } catch (_error) {
+            // Ignore non-JSON error bodies.
+        }
+        alert(errorMessage);
+        return;
+    }
+
+    const wordBlob = await response.blob();
+    const fileName = parseVpaaFileNameFromDisposition(response.headers.get("Content-Disposition"))
+        || `${String(professor && professor.name || "Professor").trim() || "Professor"} IFER.docx`;
+    const blobUrl = URL.createObjectURL(wordBlob);
+    const anchor = document.createElement("a");
+    anchor.href = blobUrl;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.setTimeout(function () {
+        URL.revokeObjectURL(blobUrl);
+    }, 30000);
+}
+
+async function openVpaaSasrTemplateDownload(professor, semesterId, loadType) {
+    const professorUserId = normalizeVpaaProfessorUserId(professor && (professor.userId || professor.id));
+    const selectedLoadType = normalizeVpaaReportLoadType(loadType);
+    if (!professorUserId) {
+        alert("Unable to resolve professor account for SASR download.");
+        return;
+    }
+    if (!semesterId) {
+        alert("Select a semester first.");
+        return;
+    }
+
+    let response;
+    try {
+        response = await fetch("../api/generate_sasr.php", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                professor_user_id: professorUserId,
+                semester_id: semesterId,
+                load_type: selectedLoadType
+            })
+        });
+    } catch (_error) {
+        alert("Unable to connect to the SASR generator.");
+        return;
+    }
+
+    if (!response.ok) {
+        let errorMessage = "Failed to generate SASR Excel file.";
+        try {
+            const data = await response.json();
+            if (data && data.error) errorMessage = String(data.error);
+        } catch (_error) {
+            // Ignore non-JSON error bodies.
+        }
+        alert(errorMessage);
+        return;
+    }
+
+    const excelBlob = await response.blob();
+    const fileName = parseVpaaFileNameFromDisposition(response.headers.get("Content-Disposition"))
+        || `${String(professor && professor.name || "Professor").trim() || "Professor"} SASR.xlsx`;
+    const blobUrl = URL.createObjectURL(excelBlob);
+    const anchor = document.createElement("a");
+    anchor.href = blobUrl;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.setTimeout(function () {
+        URL.revokeObjectURL(blobUrl);
+    }, 30000);
+}
+
+async function openVpaaStoredFacultyPaperPreview(professor, paper) {
+    if (!paper || !paper.id) {
+        alert("Stored acknowledgement PDF is unavailable for this semester.");
+        return;
+    }
+
+    const params = new URLSearchParams();
+    params.set("paper_id", String(paper.id));
+    const versionNo = getVpaaStoredFacultyPaperVersionNo(paper);
+    if (versionNo) {
+        params.set("version_no", String(versionNo));
+    }
+
+    const requestUrl = `../api/faculty_paper_file.php?${params.toString()}`;
+    let response;
+    try {
+        response = await fetch(requestUrl, {
+            method: "GET",
+            credentials: "same-origin"
+        });
+    } catch (_error) {
+        alert("Unable to open the stored acknowledgement PDF.");
+        return;
+    }
+
+    if (!response.ok) {
+        let errorMessage = "Stored acknowledgement PDF is unavailable.";
+        try {
+            const data = await response.json();
+            if (data && data.error) errorMessage = String(data.error);
+        } catch (_error) {
+            // Ignore non-JSON error bodies.
+        }
+        alert(errorMessage);
+        return;
+    }
+
+    const pdfBlob = await response.blob();
+    const fileName = parseVpaaFileNameFromDisposition(response.headers.get("Content-Disposition"))
+        || String(paper.latest_file_name || paper.latestFileName || "faculty_acknowledgement.pdf").trim()
+        || "faculty_acknowledgement.pdf";
+    openVpaaPdfBlobPreview({
+        blob: pdfBlob,
+        fileName: fileName,
+        title: `${String(professor && professor.name || "Professor")} Acknowledgement`
+    });
+}
+
+function openVpaaProfessorIferFlow(professorId) {
+    const professor = getVpaaProfessorById(professorId, currentVpaaAnalyticsSemester || currentSemesterLabel);
+    if (!professor) {
+        alert("Professor not found. Please try again.");
+        return;
+    }
+
+    const semesterOptions = getVpaaReportSemesterChoices();
+    if (!semesterOptions.length) {
+        alert("No semester is available for IFER generation.");
+        return;
+    }
+
+    openVpaaReportSemesterPicker({
+        title: `Select IFER Semester for ${String(professor.name || "Professor")}`,
+        note: "Choose the load type and semester to generate the Individual Faculty Evaluation Report.",
+        options: semesterOptions,
+        selectedSemesterId: String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : "").trim(),
+        selectedLoadType: "main",
+        showLoadType: true,
+        confirmLabel: "Download",
+        onConfirm: function (semesterId, loadType) {
+            openVpaaIferTemplateDownload(professor, semesterId, loadType);
+        }
+    });
+}
+
+function openVpaaProfessorSasrFlow(professorId) {
+    const professor = getVpaaProfessorById(professorId, currentVpaaAnalyticsSemester || currentSemesterLabel);
+    if (!professor) {
+        alert("Professor not found. Please try again.");
+        return;
+    }
+
+    const semesterOptions = getVpaaReportSemesterChoices();
+    if (!semesterOptions.length) {
+        alert("No semester is available for SASR generation.");
+        return;
+    }
+
+    openVpaaReportSemesterPicker({
+        title: `Select SASR Semester for ${String(professor.name || "Professor")}`,
+        note: "Choose the load type and semester to generate the SET and SEF rating summary Excel file.",
+        options: semesterOptions,
+        selectedSemesterId: String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : "").trim(),
+        selectedLoadType: "main",
+        showLoadType: true,
+        confirmLabel: "Download",
+        onConfirm: function (semesterId, loadType) {
+            openVpaaSasrTemplateDownload(professor, semesterId, loadType);
+        }
+    });
+}
+
+function openVpaaProfessorAcknowledgementFlow(professorId) {
+    const professor = getVpaaProfessorById(professorId, currentVpaaAnalyticsSemester || currentSemesterLabel);
+    if (!professor) {
+        alert("Professor not found. Please try again.");
+        return;
+    }
+
+    const mainSemesterOptions = buildVpaaAcknowledgementSemesterChoices(professor, "main");
+    const excessSemesterOptions = buildVpaaAcknowledgementSemesterChoices(professor, "excess");
+    const defaultLoadType = mainSemesterOptions.length ? "main" : "excess";
+    const semesterOptions = defaultLoadType === "main" ? mainSemesterOptions : excessSemesterOptions;
+    if (!semesterOptions.length) {
+        alert("No stored acknowledgement PDF is available for this professor.");
+        return;
+    }
+
+    openVpaaReportSemesterPicker({
+        title: `Select Acknowledgement Semester for ${String(professor.name || "Professor")}`,
+        note: "Choose the load type and semester. Only matching stored acknowledgement PDFs are available.",
+        options: semesterOptions,
+        selectedSemesterId: semesterOptions[semesterOptions.length - 1].id,
+        selectedLoadType: defaultLoadType,
+        showLoadType: true,
+        loadScopedOptionsProvider: function (loadType) {
+            return buildVpaaAcknowledgementSemesterChoices(professor, loadType);
+        },
+        confirmLabel: "Preview PDF",
+        onConfirm: function (semesterId, loadType) {
+            const selectedLoadType = normalizeVpaaReportLoadType(loadType);
+            const selectedOptions = buildVpaaAcknowledgementSemesterChoices(professor, selectedLoadType);
+            const selected = selectedOptions.find(function (option) {
+                return option.id === semesterId;
+            });
+            if (!selected || !selected.paper) {
+                alert(`Stored ${getVpaaReportLoadTypeLabel(selectedLoadType).toLowerCase()} acknowledgement PDF is unavailable for this semester.`);
+                return;
+            }
+            openVpaaStoredFacultyPaperPreview(professor, selected.paper);
+        }
+    });
 }
 
 function buildCombinedCommentEntries(prof) {

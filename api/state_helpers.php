@@ -1289,6 +1289,87 @@ function buildEmptyQuestionnairesByType() {
     ];
 }
 
+function getDefaultQuestionnairePrivacyConsentConfig($typeCode = 'student-to-professor') {
+    $type = getUiQuestionnaireTypeCode($typeCode);
+    $typeLabels = [
+        'student-to-professor' => 'Student to Professor',
+        'professor-to-professor' => 'Professor to Professor',
+        'supervisor-to-professor' => 'Supervisor to Professor',
+    ];
+    $label = $typeLabels[$type] ?? 'Professor Evaluation';
+    $defaultRequired = $type === 'student-to-professor';
+    $title = 'Data Privacy Notice';
+    $paragraphs = [
+        'This questionnaire collects your user identity, role, evaluation assignment details, ratings, written feedback, submission timing, and limited interaction data needed to process the evaluation.',
+        'The school uses this information to administer evaluations, verify completion, generate academic quality reports, review feedback quality, detect inappropriate or biased submissions, and keep audit records.',
+        'Your responses may be reviewed by authorized school personnel and may be summarized for faculty evaluation, quality assurance, compliance, and institutional improvement. Records are retained according to school policy and applicable law.',
+        'By continuing, you confirm that you have read this notice and agree that your evaluation data will be processed for these purposes.',
+    ];
+    $agreementText = 'I have read and agree to the Data Privacy Notice for this questionnaire.';
+    $version = preg_replace('/[^a-z0-9-]+/', '-', strtolower($type)) . '-privacy-v1';
+    $textIdentifier = preg_replace('/[^a-z0-9-]+/', '-', strtolower($type)) . '-privacy-notice';
+
+    return [
+        'enabled' => $defaultRequired,
+        'version' => $version,
+        'textIdentifier' => $textIdentifier,
+        'title' => $title,
+        'description' => $label . ' privacy agreement',
+        'paragraphs' => $paragraphs,
+        'agreementText' => $agreementText,
+    ];
+}
+
+function normalizeQuestionnairePrivacyConsentConfig($config, $typeCode = 'student-to-professor') {
+    $defaults = getDefaultQuestionnairePrivacyConsentConfig($typeCode);
+    $input = is_array($config) ? $config : [];
+    $paragraphs = [];
+    if (is_array($input['paragraphs'] ?? null)) {
+        foreach ($input['paragraphs'] as $paragraph) {
+            $text = trim((string) $paragraph);
+            if ($text !== '') {
+                $paragraphs[] = $text;
+            }
+        }
+    } else {
+        $noticeText = trim((string) ($input['noticeText'] ?? ''));
+        if ($noticeText !== '') {
+            foreach (preg_split('/\R+/', $noticeText) as $paragraph) {
+                $text = trim((string) $paragraph);
+                if ($text !== '') {
+                    $paragraphs[] = $text;
+                }
+            }
+        }
+    }
+
+    if (count($paragraphs) === 0) {
+        $paragraphs = $defaults['paragraphs'];
+    }
+
+    $version = trim((string) ($input['version'] ?? ''));
+    $textIdentifier = trim((string) ($input['textIdentifier'] ?? ($input['consentTextIdentifier'] ?? '')));
+    $title = trim((string) ($input['title'] ?? ''));
+    $agreementText = trim((string) ($input['agreementText'] ?? ''));
+
+    return [
+        'enabled' => array_key_exists('enabled', $input) ? !empty($input['enabled']) : !empty($defaults['enabled']),
+        'version' => $version !== '' ? substr($version, 0, 100) : $defaults['version'],
+        'textIdentifier' => $textIdentifier !== '' ? substr($textIdentifier, 0, 150) : $defaults['textIdentifier'],
+        'title' => $title !== '' ? substr($title, 0, 200) : $defaults['title'],
+        'description' => trim((string) ($input['description'] ?? $defaults['description'])),
+        'paragraphs' => array_values($paragraphs),
+        'agreementText' => $agreementText !== '' ? substr($agreementText, 0, 500) : $defaults['agreementText'],
+    ];
+}
+
+function buildQuestionnairePrivacyConsentCanonicalText(array $config) {
+    $paragraphs = is_array($config['paragraphs'] ?? null) ? $config['paragraphs'] : [];
+    return trim((string) ($config['title'] ?? 'Data Privacy Notice'))
+        . "\n\n" . implode("\n\n", array_map('trim', $paragraphs))
+        . "\n\n" . trim((string) ($config['agreementText'] ?? ''));
+}
+
 function getQuestionnaireTypeCodeMap() {
     return [
         'student-to-professor' => 'student-professor',
@@ -1311,7 +1392,7 @@ function isPersistedDatabaseId($value) {
     return preg_match('/^\d+$/', trim((string) $value)) === 1;
 }
 
-function isQuestionnaireEntryEmpty($entry) {
+function isQuestionnaireEntryEmpty($entry, $typeCode = 'student-to-professor') {
     if (!is_array($entry)) {
         return true;
     }
@@ -1319,11 +1400,14 @@ function isQuestionnaireEntryEmpty($entry) {
     $sections = is_array($entry['sections'] ?? null) ? $entry['sections'] : [];
     $questions = is_array($entry['questions'] ?? null) ? $entry['questions'] : [];
     $header = is_array($entry['header'] ?? null) ? $entry['header'] : [];
+    $privacyConsent = normalizeQuestionnairePrivacyConsentConfig($entry['privacyConsent'] ?? [], $typeCode);
+    $defaultPrivacyConsent = getDefaultQuestionnairePrivacyConsentConfig($typeCode);
 
     return count($sections) === 0
         && count($questions) === 0
         && trim((string) ($header['title'] ?? '')) === ''
-        && trim((string) ($header['description'] ?? '')) === '';
+        && trim((string) ($header['description'] ?? '')) === ''
+        && $privacyConsent == $defaultPrivacyConsent;
 }
 
 function getQuestionnaireRowCount(PDO $pdo) {
@@ -1345,11 +1429,14 @@ function extractQuestionRatingMax($question) {
 }
 
 function ensureQuestionnaireExceptionReportingSchema(PDO $pdo) {
-    if (!tableExistsInCurrentSchema($pdo, 'questions')) {
-        return;
+    if (tableExistsInCurrentSchema($pdo, 'questionnaires') && !columnExistsInCurrentSchema($pdo, 'questionnaires', 'privacy_consent_json')) {
+        $pdo->exec(
+            'ALTER TABLE questionnaires
+             ADD COLUMN privacy_consent_json LONGTEXT DEFAULT NULL AFTER status'
+        );
     }
 
-    if (!columnExistsInCurrentSchema($pdo, 'questions', 'is_exception_reporting')) {
+    if (tableExistsInCurrentSchema($pdo, 'questions') && !columnExistsInCurrentSchema($pdo, 'questions', 'is_exception_reporting')) {
         $pdo->exec(
             'ALTER TABLE questions
              ADD COLUMN is_exception_reporting TINYINT(1) NOT NULL DEFAULT 0 AFTER is_required'
@@ -1367,7 +1454,8 @@ function buildQuestionnairesSnapshotFromTables(PDO $pdo) {
             s.slug AS semester_slug,
             et.code AS evaluation_type_code,
             q.title,
-            q.description
+            q.description,
+            q.privacy_consent_json
          FROM questionnaires q
          JOIN semesters s ON s.id = q.semester_id
          JOIN evaluation_types et ON et.id = q.evaluation_type_id
@@ -1388,6 +1476,7 @@ function buildQuestionnairesSnapshotFromTables(PDO $pdo) {
         }
 
         $defaultHeader = $defaults[$typeCode] ?? ['title' => '', 'description' => ''];
+        $privacyConsent = json_decode((string) ($row['privacy_consent_json'] ?? ''), true);
         $snapshot[$semesterSlug][$typeCode] = [
             'header' => [
                 'title' => $row['title'] !== '' ? $row['title'] : $defaultHeader['title'],
@@ -1395,6 +1484,10 @@ function buildQuestionnairesSnapshotFromTables(PDO $pdo) {
                     ? $row['description']
                     : $defaultHeader['description'],
             ],
+            'privacyConsent' => normalizeQuestionnairePrivacyConsentConfig(
+                is_array($privacyConsent) ? $privacyConsent : [],
+                $typeCode
+            ),
             'sections' => [],
             'questions' => [],
         ];
@@ -1491,12 +1584,13 @@ function syncQuestionnairesSnapshotToTables(PDO $pdo, array $data) {
     $emptyByType = buildEmptyQuestionnairesByType();
 
     $upsertQuestionnaire = $pdo->prepare(
-        'INSERT INTO questionnaires (semester_id, evaluation_type_id, title, description, status)
-         VALUES (:semester_id, :evaluation_type_id, :title, :description, :status)
+        'INSERT INTO questionnaires (semester_id, evaluation_type_id, title, description, status, privacy_consent_json)
+         VALUES (:semester_id, :evaluation_type_id, :title, :description, :status, :privacy_consent_json)
          ON DUPLICATE KEY UPDATE
             title = VALUES(title),
             description = VALUES(description),
             status = VALUES(status),
+            privacy_consent_json = VALUES(privacy_consent_json),
             id = LAST_INSERT_ID(id)'
     );
     $deleteQuestionnaire = $pdo->prepare(
@@ -1586,7 +1680,7 @@ function syncQuestionnairesSnapshotToTables(PDO $pdo, array $data) {
                     ? $semesterEntries[$typeCode]
                     : ['sections' => [], 'questions' => []];
 
-                if (isQuestionnaireEntryEmpty($entry)) {
+                if (isQuestionnaireEntryEmpty($entry, $typeCode)) {
                     $deleteQuestionnaire->execute([
                         ':semester_id' => $semesterId,
                         ':evaluation_type_id' => $evaluationTypeId,
@@ -1611,6 +1705,9 @@ function syncQuestionnairesSnapshotToTables(PDO $pdo, array $data) {
                     ':title' => $title,
                     ':description' => $description,
                     ':status' => 'published',
+                    ':privacy_consent_json' => json_encode(
+                        normalizeQuestionnairePrivacyConsentConfig($entry['privacyConsent'] ?? [], $typeCode)
+                    ),
                 ]);
 
                 $questionnaireId = (int) $pdo->lastInsertId();
@@ -3189,6 +3286,259 @@ function resolveSemesterIdBySlug(PDO $pdo, $semesterSlug) {
     return $row ? (int) $row['id'] : null;
 }
 
+function resolveQuestionnairePrivacyConsentConfigForSemester(PDO $pdo, $questionnaireType = 'student-to-professor', $semesterSlug = '') {
+    ensureQuestionnaireExceptionReportingSchema($pdo);
+    $typeCode = getUiQuestionnaireTypeCode($questionnaireType);
+    $semester = trim((string) $semesterSlug);
+    if ($semester === '') {
+        $semester = getCurrentSemesterSnapshot($pdo);
+    }
+
+    if (
+        $semester !== ''
+        && tableExistsInCurrentSchema($pdo, 'questionnaires')
+        && tableExistsInCurrentSchema($pdo, 'semesters')
+        && tableExistsInCurrentSchema($pdo, 'evaluation_types')
+    ) {
+        $stmt = $pdo->prepare(
+            'SELECT q.privacy_consent_json
+             FROM questionnaires q
+             JOIN semesters s ON s.id = q.semester_id
+             JOIN evaluation_types et ON et.id = q.evaluation_type_id
+             WHERE s.slug = :semester_slug
+               AND et.code = :evaluation_type_code
+             LIMIT 1'
+        );
+        $stmt->execute([
+            ':semester_slug' => $semester,
+            ':evaluation_type_code' => getDatabaseQuestionnaireTypeCode($typeCode),
+        ]);
+        $row = $stmt->fetch();
+        if ($row) {
+            $decoded = json_decode((string) ($row['privacy_consent_json'] ?? ''), true);
+            return normalizeQuestionnairePrivacyConsentConfig(is_array($decoded) ? $decoded : [], $typeCode);
+        }
+    }
+
+    return getDefaultQuestionnairePrivacyConsentConfig($typeCode);
+}
+
+function getStudentDataPrivacyConsentNoticeSnapshot($pdo = null, $questionnaireType = 'student-to-professor', $semesterSlug = '') {
+    $typeCode = getUiQuestionnaireTypeCode($questionnaireType);
+    $config = $pdo instanceof PDO
+        ? resolveQuestionnairePrivacyConsentConfigForSemester($pdo, $typeCode, $semesterSlug)
+        : getDefaultQuestionnairePrivacyConsentConfig($typeCode);
+    $canonicalText = buildQuestionnairePrivacyConsentCanonicalText($config);
+
+    return [
+        'enabled' => !empty($config['enabled']),
+        'questionnaireType' => $typeCode,
+        'version' => $config['version'],
+        'textIdentifier' => $config['textIdentifier'],
+        'textHash' => hash('sha256', $canonicalText),
+        'title' => $config['title'],
+        'description' => $config['description'],
+        'paragraphs' => $config['paragraphs'],
+        'agreementText' => $config['agreementText'],
+        'canonicalText' => $canonicalText,
+    ];
+}
+
+function ensureStudentDataPrivacyConsentSchema(PDO $pdo) {
+    if (tableExistsInCurrentSchema($pdo, 'student_data_privacy_consents')) {
+        if (!columnExistsInCurrentSchema($pdo, 'student_data_privacy_consents', 'questionnaire_type')) {
+            $pdo->exec(
+                'ALTER TABLE student_data_privacy_consents
+                 ADD COLUMN questionnaire_type VARCHAR(80) NOT NULL DEFAULT \'student-to-professor\' AFTER semester_id'
+            );
+        }
+        $expectedUniqueColumns = ['student_user_id', 'semester_id', 'questionnaire_type', 'consent_version'];
+        $currentUniqueColumns = getIndexColumnsInCurrentSchema($pdo, 'student_data_privacy_consents', 'uq_student_privacy_consent');
+        if ($currentUniqueColumns !== [] && $currentUniqueColumns !== $expectedUniqueColumns) {
+            $pdo->exec('DROP INDEX uq_student_privacy_consent ON student_data_privacy_consents');
+        }
+        if (!indexExistsInCurrentSchema($pdo, 'student_data_privacy_consents', 'uq_student_privacy_consent')) {
+            $pdo->exec(
+                'ALTER TABLE student_data_privacy_consents
+                 ADD UNIQUE KEY uq_student_privacy_consent (student_user_id, semester_id, questionnaire_type, consent_version)'
+            );
+        }
+        if (!indexExistsInCurrentSchema($pdo, 'student_data_privacy_consents', 'idx_student_privacy_consent_type')) {
+            $pdo->exec(
+                'ALTER TABLE student_data_privacy_consents
+                 ADD KEY idx_student_privacy_consent_type (questionnaire_type)'
+            );
+        }
+        return;
+    }
+
+    $pdo->exec(
+        'CREATE TABLE student_data_privacy_consents (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            student_user_id BIGINT UNSIGNED NOT NULL,
+            semester_id BIGINT UNSIGNED NOT NULL,
+            questionnaire_type VARCHAR(80) NOT NULL DEFAULT \'student-to-professor\',
+            consent_version VARCHAR(100) NOT NULL,
+            consent_text_identifier VARCHAR(150) NOT NULL,
+            consent_text_hash CHAR(64) NOT NULL,
+            consent_text MEDIUMTEXT NOT NULL,
+            agreed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_student_privacy_consent (student_user_id, semester_id, questionnaire_type, consent_version),
+            KEY idx_student_privacy_consent_student (student_user_id),
+            KEY idx_student_privacy_consent_semester (semester_id),
+            KEY idx_student_privacy_consent_type (questionnaire_type),
+            CONSTRAINT fk_student_privacy_consent_student
+                FOREIGN KEY (student_user_id) REFERENCES users(id)
+                ON UPDATE CASCADE ON DELETE CASCADE,
+            CONSTRAINT fk_student_privacy_consent_semester
+                FOREIGN KEY (semester_id) REFERENCES semesters(id)
+                ON UPDATE CASCADE ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+}
+
+function normalizeStudentDataPrivacyConsentRow(array $row) {
+    $studentUserId = (int) ($row['student_user_id'] ?? 0);
+    $semesterId = (int) ($row['semester_id'] ?? 0);
+
+    return [
+        'id' => (string) ($row['id'] ?? ''),
+        'studentUserId' => $studentUserId > 0 ? ('u' . $studentUserId) : '',
+        'semesterDatabaseId' => $semesterId,
+        'semesterId' => trim((string) ($row['semester_slug'] ?? '')),
+        'semesterLabel' => trim((string) ($row['semester_label'] ?? '')),
+        'questionnaireType' => trim((string) ($row['questionnaire_type'] ?? 'student-to-professor')),
+        'consentVersion' => trim((string) ($row['consent_version'] ?? '')),
+        'consentTextIdentifier' => trim((string) ($row['consent_text_identifier'] ?? '')),
+        'consentTextHash' => trim((string) ($row['consent_text_hash'] ?? '')),
+        'agreedAt' => formatEvaluationSnapshotDateTime($row['agreed_at'] ?? ''),
+    ];
+}
+
+function buildStudentDataPrivacyConsentsSnapshot(PDO $pdo, $studentUserId = '') {
+    ensureStudentDataPrivacyConsentSchema($pdo);
+    $numericStudentUserId = resolveStoredUserIdNumber($studentUserId);
+
+    $sql = 'SELECT
+                c.id,
+                c.student_user_id,
+                c.semester_id,
+                s.slug AS semester_slug,
+                s.label AS semester_label,
+                c.questionnaire_type,
+                c.consent_version,
+                c.consent_text_identifier,
+                c.consent_text_hash,
+                c.agreed_at
+            FROM student_data_privacy_consents c
+            JOIN semesters s ON s.id = c.semester_id';
+    $params = [];
+    if ($numericStudentUserId > 0) {
+        $sql .= ' WHERE c.student_user_id = :student_user_id';
+        $params[':student_user_id'] = $numericStudentUserId;
+    }
+    $sql .= ' ORDER BY c.agreed_at DESC, c.id DESC';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    $rows = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $rows[] = normalizeStudentDataPrivacyConsentRow($row);
+    }
+    return $rows;
+}
+
+function hasStudentDataPrivacyConsentSnapshot(PDO $pdo, $studentUserId, $semesterSlug, $consentVersion = '', $questionnaireType = 'student-to-professor') {
+    ensureStudentDataPrivacyConsentSchema($pdo);
+    $studentId = resolveStoredUserIdNumber($studentUserId);
+    $semesterId = resolveSemesterIdBySlug($pdo, $semesterSlug);
+    $notice = getStudentDataPrivacyConsentNoticeSnapshot($pdo, $questionnaireType, $semesterSlug);
+    if (empty($notice['enabled'])) {
+        return true;
+    }
+    $version = trim((string) $consentVersion);
+    if ($version === '') {
+        $version = $notice['version'];
+    }
+
+    if ($studentId <= 0 || !$semesterId || $version === '') {
+        return false;
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) AS total
+         FROM student_data_privacy_consents
+         WHERE student_user_id = :student_user_id
+           AND semester_id = :semester_id
+           AND questionnaire_type = :questionnaire_type
+           AND consent_version = :consent_version'
+    );
+    $stmt->execute([
+        ':student_user_id' => $studentId,
+        ':semester_id' => $semesterId,
+        ':questionnaire_type' => getUiQuestionnaireTypeCode($questionnaireType),
+        ':consent_version' => $version,
+    ]);
+    $row = $stmt->fetch();
+    return ((int) ($row['total'] ?? 0)) > 0;
+}
+
+function recordStudentDataPrivacyConsentSnapshot(PDO $pdo, $studentUserId, $semesterSlug, $questionnaireType = 'student-to-professor') {
+    ensureStudentDataPrivacyConsentSchema($pdo);
+    $studentId = resolveStoredUserIdNumber($studentUserId);
+    $semesterId = resolveSemesterIdBySlug($pdo, $semesterSlug);
+    if ($studentId <= 0) {
+        throw new RuntimeException('Unable to resolve user identity.');
+    }
+    if (!$semesterId) {
+        throw new RuntimeException('Unable to resolve the current semester for privacy consent.');
+    }
+
+    $typeCode = getUiQuestionnaireTypeCode($questionnaireType);
+    $notice = getStudentDataPrivacyConsentNoticeSnapshot($pdo, $typeCode, $semesterSlug);
+    if (empty($notice['enabled'])) {
+        throw new RuntimeException('Privacy consent is not required for this questionnaire.');
+    }
+    $now = getAuthoritativePhilippineDateTime()->format('Y-m-d H:i:s');
+    $stmt = $pdo->prepare(
+        'INSERT INTO student_data_privacy_consents
+            (student_user_id, semester_id, questionnaire_type, consent_version, consent_text_identifier, consent_text_hash, consent_text, agreed_at)
+         VALUES
+            (:student_user_id, :semester_id, :questionnaire_type, :consent_version, :consent_text_identifier, :consent_text_hash, :consent_text, :agreed_at)
+         ON DUPLICATE KEY UPDATE
+            consent_text_identifier = VALUES(consent_text_identifier),
+            consent_text_hash = VALUES(consent_text_hash),
+            consent_text = VALUES(consent_text),
+            agreed_at = agreed_at'
+    );
+    $stmt->execute([
+        ':student_user_id' => $studentId,
+        ':semester_id' => $semesterId,
+        ':questionnaire_type' => $typeCode,
+        ':consent_version' => $notice['version'],
+        ':consent_text_identifier' => $notice['textIdentifier'],
+        ':consent_text_hash' => $notice['textHash'],
+        ':consent_text' => $notice['canonicalText'],
+        ':agreed_at' => $now,
+    ]);
+
+    $rows = buildStudentDataPrivacyConsentsSnapshot($pdo, 'u' . $studentId);
+    foreach ($rows as $row) {
+        if (
+            ($row['semesterDatabaseId'] ?? 0) === $semesterId
+            && ($row['questionnaireType'] ?? '') === $typeCode
+            && ($row['consentVersion'] ?? '') === $notice['version']
+        ) {
+            return $row;
+        }
+    }
+
+    throw new RuntimeException('Privacy consent could not be saved.');
+}
+
 function resolveSubjectIdByCampusDepartmentAndCode(PDO $pdo, $campusSlug, $departmentCode, $subjectCode) {
     $normalizedCampus = normalizeLookupValue($campusSlug);
     $normalizedDepartment = normalizeLookupValue($departmentCode);
@@ -4172,6 +4522,24 @@ function indexExistsInCurrentSchema(PDO $pdo, $tableName, $indexName) {
     ]);
     $row = $stmt->fetch();
     return ((int) ($row['total'] ?? 0)) > 0;
+}
+
+function getIndexColumnsInCurrentSchema(PDO $pdo, $tableName, $indexName) {
+    $stmt = $pdo->prepare(
+        'SELECT column_name
+         FROM information_schema.statistics
+         WHERE table_schema = DATABASE()
+           AND table_name = :table_name
+           AND index_name = :index_name
+         ORDER BY seq_in_index ASC'
+    );
+    $stmt->execute([
+        ':table_name' => (string) $tableName,
+        ':index_name' => (string) $indexName,
+    ]);
+    return array_map(function ($row) {
+        return strtolower(trim((string) ($row['column_name'] ?? '')));
+    }, $stmt->fetchAll());
 }
 
 function ensurePeerEvaluationSchema(PDO $pdo) {
@@ -7295,6 +7663,7 @@ function buildAnnouncementsActivityFlatState(array $items) {
         $state[$prefix . ' Audience Campus'] = (string) ($audience['campus'] ?? '');
         $state[$prefix . ' Audience Program'] = (string) ($audience['programCode'] ?? '');
         $state[$prefix . ' Audience Student Completion'] = (string) ($audience['studentCompletion'] ?? '');
+        $state[$prefix . ' Read By Count'] = is_array($item['readBy'] ?? null) ? (string) count($item['readBy']) : '0';
         $state[$prefix . ' Read'] = !empty($item['read']) ? 'Yes' : 'No';
     }
     ksort($state, SORT_STRING);
@@ -7712,10 +8081,138 @@ function persistActivityLogSnapshot(PDO $pdo, array $rows) {
     return buildActivityLogSnapshot($pdo);
 }
 
+function getAnnouncementAllowedRoleCodes() {
+    return ['admin', 'hr', 'dean', 'procoor', 'professor', 'vpaa', 'osa', 'student'];
+}
+
+function normalizeAnnouncementAudienceSnapshot($input, $strict = false) {
+    $source = is_array($input) ? $input : [];
+    $role = normalizeLookupValue($source['role'] ?? ($source['targetRole'] ?? ''));
+    if ($role === 'all' || $role === 'all-users' || $role === 'all_users') {
+        $role = '';
+    }
+
+    if ($role !== '' && !in_array($role, getAnnouncementAllowedRoleCodes(), true)) {
+        if ($strict) {
+            throw new InvalidArgumentException('Invalid announcement target role.');
+        }
+        $role = '';
+    }
+
+    $campus = normalizeLookupValue($source['campus'] ?? ($source['campusSlug'] ?? ''));
+    $programCode = normalizeLookupValue($source['programCode'] ?? ($source['program'] ?? ''));
+    if ($campus === 'all') {
+        $campus = '';
+    }
+    if ($programCode === 'all') {
+        $programCode = '';
+    }
+
+    $studentCompletion = normalizeLookupValue($source['studentCompletion'] ?? ($source['completion'] ?? 'all'));
+    if ($studentCompletion !== 'completed' && $studentCompletion !== 'not_completed') {
+        $studentCompletion = 'all';
+    }
+
+    return [
+        'role' => $role,
+        'campus' => $campus,
+        'programCode' => $programCode,
+        'studentCompletion' => $studentCompletion,
+    ];
+}
+
+function normalizeAnnouncementReadBySnapshot($input) {
+    $readBy = [];
+    if (!is_array($input)) {
+        return $readBy;
+    }
+
+    foreach ($input as $key => $value) {
+        $normalizedKey = strtolower(trim((string) $key));
+        if ($normalizedKey === '') {
+            continue;
+        }
+        $timestamp = trim((string) $value);
+        $readBy[$normalizedKey] = $timestamp !== '' ? $timestamp : getAuthoritativePhilippineIso8601();
+    }
+
+    return $readBy;
+}
+
+function normalizeAnnouncementSnapshotItem($item, $index = 0, $strict = false) {
+    if (!is_array($item)) {
+        if ($strict) {
+            throw new InvalidArgumentException('Invalid announcement item.');
+        }
+        $item = [];
+    }
+
+    $now = getAuthoritativePhilippineIso8601();
+    $id = trim((string) ($item['id'] ?? ''));
+    if ($id === '') {
+        $id = 'ANN-' . (string) time() . '-' . (string) ((int) $index + 1);
+    }
+
+    $title = trim((string) ($item['title'] ?? ''));
+    $message = trim((string) ($item['message'] ?? ''));
+    if ($strict && ($title === '' || $message === '')) {
+        throw new InvalidArgumentException('Announcement title and message are required.');
+    }
+
+    $createdAt = trim((string) ($item['createdAt'] ?? ($item['timestamp'] ?? '')));
+    if ($createdAt === '') {
+        $createdAt = $now;
+    }
+
+    $audienceSource = is_array($item['audience'] ?? null) ? $item['audience'] : $item;
+
+    return [
+        'id' => $id,
+        'timestamp' => $createdAt,
+        'createdAt' => $createdAt,
+        'read' => !empty($item['read']),
+        'readBy' => normalizeAnnouncementReadBySnapshot($item['readBy'] ?? []),
+        'title' => $title !== '' ? $title : 'Announcement',
+        'message' => $message !== '' ? $message : 'No details available.',
+        'createdByRole' => normalizeLookupValue($item['createdByRole'] ?? ''),
+        'createdByUserId' => trim((string) ($item['createdByUserId'] ?? '')),
+        'audience' => normalizeAnnouncementAudienceSnapshot($audienceSource, $strict),
+    ];
+}
+
+function normalizeAnnouncementsSnapshotList(array $items, $strict = false) {
+    $normalized = [];
+    foreach ($items as $index => $item) {
+        $normalized[] = normalizeAnnouncementSnapshotItem($item, $index, $strict);
+    }
+    return array_slice($normalized, 0, 50);
+}
+
+function buildAnnouncementReadUserKey(array $actorUser) {
+    $id = trim((string) ($actorUser['id'] ?? ''));
+    if (preg_match('/^u(\d+)$/i', $id, $matches)) {
+        return 'u' . (string) ((int) $matches[1]);
+    }
+    if (preg_match('/^\d+$/', $id)) {
+        return 'u' . (string) ((int) $id);
+    }
+
+    $email = normalizeLookupValue($actorUser['email'] ?? '');
+    if ($email !== '') {
+        return 'email:' . $email;
+    }
+
+    return '';
+}
+
 function buildAnnouncementsSnapshot(PDO $pdo) {
     $snapshot = getSettingJson($pdo, 'sharedAnnouncements', null);
     if (is_array($snapshot)) {
-        return $snapshot;
+        $normalized = normalizeAnnouncementsSnapshotList($snapshot, false);
+        if (json_encode($normalized) !== json_encode($snapshot)) {
+            setSettingJson($pdo, 'sharedAnnouncements', $normalized);
+        }
+        return $normalized;
     }
 
     $stmt = $pdo->query('SELECT id, title, message, created_at FROM announcements ORDER BY created_at DESC, id DESC');
@@ -7725,16 +8222,25 @@ function buildAnnouncementsSnapshot(PDO $pdo) {
             'id' => 'ANN-' . $row['id'],
             'timestamp' => $row['created_at'] ?? getAuthoritativePhilippineIso8601(),
             'read' => false,
+            'readBy' => [],
             'title' => $row['title'],
             'message' => $row['message'],
+            'audience' => [
+                'role' => '',
+                'campus' => '',
+                'programCode' => '',
+                'studentCompletion' => 'all',
+            ],
         ];
     }
+    $items = normalizeAnnouncementsSnapshotList($items, false);
     setSettingJson($pdo, 'sharedAnnouncements', $items);
     return $items;
 }
 
 function persistAnnouncementsSnapshot(PDO $pdo, array $items, array $actorUser = []) {
     $before = buildAnnouncementsSnapshot($pdo);
+    $items = normalizeAnnouncementsSnapshotList($items, true);
     setSettingJson($pdo, 'sharedAnnouncements', $items);
     safeLogAdminFlatStateChangeSnapshot(
         $pdo,
@@ -7745,6 +8251,51 @@ function persistAnnouncementsSnapshot(PDO $pdo, array $items, array $actorUser =
         buildAnnouncementsActivityFlatState($before),
         buildAnnouncementsActivityFlatState($items)
     );
+}
+
+function markAnnouncementsReadSnapshot(PDO $pdo, array $announcementIds, array $actorUser = []) {
+    $userKey = buildAnnouncementReadUserKey($actorUser);
+    if ($userKey === '') {
+        throw new InvalidArgumentException('Unable to resolve announcement read user.');
+    }
+
+    $targetIds = [];
+    foreach ($announcementIds as $id) {
+        $id = trim((string) $id);
+        if ($id !== '') {
+            $targetIds[$id] = true;
+        }
+    }
+
+    if (count($targetIds) === 0) {
+        return buildAnnouncementsSnapshot($pdo);
+    }
+
+    $items = buildAnnouncementsSnapshot($pdo);
+    $now = getAuthoritativePhilippineIso8601();
+    $changed = false;
+
+    foreach ($items as &$item) {
+        $id = trim((string) ($item['id'] ?? ''));
+        if ($id === '' || !isset($targetIds[$id])) {
+            continue;
+        }
+
+        if (!is_array($item['readBy'] ?? null)) {
+            $item['readBy'] = [];
+        }
+        if (!isset($item['readBy'][$userKey])) {
+            $item['readBy'][$userKey] = $now;
+            $changed = true;
+        }
+    }
+    unset($item);
+
+    if ($changed) {
+        setSettingJson($pdo, 'sharedAnnouncements', $items);
+    }
+
+    return $items;
 }
 
 function normalizeLoginSecurityUserKey($value) {
@@ -10304,6 +10855,10 @@ function filterBootstrapFacultyPapersForActor(array $papers, array $ctx) {
             return false;
         }
 
+        if ($role === 'hr' || $role === 'vpaa') {
+            return true;
+        }
+
         $status = bootstrapNormalizePlainToken($paper['status'] ?? 'draft');
         $isRouted = $status === 'sent' || $status === 'completed';
 
@@ -10353,6 +10908,13 @@ function buildBootstrapPayload(PDO $pdo, $currentUserInput = '') {
         'campuses' => buildCampusSnapshot($pdo),
         'programs' => buildProgramsSnapshot($pdo),
         'currentSemester' => getCurrentSemesterSnapshot($pdo),
+        'dataPrivacyConsentNotice' => getStudentDataPrivacyConsentNoticeSnapshot($pdo, 'student-to-professor'),
+        'dataPrivacyConsentNotices' => [
+            'student-to-professor' => getStudentDataPrivacyConsentNoticeSnapshot($pdo, 'student-to-professor'),
+            'professor-to-professor' => getStudentDataPrivacyConsentNoticeSnapshot($pdo, 'professor-to-professor'),
+            'supervisor-to-professor' => getStudentDataPrivacyConsentNoticeSnapshot($pdo, 'supervisor-to-professor'),
+        ],
+        'studentDataPrivacyConsents' => buildStudentDataPrivacyConsentsSnapshot($pdo, $currentUserId),
         'questionnaires' => buildQuestionnairesSnapshot($pdo),
         'activityLog' => in_array($ctx['role'], ['admin', 'hr'], true) ? buildActivityLogSnapshot($pdo) : [],
         'announcements' => buildAnnouncementsSnapshot($pdo),

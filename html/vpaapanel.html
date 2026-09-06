@@ -8,8 +8,8 @@
     <link rel="icon" type="image/png" sizes="32x32" href="../design/favicon-32x32.png">
     <link rel="apple-touch-icon" href="../design/apple-touch-icon.png">
     <title>VPAA Evaluation Overview - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/panel-theme.css?v=20260824a">
-    <link rel="stylesheet" href="../css/vpaapanel.css?v=20260820a">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260904c">
+    <link rel="stylesheet" href="../css/vpaapanel.css?v=20260906a">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
@@ -271,6 +271,65 @@
                         </div>
                     </header>
 
+                    <section class="admin-section vpaa-descriptive-analytics-section" aria-labelledby="vpaaDescriptiveAnalyticsTitle">
+                        <div class="section-header">
+                            <div class="section-title">
+                                <h2 id="vpaaDescriptiveAnalyticsTitle">Descriptive Analytics</h2>
+                                <p>Evaluated versus not evaluated students by department and program.</p>
+                            </div>
+                            <label class="vpaa-analytics-campus-filter" for="vpaaAnalyticsCampusSelect">
+                                <span>Campus</span>
+                                <select id="vpaaAnalyticsCampusSelect">
+                                    <option value="all">All Campuses</option>
+                                </select>
+                            </label>
+                        </div>
+
+                        <div class="vpaa-analytics-info-box">
+                            <i class="fas fa-chart-pie"></i>
+                            <span>Computed from assigned enrollments and submitted student evaluations for the active semester.</span>
+                        </div>
+
+                        <h3 class="vpaa-analytics-table-title">By Department</h3>
+                        <div class="table-container vpaa-analytics-table-container">
+                            <table class="status-table vpaa-analytics-table">
+                                <thead>
+                                    <tr>
+                                        <th>Department</th>
+                                        <th>Assigned</th>
+                                        <th>Evaluated</th>
+                                        <th>Not Evaluated</th>
+                                        <th>Completion %</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="vpaaDepartmentAnalyticsBody"></tbody>
+                            </table>
+                        </div>
+
+                        <h3 class="vpaa-analytics-table-title" id="vpaaDepartmentProgramsTitle">Programs by Department</h3>
+                        <div class="table-container vpaa-analytics-table-container">
+                            <table class="status-table vpaa-analytics-table">
+                                <thead>
+                                    <tr>
+                                        <th>Program</th>
+                                        <th>Assigned</th>
+                                        <th>Evaluated</th>
+                                        <th>Not Evaluated</th>
+                                        <th>Completion %</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="vpaaDepartmentProgramsBody"></tbody>
+                            </table>
+                        </div>
+                        <p class="empty-state vpaa-analytics-inline-empty" id="vpaaDepartmentProgramsEmpty">
+                            Select a department above to view its programs.
+                        </p>
+
+                        <p class="empty-state" id="vpaaAnalyticsEmptyState" style="display: none;">
+                            No assigned students found for analytics.
+                        </p>
+                    </section>
+
                     <section class="admin-section">
                         <div class="section-header">
                             <div class="section-title">
@@ -373,6 +432,10 @@
                                 <h2>Professor Evaluation Reports</h2>
                                 <p>Ratings, distribution graphs, and feedback from students and peers.</p>
                             </div>
+                            <button class="btn-overall-sasr vpaa-overall-sasr-btn" id="vpaa-overall-sasr-btn" type="button">
+                                <i class="fas fa-file-excel"></i>
+                                Overall SASR
+                            </button>
                         </div>
                         <div class="professors-list-container">
                             <div class="professors-list" id="professorGrid"></div>
@@ -557,22 +620,23 @@
         </div>
     </div>
 
-    <div class="vpaa-report-modal" id="vpaaReportModal" aria-hidden="true">
-        <div class="vpaa-report-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="vpaaReportModalTitle">
-            <div class="vpaa-report-modal-header">
-                <h3 id="vpaaReportModalTitle">Professor Evaluation Report</h3>
-                <button type="button" class="vpaa-report-modal-close" id="vpaaReportModalClose"
-                    aria-label="Close report details">
+    <div id="professor-analytics-modal" class="modal vpaa-professor-analytics-modal" aria-hidden="true">
+        <div class="modal-content analytics-modal-content" role="dialog" aria-modal="true"
+            aria-labelledby="vpaaProfessorAnalyticsTitle">
+            <div class="modal-header">
+                <h2 id="vpaaProfessorAnalyticsTitle">Professor Analytics</h2>
+                <button type="button" class="modal-close" id="close-analytics-modal"
+                    aria-label="Close professor analytics">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
-            <div class="vpaa-report-modal-body" id="vpaaReportModalBody"></div>
+            <div id="professor-analytics-content"></div>
         </div>
     </div>
 
-    <script src="../JsScrip/db-data.js?v=20260802e"></script>
+    <script src="../JsScrip/db-data.js?v=20260904c"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
-    <script src="../JsScrip/vpaapanel.js?v=20260826a"></script>
+    <script src="../JsScrip/vpaapanel.js?v=20260904c"></script>
 </body>
 
 </html>

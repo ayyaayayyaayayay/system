@@ -110,12 +110,14 @@ function initializeDashboard() {
     setupHeaderPanels();
     setupMobileHeaderScrollBehavior();
     renderStudentAnnouncements();
+    showStudentLoginAnnouncements();
     renderAssignedEvaluationList();
     updateEvaluationAvailabilityUi();
     setupNavigation();
     setupLogout();
     setupEvaluationButtons();
     setupSubmitNewButton();
+    setupStudentDataPrivacyGate();
     refreshEvaluationStatuses();
     updateSummaryCards();
     setupEvaluationForm();
@@ -141,12 +143,14 @@ function initializeDashboard() {
             key === SharedData.KEYS.EVALUATIONS ||
             key === SharedData.KEYS.CURRENT_SEMESTER ||
             key === SharedData.KEYS.EVAL_PERIODS ||
+            key === SharedData.KEYS.STUDENT_DATA_PRIVACY_CONSENTS ||
             key === SharedData.KEYS.STUDENT_EVAL_PROOF_REQUESTS
         ) {
             renderAssignedEvaluationList();
             refreshEvaluationStatuses();
             updateSummaryCards();
             updateEvaluationAvailabilityUi();
+            updateStudentDataPrivacyGateUi();
             renderStudentAnnouncements();
             refreshStudentProofRequirement();
         }
@@ -154,6 +158,13 @@ function initializeDashboard() {
         if (key === SharedData.KEYS.ANNOUNCEMENTS) {
             renderStudentAnnouncements();
         }
+    });
+}
+
+function showStudentLoginAnnouncements() {
+    if (!SharedData.showUnreadAnnouncementLoginPopup) return;
+    SharedData.showUnreadAnnouncementLoginPopup({
+        onDismiss: renderStudentAnnouncements,
     });
 }
 
@@ -280,6 +291,190 @@ function buildCurrentStudentIdentity(session) {
         primarySemesterId: getActiveSemesterId(),
         tokens: Array.from(new Set(tokens))
     };
+}
+
+function getStudentPrivacyConsentNotice() {
+    const fallback = {
+        enabled: true,
+        version: 'student-to-professor-privacy-v1',
+        textIdentifier: 'student-to-professor-privacy-notice',
+        title: 'Data Privacy Notice',
+        paragraphs: [
+            'This questionnaire collects your user identity, role, evaluation assignment details, ratings, written feedback, submission timing, and limited interaction data needed to process the evaluation.',
+            'The school uses this information to administer evaluations, verify completion, generate academic quality reports, review feedback quality, detect inappropriate or biased submissions, and keep audit records.',
+            'Your responses may be reviewed by authorized school personnel and may be summarized for faculty evaluation, quality assurance, compliance, and institutional improvement. Records are retained according to school policy and applicable law.',
+            'By continuing, you confirm that you have read this notice and agree that your evaluation data will be processed for these purposes.'
+        ],
+        agreementText: 'I have read and agree to the Data Privacy Notice for this questionnaire.'
+    };
+
+    const notice = SharedData.getDataPrivacyConsentNotice
+        ? SharedData.getDataPrivacyConsentNotice('student-to-professor')
+        : {};
+    return Object.assign({}, fallback, notice || {});
+}
+
+function getStudentPrivacyConsentSemesterId() {
+    const identity = buildCurrentStudentIdentity(getUserSession() || {});
+    return String(identity.primarySemesterId || getActiveSemesterId() || '').trim();
+}
+
+function hasCurrentStudentPrivacyConsent() {
+    const notice = getStudentPrivacyConsentNotice();
+    if (notice && notice.enabled === false) {
+        return true;
+    }
+    const semesterId = getStudentPrivacyConsentSemesterId();
+    return Boolean(
+        SharedData.hasStudentDataPrivacyConsent &&
+        SharedData.hasStudentDataPrivacyConsent(semesterId, notice.version, 'student-to-professor')
+    );
+}
+
+function setStudentPrivacyGateMessage(message, tone) {
+    const messageEl = document.getElementById('studentPrivacyMessage');
+    if (!messageEl) return;
+    messageEl.textContent = String(message || '');
+    messageEl.classList.toggle('is-success', String(tone || '').toLowerCase() === 'success');
+}
+
+function renderStudentDataPrivacyNotice() {
+    const notice = getStudentPrivacyConsentNotice();
+    const titleEl = document.getElementById('studentPrivacyTitle');
+    const leadEl = document.getElementById('studentPrivacyLead');
+    const versionEl = document.getElementById('studentPrivacyVersion');
+    const bodyEl = document.getElementById('studentPrivacyBody');
+    const agreementEl = document.getElementById('studentPrivacyAgreementText');
+
+    if (titleEl) {
+        titleEl.textContent = notice.title || 'Student Data Privacy Notice';
+    }
+    if (leadEl) {
+        leadEl.textContent = 'Please review and agree before opening the professor questionnaire.';
+    }
+    if (versionEl) {
+        const version = String(notice.version || '').trim();
+        versionEl.textContent = version ? `Privacy notice ${version}` : 'Privacy notice';
+    }
+    if (bodyEl) {
+        const paragraphs = Array.isArray(notice.paragraphs) ? notice.paragraphs : [];
+        bodyEl.innerHTML = paragraphs.map(function (paragraph) {
+            return `<p>${escapeHtml(paragraph)}</p>`;
+        }).join('');
+    }
+    if (agreementEl) {
+        agreementEl.textContent = notice.agreementText || 'I have read and agree to the Student Data Privacy Notice.';
+    }
+}
+
+function updateStudentDataPrivacyGateUi(options) {
+    const cfg = options || {};
+    const gate = document.getElementById('studentDataPrivacyGate');
+    const questionnaireCard = document.getElementById('studentQuestionnaireCard');
+    if (!gate || !questionnaireCard) {
+        return true;
+    }
+
+    renderStudentDataPrivacyNotice();
+    const hasConsent = hasCurrentStudentPrivacyConsent();
+    gate.style.display = hasConsent ? 'none' : 'block';
+    questionnaireCard.style.display = hasConsent ? 'block' : 'none';
+
+    const checkbox = document.getElementById('studentPrivacyAgreement');
+    const continueBtn = document.getElementById('studentPrivacyContinueBtn');
+    if (checkbox && hasConsent) {
+        checkbox.checked = false;
+    }
+    if (continueBtn) {
+        continueBtn.disabled = hasConsent || !(checkbox && checkbox.checked);
+    }
+    if (cfg.showMessage && !hasConsent) {
+        setStudentPrivacyGateMessage('Please agree to the Student Data Privacy Notice before continuing.', 'error');
+    } else if (!hasConsent && !cfg.keepMessage) {
+        setStudentPrivacyGateMessage('', 'error');
+    }
+
+    return hasConsent;
+}
+
+function setupStudentDataPrivacyGate() {
+    const checkbox = document.getElementById('studentPrivacyAgreement');
+    const continueBtn = document.getElementById('studentPrivacyContinueBtn');
+    const backBtn = document.getElementById('studentPrivacyBackBtn');
+
+    renderStudentDataPrivacyNotice();
+    updateStudentDataPrivacyGateUi();
+
+    if (checkbox && continueBtn) {
+        checkbox.addEventListener('change', function () {
+            continueBtn.disabled = !checkbox.checked;
+            if (checkbox.checked) {
+                setStudentPrivacyGateMessage('', 'error');
+            }
+        });
+    }
+
+    if (continueBtn) {
+        continueBtn.addEventListener('click', function () {
+            if (!checkbox || !checkbox.checked) {
+                setStudentPrivacyGateMessage('Please check the agreement box before continuing.', 'error');
+                return;
+            }
+
+            const semesterId = getStudentPrivacyConsentSemesterId();
+            const originalText = continueBtn.textContent;
+            continueBtn.disabled = true;
+            continueBtn.textContent = 'Saving...';
+            setStudentPrivacyGateMessage('', 'error');
+
+            try {
+                if (!SharedData.recordStudentDataPrivacyConsent) {
+                    throw new Error('Privacy consent saving is not available.');
+                }
+                SharedData.recordStudentDataPrivacyConsent({ semesterId, questionnaireType: 'student-to-professor' });
+                setStudentPrivacyGateMessage('Agreement recorded.', 'success');
+                updateStudentDataPrivacyGateUi({ keepMessage: true });
+                if (typeof loadDynamicQuestionnaire === 'function') {
+                    loadDynamicQuestionnaire();
+                }
+                startEvaluationBehaviorCapture(false);
+            } catch (error) {
+                setStudentPrivacyGateMessage(error && error.message ? error.message : 'Agreement could not be saved. Please try again.', 'error');
+            } finally {
+                continueBtn.textContent = originalText;
+                continueBtn.disabled = hasCurrentStudentPrivacyConsent() || !(checkbox && checkbox.checked);
+            }
+        });
+    }
+
+    if (backBtn) {
+        backBtn.addEventListener('click', function () {
+            switchView('dashboard');
+            updateNavigation('dashboard');
+        });
+    }
+}
+
+const MANIFESTED_RATING_LABELS = {
+    5: 'Always manifested',
+    4: 'Often manifested',
+    3: 'Sometimes manifested',
+    2: 'Seldom manifested',
+    1: 'Never/Rarely manifested'
+};
+
+function renderManifestedRatingScaleTable(maxRatingInput) {
+    const maxRating = Math.max(1, parseInt(maxRatingInput, 10) || 5);
+    const rows = [];
+    for (let rating = maxRating; rating >= 1; rating -= 1) {
+        const label = MANIFESTED_RATING_LABELS[rating] || `Rating ${rating}`;
+        rows.push(`<tr><th scope="row">${rating}</th><td>${escapeHtml(label)}</td></tr>`);
+    }
+    return `
+        <table class="rating-legend-table" aria-label="Rating scale">
+            <tbody>${rows.join('')}</tbody>
+        </table>
+    `;
 }
 
 function getStudentEvaluationAssignmentState() {
@@ -1346,6 +1541,11 @@ function switchView(viewName, options) {
         closeStudentProofModal();
         // Scroll to top
         window.scrollTo(0, 0);
+
+        const hasPrivacyConsent = updateStudentDataPrivacyGateUi();
+        if (!hasPrivacyConsent) {
+            return;
+        }
 
         // Load dynamic questionnaire
         if (typeof loadDynamicQuestionnaire === 'function') {
@@ -2596,7 +2796,7 @@ function renderQuestionHTML(question, index) {
 
         ratingHtml += `
                 </div>
-                <p class="rating-legend">${maxRating} = Excellent, 1 = Poor</p>
+                ${renderManifestedRatingScaleTable(maxRating)}
             </div>
         `;
         return ratingHtml;
@@ -3220,6 +3420,13 @@ function handleFormSubmission() {
         return;
     }
 
+    if (!hasCurrentStudentPrivacyConsent()) {
+        updateStudentDataPrivacyGateUi({ showMessage: true });
+        showErrorMessage('Please agree to the Student Data Privacy Notice before submitting the evaluation.');
+        window.scrollTo(0, 0);
+        return;
+    }
+
     const form = document.getElementById('evaluationForm');
     const submitBtn = form.querySelector('.btn-submit');
     const originalText = submitBtn.textContent;
@@ -3495,6 +3702,7 @@ function updateEvaluationTargetIndicator() {
     const isLocked = targetParts.professorName
         ? isSubmittedEvaluation(studentId, semesterId, targetParts.professorName, studentIdentity, selectedOfferingId, targetParts.subjectCode)
         : false;
+    const hasPrivacyConsent = hasCurrentStudentPrivacyConsent();
 
     if (textEl) {
         textEl.textContent = selectedTarget || 'No professor selected yet';
@@ -3503,10 +3711,10 @@ function updateEvaluationTargetIndicator() {
         hiddenEl.value = selectedTarget || '';
     }
     if (submitBtn) {
-        submitBtn.disabled = !selectedTarget || isLocked;
+        submitBtn.disabled = !selectedTarget || isLocked || !hasPrivacyConsent;
     }
     if (saveDraftBtn) {
-        saveDraftBtn.disabled = !selectedTarget || isLocked;
+        saveDraftBtn.disabled = !selectedTarget || isLocked || !hasPrivacyConsent;
     }
     if (!selectedTarget) {
         updateDraftStatusIndicator({ state: 'idle' });

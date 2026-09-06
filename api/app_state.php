@@ -620,6 +620,12 @@ function filterFacultyPapersByActor(array $papers, $actorRole, $actorUserId, arr
     $role = normalizeActorRoleToken($actorRole);
     $userId = normalizePaperUserIdToken($actorUserId);
 
+    if ($role === 'hr' || $role === 'vpaa') {
+        return array_values(array_map(function ($paper) use ($actorRole, $actorUser) {
+            return decorateFacultyPaperForActor($paper, $actorRole, $actorUser);
+        }, $papers));
+    }
+
     if ($role === 'professor') {
         return array_values(array_map(function ($paper) use ($actorRole, $actorUser) {
             return decorateFacultyPaperForActor($paper, $actorRole, $actorUser);
@@ -3922,7 +3928,16 @@ try {
             }
             $data = is_array($body['data'] ?? null) ? $body['data'] : [];
             $questionnaires = persistQuestionnairesSnapshot($pdo, $data, $authenticatedUser);
-            sendJson(['success' => true, 'questionnaires' => $questionnaires]);
+            sendJson([
+                'success' => true,
+                'questionnaires' => $questionnaires,
+                'dataPrivacyConsentNotice' => getStudentDataPrivacyConsentNoticeSnapshot($pdo, 'student-to-professor'),
+                'dataPrivacyConsentNotices' => [
+                    'student-to-professor' => getStudentDataPrivacyConsentNoticeSnapshot($pdo, 'student-to-professor'),
+                    'professor-to-professor' => getStudentDataPrivacyConsentNoticeSnapshot($pdo, 'professor-to-professor'),
+                    'supervisor-to-professor' => getStudentDataPrivacyConsentNoticeSnapshot($pdo, 'supervisor-to-professor'),
+                ],
+            ]);
             break;
 
         case 'setEvalPeriods':
@@ -4513,10 +4528,58 @@ try {
                 enforceSupervisorEvaluationScope($pdo, $actorUser, $actorRole, $evaluation);
             }
 
+            if ($actorRole === 'professor' && $requiresPeerAssignment) {
+                $peerEvaluationSemester = trim((string) ($evaluation['semesterId'] ?? ''));
+                if ($peerEvaluationSemester === '' || strtolower($peerEvaluationSemester) === 'current') {
+                    $peerEvaluationSemester = trim((string) getCurrentSemesterSnapshot($pdo));
+                    $evaluation['semesterId'] = $peerEvaluationSemester;
+                }
+                if ($peerEvaluationSemester === '') {
+                    sendJson(['success' => false, 'error' => 'No current semester is configured.'], 400);
+                }
+                if (!hasStudentDataPrivacyConsentSnapshot($pdo, $actorUser['id'] ?? '', $peerEvaluationSemester, '', 'professor-to-professor')) {
+                    sendJson([
+                        'success' => false,
+                        'error' => 'You must agree to the Data Privacy Notice before submitting the peer questionnaire.',
+                    ], 403);
+                }
+            }
+
+            if ($actorRole === 'dean' || $actorRole === 'procoor') {
+                $supervisorEvaluationSemester = trim((string) ($evaluation['semesterId'] ?? ''));
+                if ($supervisorEvaluationSemester === '' || strtolower($supervisorEvaluationSemester) === 'current') {
+                    $supervisorEvaluationSemester = trim((string) getCurrentSemesterSnapshot($pdo));
+                    $evaluation['semesterId'] = $supervisorEvaluationSemester;
+                }
+                if ($supervisorEvaluationSemester === '') {
+                    sendJson(['success' => false, 'error' => 'No current semester is configured.'], 400);
+                }
+                if (!hasStudentDataPrivacyConsentSnapshot($pdo, $actorUser['id'] ?? '', $supervisorEvaluationSemester, '', 'supervisor-to-professor')) {
+                    sendJson([
+                        'success' => false,
+                        'error' => 'You must agree to the Data Privacy Notice before submitting the supervisor questionnaire.',
+                    ], 403);
+                }
+            }
+
             if ($actorRole === 'student') {
                 $evaluation['studentUserId'] = (string) ($actorUser['id'] ?? '');
                 if (trim((string) ($evaluation['studentId'] ?? '')) === '') {
                     $evaluation['studentId'] = (string) ($actorUser['studentNumber'] ?? '');
+                }
+                $studentEvaluationSemester = trim((string) ($evaluation['semesterId'] ?? ''));
+                if ($studentEvaluationSemester === '' || strtolower($studentEvaluationSemester) === 'current') {
+                    $studentEvaluationSemester = trim((string) getCurrentSemesterSnapshot($pdo));
+                    $evaluation['semesterId'] = $studentEvaluationSemester;
+                }
+                if ($studentEvaluationSemester === '') {
+                    sendJson(['success' => false, 'error' => 'No current semester is configured.'], 400);
+                }
+                if (!hasStudentDataPrivacyConsentSnapshot($pdo, $actorUser['id'] ?? '', $studentEvaluationSemester, '', 'student-to-professor')) {
+                    sendJson([
+                        'success' => false,
+                        'error' => 'You must agree to the Student Data Privacy Notice before submitting the professor questionnaire.',
+                    ], 403);
                 }
                 if (trim((string) ($evaluation['evaluationType'] ?? '')) === '') {
                     $evaluation['evaluationType'] = 'student';
@@ -4557,6 +4620,42 @@ try {
             sendJson([
                 'success' => true,
                 'evaluation' => $evaluation,
+            ]);
+            break;
+
+        case 'recordStudentDataPrivacyConsent':
+            if ($authenticatedRole !== 'student' && $authenticatedRole !== 'professor' && $authenticatedRole !== 'dean' && $authenticatedRole !== 'procoor') {
+                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
+            }
+
+            $semesterId = trim((string) ($body['semesterId'] ?? ''));
+            $questionnaireType = getUiQuestionnaireTypeCode($body['questionnaireType'] ?? 'student-to-professor');
+            $allowedConsentTypes = [
+                'student' => 'student-to-professor',
+                'professor' => 'professor-to-professor',
+                'dean' => 'supervisor-to-professor',
+                'procoor' => 'supervisor-to-professor',
+            ];
+            if (($allowedConsentTypes[$authenticatedRole] ?? '') !== $questionnaireType) {
+                sendJson(['success' => false, 'error' => 'Permission denied for this privacy notice.'], 403);
+            }
+            if ($semesterId === '' || strtolower($semesterId) === 'current') {
+                $semesterId = trim((string) getCurrentSemesterSnapshot($pdo));
+            }
+            if ($semesterId === '') {
+                sendJson(['success' => false, 'error' => 'No current semester is configured.'], 400);
+            }
+
+            try {
+                $consent = recordStudentDataPrivacyConsentSnapshot($pdo, $authenticatedUser['id'] ?? '', $semesterId, $questionnaireType);
+            } catch (RuntimeException $e) {
+                sendJson(['success' => false, 'error' => $e->getMessage()], 400);
+            }
+
+            sendJson([
+                'success' => true,
+                'consent' => $consent,
+                'studentDataPrivacyConsents' => buildStudentDataPrivacyConsentsSnapshot($pdo, $authenticatedUser['id'] ?? ''),
             ]);
             break;
 
@@ -4760,9 +4859,31 @@ try {
             if ($authenticatedRole !== 'admin' && $authenticatedRole !== 'hr') {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
-            $items = is_array($body['announcements'] ?? null) ? $body['announcements'] : [];
-            persistAnnouncementsSnapshot($pdo, $items, $authenticatedUser);
-            sendJson(['success' => true]);
+            try {
+                $items = is_array($body['announcements'] ?? null) ? $body['announcements'] : [];
+                persistAnnouncementsSnapshot($pdo, $items, $authenticatedUser);
+                sendJson([
+                    'success' => true,
+                    'announcements' => buildAnnouncementsSnapshot($pdo),
+                ]);
+            } catch (InvalidArgumentException $exception) {
+                sendJson(['success' => false, 'error' => $exception->getMessage()], 400);
+            }
+            break;
+
+        case 'markAnnouncementsRead':
+            try {
+                $ids = is_array($body['ids'] ?? null)
+                    ? $body['ids']
+                    : (is_array($body['announcementIds'] ?? null) ? $body['announcementIds'] : []);
+                $announcements = markAnnouncementsReadSnapshot($pdo, $ids, $authenticatedUser);
+                sendJson([
+                    'success' => true,
+                    'announcements' => $announcements,
+                ]);
+            } catch (InvalidArgumentException $exception) {
+                sendJson(['success' => false, 'error' => $exception->getMessage()], 400);
+            }
             break;
 
         case 'setProfileData':
@@ -4786,7 +4907,7 @@ try {
         case 'listFacultyPapers':
             $actorRole = $authenticatedRole;
             $actorUserId = normalizePaperUserIdToken($authenticatedUser['id'] ?? '');
-            if ($actorRole !== 'professor' && $actorRole !== 'dean' && $actorRole !== 'procoor') {
+            if ($actorRole !== 'professor' && $actorRole !== 'dean' && $actorRole !== 'procoor' && $actorRole !== 'hr' && $actorRole !== 'vpaa') {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
             if ($actorRole === 'professor') {

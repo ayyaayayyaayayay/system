@@ -860,6 +860,20 @@ body.admin-panel .graph-chart-container canvas {
   gap: 10px;
 }
 
+.professor-toolbar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 0 0 auto;
+  align-items: stretch;
+}
+
+.professor-toolbar-actions .btn-add-professor,
+.professor-toolbar-actions .btn-overall-sasr {
+  justify-content: center;
+  width: 100%;
+}
+
 .professor-campus-filter {
   min-width: 190px;
   height: 42px;
@@ -930,6 +944,54 @@ body.admin-panel .graph-chart-container canvas {
 .btn-add-professor:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+}
+
+.btn-overall-sasr {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+  padding: 12px 22px;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 42px;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+}
+
+.btn-overall-sasr:hover {
+  background: #d1fae5;
+  border-color: #6ee7b7;
+  transform: translateY(-1px);
+}
+
+.overall-sasr-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.overall-sasr-field-wide {
+  grid-column: 1 / -1;
+}
+
+.overall-sasr-modal-note {
+  margin: 0 0 18px;
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.overall-sasr-empty-note {
+  margin: 8px 0 0;
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .department-tabs {
@@ -2042,6 +2104,77 @@ input:checked+.slider:before {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
+.questionnaire-privacy-settings {
+  background: #f8fafc;
+  border: 1px solid #dbe2ea;
+  border-radius: 10px;
+  margin: 22px 0;
+  padding: 20px;
+}
+
+.questionnaire-privacy-settings__header {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.questionnaire-privacy-settings__header h3 {
+  color: #111827;
+  font-size: 16px;
+  margin: 0 0 6px 0;
+}
+
+.questionnaire-privacy-settings__header p,
+.questionnaire-privacy-note {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.questionnaire-privacy-toggle {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  color: #1f2937;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 12px;
+}
+
+.questionnaire-privacy-toggle input {
+  height: 16px;
+  width: 16px;
+}
+
+.questionnaire-privacy-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.questionnaire-privacy-settings input[type="text"],
+.questionnaire-privacy-settings textarea {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font: inherit;
+  padding: 10px 12px;
+  width: 100%;
+}
+
+.questionnaire-privacy-settings textarea {
+  line-height: 1.5;
+  resize: vertical;
+}
+
 .form-header-preview {
   border-bottom: 1px solid var(--border-color);
   padding-bottom: 24px;
@@ -2530,8 +2663,98 @@ input:checked+.slider:before {
 }
 
 .announcement-compose-modal-content {
-  max-width: 680px;
+  max-width: 760px;
   width: 95%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+#announcement-compose-form {
+  padding: 24px 32px 28px;
+}
+
+#announcement-compose-form .form-group {
+  margin-bottom: 0;
+}
+
+#announcement-compose-form label {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+#announcement-compose-form input,
+#announcement-compose-form select,
+#announcement-compose-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 2px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  padding: 12px 16px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+#announcement-compose-form input:hover,
+#announcement-compose-form select:hover,
+#announcement-compose-form textarea:hover {
+  background: var(--bg-secondary);
+  border-color: #d1d5db;
+}
+
+#announcement-compose-form input:focus,
+#announcement-compose-form select:focus,
+#announcement-compose-form textarea:focus {
+  background: var(--bg-secondary);
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.announcement-compose-subtitle {
+  margin: -4px 0 18px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.announcement-compose-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.announcement-field-wide {
+  grid-column: 1 / -1;
+}
+
+.announcement-audience-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 14px 0 12px;
+  padding: 12px 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.announcement-audience-preview span {
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.announcement-audience-preview strong {
+  color: #0f172a;
+  font-size: 13px;
+  text-align: right;
 }
 
 #announcement-compose-form .form-hint {
@@ -2539,6 +2762,11 @@ input:checked+.slider:before {
   margin-bottom: 6px;
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+#announcement-compose-form textarea {
+  min-height: 150px;
+  resize: vertical;
 }
 
 .announcement-compose-feedback {
@@ -2552,6 +2780,25 @@ input:checked+.slider:before {
 
 .announcement-compose-feedback:empty {
   display: none;
+}
+
+@media (max-width: 768px) {
+  #announcement-compose-form {
+    padding: 20px;
+  }
+
+  .announcement-compose-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .announcement-audience-preview {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .announcement-audience-preview strong {
+    text-align: left;
+  }
 }
 
 /* Enlarged modals for Section and Question forms */
@@ -3614,8 +3861,14 @@ input:checked+.slider:before {
   .professor-campus-filter,
   .btn-professor-search,
   .btn-professor-clear,
-  .btn-add-professor {
+  .btn-add-professor,
+  .professor-toolbar-actions,
+  .btn-overall-sasr {
     width: 100%;
+  }
+
+  .overall-sasr-grid {
+    grid-template-columns: 1fr;
   }
 
   .department-tabs {
@@ -6735,4 +6988,1800 @@ body.admin-panel .panel-branding-preview .logo-text {
   margin: 0;
   text-align: center !important;
   line-height: 1.25;
+}
+
+/* Compact Admin mobile pass: keep controls visible and scroll long data areas only. */
+@media (max-width: 640px) {
+  body.admin-panel {
+    overflow-x: hidden;
+  }
+
+  body.admin-panel .main-content {
+    margin-left: 0;
+    width: 100%;
+    max-width: 100vw;
+    padding: 10px 10px 18px;
+    overflow-x: hidden;
+  }
+
+  body.admin-panel .content-view {
+    gap: 12px;
+  }
+
+  body.admin-panel .content-view > * {
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+
+  body.admin-panel .top-header {
+    position: static;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 8px;
+    margin-bottom: 0;
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  body.admin-panel .admin-header-main {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  body.admin-panel .page-title-block {
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 2px;
+  }
+
+  body.admin-panel .header-right {
+    flex: 0 0 auto;
+    width: auto;
+    margin-left: auto;
+    gap: 8px;
+  }
+
+  body.admin-panel .mobile-nav-toggle,
+  body.admin-panel .user-profile {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0;
+    border-radius: 10px;
+  }
+
+  body.admin-panel .user-profile span {
+    display: none;
+  }
+
+  body.admin-panel .page-title {
+    font-size: 18px;
+    line-height: 1.15;
+    letter-spacing: 0;
+  }
+
+  body.admin-panel .page-context,
+  body.admin-panel .section-title p,
+  body.admin-panel .reports-title p,
+  body.admin-panel .view-header p,
+  body.admin-panel .form-header p,
+  body.admin-panel .card-caption,
+  body.admin-panel .chart-subtitle,
+  body.admin-panel .credential-distributor-description,
+  body.admin-panel .questionnaire-privacy-settings__header p,
+  body.admin-panel .questionnaire-privacy-note,
+  body.admin-panel .profile-photo-help,
+  body.admin-panel .form-hint {
+    font-size: 11px;
+    line-height: 1.35;
+    letter-spacing: 0;
+  }
+
+  body.admin-panel .admin-hero-card,
+  body.admin-panel .overview-card,
+  body.admin-panel .admin-section,
+  body.admin-panel .view-header,
+  body.admin-panel .form-card,
+  body.admin-panel .settings-group,
+  body.admin-panel .questionnaire-header,
+  body.admin-panel .questionnaire-form-preview,
+  body.admin-panel .questionnaire-privacy-settings,
+  body.admin-panel .activity-log-controls,
+  body.admin-panel .activity-log-table,
+  body.admin-panel .user-management-content,
+  body.admin-panel .user-management-container,
+  body.admin-panel .subject-management-layout > section,
+  body.admin-panel .reports-header,
+  body.admin-panel .section-card,
+  body.admin-panel .evaluation-type-section,
+  body.admin-panel .campus-tabs-bar {
+    padding: 14px 10px;
+    border-radius: 14px;
+    margin-bottom: 12px;
+  }
+
+  body.admin-panel .settings-container {
+    padding: 0 !important;
+  }
+
+  body.admin-panel .admin-hero-card {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  body.admin-panel .hero-eyebrow {
+    min-height: 24px;
+    margin-bottom: 8px;
+    padding: 0 9px;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+  }
+
+  body.admin-panel .admin-hero-copy h2 {
+    margin: 0 0 8px;
+    font-size: 20px;
+    line-height: 1.12;
+    letter-spacing: 0;
+  }
+
+  body.admin-panel .admin-hero-copy p {
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  body.admin-panel .admin-hero-actions,
+  body.admin-panel .overview-cards,
+  body.admin-panel .dashboard-grid,
+  body.admin-panel .charts-section,
+  body.admin-panel .charts-grid,
+  body.admin-panel .stats-summary,
+  body.admin-panel .quick-actions-grid,
+  body.admin-panel .profile-grid,
+  body.admin-panel .settings-list,
+  body.admin-panel .questionnaire-actions,
+  body.admin-panel .subject-toolbar,
+  body.admin-panel .offering-toolbar,
+  body.admin-panel .subject-form-grid,
+  body.admin-panel .offering-form-grid,
+  body.admin-panel .credential-distributor-grid,
+  body.admin-panel .credential-distributor-actions,
+  body.admin-panel .credential-distributor-upload,
+  body.admin-panel .openai-panel-access-grid,
+  body.admin-panel .professor-filter-controls,
+  body.admin-panel .professor-toolbar-actions,
+  body.admin-panel .organization-structure {
+    gap: 8px;
+  }
+
+  body.admin-panel .overview-cards,
+  body.admin-panel .dashboard-grid,
+  body.admin-panel .charts-section,
+  body.admin-panel .charts-grid,
+  body.admin-panel .stats-summary,
+  body.admin-panel .profile-grid,
+  body.admin-panel .settings-list,
+  body.admin-panel .credential-distributor-grid,
+  body.admin-panel .openai-panel-access-grid,
+  body.admin-panel .subject-form-grid,
+  body.admin-panel .offering-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  body.admin-panel .overview-card {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+  }
+
+  body.admin-panel .card-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    font-size: 16px;
+  }
+
+  body.admin-panel .card-content h3 {
+    font-size: 12px;
+    line-height: 1.25;
+  }
+
+  body.admin-panel .card-number {
+    font-size: 22px;
+    line-height: 1.1;
+  }
+
+  body.admin-panel .section-title h2,
+  body.admin-panel .reports-title h1,
+  body.admin-panel .view-header h1,
+  body.admin-panel .form-header h2,
+  body.admin-panel .settings-group h3,
+  body.admin-panel .form-title-preview,
+  body.admin-panel .section-card-title {
+    font-size: 18px;
+    line-height: 1.2;
+    letter-spacing: 0;
+  }
+
+  body.admin-panel .chart-title,
+  body.admin-panel .setting-content h3,
+  body.admin-panel .eval-period-content h3,
+  body.admin-panel .openai-panel-access-header h4,
+  body.admin-panel .credential-test-mail-box h4 {
+    font-size: 14px;
+    line-height: 1.25;
+  }
+
+  body.admin-panel .hero-action-btn,
+  body.admin-panel .quick-action-btn,
+  body.admin-panel .btn-add-user-floating,
+  body.admin-panel .btn-add-user,
+  body.admin-panel .btn-add-professor,
+  body.admin-panel .btn-overall-sasr,
+  body.admin-panel .btn-professor-search,
+  body.admin-panel .btn-professor-clear,
+  body.admin-panel .btn-user-search,
+  body.admin-panel .btn-secondary,
+  body.admin-panel .btn-bulk-register,
+  body.admin-panel .btn-submit,
+  body.admin-panel .btn-cancel,
+  body.admin-panel .btn-save,
+  body.admin-panel .btn-reset,
+  body.admin-panel .btn-setting,
+  body.admin-panel .btn-add-term,
+  body.admin-panel .btn-add-section,
+  body.admin-panel .btn-add-question,
+  body.admin-panel .btn-save-questionnaire,
+  body.admin-panel .form-input,
+  body.admin-panel .subject-select,
+  body.admin-panel .subject-input,
+  body.admin-panel .questionnaire-type-dropdown,
+  body.admin-panel .campus-filter-select,
+  body.admin-panel .professor-campus-filter,
+  body.admin-panel .log-control input,
+  body.admin-panel .log-control select,
+  body.admin-panel .setting-item input[type="text"],
+  body.admin-panel .setting-item input[type="email"],
+  body.admin-panel .setting-item select,
+  body.admin-panel .credential-distributor-field input,
+  body.admin-panel .credential-distributor-field select,
+  body.admin-panel .credential-distributor-field textarea,
+  body.admin-panel .questionnaire-privacy-settings input[type="text"],
+  body.admin-panel .questionnaire-privacy-settings textarea,
+  body.admin-panel .modal-content input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+  body.admin-panel .modal-content select,
+  body.admin-panel .modal-content textarea {
+    min-height: 38px;
+    padding: 9px 12px;
+    border-radius: 10px;
+    font-size: 12px;
+  }
+
+  body.admin-panel .quick-action-btn {
+    min-height: 66px;
+    flex-direction: row;
+    justify-content: flex-start;
+  }
+
+  body.admin-panel .quick-action-btn i {
+    font-size: 16px;
+  }
+
+  body.admin-panel .btn-add-user-floating {
+    position: static;
+    width: 100%;
+    justify-content: center;
+    border-radius: 12px;
+  }
+
+  body.admin-panel .chart-container,
+  body.admin-panel #dashboard-view .chart-container,
+  body.admin-panel #dashboard-view .charts-section .graph-chart-container,
+  body.admin-panel #dashboard-view .reports-container .chart-container {
+    min-height: 210px;
+    height: 220px;
+    max-height: 240px;
+    padding: 10px 8px;
+  }
+
+  body.admin-panel #dashboard-view .reports-container .chart-container canvas,
+  body.admin-panel #dashboard-view .reports-container .graph-chart-container canvas,
+  body.admin-panel #dashboard-view .reports-container .rating-chart-container canvas {
+    height: 180px !important;
+    max-height: 180px !important;
+  }
+
+  body.admin-panel .dashboard-activity-section {
+    display: flex;
+    flex-direction: column;
+  }
+
+  body.admin-panel .dashboard-activity-section .section-header,
+  body.admin-panel .section-header,
+  body.admin-panel .reports-header,
+  body.admin-panel .questionnaire-actions,
+  body.admin-panel .profile-actions,
+  body.admin-panel .subject-toolbar,
+  body.admin-panel .offering-toolbar {
+    gap: 8px;
+  }
+
+  body.admin-panel .dashboard-activity-section .activity-list {
+    max-height: min(38vh, 300px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 2px;
+  }
+
+  body.admin-panel .dashboard-activity-section .activity-item,
+  body.admin-panel .setting-item,
+  body.admin-panel .eval-period-card,
+  body.admin-panel .openai-panel-access-item,
+  body.admin-panel .profile-item {
+    min-height: 0;
+    padding: 10px;
+    border-radius: 12px;
+  }
+
+  body.admin-panel .user-management-content,
+  body.admin-panel .questionnaire-container,
+  body.admin-panel .reports-container,
+  body.admin-panel .system-settings-content {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  body.admin-panel .campus-tabs-bar,
+  body.admin-panel .campus-tabs,
+  body.admin-panel .campus-filter-controls,
+  body.admin-panel .user-filters,
+  body.admin-panel .professor-toolbar,
+  body.admin-panel .professor-filter-controls,
+  body.admin-panel .professor-toolbar-actions,
+  body.admin-panel .questionnaire-actions,
+  body.admin-panel .credential-distributor-actions,
+  body.admin-panel .credential-distributor-upload {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  body.admin-panel .user-filters {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  body.admin-panel .user-filters .filter-group,
+  body.admin-panel .log-control,
+  body.admin-panel .professor-filter-controls,
+  body.admin-panel .questionnaire-semester-selector,
+  body.admin-panel .questionnaire-type-selector,
+  body.admin-panel .credential-distributor-field {
+    min-width: 0;
+    width: 100%;
+    gap: 5px;
+  }
+
+  body.admin-panel .professor-search,
+  body.admin-panel .user-search,
+  body.admin-panel .offering-search-box {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    min-height: 38px;
+    margin: 0;
+    padding: 0 10px;
+    border-radius: 10px;
+  }
+
+  body.admin-panel .professor-search input,
+  body.admin-panel .user-search input,
+  body.admin-panel .offering-search-box input {
+    min-height: 36px;
+    padding: 0;
+    font-size: 12px;
+  }
+
+  body.admin-panel .department-tabs {
+    gap: 8px;
+    margin-bottom: 10px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 2px;
+  }
+
+  body.admin-panel .dept-tab,
+  body.admin-panel .campus-tab {
+    flex: 0 0 auto;
+    min-height: 36px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  body.admin-panel .organization-structure {
+    max-height: min(58vh, 520px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 2px;
+  }
+
+  body.admin-panel .org-section,
+  body.admin-panel .department-block,
+  body.admin-panel .role-group,
+  body.admin-panel .user-card-compact {
+    border-radius: 12px;
+  }
+
+  body.admin-panel .org-header,
+  body.admin-panel .dept-header,
+  body.admin-panel .role-header {
+    min-height: 40px;
+    height: auto;
+    padding: 9px 10px;
+    gap: 8px;
+  }
+
+  body.admin-panel .org-content,
+  body.admin-panel .dept-content,
+  body.admin-panel .role-users {
+    padding: 0 10px 10px;
+  }
+
+  body.admin-panel .department-block {
+    margin: 8px 10px;
+  }
+
+  body.admin-panel .user-card-compact {
+    gap: 8px;
+    padding: 8px;
+    margin-bottom: 6px;
+  }
+
+  body.admin-panel .user-avatar {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+  }
+
+  body.admin-panel .user-details .name,
+  body.admin-panel .professor-table-name,
+  body.admin-panel .profile-value {
+    font-size: 12px;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+
+  body.admin-panel .user-details .info,
+  body.admin-panel .profile-label {
+    font-size: 10px;
+    line-height: 1.3;
+  }
+
+  body.admin-panel .user-actions-compact {
+    gap: 6px;
+  }
+
+  body.admin-panel .user-actions-compact button,
+  body.admin-panel .action-btn,
+  body.admin-panel .questionnaire-container .action-btn {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    padding: 0;
+    border-radius: 10px;
+    margin-right: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+  }
+
+  body.admin-panel .user-actions-compact .status-btn {
+    width: auto;
+    min-width: 68px;
+    padding: 0 8px;
+  }
+
+  body.admin-panel .professor-toolbar {
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  body.admin-panel .professor-filter-controls,
+  body.admin-panel .professor-toolbar-actions {
+    gap: 8px;
+  }
+
+  body.admin-panel .professor-toolbar .professor-search,
+  body.admin-panel .professor-campus-filter,
+  body.admin-panel .btn-professor-search,
+  body.admin-panel .btn-professor-clear,
+  body.admin-panel .btn-add-professor,
+  body.admin-panel .btn-overall-sasr {
+    width: 100%;
+  }
+
+  body.admin-panel .professors-list-container,
+  body.admin-panel .professor-table-wrap {
+    max-height: min(52vh, 420px);
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  body.admin-panel .professor-table {
+    min-width: 900px;
+  }
+
+  body.admin-panel .professor-table th,
+  body.admin-panel .professor-table td {
+    padding: 10px 9px;
+    font-size: 11px;
+  }
+
+  body.admin-panel .user-results-table-wrapper,
+  body.admin-panel .users-table-container,
+  body.admin-panel .table-container,
+  body.admin-panel .subject-catalog-table-wrap,
+  body.admin-panel .offering-table-wrap,
+  body.admin-panel .program-list-wrapper,
+  body.admin-panel .offering-students-list {
+    max-height: min(46vh, 360px);
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  body.admin-panel .subject-offering-section {
+    max-height: none;
+  }
+
+  body.admin-panel .activity-log-controls {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  body.admin-panel #activity-log-view .admin-activity-log-table,
+  body.admin-panel .activity-log-table {
+    max-height: min(46vh, 360px);
+    min-height: 220px;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  body.admin-panel #activity-log-view .admin-activity-log-table table,
+  body.admin-panel .activity-log-table table {
+    min-width: 820px;
+  }
+
+  body.admin-panel .activity-log-table th,
+  body.admin-panel .activity-log-table td {
+    padding: 10px 9px;
+    font-size: 11px;
+  }
+
+  body.admin-panel .questionnaire-header {
+    margin-bottom: 10px;
+  }
+
+  body.admin-panel .questionnaire-actions {
+    gap: 8px;
+  }
+
+  body.admin-panel .questionnaire-semester-selector,
+  body.admin-panel .questionnaire-type-selector {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  body.admin-panel .questionnaire-form-preview {
+    padding: 14px 10px;
+  }
+
+  body.admin-panel .form-header-preview {
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+  }
+
+  body.admin-panel .form-description-preview {
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  body.admin-panel .questionnaire-privacy-settings {
+    margin: 10px 0;
+  }
+
+  body.admin-panel .questionnaire-privacy-settings__header {
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  body.admin-panel .questionnaire-privacy-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  body.admin-panel .questions-list {
+    max-height: min(56vh, 520px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    gap: 10px;
+    padding: 2px 2px 10px;
+  }
+
+  body.admin-panel #hr-questionnaire-view .question-section {
+    padding: 12px;
+    margin-bottom: 0;
+    border-radius: 12px;
+  }
+
+  body.admin-panel #hr-questionnaire-view .section-header {
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom-width: 1px;
+  }
+
+  body.admin-panel #hr-questionnaire-view .section-title-group {
+    min-width: 0;
+    gap: 8px;
+  }
+
+  body.admin-panel #hr-questionnaire-view .section-title {
+    font-size: 18px;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+  }
+
+  body.admin-panel #hr-questionnaire-view .section-letter-inline {
+    margin-right: 6px;
+    font-size: 18px;
+  }
+
+  body.admin-panel #hr-questionnaire-view .section-description {
+    font-size: 12px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+
+  body.admin-panel #hr-questionnaire-view .section-questions {
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  body.admin-panel .question-item {
+    gap: 8px;
+    padding: 10px;
+    border-radius: 12px;
+  }
+
+  body.admin-panel .question-number {
+    width: 28px;
+    height: 28px;
+    font-size: 12px;
+  }
+
+  body.admin-panel .question-content {
+    min-width: 0;
+  }
+
+  body.admin-panel .question-header {
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  body.admin-panel .question-text {
+    font-size: 13px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  body.admin-panel .question-preview {
+    margin-bottom: 10px;
+  }
+
+  body.admin-panel .rating-preview {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+    overflow-x: auto;
+  }
+
+  body.admin-panel .number-rating-preview {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(34px, 1fr));
+    gap: 6px;
+  }
+
+  body.admin-panel .rating-num-box {
+    width: auto;
+    min-width: 34px;
+    height: 30px;
+    font-size: 12px;
+  }
+
+  body.admin-panel .rating-label {
+    font-size: 11px;
+    line-height: 1.35;
+    white-space: normal;
+  }
+
+  body.admin-panel .question-actions {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  body.admin-panel .form-actions-preview {
+    margin-top: 10px;
+  }
+
+  body.admin-panel .btn-save-questionnaire {
+    width: 100%;
+    justify-content: center;
+  }
+
+  body.admin-panel .settings-group,
+  body.admin-panel .credential-test-mail-box,
+  body.admin-panel .openai-panel-access {
+    padding: 12px 10px;
+    border-radius: 14px;
+  }
+
+  body.admin-panel .settings-actions,
+  body.admin-panel .form-actions,
+  body.admin-panel .eval-period-range,
+  body.admin-panel .eval-term-fields {
+    display: grid !important;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  body.admin-panel .setting-item,
+  body.admin-panel .openai-panel-access-item {
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  body.admin-panel .eval-period-card {
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  body.admin-panel .eval-period-icon,
+  body.admin-panel .setting-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    font-size: 14px;
+  }
+
+  body.admin-panel .eval-period-fields {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  body.admin-panel .profile-photo-block {
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  body.admin-panel .profile-photo {
+    width: 76px;
+    height: 76px;
+  }
+
+  body.admin-panel .profile-photo-placeholder {
+    font-size: 20px;
+  }
+
+  body.admin-panel .modal {
+    padding: 8px;
+    overflow-y: auto;
+  }
+
+  body.admin-panel .modal-content,
+  body.admin-panel .announcement-compose-modal-content,
+  body.admin-panel #section-modal .modal-content,
+  body.admin-panel #question-modal .modal-content,
+  body.admin-panel #professor-modal .modal-content,
+  body.admin-panel #professor-details-modal .modal-content,
+  body.admin-panel #professor-analytics-modal .modal-content,
+  body.admin-panel #manage-campuses-modal .modal-content,
+  body.admin-panel #manage-programs-modal .modal-content,
+  body.admin-panel .overall-sasr-content {
+    width: min(100%, calc(100vw - 16px));
+    max-height: calc(100dvh - 16px);
+    margin: 0;
+    border-radius: 14px;
+    overflow-y: auto;
+  }
+
+  body.admin-panel .modal-header,
+  body.admin-panel #professor-modal .modal-header,
+  body.admin-panel #professor-details-modal .modal-header,
+  body.admin-panel #professor-analytics-modal .modal-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    gap: 8px;
+    padding: 12px 10px;
+    border-bottom: 1px solid var(--border-color);
+    border-radius: 14px 14px 0 0;
+  }
+
+  body.admin-panel .modal-header h2,
+  body.admin-panel #professor-modal .modal-header h2,
+  body.admin-panel #professor-details-modal .modal-header h2,
+  body.admin-panel #professor-analytics-modal .modal-header h2 {
+    font-size: 16px;
+    line-height: 1.2;
+  }
+
+  body.admin-panel .modal-close,
+  body.admin-panel .toggle-password,
+  body.admin-panel #professor-modal .modal-close,
+  body.admin-panel #professor-details-modal .modal-close,
+  body.admin-panel #professor-analytics-modal .modal-close {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    padding: 0;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  body.admin-panel .modal form,
+  body.admin-panel #announcement-compose-form,
+  body.admin-panel #professor-modal #professor-form,
+  body.admin-panel #professor-details-modal .professor-details-view,
+  body.admin-panel #professor-analytics-modal .analytics-view,
+  body.admin-panel .hr-report-modal-body {
+    padding: 12px 10px;
+  }
+
+  body.admin-panel .modal-actions,
+  body.admin-panel #professor-modal .modal-actions,
+  body.admin-panel .hr-report-modal-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin: 0;
+    padding: 10px;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    border-radius: 0 0 14px 14px;
+  }
+
+  body.admin-panel #professor-analytics-modal .analytics-header {
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+  }
+
+  body.admin-panel #professor-analytics-modal .analytics-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+  }
+
+  body.admin-panel #professor-analytics-modal .analytics-name h2 {
+    font-size: 18px;
+    line-height: 1.2;
+  }
+
+  body.admin-panel #professor-analytics-modal .analytics-filters,
+  body.admin-panel #professor-analytics-modal .analytics-stats-grid,
+  body.admin-panel #professor-analytics-modal .analytics-summary {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  body.admin-panel #professor-analytics-modal .stat-card,
+  body.admin-panel #professor-analytics-modal .evaluation-item,
+  body.admin-panel #professor-analytics-modal .historical-trend-banner,
+  body.admin-panel #professor-analytics-modal .response-card {
+    padding: 10px;
+    border-radius: 12px;
+  }
+
+  body.admin-panel #professor-analytics-modal .stat-icon,
+  body.admin-panel #professor-analytics-modal .evaluation-icon,
+  body.admin-panel #professor-analytics-modal .response-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    font-size: 14px;
+  }
+
+  body.admin-panel #professor-analytics-modal .historical-trend-table-wrap,
+  body.admin-panel #professor-analytics-modal .qualitative-responses-list,
+  body.admin-panel #professor-analytics-modal .admin-ai-insights.visible {
+    max-height: min(38vh, 300px);
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+@media (max-width: 1000px) and (orientation: landscape) {
+  body.admin-panel .main-content {
+    margin-left: 0;
+    width: 100%;
+    max-width: 100vw;
+    padding: 10px 14px 18px;
+    overflow-x: hidden;
+  }
+
+  body.admin-panel .content-view {
+    gap: 12px;
+  }
+
+  body.admin-panel .top-header {
+    gap: 8px;
+    margin-bottom: 0;
+    padding: 10px 14px;
+    border-radius: 14px;
+  }
+
+  body.admin-panel .page-title {
+    font-size: 18px;
+    line-height: 1.15;
+    letter-spacing: 0;
+  }
+
+  body.admin-panel .page-context,
+  body.admin-panel .section-title p,
+  body.admin-panel .view-header p,
+  body.admin-panel .reports-title p {
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  body.admin-panel .admin-hero-card,
+  body.admin-panel .overview-card,
+  body.admin-panel .admin-section,
+  body.admin-panel .view-header,
+  body.admin-panel .form-card,
+  body.admin-panel .settings-group,
+  body.admin-panel .questionnaire-header,
+  body.admin-panel .questionnaire-form-preview,
+  body.admin-panel .activity-log-controls,
+  body.admin-panel .activity-log-table,
+  body.admin-panel .user-management-content,
+  body.admin-panel .user-management-container,
+  body.admin-panel .subject-management-layout > section,
+  body.admin-panel .reports-header,
+  body.admin-panel .section-card,
+  body.admin-panel .campus-tabs-bar {
+    padding: 14px;
+    border-radius: 14px;
+    margin-bottom: 12px;
+  }
+
+  body.admin-panel .settings-container {
+    padding: 0 !important;
+  }
+
+  body.admin-panel .admin-hero-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+  }
+
+  body.admin-panel .admin-hero-copy h2 {
+    font-size: 20px;
+    line-height: 1.12;
+    letter-spacing: 0;
+  }
+
+  body.admin-panel .admin-hero-copy p {
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  body.admin-panel .hero-action-btn,
+  body.admin-panel .quick-action-btn,
+  body.admin-panel .btn-add-user-floating,
+  body.admin-panel .btn-add-user,
+  body.admin-panel .btn-add-professor,
+  body.admin-panel .btn-overall-sasr,
+  body.admin-panel .btn-professor-search,
+  body.admin-panel .btn-professor-clear,
+  body.admin-panel .btn-user-search,
+  body.admin-panel .btn-secondary,
+  body.admin-panel .btn-bulk-register,
+  body.admin-panel .btn-submit,
+  body.admin-panel .btn-cancel,
+  body.admin-panel .btn-save,
+  body.admin-panel .btn-reset,
+  body.admin-panel .btn-setting,
+  body.admin-panel .btn-add-term,
+  body.admin-panel .btn-add-section,
+  body.admin-panel .btn-add-question,
+  body.admin-panel .btn-save-questionnaire,
+  body.admin-panel .form-input,
+  body.admin-panel .subject-select,
+  body.admin-panel .subject-input,
+  body.admin-panel .questionnaire-type-dropdown,
+  body.admin-panel .campus-filter-select,
+  body.admin-panel .professor-campus-filter,
+  body.admin-panel .log-control input,
+  body.admin-panel .log-control select,
+  body.admin-panel .setting-item input[type="text"],
+  body.admin-panel .setting-item input[type="email"],
+  body.admin-panel .setting-item select,
+  body.admin-panel .credential-distributor-field input,
+  body.admin-panel .credential-distributor-field select,
+  body.admin-panel .credential-distributor-field textarea {
+    min-height: 38px;
+    padding: 9px 12px;
+    border-radius: 10px;
+    font-size: 12px;
+  }
+
+  body.admin-panel .admin-hero-actions,
+  body.admin-panel .overview-cards,
+  body.admin-panel .dashboard-grid,
+  body.admin-panel .charts-section,
+  body.admin-panel .charts-grid,
+  body.admin-panel .stats-summary,
+  body.admin-panel .quick-actions-grid,
+  body.admin-panel .profile-grid,
+  body.admin-panel .settings-list,
+  body.admin-panel .questionnaire-actions,
+  body.admin-panel .subject-toolbar,
+  body.admin-panel .offering-toolbar,
+  body.admin-panel .subject-form-grid,
+  body.admin-panel .offering-form-grid,
+  body.admin-panel .credential-distributor-grid,
+  body.admin-panel .credential-distributor-actions,
+  body.admin-panel .credential-distributor-upload,
+  body.admin-panel .openai-panel-access-grid,
+  body.admin-panel .professor-filter-controls,
+  body.admin-panel .professor-toolbar-actions {
+    gap: 8px;
+  }
+
+  body.admin-panel .dashboard-activity-section .activity-list,
+  body.admin-panel .user-results-table-wrapper,
+  body.admin-panel .users-table-container,
+  body.admin-panel .table-container,
+  body.admin-panel .subject-catalog-table-wrap,
+  body.admin-panel .offering-table-wrap,
+  body.admin-panel .program-list-wrapper,
+  body.admin-panel .offering-students-list {
+    max-height: min(50vh, 380px);
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  body.admin-panel .organization-structure,
+  body.admin-panel .professors-list-container,
+  body.admin-panel .professor-table-wrap {
+    max-height: min(56vh, 460px);
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  body.admin-panel #activity-log-view .admin-activity-log-table,
+  body.admin-panel .activity-log-table {
+    max-height: min(50vh, 380px);
+    min-height: 220px;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  body.admin-panel .questions-list {
+    max-height: min(60vh, 520px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    gap: 10px;
+  }
+
+  body.admin-panel .professor-search,
+  body.admin-panel .user-search,
+  body.admin-panel .offering-search-box {
+    min-height: 38px;
+    margin: 0;
+    padding: 0 10px;
+    border-radius: 10px;
+  }
+
+  body.admin-panel .activity-log-controls,
+  body.admin-panel .user-filters,
+  body.admin-panel .professor-toolbar {
+    gap: 8px;
+  }
+
+  body.admin-panel .modal-content,
+  body.admin-panel .announcement-compose-modal-content,
+  body.admin-panel #section-modal .modal-content,
+  body.admin-panel #question-modal .modal-content,
+  body.admin-panel #professor-modal .modal-content,
+  body.admin-panel #professor-details-modal .modal-content,
+  body.admin-panel #professor-analytics-modal .modal-content,
+  body.admin-panel #manage-campuses-modal .modal-content,
+  body.admin-panel #manage-programs-modal .modal-content,
+  body.admin-panel .overall-sasr-content {
+    width: min(96vw, 920px);
+    max-height: calc(100dvh - 16px);
+    border-radius: 14px;
+    overflow-y: auto;
+  }
+
+  body.admin-panel .modal-header,
+  body.admin-panel #professor-modal .modal-header,
+  body.admin-panel #professor-details-modal .modal-header,
+  body.admin-panel #professor-analytics-modal .modal-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  body.admin-panel .modal form,
+  body.admin-panel #announcement-compose-form,
+  body.admin-panel #professor-modal #professor-form,
+  body.admin-panel #professor-details-modal .professor-details-view,
+  body.admin-panel #professor-analytics-modal .analytics-view,
+  body.admin-panel .hr-report-modal-body {
+    padding: 12px 14px;
+  }
+
+  body.admin-panel .modal-actions,
+  body.admin-panel #professor-modal .modal-actions,
+  body.admin-panel .hr-report-modal-actions {
+    position: sticky;
+    bottom: 0;
+    gap: 8px;
+    margin: 0;
+    padding: 10px 14px;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+  }
+}
+
+/* Final admin mobile drawer fix: reset older collapsed/bottom sidebar rules. */
+@media (max-width: 1000px) {
+  body.admin-panel {
+    --sidebar-width: 0px;
+  }
+
+  body.admin-panel .dashboard-container,
+  body.admin-panel .main-wrapper {
+    width: 100% !important;
+    min-width: 0;
+    margin-top: 0 !important;
+  }
+
+  body.admin-panel .main-content {
+    margin-left: 0 !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    padding: 10px 14px 18px;
+  }
+
+  body.admin-panel .sidebar {
+    position: fixed !important;
+    top: 0 !important;
+    right: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    z-index: 1200 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    width: min(300px, calc(100vw - 48px)) !important;
+    min-width: 0;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    padding: 14px 12px 18px;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    border-top: 0 !important;
+    border-right: 1px solid rgba(203, 213, 225, 0.9) !important;
+    background: rgba(255, 255, 255, 0.98);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(calc(-100% - 8px)) !important;
+    transition: transform 0.22s ease;
+    box-shadow: 20px 0 40px rgba(15, 23, 42, 0.18);
+  }
+
+  body.admin-panel.admin-sidebar-open .sidebar {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(0) !important;
+  }
+
+  body.admin-panel:not(.admin-sidebar-open) .sidebar {
+    pointer-events: none;
+  }
+
+  body.admin-panel.admin-sidebar-open .sidebar {
+    pointer-events: auto;
+  }
+
+  body.admin-panel .sidebar-header {
+    display: block !important;
+    flex: 0 0 auto;
+    padding: 8px 4px 12px;
+  }
+
+  body.admin-panel .sidebar-header .logo-container {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-start;
+    gap: 10px !important;
+    text-align: left !important;
+  }
+
+  body.admin-panel .sidebar .logo-shield {
+    width: 42px !important;
+    height: 42px !important;
+    border-radius: 12px !important;
+    flex: 0 0 auto;
+    margin-inline: 0 !important;
+  }
+
+  body.admin-panel .sidebar .logo-shield.has-custom-logo,
+  body.admin-panel .sidebar-header .logo-shield.has-custom-logo {
+    width: 42px !important;
+    height: 42px !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
+  body.admin-panel .sidebar .logo-shield.has-custom-logo .brand-logo-image,
+  body.admin-panel .sidebar-header .logo-shield.has-custom-logo .brand-logo-image {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    object-fit: contain !important;
+  }
+
+  body.admin-panel .sidebar .logo-text,
+  body.admin-panel .sidebar .nav-link span,
+  body.admin-panel .sidebar-footer .nav-link span {
+    display: inline-flex !important;
+    position: static !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+    margin: 0 !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    overflow: visible !important;
+    clip: auto !important;
+    white-space: normal !important;
+  }
+
+  body.admin-panel .sidebar .logo-text {
+    max-width: 190px;
+    font-size: 13px;
+    line-height: 1.25;
+    text-align: left !important;
+  }
+
+  body.admin-panel .sidebar-nav {
+    flex: 1 1 auto;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 6px;
+    padding: 8px 0;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
+
+  body.admin-panel .sidebar-footer {
+    flex: 0 0 auto;
+    padding: 10px 0 0;
+    border-top: 1px solid rgba(203, 213, 225, 0.75);
+  }
+
+  body.admin-panel .sidebar .nav-link,
+  body.admin-panel .sidebar-footer .nav-link {
+    width: 100%;
+    min-height: 42px;
+    justify-content: flex-start !important;
+    margin: 0;
+    padding: 10px 12px !important;
+    border-radius: 12px;
+    gap: 10px;
+    color: #475569;
+  }
+
+  body.admin-panel .sidebar .nav-link.active {
+    color: #ffffff;
+  }
+
+  body.admin-panel .sidebar-footer .nav-link.logout {
+    color: #dc2626;
+  }
+
+  body.admin-panel .sidebar .nav-link i,
+  body.admin-panel .sidebar-footer .nav-link i {
+    width: 18px;
+    min-width: 18px;
+    margin: 0 !important;
+    text-align: center;
+    font-size: 14px;
+  }
+
+  body.admin-panel .sidebar-backdrop {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 1190 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    background: rgba(15, 23, 42, 0.48);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  body.admin-panel.admin-sidebar-open .sidebar-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  body.admin-panel .main-content {
+    padding: 10px 10px 18px !important;
+  }
+
+  body.admin-panel .sidebar {
+    width: min(284px, calc(100vw - 48px)) !important;
+    padding: 12px 10px 16px;
+  }
+}
+
+/* Final admin mobile polish: readable cards, stable logo, and persistent menu access. */
+@media (max-width: 1000px) {
+  body.admin-panel .top-header {
+    position: sticky !important;
+    top: 8px;
+    z-index: 980;
+    margin-bottom: 12px !important;
+    background: rgba(255, 255, 255, 0.96) !important;
+    backdrop-filter: blur(14px);
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  }
+
+  body.admin-panel .mobile-nav-toggle {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    z-index: 990;
+    flex: 0 0 36px;
+  }
+
+  body.admin-panel .sidebar-header {
+    padding: 10px 6px 14px !important;
+  }
+
+  body.admin-panel .sidebar-header .logo-container {
+    display: grid !important;
+    grid-template-columns: 44px minmax(0, 1fr);
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 10px !important;
+    width: 100%;
+    text-align: left !important;
+  }
+
+  body.admin-panel .sidebar .logo-shield,
+  body.admin-panel .sidebar-header .logo-shield,
+  body.admin-panel .sidebar .logo-shield.has-custom-logo,
+  body.admin-panel .sidebar-header .logo-shield.has-custom-logo {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
+    margin: 0 !important;
+    padding: 3px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border: 1px solid rgba(203, 213, 225, 0.9) !important;
+    border-radius: 12px !important;
+    background: #ffffff !important;
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08) !important;
+    overflow: hidden !important;
+  }
+
+  body.admin-panel .sidebar .logo-shield i,
+  body.admin-panel .sidebar-header .logo-shield i {
+    font-size: 18px !important;
+    color: #4f46e5 !important;
+  }
+
+  body.admin-panel .sidebar .logo-shield.has-custom-logo .brand-logo-image,
+  body.admin-panel .sidebar-header .logo-shield.has-custom-logo .brand-logo-image {
+    display: block !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    border-radius: 8px !important;
+    object-fit: contain !important;
+  }
+
+  body.admin-panel .sidebar .logo-text,
+  body.admin-panel .sidebar-header .logo-text {
+    width: auto !important;
+    max-width: 198px !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    color: #0f172a !important;
+    font-size: 12px !important;
+    font-weight: 800 !important;
+    line-height: 1.25 !important;
+    text-align: left !important;
+    white-space: normal !important;
+  }
+}
+
+@media (max-width: 640px) {
+  body.admin-panel .top-header {
+    top: 6px;
+    padding: 10px !important;
+  }
+
+  body.admin-panel #hr-professors-view .professors-list-container {
+    max-height: min(58vh, 440px) !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    overscroll-behavior: contain;
+    padding: 2px 2px 4px;
+  }
+
+  body.admin-panel #hr-professors-view .professor-table-wrap,
+  body.admin-panel #subject-management-view .subject-table-wrap {
+    max-height: none !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  body.admin-panel #hr-professors-view .professor-table,
+  body.admin-panel #subject-management-view .professor-table {
+    display: block;
+    width: 100%;
+    min-width: 0 !important;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  body.admin-panel #hr-professors-view .professor-table thead,
+  body.admin-panel #subject-management-view .professor-table thead {
+    display: none !important;
+  }
+
+  body.admin-panel #hr-professors-view .professor-table tbody,
+  body.admin-panel #subject-management-view .professor-table tbody {
+    display: grid;
+    gap: 10px;
+    width: 100%;
+  }
+
+  body.admin-panel #hr-professors-view .professor-table tr,
+  body.admin-panel #subject-management-view .professor-table tr {
+    display: block;
+    width: 100%;
+    padding: 12px;
+    border: 1px solid rgba(203, 213, 225, 0.9);
+    border-left: 4px solid #6366f1;
+    border-radius: 14px;
+    background: #ffffff;
+    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
+  }
+
+  body.admin-panel #hr-professors-view .professor-table tr.inactive,
+  body.admin-panel #subject-management-view .professor-table tr.inactive {
+    border-left-color: #94a3b8;
+    background: #f8fafc;
+    opacity: 1;
+  }
+
+  body.admin-panel #hr-professors-view .professor-table td,
+  body.admin-panel #subject-management-view .professor-table td {
+    display: grid !important;
+    grid-template-columns: minmax(88px, 34%) minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 6px 0 !important;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.9) !important;
+    color: #0f172a;
+    font-size: 12px !important;
+    line-height: 1.35;
+    text-align: left !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  body.admin-panel #hr-professors-view .professor-table td[data-label]::before,
+  body.admin-panel #subject-management-view .professor-table td[data-label]::before {
+    content: attr(data-label);
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+    text-transform: uppercase;
+  }
+
+  body.admin-panel #hr-professors-view .professor-table td:first-child,
+  body.admin-panel #subject-management-view .professor-table td:first-child {
+    display: block !important;
+    padding: 0 0 8px !important;
+  }
+
+  body.admin-panel #hr-professors-view .professor-table td:first-child::before,
+  body.admin-panel #subject-management-view .professor-table td:first-child::before {
+    display: none;
+  }
+
+  body.admin-panel #hr-professors-view .professor-table td:last-child,
+  body.admin-panel #subject-management-view .professor-table td:last-child {
+    display: block !important;
+    padding: 10px 0 0 !important;
+    border-bottom: 0 !important;
+  }
+
+  body.admin-panel #hr-professors-view .professor-table td:last-child::before,
+  body.admin-panel #subject-management-view .professor-table td:last-child::before {
+    display: block;
+    margin-bottom: 6px;
+  }
+
+  body.admin-panel #hr-professors-view .professor-table-name,
+  body.admin-panel #subject-management-view .professor-table td:first-child {
+    font-size: 14px !important;
+    font-weight: 800;
+    line-height: 1.25;
+  }
+
+  body.admin-panel #hr-professors-view .professor-actions,
+  body.admin-panel #subject-management-view .professor-actions {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: stretch !important;
+    justify-content: stretch !important;
+    gap: 8px;
+    width: 100%;
+    padding: 8px;
+    border: 1px solid rgba(226, 232, 240, 0.95);
+    border-radius: 12px;
+    background: #f8fafc;
+  }
+
+  body.admin-panel #subject-management-view .subject-catalog-table-wrap .professor-actions {
+    grid-template-columns: 1fr;
+  }
+
+  body.admin-panel #subject-management-view .offering-table-wrap .professor-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  body.admin-panel #hr-professors-view .professor-actions .action-btn,
+  body.admin-panel #subject-management-view .professor-actions .action-btn {
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    gap: 6px;
+    padding: 0 8px !important;
+    border-radius: 10px !important;
+    font-size: 12px !important;
+  }
+
+  body.admin-panel #hr-professors-view .professor-actions .action-btn[title]::after,
+  body.admin-panel #subject-management-view .professor-actions .action-btn[title]::after {
+    content: attr(title);
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1.1;
+    white-space: normal;
+  }
+
+  body.admin-panel #subject-management-view .subject-management-layout {
+    gap: 10px !important;
+  }
+
+  body.admin-panel #subject-management-view .subject-management-layout > section {
+    overflow: hidden;
+  }
+
+  body.admin-panel #subject-management-view .section-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 6px !important;
+    margin-bottom: 10px !important;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+  }
+
+  body.admin-panel #subject-management-view .section-title {
+    width: 100%;
+    min-width: 0;
+  }
+
+  body.admin-panel #subject-management-view .section-title h2 {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0;
+    font-size: 18px !important;
+    line-height: 1.2 !important;
+    overflow-wrap: anywhere;
+  }
+
+  body.admin-panel #subject-management-view .section-title p {
+    width: 100%;
+    max-width: 100%;
+    margin-top: 4px;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    overflow-wrap: anywhere;
+  }
+
+  body.admin-panel #subject-management-view .subject-toolbar {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch !important;
+    gap: 8px !important;
+    margin-bottom: 10px !important;
+  }
+
+  body.admin-panel #subject-management-view .offering-toolbar,
+  body.admin-panel #subject-management-view .subject-form-grid,
+  body.admin-panel #subject-management-view .offering-form-grid {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+    margin-bottom: 10px !important;
+  }
+
+  body.admin-panel #subject-management-view .subject-select,
+  body.admin-panel #subject-management-view .subject-input,
+  body.admin-panel #subject-management-view .offering-search-box {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  body.admin-panel #subject-management-view .subject-toolbar .btn-add-professor,
+  body.admin-panel #subject-management-view .subject-toolbar .btn-bulk-register {
+    grid-column: 1 / -1;
+    width: 100% !important;
+    min-width: 0 !important;
+    justify-content: center !important;
+    color: #ffffff !important;
+    line-height: 1.2;
+    white-space: normal !important;
+    overflow: visible !important;
+  }
+
+  body.admin-panel #subject-management-view .subject-toolbar .btn-add-professor i,
+  body.admin-panel #subject-management-view .subject-toolbar .btn-bulk-register i,
+  body.admin-panel #subject-management-view .offering-toolbar .btn-bulk-register i {
+    display: inline-flex !important;
+    color: inherit !important;
+  }
+
+  body.admin-panel #subject-management-view .subject-catalog-table-wrap,
+  body.admin-panel #subject-management-view .offering-table-wrap {
+    max-height: min(50vh, 380px) !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    overscroll-behavior: contain;
+    padding: 2px 2px 4px;
+  }
+
+  body.admin-panel #dashboard-view .reports-container {
+    gap: 10px !important;
+  }
+
+  body.admin-panel #dashboard-view .reports-header,
+  body.admin-panel #dashboard-view .evaluation-type-section,
+  body.admin-panel #dashboard-view .reports-container .section-card {
+    padding: 12px 10px !important;
+    border-radius: 14px !important;
+    margin-bottom: 10px !important;
+  }
+
+  body.admin-panel #dashboard-view .evaluation-type-section {
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+
+  body.admin-panel #dashboard-view .reports-container .section-card-title {
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 17px !important;
+    line-height: 1.2 !important;
+  }
+
+  body.admin-panel #dashboard-view .reports-container .charts-grid {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+
+  body.admin-panel #dashboard-view .reports-container .chart-container {
+    min-height: 158px !important;
+    height: 168px !important;
+    max-height: 176px !important;
+    padding: 8px !important;
+    border-radius: 12px !important;
+  }
+
+  body.admin-panel #dashboard-view .reports-container .rating-chart-container {
+    min-height: 170px !important;
+    height: 178px !important;
+    max-height: 188px !important;
+  }
+
+  body.admin-panel #dashboard-view .reports-container .chart-title {
+    margin: 0;
+    font-size: 13px !important;
+    line-height: 1.2 !important;
+  }
+
+  body.admin-panel #dashboard-view .reports-container .chart-subtitle {
+    margin: 3px 0 6px;
+    font-size: 10.5px !important;
+    line-height: 1.25 !important;
+  }
+
+  body.admin-panel #dashboard-view .reports-container .chart-container canvas,
+  body.admin-panel #dashboard-view .reports-container .graph-chart-container canvas {
+    height: 108px !important;
+    max-height: 108px !important;
+  }
+
+  body.admin-panel #dashboard-view .reports-container .rating-chart-container canvas {
+    height: 124px !important;
+    max-height: 124px !important;
+  }
+
+  body.admin-panel #dashboard-view .reports-container .stats-summary {
+    gap: 8px !important;
+  }
+
+  body.admin-panel #dashboard-view .reports-container .stat-item {
+    min-height: 38px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    font-size: 12px;
+  }
 }

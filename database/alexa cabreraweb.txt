@@ -1,0 +1,445 @@
+-- =============================================================
+-- NAAP Evaluation System
+-- Direct inserts for Alexa I Cabrera student evaluations
+-- Paste this in phpMyAdmin's SQL tab for `izgrqywp_naap`
+-- =============================================================
+
+USE `izgrqywp_naap`;
+
+START TRANSACTION;
+
+SET @semester_id := COALESCE(
+    (SELECT `id`
+     FROM `semesters`
+     WHERE `slug` = '1st-semester-2026-2027'
+     LIMIT 1),
+    2
+);
+
+SET @questionnaire_id := COALESCE(
+    (SELECT `id`
+     FROM `questionnaires`
+     WHERE `semester_id` = @semester_id
+       AND `evaluation_type_id` = 1
+     ORDER BY `id` DESC
+     LIMIT 1),
+    2
+);
+
+SET @professor_id := (
+    SELECT `id`
+    FROM `users`
+    WHERE `email` = 'professor.003@naap.edu.ph'
+       OR `name` = 'Alexa I Cabrera'
+    ORDER BY CASE WHEN `email` = 'professor.003@naap.edu.ph' THEN 0 ELSE 1 END, `id`
+    LIMIT 1
+);
+
+SET @course_offering_id := (
+    SELECT MIN(co.`id`)
+    FROM `course_offerings` co
+    JOIN `subjects` s
+      ON s.`id` = co.`subject_id`
+    WHERE co.`professor_id` = @professor_id
+      AND co.`semester_id` = @semester_id
+      AND s.`subject_code` = 'AVT101'
+);
+
+SET @q13_id := (SELECT `id` FROM `questions` WHERE `questionnaire_id` = @questionnaire_id AND `sort_order` = 1 LIMIT 1);
+SET @q14_id := (SELECT `id` FROM `questions` WHERE `questionnaire_id` = @questionnaire_id AND `sort_order` = 2 LIMIT 1);
+SET @q15_id := (SELECT `id` FROM `questions` WHERE `questionnaire_id` = @questionnaire_id AND `sort_order` = 3 LIMIT 1);
+SET @q16_id := (SELECT `id` FROM `questions` WHERE `questionnaire_id` = @questionnaire_id AND `sort_order` = 4 LIMIT 1);
+SET @q17_id := (SELECT `id` FROM `questions` WHERE `questionnaire_id` = @questionnaire_id AND `sort_order` = 5 LIMIT 1);
+SET @q18_id := (SELECT `id` FROM `questions` WHERE `questionnaire_id` = @questionnaire_id AND `sort_order` = 6 LIMIT 1);
+SET @q19_id := (SELECT `id` FROM `questions` WHERE `questionnaire_id` = @questionnaire_id AND `sort_order` = 7 LIMIT 1);
+SET @q20_id := (SELECT `id` FROM `questions` WHERE `questionnaire_id` = @questionnaire_id AND `sort_order` = 8 LIMIT 1);
+SET @q21_id := (SELECT `id` FROM `questions` WHERE `questionnaire_id` = @questionnaire_id AND `sort_order` = 9 LIMIT 1);
+SET @q22_id := (SELECT `id` FROM `questions` WHERE `questionnaire_id` = @questionnaire_id AND `sort_order` = 10 LIMIT 1);
+SET @q23_id := (SELECT `id` FROM `questions` WHERE `questionnaire_id` = @questionnaire_id AND `sort_order` = 11 LIMIT 1);
+SET @q24_id := (SELECT `id` FROM `questions` WHERE `questionnaire_id` = @questionnaire_id AND `sort_order` = 12 LIMIT 1);
+SET @q25_id := (SELECT `id` FROM `questions` WHERE `questionnaire_id` = @questionnaire_id AND `sort_order` = 13 LIMIT 1);
+SET @q26_id := (SELECT `id` FROM `questions` WHERE `questionnaire_id` = @questionnaire_id AND `sort_order` = 14 LIMIT 1);
+SET @q27_id := (SELECT `id` FROM `questions` WHERE `questionnaire_id` = @questionnaire_id AND `sort_order` = 15 LIMIT 1);
+SET @q28_id := (SELECT `id` FROM `questions` WHERE `questionnaire_id` = @questionnaire_id AND `sort_order` = 16 LIMIT 1);
+
+-- Insert one evaluation header row per student.
+-- Existing matches are skipped so rerunning the script stays safe.
+INSERT INTO `evaluations` (
+    `semester_id`,
+    `questionnaire_id`,
+    `evaluation_type_id`,
+    `evaluator_user_id`,
+    `evaluatee_user_id`,
+    `course_offering_id`,
+    `general_comments`,
+    `submitted_at`,
+    `status`
+)
+SELECT
+    @semester_id AS `semester_id`,
+    @questionnaire_id AS `questionnaire_id`,
+    1 AS `evaluation_type_id`,
+    src.`evaluator_user_id`,
+    @professor_id AS `evaluatee_user_id`,
+    @course_offering_id AS `course_offering_id`,
+    NULL AS `general_comments`,
+    src.`submitted_at`,
+    'submitted' AS `status`
+FROM (
+    SELECT 1 AS `seed_order`, 39 AS `evaluator_user_id`, '2026-07-08 22:37:01' AS `submitted_at`
+    UNION ALL SELECT 2, 71, '2026-07-08 22:40:22'
+    UNION ALL SELECT 3, 102, '2026-07-08 22:43:10'
+    UNION ALL SELECT 4, 106, '2026-07-08 22:46:44'
+    UNION ALL SELECT 5, 110, '2026-07-08 22:49:09'
+    UNION ALL SELECT 6, 114, '2026-07-08 22:52:16'
+    UNION ALL SELECT 7, 118, '2026-07-08 22:55:08'
+    UNION ALL SELECT 8, 122, '2026-07-08 22:58:41'
+    UNION ALL SELECT 9, 126, '2026-07-08 23:01:28'
+    UNION ALL SELECT 10, 130, '2026-07-08 23:04:57'
+    UNION ALL SELECT 11, 134, '2026-07-08 23:08:13'
+    UNION ALL SELECT 12, 138, '2026-07-08 23:11:36'
+    UNION ALL SELECT 13, 142, '2026-07-08 23:14:12'
+    UNION ALL SELECT 14, 146, '2026-07-08 23:17:45'
+    UNION ALL SELECT 15, 150, '2026-07-08 23:20:08'
+) src
+JOIN `users` evaluator
+    ON evaluator.`id` = src.`evaluator_user_id`
+JOIN `roles` evaluator_role
+    ON evaluator_role.`id` = evaluator.`role_id`
+   AND evaluator_role.`code` = 'student'
+LEFT JOIN `evaluations` e
+    ON e.`evaluation_type_id` = 1
+   AND e.`course_offering_id` <=> @course_offering_id
+   AND e.`evaluatee_user_id` = @professor_id
+   AND e.`evaluator_user_id` = src.`evaluator_user_id`
+   AND e.`submitted_at` = src.`submitted_at`
+WHERE e.`id` IS NULL
+  AND @professor_id IS NOT NULL
+  AND @course_offering_id IS NOT NULL
+ORDER BY src.`seed_order`;
+
+-- Insert the detailed answers for questions 13-28.
+-- Existing evaluation/question pairs are skipped on rerun.
+INSERT INTO `evaluation_responses` (
+    `evaluation_id`,
+    `question_id`,
+    `rating_value`,
+    `text_value`,
+    `display_order`
+)
+SELECT
+    r.`evaluation_id`,
+    r.`question_id`,
+    r.`rating_value`,
+    r.`text_value`,
+    r.`display_order`
+FROM (
+    SELECT e.`id` AS `evaluation_id`, @q13_id AS `question_id`, src.`q13` AS `rating_value`, NULL AS `text_value`, 1 AS `display_order`
+    FROM `evaluations` e
+    JOIN (
+        SELECT 39 AS `evaluator_user_id`, '2026-07-08 22:37:01' AS `submitted_at`, 5 AS `q13`, 5 AS `q14`, 4 AS `q15`, 4 AS `q16`, 4 AS `q17`, 5 AS `q18`, 5 AS `q19`, 4 AS `q20`, 4 AS `q21`, 4 AS `q22`, 4 AS `q23`, 5 AS `q24`, 5 AS `q25`, 5 AS `q26`, 5 AS `q27`, 'Prof. Alexa explains the lessons clearly and makes the topic easier to understand even when the discussion is long.' AS `q28`
+        UNION ALL SELECT 71, '2026-07-08 22:40:22', 4, 4, 4, 5, 4, 4, 5, 4, 4, 4, 4, 5, 4, 4, 5, 'I appreciate how organized the class is, but adding more real-life tourism examples would make the lessons more memorable.'
+        UNION ALL SELECT 102, '2026-07-08 22:43:10', 5, 4, 4, 4, 4, 5, 4, 4, 5, 4, 4, 4, 4, 5, 4, 'The pacing of the class is good and the professor gives feedback that helps us improve our work.'
+        UNION ALL SELECT 106, '2026-07-08 22:46:44', 4, 5, 4, 4, 4, 4, 5, 4, 4, 5, 4, 5, 4, 4, 5, 'Please continue giving clear instructions before every activity because it helps students avoid confusion.'
+        UNION ALL SELECT 110, '2026-07-08 22:49:09', 5, 4, 4, 5, 4, 4, 4, 5, 4, 4, 4, 5, 5, 4, 4, 'The class environment feels respectful and comfortable, and the expectations for requirements are explained well.'
+        UNION ALL SELECT 114, '2026-07-08 22:52:16', 4, 4, 4, 4, 5, 4, 5, 4, 4, 4, 5, 4, 4, 4, 5, 'A short review before quizzes would be very helpful so students can recall the most important lessons.'
+        UNION ALL SELECT 118, '2026-07-08 22:55:08', 5, 5, 4, 4, 4, 4, 5, 4, 4, 5, 4, 4, 5, 4, 5, 'The professor is approachable during class and answers questions patiently, which makes students more confident to participate.'
+        UNION ALL SELECT 122, '2026-07-08 22:58:41', 4, 4, 4, 5, 4, 4, 4, 4, 4, 5, 4, 5, 4, 4, 5, 'More interactive activities or short group discussions could make the subject even more engaging for the class.'
+        UNION ALL SELECT 126, '2026-07-08 23:01:28', 5, 4, 4, 4, 4, 5, 4, 5, 4, 4, 4, 5, 4, 5, 4, 'The grading criteria are explained clearly, and it is easy to understand how our outputs are being evaluated.'
+        UNION ALL SELECT 130, '2026-07-08 23:04:57', 4, 5, 4, 4, 5, 4, 5, 4, 4, 4, 5, 4, 4, 5, 5, 'The professor gives good guidance during difficult topics, and that support helps students keep up with the lessons.'
+        UNION ALL SELECT 134, '2026-07-08 23:08:13', 5, 5, 4, 4, 4, 5, 5, 4, 4, 4, 4, 5, 5, 5, 5, 'Prof. Alexa is well prepared during discussions and presents the lesson in a way that is clear and easy to follow.'
+        UNION ALL SELECT 138, '2026-07-08 23:11:36', 4, 4, 4, 5, 4, 4, 5, 5, 4, 4, 4, 5, 4, 4, 5, 'Including more concrete examples from the aviation industry would help students connect theory to actual practice.'
+        UNION ALL SELECT 142, '2026-07-08 23:14:12', 5, 4, 4, 4, 4, 5, 4, 4, 5, 4, 4, 4, 4, 5, 4, 'The class pacing is manageable, and the feedback on our activities is useful for improving our next submissions.'
+        UNION ALL SELECT 146, '2026-07-08 23:17:45', 4, 5, 4, 4, 4, 4, 5, 4, 4, 5, 4, 5, 4, 4, 5, 'Please keep giving step-by-step instructions because it helps students understand what is expected in every task.'
+        UNION ALL SELECT 150, '2026-07-08 23:20:08', 5, 4, 4, 5, 4, 4, 4, 5, 4, 4, 4, 5, 5, 4, 4, 'The professor maintains a positive classroom atmosphere and communicates the course expectations clearly from the start.'
+    ) src
+        ON e.`evaluation_type_id` = 1
+       AND e.`course_offering_id` <=> @course_offering_id
+       AND e.`evaluatee_user_id` = @professor_id
+       AND e.`evaluator_user_id` = src.`evaluator_user_id`
+       AND e.`submitted_at` = src.`submitted_at`
+    UNION ALL
+    SELECT e.`id`, @q14_id, src.`q14`, NULL, 2
+    FROM `evaluations` e
+    JOIN (
+        SELECT 39 AS `evaluator_user_id`, '2026-07-08 22:37:01' AS `submitted_at`, 5 AS `q13`, 5 AS `q14`, 4 AS `q15`, 4 AS `q16`, 4 AS `q17`, 5 AS `q18`, 5 AS `q19`, 4 AS `q20`, 4 AS `q21`, 4 AS `q22`, 4 AS `q23`, 5 AS `q24`, 5 AS `q25`, 5 AS `q26`, 5 AS `q27`, 'Prof. Alexa explains the lessons clearly and makes the topic easier to understand even when the discussion is long.' AS `q28`
+        UNION ALL SELECT 71, '2026-07-08 22:40:22', 4, 4, 4, 5, 4, 4, 5, 4, 4, 4, 4, 5, 4, 4, 5, 'I appreciate how organized the class is, but adding more real-life tourism examples would make the lessons more memorable.'
+        UNION ALL SELECT 102, '2026-07-08 22:43:10', 5, 4, 4, 4, 4, 5, 4, 4, 5, 4, 4, 4, 4, 5, 4, 'The pacing of the class is good and the professor gives feedback that helps us improve our work.'
+        UNION ALL SELECT 106, '2026-07-08 22:46:44', 4, 5, 4, 4, 4, 4, 5, 4, 4, 5, 4, 5, 4, 4, 5, 'Please continue giving clear instructions before every activity because it helps students avoid confusion.'
+        UNION ALL SELECT 110, '2026-07-08 22:49:09', 5, 4, 4, 5, 4, 4, 4, 5, 4, 4, 4, 5, 5, 4, 4, 'The class environment feels respectful and comfortable, and the expectations for requirements are explained well.'
+        UNION ALL SELECT 114, '2026-07-08 22:52:16', 4, 4, 4, 4, 5, 4, 5, 4, 4, 4, 5, 4, 4, 4, 5, 'A short review before quizzes would be very helpful so students can recall the most important lessons.'
+        UNION ALL SELECT 118, '2026-07-08 22:55:08', 5, 5, 4, 4, 4, 4, 5, 4, 4, 5, 4, 4, 5, 4, 5, 'The professor is approachable during class and answers questions patiently, which makes students more confident to participate.'
+        UNION ALL SELECT 122, '2026-07-08 22:58:41', 4, 4, 4, 5, 4, 4, 4, 4, 4, 5, 4, 5, 4, 4, 5, 'More interactive activities or short group discussions could make the subject even more engaging for the class.'
+        UNION ALL SELECT 126, '2026-07-08 23:01:28', 5, 4, 4, 4, 4, 5, 4, 5, 4, 4, 4, 5, 4, 5, 4, 'The grading criteria are explained clearly, and it is easy to understand how our outputs are being evaluated.'
+        UNION ALL SELECT 130, '2026-07-08 23:04:57', 4, 5, 4, 4, 5, 4, 5, 4, 4, 4, 5, 4, 4, 5, 5, 'The professor gives good guidance during difficult topics, and that support helps students keep up with the lessons.'
+        UNION ALL SELECT 134, '2026-07-08 23:08:13', 5, 5, 4, 4, 4, 5, 5, 4, 4, 4, 4, 5, 5, 5, 5, 'Prof. Alexa is well prepared during discussions and presents the lesson in a way that is clear and easy to follow.'
+        UNION ALL SELECT 138, '2026-07-08 23:11:36', 4, 4, 4, 5, 4, 4, 5, 5, 4, 4, 4, 5, 4, 4, 5, 'Including more concrete examples from the aviation industry would help students connect theory to actual practice.'
+        UNION ALL SELECT 142, '2026-07-08 23:14:12', 5, 4, 4, 4, 4, 5, 4, 4, 5, 4, 4, 4, 4, 5, 4, 'The class pacing is manageable, and the feedback on our activities is useful for improving our next submissions.'
+        UNION ALL SELECT 146, '2026-07-08 23:17:45', 4, 5, 4, 4, 4, 4, 5, 4, 4, 5, 4, 5, 4, 4, 5, 'Please keep giving step-by-step instructions because it helps students understand what is expected in every task.'
+        UNION ALL SELECT 150, '2026-07-08 23:20:08', 5, 4, 4, 5, 4, 4, 4, 5, 4, 4, 4, 5, 5, 4, 4, 'The professor maintains a positive classroom atmosphere and communicates the course expectations clearly from the start.'
+    ) src
+        ON e.`evaluation_type_id` = 1
+       AND e.`course_offering_id` <=> @course_offering_id
+       AND e.`evaluatee_user_id` = @professor_id
+       AND e.`evaluator_user_id` = src.`evaluator_user_id`
+       AND e.`submitted_at` = src.`submitted_at`
+    UNION ALL
+    SELECT e.`id`, @q15_id, src.`q15`, NULL, 3 FROM `evaluations` e JOIN (
+        SELECT 39 AS `evaluator_user_id`, '2026-07-08 22:37:01' AS `submitted_at`, 4 AS `q15`
+        UNION ALL SELECT 71, '2026-07-08 22:40:22', 4
+        UNION ALL SELECT 102, '2026-07-08 22:43:10', 4
+        UNION ALL SELECT 106, '2026-07-08 22:46:44', 4
+        UNION ALL SELECT 110, '2026-07-08 22:49:09', 4
+        UNION ALL SELECT 114, '2026-07-08 22:52:16', 4
+        UNION ALL SELECT 118, '2026-07-08 22:55:08', 4
+        UNION ALL SELECT 122, '2026-07-08 22:58:41', 4
+        UNION ALL SELECT 126, '2026-07-08 23:01:28', 4
+        UNION ALL SELECT 130, '2026-07-08 23:04:57', 4
+        UNION ALL SELECT 134, '2026-07-08 23:08:13', 4
+        UNION ALL SELECT 138, '2026-07-08 23:11:36', 4
+        UNION ALL SELECT 142, '2026-07-08 23:14:12', 4
+        UNION ALL SELECT 146, '2026-07-08 23:17:45', 4
+        UNION ALL SELECT 150, '2026-07-08 23:20:08', 4
+    ) src ON e.`evaluation_type_id` = 1 AND e.`course_offering_id` <=> @course_offering_id AND e.`evaluatee_user_id` = @professor_id AND e.`evaluator_user_id` = src.`evaluator_user_id` AND e.`submitted_at` = src.`submitted_at`
+    UNION ALL
+    SELECT e.`id`, @q16_id, src.`rating_value`, NULL, 4 FROM `evaluations` e JOIN (
+        SELECT 39 AS `evaluator_user_id`, '2026-07-08 22:37:01' AS `submitted_at`, 4 AS `rating_value`
+        UNION ALL SELECT 71, '2026-07-08 22:40:22', 5
+        UNION ALL SELECT 102, '2026-07-08 22:43:10', 4
+        UNION ALL SELECT 106, '2026-07-08 22:46:44', 4
+        UNION ALL SELECT 110, '2026-07-08 22:49:09', 5
+        UNION ALL SELECT 114, '2026-07-08 22:52:16', 4
+        UNION ALL SELECT 118, '2026-07-08 22:55:08', 4
+        UNION ALL SELECT 122, '2026-07-08 22:58:41', 5
+        UNION ALL SELECT 126, '2026-07-08 23:01:28', 4
+        UNION ALL SELECT 130, '2026-07-08 23:04:57', 4
+        UNION ALL SELECT 134, '2026-07-08 23:08:13', 4
+        UNION ALL SELECT 138, '2026-07-08 23:11:36', 5
+        UNION ALL SELECT 142, '2026-07-08 23:14:12', 4
+        UNION ALL SELECT 146, '2026-07-08 23:17:45', 4
+        UNION ALL SELECT 150, '2026-07-08 23:20:08', 5
+    ) src ON e.`evaluation_type_id` = 1 AND e.`course_offering_id` <=> @course_offering_id AND e.`evaluatee_user_id` = @professor_id AND e.`evaluator_user_id` = src.`evaluator_user_id` AND e.`submitted_at` = src.`submitted_at`
+    UNION ALL
+    SELECT e.`id`, @q17_id, src.`rating_value`, NULL, 5 FROM `evaluations` e JOIN (
+        SELECT 39 AS `evaluator_user_id`, '2026-07-08 22:37:01' AS `submitted_at`, 4 AS `rating_value`
+        UNION ALL SELECT 71, '2026-07-08 22:40:22', 4
+        UNION ALL SELECT 102, '2026-07-08 22:43:10', 4
+        UNION ALL SELECT 106, '2026-07-08 22:46:44', 4
+        UNION ALL SELECT 110, '2026-07-08 22:49:09', 4
+        UNION ALL SELECT 114, '2026-07-08 22:52:16', 5
+        UNION ALL SELECT 118, '2026-07-08 22:55:08', 4
+        UNION ALL SELECT 122, '2026-07-08 22:58:41', 4
+        UNION ALL SELECT 126, '2026-07-08 23:01:28', 4
+        UNION ALL SELECT 130, '2026-07-08 23:04:57', 5
+        UNION ALL SELECT 134, '2026-07-08 23:08:13', 4
+        UNION ALL SELECT 138, '2026-07-08 23:11:36', 4
+        UNION ALL SELECT 142, '2026-07-08 23:14:12', 4
+        UNION ALL SELECT 146, '2026-07-08 23:17:45', 4
+        UNION ALL SELECT 150, '2026-07-08 23:20:08', 4
+    ) src ON e.`evaluation_type_id` = 1 AND e.`course_offering_id` <=> @course_offering_id AND e.`evaluatee_user_id` = @professor_id AND e.`evaluator_user_id` = src.`evaluator_user_id` AND e.`submitted_at` = src.`submitted_at`
+    UNION ALL
+    SELECT e.`id`, @q18_id, src.`rating_value`, NULL, 6 FROM `evaluations` e JOIN (
+        SELECT 39 AS `evaluator_user_id`, '2026-07-08 22:37:01' AS `submitted_at`, 5 AS `rating_value`
+        UNION ALL SELECT 71, '2026-07-08 22:40:22', 4
+        UNION ALL SELECT 102, '2026-07-08 22:43:10', 5
+        UNION ALL SELECT 106, '2026-07-08 22:46:44', 4
+        UNION ALL SELECT 110, '2026-07-08 22:49:09', 4
+        UNION ALL SELECT 114, '2026-07-08 22:52:16', 4
+        UNION ALL SELECT 118, '2026-07-08 22:55:08', 4
+        UNION ALL SELECT 122, '2026-07-08 22:58:41', 4
+        UNION ALL SELECT 126, '2026-07-08 23:01:28', 5
+        UNION ALL SELECT 130, '2026-07-08 23:04:57', 4
+        UNION ALL SELECT 134, '2026-07-08 23:08:13', 5
+        UNION ALL SELECT 138, '2026-07-08 23:11:36', 4
+        UNION ALL SELECT 142, '2026-07-08 23:14:12', 5
+        UNION ALL SELECT 146, '2026-07-08 23:17:45', 4
+        UNION ALL SELECT 150, '2026-07-08 23:20:08', 4
+    ) src ON e.`evaluation_type_id` = 1 AND e.`course_offering_id` <=> @course_offering_id AND e.`evaluatee_user_id` = @professor_id AND e.`evaluator_user_id` = src.`evaluator_user_id` AND e.`submitted_at` = src.`submitted_at`
+    UNION ALL
+    SELECT e.`id`, @q19_id, src.`rating_value`, NULL, 7 FROM `evaluations` e JOIN (
+        SELECT 39 AS `evaluator_user_id`, '2026-07-08 22:37:01' AS `submitted_at`, 5 AS `rating_value`
+        UNION ALL SELECT 71, '2026-07-08 22:40:22', 5
+        UNION ALL SELECT 102, '2026-07-08 22:43:10', 4
+        UNION ALL SELECT 106, '2026-07-08 22:46:44', 5
+        UNION ALL SELECT 110, '2026-07-08 22:49:09', 4
+        UNION ALL SELECT 114, '2026-07-08 22:52:16', 5
+        UNION ALL SELECT 118, '2026-07-08 22:55:08', 5
+        UNION ALL SELECT 122, '2026-07-08 22:58:41', 4
+        UNION ALL SELECT 126, '2026-07-08 23:01:28', 4
+        UNION ALL SELECT 130, '2026-07-08 23:04:57', 5
+        UNION ALL SELECT 134, '2026-07-08 23:08:13', 5
+        UNION ALL SELECT 138, '2026-07-08 23:11:36', 5
+        UNION ALL SELECT 142, '2026-07-08 23:14:12', 4
+        UNION ALL SELECT 146, '2026-07-08 23:17:45', 5
+        UNION ALL SELECT 150, '2026-07-08 23:20:08', 4
+    ) src ON e.`evaluation_type_id` = 1 AND e.`course_offering_id` <=> @course_offering_id AND e.`evaluatee_user_id` = @professor_id AND e.`evaluator_user_id` = src.`evaluator_user_id` AND e.`submitted_at` = src.`submitted_at`
+    UNION ALL
+    SELECT e.`id`, @q20_id, src.`rating_value`, NULL, 8 FROM `evaluations` e JOIN (
+        SELECT 39 AS `evaluator_user_id`, '2026-07-08 22:37:01' AS `submitted_at`, 4 AS `rating_value`
+        UNION ALL SELECT 71, '2026-07-08 22:40:22', 4
+        UNION ALL SELECT 102, '2026-07-08 22:43:10', 4
+        UNION ALL SELECT 106, '2026-07-08 22:46:44', 4
+        UNION ALL SELECT 110, '2026-07-08 22:49:09', 5
+        UNION ALL SELECT 114, '2026-07-08 22:52:16', 4
+        UNION ALL SELECT 118, '2026-07-08 22:55:08', 4
+        UNION ALL SELECT 122, '2026-07-08 22:58:41', 4
+        UNION ALL SELECT 126, '2026-07-08 23:01:28', 5
+        UNION ALL SELECT 130, '2026-07-08 23:04:57', 4
+        UNION ALL SELECT 134, '2026-07-08 23:08:13', 4
+        UNION ALL SELECT 138, '2026-07-08 23:11:36', 5
+        UNION ALL SELECT 142, '2026-07-08 23:14:12', 4
+        UNION ALL SELECT 146, '2026-07-08 23:17:45', 4
+        UNION ALL SELECT 150, '2026-07-08 23:20:08', 5
+    ) src ON e.`evaluation_type_id` = 1 AND e.`course_offering_id` <=> @course_offering_id AND e.`evaluatee_user_id` = @professor_id AND e.`evaluator_user_id` = src.`evaluator_user_id` AND e.`submitted_at` = src.`submitted_at`
+    UNION ALL
+    SELECT e.`id`, @q21_id, src.`rating_value`, NULL, 9 FROM `evaluations` e JOIN (
+        SELECT 39 AS `evaluator_user_id`, '2026-07-08 22:37:01' AS `submitted_at`, 4 AS `rating_value`
+        UNION ALL SELECT 71, '2026-07-08 22:40:22', 4
+        UNION ALL SELECT 102, '2026-07-08 22:43:10', 5
+        UNION ALL SELECT 106, '2026-07-08 22:46:44', 4
+        UNION ALL SELECT 110, '2026-07-08 22:49:09', 4
+        UNION ALL SELECT 114, '2026-07-08 22:52:16', 4
+        UNION ALL SELECT 118, '2026-07-08 22:55:08', 4
+        UNION ALL SELECT 122, '2026-07-08 22:58:41', 4
+        UNION ALL SELECT 126, '2026-07-08 23:01:28', 4
+        UNION ALL SELECT 130, '2026-07-08 23:04:57', 4
+        UNION ALL SELECT 134, '2026-07-08 23:08:13', 4
+        UNION ALL SELECT 138, '2026-07-08 23:11:36', 4
+        UNION ALL SELECT 142, '2026-07-08 23:14:12', 5
+        UNION ALL SELECT 146, '2026-07-08 23:17:45', 4
+        UNION ALL SELECT 150, '2026-07-08 23:20:08', 4
+    ) src ON e.`evaluation_type_id` = 1 AND e.`course_offering_id` <=> @course_offering_id AND e.`evaluatee_user_id` = @professor_id AND e.`evaluator_user_id` = src.`evaluator_user_id` AND e.`submitted_at` = src.`submitted_at`
+    UNION ALL
+    SELECT e.`id`, @q22_id, src.`rating_value`, NULL, 10 FROM `evaluations` e JOIN (
+        SELECT 39 AS `evaluator_user_id`, '2026-07-08 22:37:01' AS `submitted_at`, 4 AS `rating_value`
+        UNION ALL SELECT 71, '2026-07-08 22:40:22', 4
+        UNION ALL SELECT 102, '2026-07-08 22:43:10', 4
+        UNION ALL SELECT 106, '2026-07-08 22:46:44', 5
+        UNION ALL SELECT 110, '2026-07-08 22:49:09', 4
+        UNION ALL SELECT 114, '2026-07-08 22:52:16', 4
+        UNION ALL SELECT 118, '2026-07-08 22:55:08', 5
+        UNION ALL SELECT 122, '2026-07-08 22:58:41', 5
+        UNION ALL SELECT 126, '2026-07-08 23:01:28', 4
+        UNION ALL SELECT 130, '2026-07-08 23:04:57', 4
+        UNION ALL SELECT 134, '2026-07-08 23:08:13', 4
+        UNION ALL SELECT 138, '2026-07-08 23:11:36', 4
+        UNION ALL SELECT 142, '2026-07-08 23:14:12', 4
+        UNION ALL SELECT 146, '2026-07-08 23:17:45', 5
+        UNION ALL SELECT 150, '2026-07-08 23:20:08', 4
+    ) src ON e.`evaluation_type_id` = 1 AND e.`course_offering_id` <=> @course_offering_id AND e.`evaluatee_user_id` = @professor_id AND e.`evaluator_user_id` = src.`evaluator_user_id` AND e.`submitted_at` = src.`submitted_at`
+    UNION ALL
+    SELECT e.`id`, @q23_id, src.`rating_value`, NULL, 11 FROM `evaluations` e JOIN (
+        SELECT 39 AS `evaluator_user_id`, '2026-07-08 22:37:01' AS `submitted_at`, 4 AS `rating_value`
+        UNION ALL SELECT 71, '2026-07-08 22:40:22', 4
+        UNION ALL SELECT 102, '2026-07-08 22:43:10', 4
+        UNION ALL SELECT 106, '2026-07-08 22:46:44', 4
+        UNION ALL SELECT 110, '2026-07-08 22:49:09', 4
+        UNION ALL SELECT 114, '2026-07-08 22:52:16', 5
+        UNION ALL SELECT 118, '2026-07-08 22:55:08', 4
+        UNION ALL SELECT 122, '2026-07-08 22:58:41', 4
+        UNION ALL SELECT 126, '2026-07-08 23:01:28', 4
+        UNION ALL SELECT 130, '2026-07-08 23:04:57', 5
+        UNION ALL SELECT 134, '2026-07-08 23:08:13', 4
+        UNION ALL SELECT 138, '2026-07-08 23:11:36', 4
+        UNION ALL SELECT 142, '2026-07-08 23:14:12', 4
+        UNION ALL SELECT 146, '2026-07-08 23:17:45', 4
+        UNION ALL SELECT 150, '2026-07-08 23:20:08', 4
+    ) src ON e.`evaluation_type_id` = 1 AND e.`course_offering_id` <=> @course_offering_id AND e.`evaluatee_user_id` = @professor_id AND e.`evaluator_user_id` = src.`evaluator_user_id` AND e.`submitted_at` = src.`submitted_at`
+    UNION ALL
+    SELECT e.`id`, @q24_id, src.`rating_value`, NULL, 12 FROM `evaluations` e JOIN (
+        SELECT 39 AS `evaluator_user_id`, '2026-07-08 22:37:01' AS `submitted_at`, 5 AS `rating_value`
+        UNION ALL SELECT 71, '2026-07-08 22:40:22', 5
+        UNION ALL SELECT 102, '2026-07-08 22:43:10', 4
+        UNION ALL SELECT 106, '2026-07-08 22:46:44', 5
+        UNION ALL SELECT 110, '2026-07-08 22:49:09', 5
+        UNION ALL SELECT 114, '2026-07-08 22:52:16', 4
+        UNION ALL SELECT 118, '2026-07-08 22:55:08', 4
+        UNION ALL SELECT 122, '2026-07-08 22:58:41', 5
+        UNION ALL SELECT 126, '2026-07-08 23:01:28', 5
+        UNION ALL SELECT 130, '2026-07-08 23:04:57', 4
+        UNION ALL SELECT 134, '2026-07-08 23:08:13', 5
+        UNION ALL SELECT 138, '2026-07-08 23:11:36', 5
+        UNION ALL SELECT 142, '2026-07-08 23:14:12', 4
+        UNION ALL SELECT 146, '2026-07-08 23:17:45', 5
+        UNION ALL SELECT 150, '2026-07-08 23:20:08', 5
+    ) src ON e.`evaluation_type_id` = 1 AND e.`course_offering_id` <=> @course_offering_id AND e.`evaluatee_user_id` = @professor_id AND e.`evaluator_user_id` = src.`evaluator_user_id` AND e.`submitted_at` = src.`submitted_at`
+    UNION ALL
+    SELECT e.`id`, @q25_id, src.`rating_value`, NULL, 13 FROM `evaluations` e JOIN (
+        SELECT 39 AS `evaluator_user_id`, '2026-07-08 22:37:01' AS `submitted_at`, 5 AS `rating_value`
+        UNION ALL SELECT 71, '2026-07-08 22:40:22', 4
+        UNION ALL SELECT 102, '2026-07-08 22:43:10', 4
+        UNION ALL SELECT 106, '2026-07-08 22:46:44', 4
+        UNION ALL SELECT 110, '2026-07-08 22:49:09', 5
+        UNION ALL SELECT 114, '2026-07-08 22:52:16', 4
+        UNION ALL SELECT 118, '2026-07-08 22:55:08', 5
+        UNION ALL SELECT 122, '2026-07-08 22:58:41', 4
+        UNION ALL SELECT 126, '2026-07-08 23:01:28', 4
+        UNION ALL SELECT 130, '2026-07-08 23:04:57', 4
+        UNION ALL SELECT 134, '2026-07-08 23:08:13', 5
+        UNION ALL SELECT 138, '2026-07-08 23:11:36', 4
+        UNION ALL SELECT 142, '2026-07-08 23:14:12', 4
+        UNION ALL SELECT 146, '2026-07-08 23:17:45', 4
+        UNION ALL SELECT 150, '2026-07-08 23:20:08', 5
+    ) src ON e.`evaluation_type_id` = 1 AND e.`course_offering_id` <=> @course_offering_id AND e.`evaluatee_user_id` = @professor_id AND e.`evaluator_user_id` = src.`evaluator_user_id` AND e.`submitted_at` = src.`submitted_at`
+    UNION ALL
+    SELECT e.`id`, @q26_id, src.`rating_value`, NULL, 14 FROM `evaluations` e JOIN (
+        SELECT 39 AS `evaluator_user_id`, '2026-07-08 22:37:01' AS `submitted_at`, 5 AS `rating_value`
+        UNION ALL SELECT 71, '2026-07-08 22:40:22', 4
+        UNION ALL SELECT 102, '2026-07-08 22:43:10', 5
+        UNION ALL SELECT 106, '2026-07-08 22:46:44', 4
+        UNION ALL SELECT 110, '2026-07-08 22:49:09', 4
+        UNION ALL SELECT 114, '2026-07-08 22:52:16', 4
+        UNION ALL SELECT 118, '2026-07-08 22:55:08', 4
+        UNION ALL SELECT 122, '2026-07-08 22:58:41', 4
+        UNION ALL SELECT 126, '2026-07-08 23:01:28', 5
+        UNION ALL SELECT 130, '2026-07-08 23:04:57', 5
+        UNION ALL SELECT 134, '2026-07-08 23:08:13', 5
+        UNION ALL SELECT 138, '2026-07-08 23:11:36', 4
+        UNION ALL SELECT 142, '2026-07-08 23:14:12', 5
+        UNION ALL SELECT 146, '2026-07-08 23:17:45', 4
+        UNION ALL SELECT 150, '2026-07-08 23:20:08', 4
+    ) src ON e.`evaluation_type_id` = 1 AND e.`course_offering_id` <=> @course_offering_id AND e.`evaluatee_user_id` = @professor_id AND e.`evaluator_user_id` = src.`evaluator_user_id` AND e.`submitted_at` = src.`submitted_at`
+    UNION ALL
+    SELECT e.`id`, @q27_id, src.`rating_value`, NULL, 15 FROM `evaluations` e JOIN (
+        SELECT 39 AS `evaluator_user_id`, '2026-07-08 22:37:01' AS `submitted_at`, 5 AS `rating_value`
+        UNION ALL SELECT 71, '2026-07-08 22:40:22', 5
+        UNION ALL SELECT 102, '2026-07-08 22:43:10', 4
+        UNION ALL SELECT 106, '2026-07-08 22:46:44', 5
+        UNION ALL SELECT 110, '2026-07-08 22:49:09', 4
+        UNION ALL SELECT 114, '2026-07-08 22:52:16', 5
+        UNION ALL SELECT 118, '2026-07-08 22:55:08', 5
+        UNION ALL SELECT 122, '2026-07-08 22:58:41', 5
+        UNION ALL SELECT 126, '2026-07-08 23:01:28', 4
+        UNION ALL SELECT 130, '2026-07-08 23:04:57', 5
+        UNION ALL SELECT 134, '2026-07-08 23:08:13', 5
+        UNION ALL SELECT 138, '2026-07-08 23:11:36', 5
+        UNION ALL SELECT 142, '2026-07-08 23:14:12', 4
+        UNION ALL SELECT 146, '2026-07-08 23:17:45', 5
+        UNION ALL SELECT 150, '2026-07-08 23:20:08', 4
+    ) src ON e.`evaluation_type_id` = 1 AND e.`course_offering_id` <=> @course_offering_id AND e.`evaluatee_user_id` = @professor_id AND e.`evaluator_user_id` = src.`evaluator_user_id` AND e.`submitted_at` = src.`submitted_at`
+    UNION ALL
+    SELECT e.`id`, @q28_id, NULL, src.`comment_text`, 16 FROM `evaluations` e JOIN (
+        SELECT 39 AS `evaluator_user_id`, '2026-07-08 22:37:01' AS `submitted_at`, 'Prof. Alexa explains the lessons clearly and makes the topic easier to understand even when the discussion is long.' AS `comment_text`
+        UNION ALL SELECT 71, '2026-07-08 22:40:22', 'I appreciate how organized the class is, but adding more real-life tourism examples would make the lessons more memorable.'
+        UNION ALL SELECT 102, '2026-07-08 22:43:10', 'The pacing of the class is good and the professor gives feedback that helps us improve our work.'
+        UNION ALL SELECT 106, '2026-07-08 22:46:44', 'Please continue giving clear instructions before every activity because it helps students avoid confusion.'
+        UNION ALL SELECT 110, '2026-07-08 22:49:09', 'The class environment feels respectful and comfortable, and the expectations for requirements are explained well.'
+        UNION ALL SELECT 114, '2026-07-08 22:52:16', 'A short review before quizzes would be very helpful so students can recall the most important lessons.'
+        UNION ALL SELECT 118, '2026-07-08 22:55:08', 'The professor is approachable during class and answers questions patiently, which makes students more confident to participate.'
+        UNION ALL SELECT 122, '2026-07-08 22:58:41', 'More interactive activities or short group discussions could make the subject even more engaging for the class.'
+        UNION ALL SELECT 126, '2026-07-08 23:01:28', 'The grading criteria are explained clearly, and it is easy to understand how our outputs are being evaluated.'
+        UNION ALL SELECT 130, '2026-07-08 23:04:57', 'The professor gives good guidance during difficult topics, and that support helps students keep up with the lessons.'
+        UNION ALL SELECT 134, '2026-07-08 23:08:13', 'Prof. Alexa is well prepared during discussions and presents the lesson in a way that is clear and easy to follow.'
+        UNION ALL SELECT 138, '2026-07-08 23:11:36', 'Including more concrete examples from the aviation industry would help students connect theory to actual practice.'
+        UNION ALL SELECT 142, '2026-07-08 23:14:12', 'The class pacing is manageable, and the feedback on our activities is useful for improving our next submissions.'
+        UNION ALL SELECT 146, '2026-07-08 23:17:45', 'Please keep giving step-by-step instructions because it helps students understand what is expected in every task.'
+        UNION ALL SELECT 150, '2026-07-08 23:20:08', 'The professor maintains a positive classroom atmosphere and communicates the course expectations clearly from the start.'
+    ) src ON e.`evaluation_type_id` = 1 AND e.`course_offering_id` <=> @course_offering_id AND e.`evaluatee_user_id` = @professor_id AND e.`evaluator_user_id` = src.`evaluator_user_id` AND e.`submitted_at` = src.`submitted_at`
+) r
+LEFT JOIN `evaluation_responses` er
+    ON er.`evaluation_id` = r.`evaluation_id`
+   AND er.`question_id` = r.`question_id`
+WHERE er.`id` IS NULL
+ORDER BY r.`evaluation_id`, r.`display_order`;
+
+COMMIT;

@@ -193,6 +193,7 @@ function initializeDashboard() {
     setupHrHeroActions();
     renderHrSystemNotifications();
     setupHrAnnouncementComposer();
+    showHrLoginAnnouncements();
     setupProfilePhotoUpload();
     setupProfileActions();
     setupSemesterSettings();
@@ -227,6 +228,7 @@ function initializeDashboard() {
             renderHrSystemNotifications();
         }
         if (e.key === SharedData.KEYS.ANNOUNCEMENTS) {
+            setupNotifications();
             renderHrSystemNotifications();
         }
     });
@@ -2937,13 +2939,14 @@ function setupNotifications() {
         return;
     }
 
-    const announcements = (SharedData.getAnnouncements && SharedData.getAnnouncements()) || [];
+    const announcements = (SharedData.getAnnouncementsForCurrentUser && SharedData.getAnnouncementsForCurrentUser()) ||
+        (SharedData.getAnnouncements && SharedData.getAnnouncements()) || [];
     const formatMeta = (item) => {
         const message = String(item && item.message || '').trim();
         const timestamp = String(item && item.timestamp || '').trim();
         const parsed = timestamp ? new Date(timestamp) : null;
         const dateLabel = parsed && !Number.isNaN(parsed.getTime()) ? SharedData.formatDateTimeInPhilippines(parsed) : timestamp;
-        if (message && dateLabel) return `${message} • ${dateLabel}`;
+        if (message && dateLabel) return `${message} - ${dateLabel}`;
         if (message) return message;
         if (dateLabel) return dateLabel;
         return 'No details';
@@ -2966,8 +2969,8 @@ function setupNotifications() {
     } else {
         list.innerHTML = announcements.map(item => `
             <div class="notification-item">
-                <div class="notification-item-title">${item.title || 'Announcement'}</div>
-                <div class="notification-item-meta">${formatMeta(item)}</div>
+                <div class="notification-item-title">${escapeHrHtml(item.title || 'Announcement')}</div>
+                <div class="notification-item-meta">${escapeHrHtml(formatMeta(item))}</div>
             </div>
         `).join('');
     }
@@ -2990,8 +2993,62 @@ function setupNotifications() {
     }
 }
 
+function showHrLoginAnnouncements() {
+    if (!SharedData.showUnreadAnnouncementLoginPopup) return;
+    SharedData.showUnreadAnnouncementLoginPopup({
+        onDismiss: function () {
+            setupNotifications();
+            renderHrSystemNotifications();
+        },
+    });
+}
+
 function normalizeHrAnnouncementComposerToken(value) {
     return String(value == null ? '' : value).trim().toLowerCase();
+}
+
+function getHrAnnouncementRoleLabel(role) {
+    const labels = {
+        all: 'All users',
+        admin: 'Admin',
+        hr: 'HR Staff',
+        vpaa: 'VPAA',
+        osa: 'OSA',
+        dean: 'Dean',
+        procoor: 'Program Coordinator',
+        professor: 'Professor',
+        student: 'Student',
+    };
+    const token = normalizeHrAnnouncementComposerToken(role) || 'all';
+    return labels[token] || token;
+}
+
+function updateHrAnnouncementAudiencePreview() {
+    const preview = document.getElementById('hr-announcement-audience-preview');
+    if (!preview) return;
+
+    const roleSelect = document.getElementById('hr-announcement-target-role');
+    const campusSelect = document.getElementById('hr-announcement-target-campus');
+    const programSelect = document.getElementById('hr-announcement-target-program');
+    const completionSelect = document.getElementById('hr-announcement-student-completion');
+    const role = normalizeHrAnnouncementComposerToken(roleSelect ? roleSelect.value : 'all') || 'all';
+    const campusLabel = campusSelect && campusSelect.selectedOptions && campusSelect.selectedOptions[0]
+        ? campusSelect.selectedOptions[0].textContent.trim()
+        : 'All Campuses';
+    const programLabel = programSelect && programSelect.selectedOptions && programSelect.selectedOptions[0]
+        ? programSelect.selectedOptions[0].textContent.trim()
+        : 'All Programs';
+    const completionLabel = completionSelect && completionSelect.selectedOptions && completionSelect.selectedOptions[0]
+        ? completionSelect.selectedOptions[0].textContent.trim()
+        : 'All Students';
+    const parts = [getHrAnnouncementRoleLabel(role), campusLabel || 'All Campuses', programLabel || 'All Programs'];
+
+    if (role === 'student') {
+        parts.push(completionLabel || 'All Students');
+    }
+
+    const value = preview.querySelector('strong');
+    if (value) value.textContent = parts.join(' - ');
 }
 
 function populateHrAnnouncementComposerCampusOptions() {
@@ -3021,6 +3078,7 @@ function populateHrAnnouncementComposerCampusOptions() {
     } else {
         campusSelect.value = '';
     }
+    updateHrAnnouncementAudiencePreview();
 }
 
 function populateHrAnnouncementComposerProgramOptions() {
@@ -3060,6 +3118,7 @@ function populateHrAnnouncementComposerProgramOptions() {
     } else {
         programSelect.value = '';
     }
+    updateHrAnnouncementAudiencePreview();
 }
 
 function syncHrAnnouncementStudentCompletionVisibility() {
@@ -3071,6 +3130,7 @@ function syncHrAnnouncementStudentCompletionVisibility() {
     if (completionSelect && !isStudentTarget) {
         completionSelect.value = 'all';
     }
+    updateHrAnnouncementAudiencePreview();
 }
 
 function resetHrAnnouncementComposerForm() {
@@ -3115,14 +3175,15 @@ function handleHrAnnouncementComposeSubmit(event) {
 
     const title = String(titleInput ? titleInput.value : '').trim();
     const message = String(messageInput ? messageInput.value : '').trim();
-    const role = normalizeHrAnnouncementComposerToken(roleSelect ? roleSelect.value : '');
+    const selectedRole = normalizeHrAnnouncementComposerToken(roleSelect ? roleSelect.value : 'all') || 'all';
+    const role = selectedRole === 'all' ? '' : selectedRole;
     const campus = normalizeHrAnnouncementComposerToken(campusSelect ? campusSelect.value : '');
     const programCode = normalizeHrAnnouncementComposerToken(programSelect ? programSelect.value : '');
-    const studentCompletion = role === 'student'
+    const studentCompletion = selectedRole === 'student'
         ? normalizeHrAnnouncementComposerToken(completionSelect ? completionSelect.value : 'all')
         : 'all';
 
-    if (!title || !message || !role) {
+    if (!title || !message || !selectedRole) {
         if (feedback) {
             feedback.textContent = 'Please fill in title, message, and target role.';
         }
@@ -3154,10 +3215,10 @@ function handleHrAnnouncementComposeSubmit(event) {
 
         if (SharedData.addActivityLogEntry) {
             const targetDetails = [
-                role,
+                getHrAnnouncementRoleLabel(selectedRole),
                 campus ? `campus:${campus}` : '',
                 programCode ? `program:${programCode}` : '',
-                role === 'student' ? `completion:${audience.studentCompletion}` : ''
+                selectedRole === 'student' ? `completion:${audience.studentCompletion}` : ''
             ].filter(Boolean).join(', ');
 
             SharedData.addActivityLogEntry({
@@ -3188,21 +3249,27 @@ function setupHrAnnouncementComposer() {
     if (hrAnnouncementComposerReady) return;
 
     const openBtn = document.getElementById('hr-open-announcement-compose-btn');
+    const settingsOpenBtn = document.getElementById('hr-settings-announcement-compose-btn');
     const modal = document.getElementById('hr-announcement-compose-modal');
-    if (!openBtn || !modal) return;
+    if (!modal) return;
 
     const closeBtn = document.getElementById('hr-close-announcement-compose-modal');
     const cancelBtn = document.getElementById('hr-cancel-announcement-compose-btn');
     const form = document.getElementById('hr-announcement-compose-form');
     const roleSelect = document.getElementById('hr-announcement-target-role');
     const campusSelect = document.getElementById('hr-announcement-target-campus');
+    const programSelect = document.getElementById('hr-announcement-target-program');
+    const completionSelect = document.getElementById('hr-announcement-student-completion');
 
-    openBtn.addEventListener('click', openHrAnnouncementComposerModal);
+    if (openBtn) openBtn.addEventListener('click', openHrAnnouncementComposerModal);
+    if (settingsOpenBtn) settingsOpenBtn.addEventListener('click', openHrAnnouncementComposerModal);
     if (closeBtn) closeBtn.addEventListener('click', closeHrAnnouncementComposerModal);
     if (cancelBtn) cancelBtn.addEventListener('click', closeHrAnnouncementComposerModal);
     if (form) form.addEventListener('submit', handleHrAnnouncementComposeSubmit);
     if (roleSelect) roleSelect.addEventListener('change', syncHrAnnouncementStudentCompletionVisibility);
     if (campusSelect) campusSelect.addEventListener('change', populateHrAnnouncementComposerProgramOptions);
+    if (programSelect) programSelect.addEventListener('change', updateHrAnnouncementAudiencePreview);
+    if (completionSelect) completionSelect.addEventListener('change', updateHrAnnouncementAudiencePreview);
 
     modal.addEventListener('click', function (event) {
         if (event.target === modal) {
@@ -4941,9 +5008,8 @@ function getHrProfessorEvaluationSnapshot(professorId, semesterId, evaluationTyp
     }
 
     const activeProfessors = context.professorUsers.filter(user => normalizeHrToken(user.status) !== 'inactive');
-    const activeSupervisors = context.supervisorUsers.filter(user => normalizeHrToken(user.status) !== 'inactive');
     const professorPool = Math.max(activeProfessors.length - 1, 0);
-    const supervisorPool = activeSupervisors.length;
+    const supervisorPool = getHrApplicableSupervisorUsersForProfessor(context, normalizedProfessorId).length || 1;
     let totalRaters = normalizedType === 'peer' ? professorPool : supervisorPool;
     if (totalRaters < aggregate.uniqueRaterCount) {
         totalRaters = aggregate.uniqueRaterCount;
@@ -4958,6 +5024,40 @@ function getHrProfessorEvaluationSnapshot(professorId, semesterId, evaluationTyp
         qualitativeResponses: aggregate.qualitativeResponses,
         meta,
     };
+}
+
+function getHrApplicableSupervisorUsersForProfessor(context, professorId) {
+    const professorToken = normalizeHrUserIdToken(professorId);
+    const professor = (context.professorUsers || []).find(user => normalizeHrUserIdToken(user && user.id) === professorToken);
+    if (!professor) return [];
+
+    const campus = normalizeHrToken(professor.campus || professor.campusSlug);
+    const department = normalizeHrToken(professor.department || professor.institute);
+    const program = normalizeHrToken(professor.programCode || professor.program);
+    const activeSupervisors = (context.supervisorUsers || []).filter(user => normalizeHrToken(user && user.status) !== 'inactive');
+
+    const isSameCampusDepartment = user => {
+        const userCampus = normalizeHrToken(user && (user.campus || user.campusSlug));
+        const userDepartment = normalizeHrToken(user && (user.department || user.institute));
+        return (!campus || !userCampus || userCampus === campus) && department && userDepartment === department;
+    };
+
+    const programCoordinators = activeSupervisors.filter(user => {
+        if (normalizeHrToken(user && user.role) !== 'procoor') return false;
+        if (!isSameCampusDepartment(user)) return false;
+        const userProgram = normalizeHrToken(user && (user.programCode || user.program));
+        return program && userProgram === program;
+    });
+    if (programCoordinators.length > 0) return programCoordinators;
+
+    const departmentDeans = activeSupervisors.filter(user => {
+        return normalizeHrToken(user && user.role) === 'dean' && isSameCampusDepartment(user);
+    });
+    if (departmentDeans.length > 0) return departmentDeans;
+
+    return activeSupervisors.filter(user => {
+        return normalizeHrToken(user && user.role) === 'supervisor' && isSameCampusDepartment(user);
+    });
 }
 
 function setupHrSharedDataBindings() {
@@ -5505,6 +5605,11 @@ function setupProfessorManagement() {
     const addProfessorBtn = document.getElementById('add-professor-btn');
     if (addProfessorBtn) {
         addProfessorBtn.addEventListener('click', openAddProfessorModal);
+    }
+
+    const overallSasrBtn = document.getElementById('overall-sasr-btn');
+    if (overallSasrBtn) {
+        overallSasrBtn.addEventListener('click', openHrOverallSasrModal);
     }
 
     const searchInput = document.getElementById('professor-search');
@@ -6238,6 +6343,354 @@ function openHrReportSemesterPicker(config) {
     }
     modal._onConfirm = typeof config.onConfirm === 'function' ? config.onConfirm : null;
     modal._showLoadType = showLoadType;
+    modal.style.display = 'flex';
+}
+
+function getHrOverallSasrCurrentSemesterId() {
+    const current = String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : '').trim();
+    const options = getHrReportSemesterChoices();
+    if (current && options.some(option => String(option.id) === current)) {
+        return current;
+    }
+    return options.length ? String(options[0].id || '').trim() : '';
+}
+
+function getHrOverallSasrCampusOptions() {
+    const campuses = SharedData.getCampuses ? SharedData.getCampuses() : [];
+    const realCampuses = Array.isArray(campuses)
+        ? campuses.filter(campus => campus && normalizeHrToken(campus.id) && normalizeHrToken(campus.id) !== 'all')
+        : [];
+    return [
+        { id: 'all', label: 'All Campuses' },
+        ...realCampuses.map(campus => ({
+            id: String(campus.id || '').trim(),
+            label: String(campus.name || campus.id || '').trim(),
+        })),
+    ];
+}
+
+function getHrOverallSasrDepartments(campusId) {
+    const campusToken = normalizeHrToken(campusId || 'all');
+    const departments = new Set();
+    const campuses = SharedData.getCampuses ? SharedData.getCampuses() : [];
+
+    if (campusToken && campusToken !== 'all' && Array.isArray(campuses)) {
+        campuses.forEach(campus => {
+            if (normalizeHrToken(campus && campus.id) !== campusToken) return;
+            const items = Array.isArray(campus && campus.departments) ? campus.departments : [];
+            items.forEach(dept => {
+                const value = String(dept || '').trim().toUpperCase();
+                if (value) departments.add(value);
+            });
+        });
+    }
+
+    if (departments.size === 0 && SharedData.getAllDepartments) {
+        SharedData.getAllDepartments().forEach(dept => {
+            const value = String(dept || '').trim().toUpperCase();
+            if (value) departments.add(value);
+        });
+    }
+
+    const users = SharedData.getUsers ? SharedData.getUsers() : [];
+    users.forEach(user => {
+        if (!user || normalizeHrToken(user.role) !== 'professor') return;
+        if (campusToken !== 'all' && normalizeHrToken(user.campus || user.campusSlug) !== campusToken) return;
+        const value = String(user.department || user.institute || '').trim().toUpperCase();
+        if (value) departments.add(value);
+    });
+
+    return Array.from(departments).sort();
+}
+
+function getHrOverallSasrPrograms(campusId) {
+    const campusToken = normalizeHrToken(campusId || 'all');
+    const programs = SharedData.getPrograms ? SharedData.getPrograms() : [];
+    return (Array.isArray(programs) ? programs : [])
+        .filter(program => {
+            const programCampus = normalizeHrToken(program && program.campusSlug);
+            return campusToken === 'all' || programCampus === campusToken;
+        })
+        .map(program => {
+            const code = String(program && program.programCode || '').trim().toUpperCase();
+            const name = String(program && program.programName || '').trim();
+            const campus = String(program && program.campusSlug || '').trim().toUpperCase();
+            const dept = String(program && program.departmentCode || '').trim().toUpperCase();
+            const labelParts = [];
+            if (campus) labelParts.push(campus);
+            if (dept) labelParts.push(dept);
+            labelParts.push(name ? `${code} - ${name}` : code);
+            return {
+                id: String(program && program.id || '').trim(),
+                label: labelParts.filter(Boolean).join(' / '),
+            };
+        })
+        .filter(program => program.id && program.label)
+        .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function ensureHrOverallSasrModal() {
+    let modal = document.getElementById('hrOverallSasrModal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'hrOverallSasrModal';
+    modal.className = 'modal hr-report-modal overall-sasr-modal';
+    modal.innerHTML = `
+        <div class="modal-content hr-report-modal-content overall-sasr-content" role="dialog" aria-modal="true" aria-label="Generate Overall SASR">
+            <div class="modal-header">
+                <h2>Generate Overall SASR</h2>
+                <button type="button" class="modal-close" id="hrOverallSasrCloseBtn" aria-label="Close Overall SASR selector">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="hr-report-modal-body">
+                <p class="overall-sasr-modal-note">Export professor-level SET and SEF ratings for a selected department or program.</p>
+                <div class="overall-sasr-grid">
+                    <div class="form-group">
+                        <label for="hrOverallSasrCampusSelect">Campus</label>
+                        <select id="hrOverallSasrCampusSelect"></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="hrOverallSasrSemesterSelect">Semester</label>
+                        <select id="hrOverallSasrSemesterSelect"></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="hrOverallSasrLoadTypeSelect">Load Type</label>
+                        <select id="hrOverallSasrLoadTypeSelect">
+                            <option value="main">Main Load</option>
+                            <option value="excess">Excess Load</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="hrOverallSasrScopeTypeSelect">Scope Type</label>
+                        <select id="hrOverallSasrScopeTypeSelect">
+                            <option value="department">Department</option>
+                            <option value="program">Program</option>
+                        </select>
+                    </div>
+                    <div class="form-group overall-sasr-field-wide" id="hrOverallSasrDepartmentGroup">
+                        <label for="hrOverallSasrDepartmentSelect">Department</label>
+                        <select id="hrOverallSasrDepartmentSelect"></select>
+                    </div>
+                    <div class="form-group overall-sasr-field-wide" id="hrOverallSasrProgramGroup" style="display:none">
+                        <label for="hrOverallSasrProgramSelect">Program</label>
+                        <select id="hrOverallSasrProgramSelect"></select>
+                    </div>
+                </div>
+                <p class="overall-sasr-empty-note" id="hrOverallSasrEmptyNote" hidden></p>
+            </div>
+            <div class="modal-actions hr-report-modal-actions">
+                <button type="button" class="btn-cancel" id="hrOverallSasrCancelBtn">Cancel</button>
+                <button type="button" class="btn-submit" id="hrOverallSasrGenerateBtn">Generate</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const close = function () {
+        modal.style.display = 'none';
+    };
+    const refresh = function () {
+        refreshHrOverallSasrScopeOptions(modal);
+    };
+
+    modal.addEventListener('click', function (event) {
+        if (event.target === modal) close();
+    });
+
+    const closeBtn = document.getElementById('hrOverallSasrCloseBtn');
+    const cancelBtn = document.getElementById('hrOverallSasrCancelBtn');
+    const campusSelect = document.getElementById('hrOverallSasrCampusSelect');
+    const scopeSelect = document.getElementById('hrOverallSasrScopeTypeSelect');
+    const generateBtn = document.getElementById('hrOverallSasrGenerateBtn');
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    if (cancelBtn) cancelBtn.addEventListener('click', close);
+    if (campusSelect) campusSelect.addEventListener('change', refresh);
+    if (scopeSelect) scopeSelect.addEventListener('change', refresh);
+    if (generateBtn) {
+        generateBtn.addEventListener('click', async function () {
+            const payload = buildHrOverallSasrPayload(modal);
+            if (!payload) return;
+
+            generateBtn.disabled = true;
+            const previousLabel = generateBtn.textContent;
+            generateBtn.textContent = 'Generating...';
+            const didDownload = await downloadHrOverallSasrReport(payload);
+            generateBtn.disabled = false;
+            generateBtn.textContent = previousLabel || 'Generate';
+            if (didDownload) close();
+        });
+    }
+
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && modal.style.display === 'flex') {
+            close();
+        }
+    });
+
+    return modal;
+}
+
+function populateHrOverallSasrBaseOptions(modal) {
+    const campusSelect = modal.querySelector('#hrOverallSasrCampusSelect');
+    const semesterSelect = modal.querySelector('#hrOverallSasrSemesterSelect');
+    const loadSelect = modal.querySelector('#hrOverallSasrLoadTypeSelect');
+    const scopeSelect = modal.querySelector('#hrOverallSasrScopeTypeSelect');
+    const campusOptions = getHrOverallSasrCampusOptions();
+    const semesterOptions = getHrReportSemesterChoices();
+    const preferredCampus = normalizeHrToken(currentProfessorCampusFilter || 'all') || 'all';
+    const preferredSemester = getHrOverallSasrCurrentSemesterId();
+
+    if (campusSelect) {
+        campusSelect.innerHTML = campusOptions.map(option => `
+            <option value="${escapeHrAttr(option.id)}">${escapeHrHtml(option.label || option.id)}</option>
+        `).join('');
+        const matchedCampus = campusOptions.find(option => normalizeHrToken(option.id) === preferredCampus);
+        campusSelect.value = matchedCampus ? matchedCampus.id : 'all';
+    }
+    if (semesterSelect) {
+        semesterSelect.innerHTML = semesterOptions.map(option => `
+            <option value="${escapeHrAttr(option.id)}">${escapeHrHtml(option.label || option.id)}</option>
+        `).join('');
+        semesterSelect.value = preferredSemester;
+    }
+    if (loadSelect) loadSelect.value = 'main';
+    if (scopeSelect) scopeSelect.value = 'department';
+}
+
+function refreshHrOverallSasrScopeOptions(modal) {
+    const campusSelect = modal.querySelector('#hrOverallSasrCampusSelect');
+    const scopeSelect = modal.querySelector('#hrOverallSasrScopeTypeSelect');
+    const departmentGroup = modal.querySelector('#hrOverallSasrDepartmentGroup');
+    const programGroup = modal.querySelector('#hrOverallSasrProgramGroup');
+    const departmentSelect = modal.querySelector('#hrOverallSasrDepartmentSelect');
+    const programSelect = modal.querySelector('#hrOverallSasrProgramSelect');
+    const emptyNote = modal.querySelector('#hrOverallSasrEmptyNote');
+    const campusId = String(campusSelect && campusSelect.value || 'all').trim() || 'all';
+    const scopeType = String(scopeSelect && scopeSelect.value || 'department').trim();
+
+    if (departmentGroup) departmentGroup.style.display = scopeType === 'department' ? '' : 'none';
+    if (programGroup) programGroup.style.display = scopeType === 'program' ? '' : 'none';
+    if (emptyNote) {
+        emptyNote.hidden = true;
+        emptyNote.textContent = '';
+    }
+
+    if (scopeType === 'program') {
+        const programs = getHrOverallSasrPrograms(campusId);
+        if (programSelect) {
+            programSelect.innerHTML = '<option value="">Select Program</option>' + programs.map(program => `
+                <option value="${escapeHrAttr(program.id)}">${escapeHrHtml(program.label)}</option>
+            `).join('');
+        }
+        if (!programs.length && emptyNote) {
+            emptyNote.hidden = false;
+            emptyNote.textContent = 'No programs found for the selected campus.';
+        }
+        return;
+    }
+
+    const departments = getHrOverallSasrDepartments(campusId);
+    if (departmentSelect) {
+        departmentSelect.innerHTML = '<option value="">Select Department</option>' + departments.map(dept => `
+            <option value="${escapeHrAttr(dept)}">${escapeHrHtml(dept)}</option>
+        `).join('');
+        const preferred = currentDepartmentFilter && currentDepartmentFilter !== 'all'
+            ? String(currentDepartmentFilter).toUpperCase()
+            : '';
+        if (preferred && departments.includes(preferred)) {
+            departmentSelect.value = preferred;
+        }
+    }
+    if (!departments.length && emptyNote) {
+        emptyNote.hidden = false;
+        emptyNote.textContent = 'No departments found for the selected campus.';
+    }
+}
+
+function buildHrOverallSasrPayload(modal) {
+    const campusSlug = String((modal.querySelector('#hrOverallSasrCampusSelect') || {}).value || 'all').trim() || 'all';
+    const semesterId = String((modal.querySelector('#hrOverallSasrSemesterSelect') || {}).value || '').trim();
+    const loadType = normalizeHrReportLoadType((modal.querySelector('#hrOverallSasrLoadTypeSelect') || {}).value);
+    const scopeType = String((modal.querySelector('#hrOverallSasrScopeTypeSelect') || {}).value || 'department').trim();
+    const departmentCode = String((modal.querySelector('#hrOverallSasrDepartmentSelect') || {}).value || '').trim();
+    const programId = String((modal.querySelector('#hrOverallSasrProgramSelect') || {}).value || '').trim();
+
+    if (!semesterId) {
+        alert('Select a semester first.');
+        return null;
+    }
+    if (scopeType === 'program' && !programId) {
+        alert('Select a program first.');
+        return null;
+    }
+    if (scopeType !== 'program' && !departmentCode) {
+        alert('Select a department first.');
+        return null;
+    }
+
+    return {
+        campus_slug: campusSlug,
+        semester_id: semesterId,
+        load_type: loadType,
+        scope_type: scopeType === 'program' ? 'program' : 'department',
+        department_code: departmentCode,
+        program_id: programId,
+    };
+}
+
+async function downloadHrOverallSasrReport(payload) {
+    let response;
+    try {
+        response = await fetch('../api/generate_overall_sasr.php', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        });
+    } catch (_error) {
+        alert('Unable to connect to the Overall SASR generator.');
+        return false;
+    }
+
+    if (!response.ok) {
+        let errorMessage = 'Failed to generate Overall SASR Excel file.';
+        try {
+            const data = await response.json();
+            if (data && data.error) errorMessage = String(data.error);
+        } catch (_error) {
+            // Ignore non-JSON error bodies.
+        }
+        alert(errorMessage);
+        return false;
+    }
+
+    const excelBlob = await response.blob();
+    const fileName = parseHrPdfFilenameFromDisposition(response.headers.get('Content-Disposition')) || 'overall_sasr.xlsx';
+    const blobUrl = URL.createObjectURL(excelBlob);
+    const anchor = document.createElement('a');
+    anchor.href = blobUrl;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+    return true;
+}
+
+function openHrOverallSasrModal() {
+    const modal = ensureHrOverallSasrModal();
+    const semesterOptions = getHrReportSemesterChoices();
+    if (!semesterOptions.length) {
+        alert('No semester is available for Overall SASR generation.');
+        return;
+    }
+
+    populateHrOverallSasrBaseOptions(modal);
+    refreshHrOverallSasrScopeOptions(modal);
     modal.style.display = 'flex';
 }
 
@@ -8472,6 +8925,59 @@ const DEFAULT_QUESTIONNAIRE_HEADERS = {
         description: 'Please provide your evaluation of the professor\'s performance.'
     }
 };
+const DEFAULT_PRIVACY_NOTICE_PARAGRAPHS = [
+    'This questionnaire collects your user identity, role, evaluation assignment details, ratings, written feedback, submission timing, and limited interaction data needed to process the evaluation.',
+    'The school uses this information to administer evaluations, verify completion, generate academic quality reports, review feedback quality, detect inappropriate or biased submissions, and keep audit records.',
+    'Your responses may be reviewed by authorized school personnel and may be summarized for faculty evaluation, quality assurance, compliance, and institutional improvement. Records are retained according to school policy and applicable law.',
+    'By continuing, you confirm that you have read this notice and agree that your evaluation data will be processed for these purposes.'
+];
+
+function getDefaultQuestionnairePrivacyConsent(type) {
+    const typeCode = QUESTIONNAIRE_TYPE_LABELS[type] ? type : 'student-to-professor';
+    return {
+        enabled: typeCode === 'student-to-professor',
+        version: `${typeCode}-privacy-v1`,
+        textIdentifier: `${typeCode}-privacy-notice`,
+        title: 'Data Privacy Notice',
+        description: `${getQuestionnaireTypeLabel(typeCode)} privacy agreement`,
+        paragraphs: [...DEFAULT_PRIVACY_NOTICE_PARAGRAPHS],
+        agreementText: 'I have read and agree to the Data Privacy Notice for this questionnaire.'
+    };
+}
+
+function splitPrivacyNoticeText(value) {
+    return String(value || '')
+        .split(/\n\s*\n|\r?\n/)
+        .map(function (paragraph) { return paragraph.trim(); })
+        .filter(function (paragraph) { return paragraph !== ''; });
+}
+
+function normalizeQuestionnairePrivacyConsent(config, type) {
+    const defaults = getDefaultQuestionnairePrivacyConsent(type);
+    const input = config && typeof config === 'object' ? config : {};
+    let paragraphs = Array.isArray(input.paragraphs)
+        ? input.paragraphs.map(function (paragraph) { return String(paragraph || '').trim(); }).filter(Boolean)
+        : splitPrivacyNoticeText(input.noticeText);
+    if (paragraphs.length === 0) {
+        paragraphs = [...defaults.paragraphs];
+    }
+
+    const version = String(input.version || '').trim();
+    const textIdentifier = String(input.textIdentifier || input.consentTextIdentifier || '').trim();
+    const title = String(input.title || '').trim();
+    const description = String(input.description || '').trim();
+    const agreementText = String(input.agreementText || '').trim();
+
+    return {
+        enabled: Object.prototype.hasOwnProperty.call(input, 'enabled') ? !!input.enabled : defaults.enabled,
+        version: version || defaults.version,
+        textIdentifier: textIdentifier || defaults.textIdentifier,
+        title: title || defaults.title,
+        description: description || defaults.description,
+        paragraphs: paragraphs,
+        agreementText: agreementText || defaults.agreementText
+    };
+}
 
 /**
  * Setup questionnaire functionality
@@ -8491,6 +8997,7 @@ function setupQuestionnaire() {
     }
     syncSectionDescriptionRequirement();
     setupFormHeaderEditing();
+    setupQuestionnairePrivacySettings();
 
     // Add section button
     const addSectionBtn = document.getElementById('add-section-btn');
@@ -8938,6 +9445,7 @@ function setActiveSemester(semester) {
 
     applyQuestionnaireEditMode(isQuestionnaireEditable());
     updateFormHeader(currentQuestionnaireType);
+    renderQuestionnairePrivacySettings();
     renderQuestions();
 }
 
@@ -8971,11 +9479,17 @@ function applyQuestionnaireEditMode(editable) {
     if (titleEl) titleEl.setAttribute('contenteditable', editable ? 'true' : 'false');
     if (descEl) descEl.setAttribute('contenteditable', editable ? 'true' : 'false');
 
+    document.querySelectorAll('#questionnaire-privacy-settings input, #questionnaire-privacy-settings textarea')
+        .forEach(function (field) {
+            field.disabled = !editable;
+        });
+
     refreshCopyQuestionnaireAvailability();
 }
 
 function persistQuestionsData() {
     if (!activeSemester) return false;
+    collectQuestionnairePrivacySettings();
     questionnairesBySemester[activeSemester] = questionsData;
     const savedQuestionnaires = SharedData.setQuestionnaires(questionnairesBySemester);
     if (!savedQuestionnaires) return false;
@@ -8987,9 +9501,9 @@ function persistQuestionsData() {
 
 function buildEmptyQuestionsData() {
     return {
-        'student-to-professor': { sections: [], questions: [] },
-        'professor-to-professor': { sections: [], questions: [] },
-        'supervisor-to-professor': { sections: [], questions: [] }
+        'student-to-professor': { sections: [], questions: [], privacyConsent: getDefaultQuestionnairePrivacyConsent('student-to-professor') },
+        'professor-to-professor': { sections: [], questions: [], privacyConsent: getDefaultQuestionnairePrivacyConsent('professor-to-professor') },
+        'supervisor-to-professor': { sections: [], questions: [], privacyConsent: getDefaultQuestionnairePrivacyConsent('supervisor-to-professor') }
     };
 }
 
@@ -9015,7 +9529,7 @@ function normalizeQuestionsData(parsed) {
             title: 'General Questions',
             description: 'General evaluation questions'
         };
-        return {
+        return normalizeQuestionsData({
             'student-to-professor': {
                 sections: [defaultSection],
                 questions: parsed.map((q, idx) => ({
@@ -9028,7 +9542,7 @@ function normalizeQuestionsData(parsed) {
             },
             'professor-to-professor': { sections: [], questions: [] },
             'supervisor-to-professor': { sections: [], questions: [] }
-        };
+        });
     }
 
     if (parsed['student-to-professor'] && Array.isArray(parsed['student-to-professor'])) {
@@ -9039,7 +9553,7 @@ function normalizeQuestionsData(parsed) {
             title: 'General Questions',
             description: 'General evaluation questions'
         };
-        return {
+        return normalizeQuestionsData({
             'student-to-professor': {
                 sections: [defaultSection],
                 questions: parsed['student-to-professor'].map((q, idx) => ({
@@ -9070,13 +9584,17 @@ function normalizeQuestionsData(parsed) {
                     exceptionReporting: !!q.exceptionReporting
                 })) : []
             }
-        };
+        });
     }
 
     const normalized = { ...buildEmptyQuestionsData(), ...parsed };
     Object.keys(normalized).forEach(type => {
+        if (!normalized[type] || typeof normalized[type] !== 'object' || Array.isArray(normalized[type])) {
+            normalized[type] = { sections: [], questions: [] };
+        }
         if (!Array.isArray(normalized[type].sections)) normalized[type].sections = [];
         if (!Array.isArray(normalized[type].questions)) normalized[type].questions = [];
+        normalized[type].privacyConsent = normalizeQuestionnairePrivacyConsent(normalized[type].privacyConsent, type);
         normalized[type].questions = normalized[type].questions.map(question => ({
             ...question,
             required: !!question.exceptionReporting ? false : !!question.required,
@@ -9094,11 +9612,7 @@ function generateSampleQuestions() {
 }
 
 function buildSampleQuestionsData() {
-    return {
-        'student-to-professor': { sections: [], questions: [] },
-        'professor-to-professor': { sections: [], questions: [] },
-        'supervisor-to-professor': { sections: [], questions: [] }
-    };
+    return buildEmptyQuestionsData();
 }
 
 /**
@@ -9107,8 +9621,10 @@ function buildSampleQuestionsData() {
 function handleQuestionnaireTypeChange() {
     const select = document.getElementById('questionnaire-type-select');
     if (select) {
+        collectQuestionnairePrivacySettings();
         currentQuestionnaireType = select.value;
         updateFormHeader(currentQuestionnaireType);
+        renderQuestionnairePrivacySettings();
         syncSectionDescriptionRequirement();
         renderQuestions();
         syncCopyQuestionnaireModalState();
@@ -9166,6 +9682,86 @@ function saveQuestionnaireHeader(type, updates) {
     const existingHeader = getQuestionnaireHeader(type);
     currentData.header = { ...existingHeader, ...updates };
     questionsData[type] = currentData;
+}
+
+function getQuestionnairePrivacyConsent(type) {
+    const currentData = questionsData[type] || { sections: [], questions: [] };
+    return normalizeQuestionnairePrivacyConsent(currentData.privacyConsent, type);
+}
+
+function hasQuestionnairePrivacyConsentChanges(type) {
+    return JSON.stringify(getQuestionnairePrivacyConsent(type)) !== JSON.stringify(getDefaultQuestionnairePrivacyConsent(type));
+}
+
+function saveQuestionnairePrivacyConsent(type, updates) {
+    const currentData = questionsData[type] || { sections: [], questions: [] };
+    const existingConfig = getQuestionnairePrivacyConsent(type);
+    currentData.privacyConsent = normalizeQuestionnairePrivacyConsent({ ...existingConfig, ...updates }, type);
+    questionsData[type] = currentData;
+}
+
+function renderQuestionnairePrivacySettings() {
+    const settingsEl = document.getElementById('questionnaire-privacy-settings');
+    if (!settingsEl) return;
+
+    const config = getQuestionnairePrivacyConsent(currentQuestionnaireType);
+    const requiredEl = document.getElementById('questionnaire-privacy-required');
+    const versionEl = document.getElementById('questionnaire-privacy-version');
+    const identifierEl = document.getElementById('questionnaire-privacy-identifier');
+    const titleEl = document.getElementById('questionnaire-privacy-title');
+    const textEl = document.getElementById('questionnaire-privacy-text');
+    const agreementEl = document.getElementById('questionnaire-privacy-agreement');
+    const noteEl = document.getElementById('questionnaire-privacy-note');
+
+    if (requiredEl) requiredEl.checked = !!config.enabled;
+    if (versionEl) versionEl.value = config.version || '';
+    if (identifierEl) identifierEl.value = config.textIdentifier || '';
+    if (titleEl) titleEl.value = config.title || '';
+    if (textEl) textEl.value = Array.isArray(config.paragraphs) ? config.paragraphs.join('\n\n') : '';
+    if (agreementEl) agreementEl.value = config.agreementText || '';
+    if (noteEl) {
+        noteEl.textContent = `Applies to ${getQuestionnaireTypeLabel(currentQuestionnaireType)}. Change the consent version when the notice text changes so users sign the updated version.`;
+    }
+    applyQuestionnaireEditMode(isQuestionnaireEditable());
+}
+
+function collectQuestionnairePrivacySettings() {
+    const settingsEl = document.getElementById('questionnaire-privacy-settings');
+    if (!settingsEl || !questionsData || !currentQuestionnaireType) return;
+
+    const requiredEl = document.getElementById('questionnaire-privacy-required');
+    const versionEl = document.getElementById('questionnaire-privacy-version');
+    const identifierEl = document.getElementById('questionnaire-privacy-identifier');
+    const titleEl = document.getElementById('questionnaire-privacy-title');
+    const textEl = document.getElementById('questionnaire-privacy-text');
+    const agreementEl = document.getElementById('questionnaire-privacy-agreement');
+
+    saveQuestionnairePrivacyConsent(currentQuestionnaireType, {
+        enabled: !!(requiredEl && requiredEl.checked),
+        version: versionEl ? versionEl.value : '',
+        textIdentifier: identifierEl ? identifierEl.value : '',
+        title: titleEl ? titleEl.value : '',
+        paragraphs: textEl ? splitPrivacyNoticeText(textEl.value) : [],
+        agreementText: agreementEl ? agreementEl.value : ''
+    });
+}
+
+function setupQuestionnairePrivacySettings() {
+    const settingsEl = document.getElementById('questionnaire-privacy-settings');
+    if (!settingsEl) return;
+
+    ['questionnaire-privacy-required', 'questionnaire-privacy-version', 'questionnaire-privacy-identifier', 'questionnaire-privacy-title', 'questionnaire-privacy-text', 'questionnaire-privacy-agreement']
+        .forEach(function (id) {
+            const field = document.getElementById(id);
+            if (!field) return;
+            const eventName = field.type === 'checkbox' ? 'change' : 'input';
+            field.addEventListener(eventName, function () {
+                if (!isQuestionnaireEditable()) return;
+                collectQuestionnairePrivacySettings();
+            });
+        });
+
+    renderQuestionnairePrivacySettings();
 }
 
 function setupCopyQuestionnaireControls() {
@@ -9421,7 +10017,8 @@ function getNormalizedQuestionnaireTypeEntry(bucket, type) {
     return {
         sections: Array.isArray(entry.sections) ? entry.sections : [],
         questions: Array.isArray(entry.questions) ? entry.questions : [],
-        header: entry.header ? { ...entry.header } : undefined
+        header: entry.header ? { ...entry.header } : undefined,
+        privacyConsent: normalizeQuestionnairePrivacyConsent(entry.privacyConsent, type)
     };
 }
 
@@ -9563,7 +10160,7 @@ function renderQuestions() {
                 <div class="section-header">
                     <div class="section-title-group">
                         <div class="section-title-content">
-                            <h2 class="section-title"><span class="section-letter-inline">${escapeHtml(section.letter)}.</span> ${escapeHtml(section.title)}</h2>
+                            <h2 class="section-title"><span class="section-letter-inline">${escapeHtml(String(section.letter || '').replace(/\.$/, ''))}</span><span class="section-title-text">${escapeHtml(section.title)}</span></h2>
                             <p class="section-description">${escapeHtml(section.description)}</p>
                         </div>
                     </div>
@@ -10013,7 +10610,9 @@ function moveQuestion(questionId, direction) {
 function saveQuestionnaire() {
     if (!ensureQuestionnaireEditable()) return;
     const currentData = questionsData[currentQuestionnaireType] || { sections: [], questions: [] };
-    if (currentData.sections.length === 0 && currentData.questions.length === 0) {
+    const sections = Array.isArray(currentData.sections) ? currentData.sections : [];
+    const questions = Array.isArray(currentData.questions) ? currentData.questions : [];
+    if (sections.length === 0 && questions.length === 0 && !hasQuestionnairePrivacyConsentChanges(currentQuestionnaireType)) {
         alert('Please add at least one section or question before saving.');
         return;
     }
