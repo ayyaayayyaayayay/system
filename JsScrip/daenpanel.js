@@ -56,6 +56,13 @@ let deanIferDirectoryState = {
     initialized: false
 };
 let deanSupervisorTargetDirectory = [];
+let deanSupervisorUserCache = null;
+let deanScopedProfessorCache = [];
+let deanFacultyResponseRefreshHandler = null;
+let deanFacultyResponseDataPromise = null;
+let deanFacultyResponseDataKey = '';
+let deanFacultyResponseDataLoadedKey = '';
+let deanPeerManagementRefreshHandler = null;
 let deanMobileDrawerBound = false;
 let deanViewportRefreshBound = false;
 let deanViewportRefreshTimer = 0;
@@ -286,11 +293,137 @@ function getScopedProfessorUsers(includeInactive = false) {
     const users = (SharedData.getUsers && SharedData.getUsers()) || [];
     const scopedDepartment = getScopedDeanDepartment();
     const scopedProgramCode = getScopedDeanProgramCode();
-    return (Array.isArray(users) ? users : []).filter(user => {
+    const mergedById = new Map();
+    (Array.isArray(users) ? users : []).forEach(user => {
+        const userId = normalizeUserIdToken(user && user.id);
+        if (userId) mergedById.set(userId, user);
+    });
+    (Array.isArray(deanScopedProfessorCache) ? deanScopedProfessorCache : []).forEach(user => {
+        const userId = normalizeUserIdToken(user && user.id);
+        if (userId) mergedById.set(userId, user);
+    });
+
+    return Array.from(mergedById.values()).filter(user => {
         if (!isProfessorWithinSupervisorScope(user, scopedDepartment, scopedProgramCode)) return false;
         if (!includeInactive && !isActiveUser(user)) return false;
         return true;
     });
+}
+
+function getDeanSessionUserId(sessionInput) {
+    const session = sessionInput || getUserSession() || {};
+    return normalizeDeanUserIdToken(session.userId || session.id || '');
+}
+
+async function refreshDeanSupervisorUser() {
+    const session = getUserSession() || {};
+    const sessionUserId = getDeanSessionUserId(session);
+
+    try {
+        if (SharedData && typeof SharedData.refreshBootstrap === 'function') {
+            await SharedData.refreshBootstrap(false);
+        }
+        const users = SharedData && typeof SharedData.getCachedUsers === 'function'
+            ? SharedData.getCachedUsers()
+            : SharedData && typeof SharedData.getUsers === 'function'
+                ? SharedData.getUsers()
+                : [];
+        const supervisors = (Array.isArray(users) ? users : []).filter(user => normalizeRoleToken(user && user.role) === SUPERVISOR_ROLE);
+        const matched = sessionUserId
+            ? supervisors.find(user => normalizeDeanUserIdToken(user && user.id) === sessionUserId)
+            : supervisors[0];
+        if (matched) {
+            deanSupervisorUserCache = matched;
+            return deanSupervisorUserCache;
+        }
+    } catch (error) {
+        console.warn('[SupervisorPanel] Unable to refresh supervisor account scope; using cached session scope.', error);
+    }
+
+    deanSupervisorUserCache = deanSupervisorUserCache || buildSupervisorUserFromSession(session, { includeInactive: true });
+    return deanSupervisorUserCache;
+}
+
+function cacheDeanScopedProfessors(professors) {
+    const byId = new Map();
+    (Array.isArray(professors) ? professors : []).forEach(professor => {
+        if (!professor || normalizeRoleToken(professor.role) !== 'professor') return;
+        const userId = normalizeUserIdToken(professor.id);
+        if (userId) byId.set(userId, professor);
+    });
+    deanScopedProfessorCache = Array.from(byId.values());
+    return deanScopedProfessorCache;
+}
+
+async function refreshDeanScopedProfessors() {
+    await refreshDeanSupervisorUser();
+    const cachedUsers = SharedData && typeof SharedData.getCachedUsers === 'function'
+        ? SharedData.getCachedUsers()
+        : SharedData && typeof SharedData.getUsers === 'function'
+            ? SharedData.getUsers()
+            : [];
+    const cachedScopedProfessors = (Array.isArray(cachedUsers) ? cachedUsers : []).filter(user =>
+        isProfessorWithinSupervisorScope(user, getScopedDeanDepartment(), getScopedDeanProgramCode())
+        && isActiveUser(user)
+    );
+    if (cachedScopedProfessors.length) {
+        return cacheDeanScopedProfessors(cachedScopedProfessors);
+    }
+
+    return getScopedProfessorUsers(false);
+}
+
+function buildDeanReportRefreshKey(semesterId) {
+    return [
+        SUPERVISOR_ROLE,
+        getScopedDeanDepartment(),
+        getScopedDeanProgramCode(),
+        resolveSelectedSemesterId(semesterId)
+    ].join('|');
+}
+
+function ensureDeanFacultyResponseData(semesterId, options = {}) {
+    const resolvedSemesterId = resolveSelectedSemesterId(semesterId);
+    const refreshKey = buildDeanReportRefreshKey(resolvedSemesterId);
+    const forceRefresh = options && options.force === true;
+    if (!forceRefresh && deanFacultyResponseDataLoadedKey === refreshKey) {
+        return Promise.resolve(true);
+    }
+    if (!forceRefresh && deanFacultyResponseDataPromise && deanFacultyResponseDataKey === refreshKey) {
+        return deanFacultyResponseDataPromise;
+    }
+
+    deanFacultyResponseDataKey = refreshKey;
+    deanFacultyResponseDataPromise = Promise.resolve()
+        .then(() => {
+            if (SharedData && typeof SharedData.refreshBootstrap === 'function') {
+                return SharedData.refreshBootstrap(false);
+            }
+            return true;
+        })
+        .then(() => Promise.all([
+            refreshDeanScopedProfessors(),
+            SharedData && typeof SharedData.refreshSubjectManagement === 'function'
+                ? SharedData.refreshSubjectManagement({ semesterId: resolvedSemesterId })
+                : Promise.resolve(null),
+            SharedData && typeof SharedData.refreshEvaluations === 'function'
+                ? SharedData.refreshEvaluations({ semesterId: resolvedSemesterId })
+                : Promise.resolve(null)
+        ]))
+        .then(result => {
+            deanFacultyResponseDataLoadedKey = refreshKey;
+            return result;
+        })
+        .catch(error => {
+            console.warn('[SupervisorPanel] Unable to refresh faculty response data; using cached data.', error);
+            return null;
+        })
+        .finally(() => {
+            deanFacultyResponseDataPromise = null;
+            deanFacultyResponseDataKey = '';
+        });
+
+    return deanFacultyResponseDataPromise;
 }
 
 function buildDeanUserLookup(users) {
@@ -922,20 +1055,33 @@ function createCategoryStatBucket() {
 function buildDeanPanelContext() {
     const session = getUserSession() || {};
     const deanUser = resolveCurrentDeanUserAnyStatus(session);
-    const users = (SharedData.getUsers && SharedData.getUsers()) || [];
-    const evaluations = (SharedData.getEvaluations && SharedData.getEvaluations()) || [];
+    const baseUsers = (SharedData.getCachedUsers && SharedData.getCachedUsers())
+        || (SharedData.getUsers && SharedData.getUsers())
+        || [];
+    const usersById = new Map();
+    (Array.isArray(baseUsers) ? baseUsers : []).forEach(user => {
+        const userId = normalizeUserIdToken(user && user.id);
+        if (userId) usersById.set(userId, user);
+    });
+    (Array.isArray(deanScopedProfessorCache) ? deanScopedProfessorCache : []).forEach(user => {
+        const userId = normalizeUserIdToken(user && user.id);
+        if (userId) usersById.set(userId, user);
+    });
+    const users = Array.from(usersById.values());
+    const evaluations = (SharedData.getCachedEvaluations && SharedData.getCachedEvaluations())
+        || (SharedData.getEvaluations && SharedData.getEvaluations())
+        || [];
     const semesterList = (SharedData.getSemesterList && SharedData.getSemesterList()) || [];
     const currentSemester = String((SharedData.getCurrentSemester && SharedData.getCurrentSemester()) || '').trim();
-    const subjectManagement = SharedData.getSubjectManagement
-        ? SharedData.getSubjectManagement()
+    const subjectManagement = SharedData.getCachedSubjectManagement
+        ? SharedData.getCachedSubjectManagement()
+        : SharedData.getSubjectManagement
+            ? SharedData.getSubjectManagement()
         : { offerings: [], enrollments: [] };
     const scopedDepartment = String((deanUser && (deanUser.department || deanUser.institute)) || '').trim().toUpperCase();
     const scopedProgramCode = String((deanUser && deanUser.programCode) || '').trim().toUpperCase();
 
-    const scopedProfessors = (Array.isArray(users) ? users : []).filter(user => {
-        if (!isActiveUser(user)) return false;
-        return isProfessorWithinSupervisorScope(user, scopedDepartment, scopedProgramCode);
-    });
+    const scopedProfessors = getScopedProfessorUsers(false);
 
     const professorLookup = buildDeanUserLookup(scopedProfessors);
     const professorById = {};
@@ -1281,43 +1427,102 @@ function checkAuthentication() {
 
 function resolveCurrentDeanUserAnyStatus(sessionInput) {
     const session = sessionInput || getUserSession() || {};
+    const sessionUserId = normalizeDeanUserIdToken(session && (session.userId || session.id));
+    if (
+        deanSupervisorUserCache
+        && normalizeDeanToken(deanSupervisorUserCache.role) === SUPERVISOR_ROLE
+        && (!sessionUserId || normalizeDeanUserIdToken(deanSupervisorUserCache.id) === sessionUserId)
+    ) {
+        return deanSupervisorUserCache;
+    }
+
     const users = (typeof SharedData !== 'undefined' && SharedData.getUsers) ? SharedData.getUsers() : [];
     const supervisors = (Array.isArray(users) ? users : []).filter(user => normalizeDeanToken(user && user.role) === SUPERVISOR_ROLE);
-    if (!supervisors.length) return null;
 
-    const sessionUserId = normalizeDeanUserIdToken(session && session.userId);
     if (sessionUserId) {
         const byId = supervisors.find(user => normalizeDeanUserIdToken(user && user.id) === sessionUserId);
-        if (byId) return byId;
+        if (byId) {
+            deanSupervisorUserCache = byId;
+            return byId;
+        }
     }
 
     const sessionEmail = normalizeDeanToken(session && session.email);
     if (sessionEmail) {
         const byEmail = supervisors.find(user => normalizeDeanToken(user && user.email) === sessionEmail);
-        if (byEmail) return byEmail;
+        if (byEmail) {
+            deanSupervisorUserCache = byEmail;
+            return byEmail;
+        }
     }
 
     const sessionEmployeeId = normalizeDeanToken(session && session.employeeId);
     if (sessionEmployeeId) {
         const byEmployeeId = supervisors.find(user => normalizeDeanToken(user && user.employeeId) === sessionEmployeeId);
-        if (byEmployeeId) return byEmployeeId;
+        if (byEmployeeId) {
+            deanSupervisorUserCache = byEmployeeId;
+            return byEmployeeId;
+        }
     }
 
     const sessionUsername = normalizeDeanToken(session && session.username);
     if (sessionUsername) {
         const byName = supervisors.find(user => normalizeDeanToken(user && user.name) === sessionUsername);
-        if (byName) return byName;
+        if (byName) {
+            deanSupervisorUserCache = byName;
+            return byName;
+        }
         const byEmailName = supervisors.find(user => normalizeDeanToken(user && user.email) === sessionUsername);
-        if (byEmailName) return byEmailName;
+        if (byEmailName) {
+            deanSupervisorUserCache = byEmailName;
+            return byEmailName;
+        }
     }
 
     const sessionFullName = normalizeDeanToken(session && session.fullName);
     if (sessionFullName) {
         const byFullName = supervisors.find(user => normalizeDeanToken(user && user.name) === sessionFullName);
-        if (byFullName) return byFullName;
+        if (byFullName) {
+            deanSupervisorUserCache = byFullName;
+            return byFullName;
+        }
     }
 
-    return null;
+    return buildSupervisorUserFromSession(session, { includeInactive: true });
+}
+
+function buildSupervisorUserFromSession(session, options = {}) {
+    const cfg = options || {};
+    const source = session && typeof session === 'object' ? session : {};
+    if (normalizeDeanToken(source.role) !== SUPERVISOR_ROLE) return null;
+
+    const status = normalizeDeanToken(source.status || 'active') === 'inactive' ? 'inactive' : 'active';
+    if (status === 'inactive' && cfg.includeInactive !== true) return null;
+
+    const id = normalizeDeanUserIdToken(source.userId);
+    const email = String(source.email || '').trim();
+    const name = String(source.fullName || source.username || email || id || '').trim();
+    if (!id && !email && !name) return null;
+
+    const department = String(source.department || source.institute || '').trim().toUpperCase();
+    const programCode = String(source.programCode || source.program || '').trim().toUpperCase();
+
+    return {
+        id,
+        name,
+        email,
+        role: SUPERVISOR_ROLE,
+        employeeId: String(source.employeeId || '').trim(),
+        department,
+        institute: department,
+        programCode,
+        programName: String(source.programName || '').trim(),
+        position: String(source.position || '').trim(),
+        campus: String(source.campus || source.campusSlug || '').trim(),
+        status,
+        photoData: String(source.profileImageUrl || source.profileImage || '').trim(),
+        profileImageUrl: String(source.profileImageUrl || source.profileImage || '').trim(),
+    };
 }
 
 function enforceActiveDeanAccount(options = {}) {
@@ -1404,7 +1609,13 @@ function setupDeanDataSync() {
             populatePeerProfessorOptions();
             loadProfessorCount();
             refreshDeanIferDirectory();
-            if (deanSummaryState.selectedEvaluationType) {
+            if (!deanFacultyResponseDataPromise && isDeanFacultyResponseViewActive() && typeof deanFacultyResponseRefreshHandler === 'function') {
+                deanFacultyResponseRefreshHandler({ force: true });
+            }
+            if (typeof deanPeerManagementRefreshHandler === 'function') {
+                deanPeerManagementRefreshHandler({ silent: true });
+            }
+            if (!isDeanFacultyResponseViewActive() && deanSummaryState.selectedEvaluationType) {
                 loadFacultySummary({
                     semesterId: deanSummaryState.selectedSemesterId,
                     evaluationType: deanSummaryState.selectedEvaluationType
@@ -1418,7 +1629,8 @@ function setupDeanDataSync() {
             SharedData.KEYS.SUBJECT_MANAGEMENT,
             SharedData.KEYS.CURRENT_SEMESTER,
             SharedData.KEYS.SEMESTER_LIST,
-            SharedData.KEYS.QUESTIONNAIRES
+            SharedData.KEYS.QUESTIONNAIRES,
+            SharedData.KEYS.PROGRAMS
         ]);
 
         if (key === SharedData.KEYS.ANNOUNCEMENTS) {
@@ -1429,10 +1641,17 @@ function setupDeanDataSync() {
         if (refreshKeys.has(key)) {
             populatePeerProfessorOptions();
             loadProfessorCount();
-            loadFacultySummary({
-                semesterId: deanSummaryState.selectedSemesterId,
-                evaluationType: deanSummaryState.selectedEvaluationType
-            });
+            if (!deanFacultyResponseDataPromise && isDeanFacultyResponseViewActive() && typeof deanFacultyResponseRefreshHandler === 'function') {
+                deanFacultyResponseRefreshHandler({ force: true });
+            } else if (!isDeanFacultyResponseViewActive()) {
+                loadFacultySummary({
+                    semesterId: deanSummaryState.selectedSemesterId,
+                    evaluationType: deanSummaryState.selectedEvaluationType
+                });
+            }
+            if (key === SharedData.KEYS.PROGRAMS && typeof deanPeerManagementRefreshHandler === 'function') {
+                deanPeerManagementRefreshHandler({ silent: true });
+            }
             refreshDeanIferDirectory();
         }
 
@@ -1703,6 +1922,9 @@ function switchView(viewName) {
         if (peerManagementView) peerManagementView.style.display = 'none';
         window.scrollTo(0, 0);
         closeAllPanels();
+        if (typeof deanFacultyResponseRefreshHandler === 'function') {
+            deanFacultyResponseRefreshHandler({ force: false });
+        }
     } else if (viewName === 'peerManagement') {
         if (dashboardView) dashboardView.style.display = 'none';
         if (peerEvaluationView) peerEvaluationView.style.display = 'none';
@@ -1712,6 +1934,9 @@ function switchView(viewName) {
         if (peerManagementView) peerManagementView.style.display = 'block';
         window.scrollTo(0, 0);
         closeAllPanels();
+        if (typeof deanPeerManagementRefreshHandler === 'function') {
+            deanPeerManagementRefreshHandler({ silent: true });
+        }
     }
 
     if (viewName === 'dashboard' || viewName === 'facultyResponse') {
@@ -2536,6 +2761,7 @@ function renderDeanFacultyPaperDetail(paper) {
             }
 
             await openDeanFacultyPaperPdf({
+                paper_id: paper.id,
                 faculty_name: paper.professor_name || 'N/A',
                 department: paper.department || 'N/A',
                 rank: paper.rank || 'N/A',
@@ -3472,12 +3698,29 @@ function setupProfilePhotoUpload() {
     const fullName = getProfileFullName();
     placeholder.textContent = buildInitials(fullName) || 'DP';
 
-    const storedPhoto = SharedData.getProfilePhoto('dean');
-    if (storedPhoto) {
-        preview.src = storedPhoto;
-        preview.classList.add('active');
-        placeholder.style.display = 'none';
+    function applyProfilePhotoPreview(photo) {
+        const resolvedPhoto = String(photo || '').trim();
+        if (resolvedPhoto) {
+            preview.src = resolvedPhoto;
+            preview.classList.add('active');
+            placeholder.style.display = 'none';
+            return true;
+        }
+
+        preview.removeAttribute('src');
+        preview.classList.remove('active');
+        placeholder.style.display = '';
+        return false;
     }
+
+    const storedPhoto = SharedData.getProfilePhoto('dean');
+    applyProfilePhotoPreview(storedPhoto);
+
+    window.addEventListener('shareddata:change', function (event) {
+        if (event && event.detail && event.detail.key === 'profilePhoto') {
+            applyProfilePhotoPreview(event.detail.value);
+        }
+    });
 
     input.addEventListener('change', function () {
         const file = input.files && input.files[0];
@@ -3515,29 +3758,33 @@ function setupProfilePhotoUpload() {
             return;
         }
 
-        try {
-            const savedPhoto = SharedData.uploadProfilePhoto(file);
-            if (savedPhoto) {
-                preview.src = savedPhoto;
-            }
-            preview.classList.add('active');
-            placeholder.style.display = 'none';
-        } catch (error) {
+        function handleUploadError(error) {
             alert(error && error.message ? error.message : 'Failed to upload the profile image.');
             const storedPhoto = SharedData.getProfilePhoto('dean');
-            if (storedPhoto) {
-                preview.src = storedPhoto;
-                preview.classList.add('active');
-                placeholder.style.display = 'none';
-            } else {
-                preview.removeAttribute('src');
-                preview.classList.remove('active');
-                placeholder.style.display = '';
-            }
-        } finally {
+            applyProfilePhotoPreview(storedPhoto);
+        }
+
+        let uploadPromise;
+        try {
+            uploadPromise = typeof SharedData.uploadProfilePhotoAsync === 'function'
+                ? SharedData.uploadProfilePhotoAsync(file, { message: 'Uploading profile photo...' })
+                : Promise.resolve(SharedData.uploadProfilePhoto(file));
+        } catch (error) {
+            handleUploadError(error);
             URL.revokeObjectURL(localPreviewUrl);
             input.value = '';
+            return;
         }
+
+        Promise.resolve(uploadPromise)
+            .then(function (savedPhoto) {
+                applyProfilePhotoPreview(savedPhoto);
+            })
+            .catch(handleUploadError)
+            .finally(function () {
+                URL.revokeObjectURL(localPreviewUrl);
+                input.value = '';
+            });
     });
 }
 
@@ -3734,14 +3981,14 @@ function setupChangeEmailForm() {
 
     form.addEventListener('submit', function (e) {
         e.preventDefault();
-        handleChangeEmail();
+        void handleChangeEmail();
     });
 }
 
 /**
  * Change email handler
  */
-function handleChangeEmail() {
+async function handleChangeEmail() {
     const form = document.getElementById('changeEmailForm');
     if (!form) return;
 
@@ -3761,13 +4008,26 @@ function handleChangeEmail() {
         showFormMessage(form, 'New mail account must be different from the current mail account.', 'error');
         return;
     }
-    if (!SharedData.changeOwnEmail) {
+    const changeOwnEmail = SharedData.changeOwnEmailAsync || SharedData.changeOwnEmail;
+    if (!changeOwnEmail) {
         showFormMessage(form, 'Mail account update service is unavailable.', 'error');
         return;
     }
 
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    const submitButton = document.getElementById('changeEmailSubmitBtn') || form.querySelector('button[type="submit"]');
+    const originalButtonText = submitButton ? submitButton.textContent : '';
+    if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = 'Updating...';
+    }
+
     try {
-        const result = SharedData.changeOwnEmail(currentEmail, newEmail);
+        const result = await Promise.resolve(changeOwnEmail(currentEmail, newEmail));
         const nextEmail = String(result && result.email || newEmail).trim();
         const currentEmailInput = document.getElementById('currentEmail');
         if (currentEmailInput) {
@@ -3783,6 +4043,11 @@ function handleChangeEmail() {
     } catch (error) {
         console.error('[DeanPanel] Failed to update mail account.', error);
         showFormMessage(form, error && error.message ? error.message : 'Failed to update mail account.', 'error');
+    } finally {
+        if (submitButton) {
+            submitButton.disabled = false;
+            submitButton.textContent = originalButtonText || 'Update Mail Account';
+        }
     }
 }
 
@@ -4531,9 +4796,17 @@ function setupFacultyResponseView() {
     const session = getUserSession() || {};
     const deanId = session.username || '';
     const assignedInstitutes = getDeanAssignedInstitutes(session);
-    let sourceData = [];
     let currentView = 'student';
+    let resultsRequestId = 0;
     let selectedSemesterId = resolveSelectedSemesterId(deanSummaryState.selectedSemesterId);
+    let sourceData = [];
+    let sourceDataView = currentView;
+    let sourceDataSemesterId = selectedSemesterId;
+    const sourceDataCache = {
+        student: {},
+        peer: {},
+        supervisor: {}
+    };
     const feedbackState = deanFacultyFeedbackState;
     feedbackState.selectedSourceView = currentView;
     feedbackState.loadedComments = Array.isArray(feedbackState.loadedComments) ? feedbackState.loadedComments : [];
@@ -4676,25 +4949,96 @@ function setupFacultyResponseView() {
         }
     }
 
-    function setResultsView(view) {
+    function renderFacultyResponseLoading(view) {
+        const tbody = table.querySelector('tbody');
+        if (tbody) {
+            tbody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="10">Loading ' + escapeHTML(getFeedbackViewLabel(view)) + ' results...</td></tr>';
+        }
+        resultEl.textContent = 'Loading ' + getFeedbackViewLabel(view) + ' results for ' + getSemesterLabelById(selectedSemesterId) + '...';
+    }
+
+    function getSourceDataCache(view, semesterId) {
+        const normalizedView = view === 'peer' ? 'peer' : view === 'supervisor' ? 'supervisor' : 'student';
+        const key = resolveSelectedSemesterId(semesterId);
+        if (!key || !sourceDataCache[normalizedView]) return null;
+        return Object.prototype.hasOwnProperty.call(sourceDataCache[normalizedView], key)
+            ? sourceDataCache[normalizedView][key]
+            : null;
+    }
+
+    function setSourceDataCache(view, semesterId, rows) {
+        const normalizedView = view === 'peer' ? 'peer' : view === 'supervisor' ? 'supervisor' : 'student';
+        const key = resolveSelectedSemesterId(semesterId);
+        if (!key || !sourceDataCache[normalizedView]) return;
+        sourceDataCache[normalizedView][key] = Array.isArray(rows) ? rows.slice() : [];
+    }
+
+    function setResultsView(view, options = {}) {
         currentView = view === 'peer' ? 'peer' : view === 'supervisor' ? 'supervisor' : 'student';
+        const requestId = ++resultsRequestId;
+        const summaryType = getDeanEvaluationTypeMeta(currentView).id;
+        const forceRefresh = options && options.force === true;
+        const cachedSourceData = getSourceDataCache(currentView, selectedSemesterId);
+        const hasCachedSourceData = Array.isArray(cachedSourceData);
+        if (hasCachedSourceData) {
+            sourceData = cachedSourceData.slice();
+            sourceDataView = currentView;
+            sourceDataSemesterId = selectedSemesterId;
+        } else if (sourceDataView !== currentView || sourceDataSemesterId !== selectedSemesterId) {
+            sourceData = [];
+        }
+        const hasVisibleRows = Array.isArray(sourceData)
+            && sourceData.length > 0
+            && sourceDataView === currentView
+            && sourceDataSemesterId === selectedSemesterId;
+        deanSummaryState.selectedEvaluationType = summaryType;
         setToggleState(studentResultsBtn, currentView === 'student');
         setToggleState(peerResultsBtn, currentView === 'peer');
         setToggleState(supervisorResultsBtn, currentView === 'supervisor');
 
         resetFeedbackPanelState(true);
-
-        fetchResults(currentView).then(results => {
-            sourceData = Array.isArray(results) ? results : [];
+        if (!hasCachedSourceData && !hasVisibleRows) {
+            renderFacultyResponseLoading(currentView);
+        } else if (hasCachedSourceData || (!forceRefresh && hasVisibleRows)) {
             const { filtered, keyword } = applyFilter(sourceData);
             renderFacultyResponseTable(filtered);
             attachFacultyCommentButtons(filtered);
             updateFacultySearchResult(filtered.length, sourceData.length, keyword, currentView, selectedSemesterId);
-        }).catch(() => {
-            renderFacultyResponseTable([]);
-            attachFacultyCommentButtons([]);
-            updateFacultySearchResult(0, 0, '', currentView, selectedSemesterId);
-        });
+        }
+
+        return ensureDeanFacultyResponseData(selectedSemesterId, options)
+            .then(() => {
+                if (requestId !== resultsRequestId) return null;
+                loadFacultySummary({
+                    semesterId: selectedSemesterId,
+                    evaluationType: summaryType
+                });
+                return fetchResults(currentView);
+            })
+            .then(results => {
+                if (requestId !== resultsRequestId || results === null) return;
+                sourceData = Array.isArray(results) ? results : [];
+                sourceDataView = currentView;
+                sourceDataSemesterId = selectedSemesterId;
+                setSourceDataCache(currentView, selectedSemesterId, sourceData);
+                const { filtered, keyword } = applyFilter(sourceData);
+                renderFacultyResponseTable(filtered);
+                attachFacultyCommentButtons(filtered);
+                updateFacultySearchResult(filtered.length, sourceData.length, keyword, currentView, selectedSemesterId);
+            }).catch(error => {
+                if (requestId !== resultsRequestId) return;
+                console.warn('[SupervisorPanel] Failed to load faculty response results.', error);
+                if (Array.isArray(sourceData) && sourceData.length) {
+                    const { filtered, keyword } = applyFilter(sourceData);
+                    renderFacultyResponseTable(filtered);
+                    attachFacultyCommentButtons(filtered);
+                    updateFacultySearchResult(filtered.length, sourceData.length, keyword, currentView, selectedSemesterId);
+                    return;
+                }
+                renderFacultyResponseTable([]);
+                attachFacultyCommentButtons([]);
+                resultEl.textContent = 'Unable to refresh ' + getFeedbackViewLabel(currentView) + ' results for ' + getSemesterLabelById(selectedSemesterId) + '.';
+            });
     }
 
     function runSearch() {
@@ -4781,11 +5125,7 @@ function setupFacultyResponseView() {
         selectedSemesterId = resolveSelectedSemesterId(semesterFilter.value || selectedSemesterId);
         deanSummaryState.selectedSemesterId = selectedSemesterId;
         deanSummaryState.selectedSemesterLabel = getSemesterLabelById(selectedSemesterId);
-        loadFacultySummary({
-            semesterId: selectedSemesterId,
-            evaluationType: deanSummaryState.selectedEvaluationType || 'student'
-        });
-        setResultsView(currentView);
+        setResultsView(currentView, { force: true });
     });
 
     if (studentResultsBtn) {
@@ -4868,6 +5208,9 @@ function setupFacultyResponseView() {
 
     populateSemesterFilter(selectedSemesterId);
     resetFeedbackPanelState(true);
+    deanFacultyResponseRefreshHandler = function (options = {}) {
+        return setResultsView(currentView, options);
+    };
     setResultsView(currentView);
 }
 
@@ -5034,6 +5377,7 @@ function setupPeerManagementView() {
     let scopedPrograms = [];
     let programSummaryCache = [];
     let selectedProgramCode = '';
+    let peerSummaryRequestId = 0;
 
     function setMessage(text, type) {
         messageEl.textContent = text;
@@ -5059,6 +5403,41 @@ function setupPeerManagementView() {
         const name = String(program && (program.programName || program.program_name) || '').trim();
         if (!code && !name) return 'No program selected';
         return name ? `${code} - ${name}` : code;
+    }
+
+    function normalizePeerProgramOption(program, assumeScoped = false) {
+        if (!program || typeof program !== 'object') return null;
+        const code = normalizeProgramCode(program.programCode || program.program_code || '');
+        if (!code) return null;
+        return {
+            programCode: code,
+            programName: String(program.programName || program.program_name || '').trim(),
+            departmentCode: String(program.departmentCode || program.department_code || '').trim().toUpperCase(),
+            assumeScoped
+        };
+    }
+
+    function buildScopedProgramOptions() {
+        const byCode = new Map();
+        const scopedProgramCode = getScopedDeanProgramCode();
+
+        function addProgram(program, assumeScoped) {
+            const option = normalizePeerProgramOption(program, assumeScoped);
+            if (!option) return;
+            if (isProgramScopedSupervisorPanel() && (!scopedProgramCode || option.programCode !== scopedProgramCode)) return;
+            if (!option.assumeScoped && scopedDepartment && option.departmentCode && option.departmentCode !== scopedDepartment) return;
+            if (!option.assumeScoped && scopedDepartment && !option.departmentCode) return;
+            const existing = byCode.get(option.programCode);
+            byCode.set(option.programCode, Object.assign({}, option, existing || {}, {
+                programName: option.programName || (existing && existing.programName) || ''
+            }));
+        }
+
+        ((SharedData.getPrograms && SharedData.getPrograms()) || []).forEach(program => addProgram(program, false));
+        (Array.isArray(programSummaryCache) ? programSummaryCache : []).forEach(program => addProgram(program, true));
+
+        return Array.from(byCode.values())
+            .sort((a, b) => String(a && a.programCode || '').localeCompare(String(b && b.programCode || '')));
     }
 
     function setSelectedProgram(programCode) {
@@ -5122,19 +5501,8 @@ function setupPeerManagementView() {
     }
 
     function renderPrograms() {
-        const allPrograms = (SharedData.getPrograms && SharedData.getPrograms()) || [];
-        const scopedProgramCode = getScopedDeanProgramCode();
-        scopedPrograms = (Array.isArray(allPrograms) ? allPrograms : [])
-            .filter(program => {
-                const dept = String(program && program.departmentCode || '').trim().toUpperCase();
-                if (!scopedDepartment || dept !== scopedDepartment) return false;
-                if (isProgramScopedSupervisorPanel()) {
-                    const programCode = String(program && program.programCode || '').trim().toUpperCase();
-                    return !!scopedProgramCode && programCode === scopedProgramCode;
-                }
-                return true;
-            })
-            .sort((a, b) => String(a && a.programCode || '').localeCompare(String(b && b.programCode || '')));
+        const previousSelection = normalizeProgramCode(programSelect.value || selectedProgramCode);
+        scopedPrograms = buildScopedProgramOptions();
 
         if (!scopedPrograms.length) {
             programSelect.innerHTML = '<option value="">No programs available in your scope</option>';
@@ -5148,8 +5516,12 @@ function setupPeerManagementView() {
             scopedPrograms.map(program =>
                 `<option value="${escapeHTML(normalizeProgramCode(program && program.programCode))}">${escapeHTML(String(program.programCode || ''))} - ${escapeHTML(String(program.programName || ''))}</option>`
             ).join('');
+        if (previousSelection && scopedPrograms.some(program => normalizeProgramCode(program && program.programCode) === previousSelection)) {
+            programSelect.value = previousSelection;
+        }
         if (isProgramScopedSupervisorPanel() && scopedPrograms.length === 1) {
             programSelect.value = normalizeProgramCode(scopedPrograms[0] && scopedPrograms[0].programCode);
+            setSelectedProgram(programSelect.value);
         }
     }
 
@@ -5161,7 +5533,9 @@ function setupPeerManagementView() {
         programSummaryCache = rows.slice();
         if (!rows.length) {
             tbody.innerHTML = '<tr><td colspan="6">No peer assignment data available for the current semester.</td></tr>';
-            setSelectedProgram('');
+            if (!scopedPrograms.length) {
+                setSelectedProgram('');
+            }
             return;
         }
 
@@ -5182,11 +5556,28 @@ function setupPeerManagementView() {
     }
 
     function loadProgramSummaries(options = {}) {
+        const requestId = ++peerSummaryRequestId;
         const silent = !!(options && options.silent);
         const preferredProgramCode = normalizeProgramCode(options && options.preferredProgramCode);
-        try {
+
+        const handleError = function (error) {
+            if (requestId !== peerSummaryRequestId) return;
+            renderProgramsTable({ programs: [] });
+            renderPrograms();
+            renderAssignmentDetails({
+                emptyMessage: 'Unable to load peer assignment details.'
+            });
+            if (!silent) {
+                setMessage(String(error && error.message || 'Unable to load peer assignments.'), 'error');
+            }
+        };
+
+        const runLoad = function () {
+            if (requestId !== peerSummaryRequestId) return;
             const response = SharedData[getSupervisorPeerMethodName('list')]({});
+            if (requestId !== peerSummaryRequestId) return;
             renderProgramsTable(response || {});
+            renderPrograms();
             const selectedCode = preferredProgramCode || normalizeProgramCode(programSelect.value || selectedProgramCode);
             if (selectedCode) {
                 setSelectedProgram(selectedCode);
@@ -5204,14 +5595,19 @@ function setupPeerManagementView() {
                     setMessage('No current semester is configured yet.', 'error');
                 }
             }
+        };
+
+        if (SharedData && typeof SharedData.refreshBootstrap === 'function') {
+            SharedData.refreshBootstrap(false)
+                .then(runLoad)
+                .catch(handleError);
+            return;
+        }
+
+        try {
+            runLoad();
         } catch (error) {
-            renderProgramsTable({ programs: [] });
-            renderAssignmentDetails({
-                emptyMessage: 'Unable to load peer assignment details.'
-            });
-            if (!silent) {
-                setMessage(String(error && error.message || 'Unable to load peer assignments.'), 'error');
-            }
+            handleError(error);
         }
     }
 
@@ -5326,6 +5722,11 @@ function setupPeerManagementView() {
         setSelectedProgram(programCode);
         loadAssignmentDetails(programCode);
     });
+
+    deanPeerManagementRefreshHandler = function (options = {}) {
+        renderPrograms();
+        loadProgramSummaries(options);
+    };
 
     renderPrograms();
     renderAssignmentDetails({

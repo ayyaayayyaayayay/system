@@ -8,8 +8,8 @@
     <link rel="icon" type="image/png" sizes="32x32" href="../design/favicon-32x32.png">
     <link rel="apple-touch-icon" href="../design/apple-touch-icon.png">
     <title>HR Dashboard - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/panel-theme.css?v=20260904c">
-    <link rel="stylesheet" href="../css/hrpanel.css?v=20260906e">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260907a">
+    <link rel="stylesheet" href="../css/hrpanel.css?v=20260925a">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -203,7 +203,8 @@
                                     <div class="section-filters">
                                         <select id="ranking-employment-filter" class="filter-select">
                                             <option value="all">All Employment Types</option>
-                                            <option value="Regular">Regular</option>
+                                            <option value="Permanent">Permanent</option>
+                                            <option value="COS">COS</option>
                                             <option value="Temporary">Temporary</option>
                                         </select>
                                         <select id="ranking-dept-filter" class="filter-select">
@@ -534,32 +535,6 @@
                             </div>
                         </section>
 
-                        <!-- Rating Criteria Settings -->
-                        <section class="admin-section hr-settings-section">
-                            <div class="section-header">
-                                <div class="section-title">
-                                    <h2><i class="fas fa-star settings-accent-icon settings-accent-icon--amber"></i> Rating Criteria</h2>
-                                    <p>Configure rating scales and evaluation criteria</p>
-                                </div>
-                            </div>
-                            <div class="settings-list">
-                                <div class="setting-item">
-                                    <div class="setting-icon">
-                                        <i class="fas fa-sort-numeric-up"></i>
-                                    </div>
-                                    <div class="setting-content">
-                                        <h3>Rating Scale</h3>
-                                        <p>Choose the rating scale for evaluations</p>
-                                    </div>
-                                    <select id="rating-scale" class="settings-select">
-                                        <option value="1-5" selected>1 to 5 Stars</option>
-                                        <option value="1-10">1 to 10 Scale</option>
-                                    </select>
-                                </div>
-
-                            </div>
-                        </section>
-
                         <!-- Notification Settings -->
                         <section class="admin-section hr-settings-section">
                             <div class="section-header">
@@ -578,7 +553,7 @@
                                         <p>Send email reminders for pending evaluations</p>
                                     </div>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" checked>
+                                        <input type="checkbox" id="student-eval-reminder-enabled">
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
@@ -600,22 +575,55 @@
                                     </div>
                                     <div class="setting-content">
                                         <h3>Reminder Frequency</h3>
-                                        <p>How often to send reminders</p>
+                                        <p>Send at most once per student within this interval</p>
                                     </div>
-                                    <select id="reminder-freq" class="settings-select">
-                                        <option value="daily">Daily</option>
-                                        <option value="weekly" selected>Weekly</option>
-                                        <option value="biweekly">Bi-weekly</option>
-                                    </select>
+                                    <div class="reminder-frequency-control">
+                                        <input id="reminder-freq" class="settings-select" type="number"
+                                            min="1" max="365" step="1" inputmode="numeric" value="7"
+                                            aria-label="Reminder frequency in days">
+                                        <span>day(s)</span>
+                                    </div>
+                                </div>
+
+                                <div class="setting-item reminder-template-item">
+                                    <div class="setting-icon">
+                                        <i class="fas fa-heading"></i>
+                                    </div>
+                                    <div class="setting-content">
+                                        <h3>Email Subject</h3>
+                                        <p>Subject used for student evaluation reminders</p>
+                                    </div>
+                                    <input id="student-eval-reminder-subject"
+                                        class="reminder-template-control" type="text" maxlength="200"
+                                        aria-label="Student evaluation reminder email subject">
+                                </div>
+
+                                <div class="setting-item reminder-template-item reminder-template-item--body">
+                                    <div class="setting-icon">
+                                        <i class="fas fa-align-left"></i>
+                                    </div>
+                                    <div class="setting-content">
+                                        <h3>Email Message</h3>
+                                        <p>Available placeholders: <code>{{student_name}}</code>,
+                                            <code>{{evaluation_end_date}}</code>, <code>{{academic_year}}</code>,
+                                            <code>{{semester}}</code></p>
+                                    </div>
+                                    <textarea id="student-eval-reminder-body" class="reminder-template-control"
+                                        rows="6" maxlength="6000"
+                                        aria-label="Student evaluation reminder email message"></textarea>
                                 </div>
                             </div>
                         </section>
 
                         <!-- Save Button -->
+                        <p id="student-eval-reminder-status" class="reminder-settings-status" role="status"
+                            aria-live="polite"></p>
                         <div class="settings-action-row settings-action-row--footer">
-                            <button class="btn-setting settings-ghost-button" type="button">Reset to
+                            <button class="btn-setting settings-ghost-button" id="student-eval-reminder-reset-btn"
+                                type="button">Reset to
                                 Default</button>
-                            <button class="btn-setting purple settings-save-button settings-save-button--wide" type="button">Save All Settings</button>
+                            <button class="btn-setting purple settings-save-button settings-save-button--wide"
+                                id="student-eval-reminder-save-btn" type="button">Save Reminder Settings</button>
                         </div>
                     </div>
                 </div>
@@ -632,6 +640,8 @@
                                 <select id="professor-campus-filter" class="professor-campus-filter" aria-label="Filter professors by campus">
                                     <option value="all">All Campuses</option>
                                 </select>
+                                <select id="professor-status-filter" class="professor-campus-filter" aria-label="Filter professors by status"></select>
+                                <select id="professor-program-filter" class="professor-campus-filter" aria-label="Filter professors by program"></select>
                                 <button type="button" class="btn-professor-search" id="professor-search-btn">
                                     <i class="fas fa-search"></i>
                                     Search
@@ -679,6 +689,7 @@
                                 <!-- Professors will be dynamically loaded here -->
                             </div>
                         </div>
+                        <div class="user-pagination" id="hr-professor-pagination"></div>
                     </div>
                 </div>
 
@@ -719,7 +730,7 @@
                             </div>
                             <div class="profile-item">
                                 <span class="profile-label">Gmail</span>
-                                <span class="profile-value" id="profileEmail">hr.manager@naap.edu</span>
+                                <span class="profile-value" id="profileEmail">N/A</span>
                             </div>
                             <div class="profile-item">
                                 <span class="profile-label">AY/SEM</span>
@@ -752,27 +763,27 @@
                                 <div class="form-group">
                                     <label for="currentEmail">Current Gmail</label>
                                     <input type="email" id="currentEmail" name="currentEmail" class="form-input"
-                                        value="hr.manager@naap.edu" readonly>
+                                        value="" readonly>
                                 </div>
                                 <div class="form-group">
                                     <label for="newEmail">New Gmail</label>
                                     <input type="email" id="newEmail" name="newEmail" class="form-input"
-                                        placeholder="Enter new Gmail address" required>
+                                        placeholder="Enter new Gmail address" autocomplete="email" maxlength="190" required>
                                 </div>
                                 <div class="form-group">
                                     <label for="confirmEmail">Confirm New Gmail</label>
                                     <input type="email" id="confirmEmail" name="confirmEmail" class="form-input"
-                                        placeholder="Re-enter new Gmail address" required>
+                                        placeholder="Re-enter new Gmail address" autocomplete="email" maxlength="190" required>
                                 </div>
                             </div>
 
                             <div class="api-info-box">
-                                <i class="fas fa-database"></i>
-                                <span>SQL Ready: connect to /api/hr/change-email (POST)</span>
+                                <i class="fas fa-shield-alt"></i>
+                                <span>Your Gmail address will be updated after validation.</span>
                             </div>
 
                             <div class="form-actions">
-                                <button type="submit" class="btn-submit">Update Gmail</button>
+                                <button type="submit" class="btn-submit" id="changeEmailSubmitBtn">Update Gmail</button>
                                 <button type="button" class="btn-cancel js-close-account-form"
                                     data-target="emailUpdateCard">Cancel</button>
                             </div>
@@ -1317,7 +1328,8 @@
                 <div class="form-group">
                     <label for="professor-employment-type">Employment Type</label>
                     <select id="professor-employment-type" name="employmentType" required>
-                        <option value="Regular">Regular</option>
+                        <option value="Permanent">Permanent</option>
+                        <option value="COS">COS</option>
                         <option value="Temporary">Temporary</option>
                     </select>
                 </div>
@@ -1527,9 +1539,10 @@
         </div>
     </div>
 
-    <script src="../JsScrip/db-data.js?v=20260904c"></script>
+    <script src="../JsScrip/db-data.js?v=20260925a"></script>
+    <script src="../JsScrip/system-report.js?v=20260907a"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
-    <script src="../JsScrip/hrpanel.js?v=20260906a"></script>
+    <script src="../JsScrip/hrpanel.js?v=20260925a"></script>
 </body>
 
 </html>

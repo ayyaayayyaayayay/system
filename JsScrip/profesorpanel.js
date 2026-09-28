@@ -24,6 +24,7 @@ let peerSectionFlow = {
 let professorMobileDrawerBound = false;
 let professorViewportRefreshBound = false;
 let professorViewportRefreshTimer = 0;
+let professorAccountExitInProgress = false;
 
 const PROFESSOR_PANEL_EMPTY_SUMMARY = {
     criteriaAverages: [],
@@ -171,10 +172,100 @@ function buildProfessorLookupMaps(users) {
     };
 }
 
-function resolveCurrentProfessorUser(session, users, maps) {
-    const activeProfessors = maps.activeProfessors || [];
-    if (!activeProfessors.length) return null;
+function buildProfessorUserFromSession(session, options = {}) {
+    const cfg = options || {};
+    const source = session && typeof session === 'object' ? session : {};
+    if (normalizeToken(source.role) !== 'professor') return null;
 
+    const status = normalizeToken(source.status || 'active') === 'inactive' ? 'inactive' : 'active';
+    if (status === 'inactive' && cfg.includeInactive !== true) return null;
+
+    const id = normalizeUserIdToken(source.userId);
+    const email = String(source.email || '').trim();
+    const name = String(source.fullName || source.username || email || id || '').trim();
+    if (!id && !email && !name) return null;
+
+    return {
+        id,
+        name,
+        email,
+        role: 'professor',
+        employeeId: String(source.employeeId || '').trim(),
+        department: String(source.department || source.institute || '').trim().toUpperCase(),
+        institute: String(source.department || source.institute || '').trim().toUpperCase(),
+        programCode: String(source.programCode || source.program || '').trim().toUpperCase(),
+        programName: String(source.programName || '').trim(),
+        position: String(source.position || '').trim(),
+        campus: String(source.campus || '').trim(),
+        status,
+        profileImageUrl: String(source.profileImageUrl || source.profilePhoto || source.photoData || '').trim(),
+        profilePhoto: String(source.profilePhoto || source.profileImageUrl || source.photoData || '').trim(),
+        photoData: String(source.photoData || source.profileImageUrl || source.profilePhoto || '').trim(),
+        profileImage: String(source.profileImage || '').trim(),
+    };
+}
+
+function buildProfessorContextRecord(source) {
+    const user = source && typeof source === 'object' ? source : {};
+    const id = normalizeUserIdToken(user.id || user.userId);
+    const name = String(user.name || user.fullName || user.username || '').trim();
+    const email = String(user.email || '').trim();
+
+    if (!id && !name && !email) return null;
+
+    return {
+        id,
+        name: name || email || id || 'Professor',
+        email,
+        role: 'professor',
+        employeeId: String(user.employeeId || '').trim(),
+        department: String(user.department || user.institute || '').trim().toUpperCase(),
+        programCode: String(user.programCode || user.program || '').trim().toUpperCase(),
+        position: String(user.position || '').trim(),
+        campus: String(user.campus || '').trim(),
+        status: normalizeToken(user.status || 'active') === 'inactive' ? 'inactive' : 'active',
+        profileImageUrl: String(user.profileImageUrl || user.profilePhoto || user.photoData || '').trim(),
+        profilePhoto: String(user.profilePhoto || user.profileImageUrl || user.photoData || '').trim(),
+        photoData: String(user.photoData || user.profileImageUrl || user.profilePhoto || '').trim(),
+        profileImage: String(user.profileImage || '').trim(),
+    };
+}
+
+function resolveActiveProfessorAccount(contextInput) {
+    const context = contextInput && typeof contextInput === 'object'
+        ? contextInput
+        : (professorPanelState.context || buildProfessorPanelContext());
+    const session = context && context.session ? context.session : (getUserSession() || {});
+    const sessionProfessor = buildProfessorUserFromSession(session);
+    const professor = buildProfessorContextRecord(context && context.professor)
+        || buildProfessorContextRecord(resolveCurrentProfessorUserAnyStatus(session))
+        || buildProfessorContextRecord(sessionProfessor);
+    const isProfessorSession = session && session.isAuthenticated === true && normalizeToken(session.role) === 'professor';
+    const isInactive = normalizeToken((professor && professor.status) || (session && session.status) || 'active') === 'inactive';
+    const actorUserId = normalizeUserIdToken((professor && professor.id) || (session && session.userId));
+    const linked = !!(isProfessorSession && actorUserId && !isInactive);
+
+    if (linked && context && typeof context === 'object') {
+        context.linked = true;
+        context.professor = Object.assign({}, professor || {}, {
+            id: actorUserId,
+            role: 'professor',
+            status: 'active',
+        });
+        professorPanelState.context = context;
+        professorPanelState.linked = true;
+    }
+
+    return {
+        context,
+        professor: context && context.professor ? context.professor : professor,
+        actorUserId,
+        linked,
+        isInactive,
+    };
+}
+
+function resolveCurrentProfessorUser(session, users, maps) {
     const sessionUserId = normalizeUserIdToken(session && session.userId);
     if (sessionUserId && maps.byId[sessionUserId]) return maps.byId[sessionUserId];
 
@@ -193,7 +284,7 @@ function resolveCurrentProfessorUser(session, users, maps) {
         return maps.byId[maps.byName[sessionUsername]];
     }
 
-    return null;
+    return buildProfessorUserFromSession(session);
 }
 
 function resolveProfessorIdToken(candidate, context) {
@@ -437,16 +528,7 @@ function buildProfessorPanelContext() {
         pendingPeerAssignments,
         peerAssignmentsStats: peerAssignmentsResponse.stats || { total: 0, pending: 0, submitted: 0 },
         peerAssignmentsLoaded,
-        professor: professorUser ? {
-            id: normalizeUserIdToken(professorUser.id),
-            name: String(professorUser.name || '').trim(),
-            email: String(professorUser.email || '').trim(),
-            employeeId: String(professorUser.employeeId || '').trim(),
-            department: String(professorUser.department || '').trim().toUpperCase(),
-            programCode: String(professorUser.programCode || '').trim().toUpperCase(),
-            position: String(professorUser.position || '').trim(),
-            campus: String(professorUser.campus || '').trim(),
-        } : null,
+        professor: buildProfessorContextRecord(professorUser),
     };
 }
 
@@ -474,7 +556,6 @@ function resolveCurrentProfessorUserAnyStatus(sessionInput) {
     const session = sessionInput || getUserSession() || {};
     const users = SharedData.getUsers ? SharedData.getUsers() : [];
     const professors = (Array.isArray(users) ? users : []).filter(user => normalizeToken(user && user.role) === 'professor');
-    if (!professors.length) return null;
 
     const sessionUserId = normalizeUserIdToken(session && session.userId);
     if (sessionUserId) {
@@ -508,22 +589,27 @@ function resolveCurrentProfessorUserAnyStatus(sessionInput) {
         if (byFullName) return byFullName;
     }
 
-    return null;
+    return buildProfessorUserFromSession(session, { includeInactive: true });
 }
 
 function enforceActiveProfessorAccount(options = {}) {
     const cfg = options || {};
     const context = cfg.context || professorPanelState.context || buildProfessorPanelContext();
-    const matchedUser = resolveCurrentProfessorUserAnyStatus(context.session || getUserSession() || {});
-    const isInactive = normalizeToken(matchedUser && matchedUser.status) === 'inactive';
-    const isLinkedActive = !!(context.linked && context.professor);
+    const account = resolveActiveProfessorAccount(context);
 
-    if (isLinkedActive && !isInactive) {
+    if (account.linked) {
         return true;
     }
 
+    // Several data-change events can be queued by one request. Once the first
+    // account failure starts navigation, suppress duplicate alerts/logout calls.
+    if (professorAccountExitInProgress) {
+        return false;
+    }
+    professorAccountExitInProgress = true;
+
     const form = cfg.form || document.getElementById('peerEvaluationForm');
-    const message = isInactive
+    const message = account.isInactive
         ? 'Your account is inactive. You cannot access evaluations. Please contact your administrator.'
         : 'Your login session is not linked to an active professor account.';
 
@@ -634,13 +720,15 @@ function renderAnnouncementPanels(context) {
 }
 
 function renderProfileViewModel(context, semesterLabel) {
-    const professor = context && context.professor ? context.professor : null;
-    const linked = !!(context && context.linked && professor);
+    const account = resolveActiveProfessorAccount(context);
+    const profileContext = account.context || context || {};
+    const professor = account.professor || (profileContext && profileContext.professor ? profileContext.professor : null);
+    const linked = !!(account.linked && professor);
 
     const department = linked ? (professor.department || 'N/A') : 'Unlinked';
     const position = linked ? (professor.position || 'Professor') : 'Unavailable';
     const facultyId = linked ? (professor.employeeId || professor.id || 'N/A') : 'Unavailable';
-    const fullName = linked ? (professor.name || 'Professor') : (context.session && context.session.username ? context.session.username : 'Professor');
+    const fullName = linked ? (professor.name || 'Professor') : (profileContext.session && profileContext.session.username ? profileContext.session.username : 'Professor');
     const email = linked ? (professor.email || '') : '';
     const semLabel = semesterLabel || 'Selected semester';
 
@@ -661,6 +749,121 @@ function renderProfileViewModel(context, semesterLabel) {
     if (profilePhotoPlaceholder) {
         profilePhotoPlaceholder.textContent = buildInitials(fullName) || 'PP';
     }
+    refreshProfessorProfilePhotoPreview(resolveProfessorProfilePhoto(profileContext));
+}
+
+function buildProfessorProfilePhotoFallbackUrl(userId) {
+    const token = normalizeUserIdToken(userId);
+    if (!token) return '';
+    return '../api/profile_photo.php?user_id=' + encodeURIComponent(token) + '&_profile_ts=' + encodeURIComponent(String(Date.now()));
+}
+
+function appendProfessorProfilePhotoCacheBust(urlValue) {
+    const rawUrl = String(urlValue || '').trim();
+    if (!rawUrl || /^data:/i.test(rawUrl) || /^blob:/i.test(rawUrl)) {
+        return rawUrl;
+    }
+
+    if (typeof URL === 'function' && typeof window !== 'undefined' && window.location) {
+        try {
+            const parsed = new URL(rawUrl, window.location.href);
+            parsed.searchParams.set('_profile_ts', String(Date.now()));
+            if (parsed.origin === window.location.origin) {
+                return parsed.pathname + parsed.search + parsed.hash;
+            }
+            return parsed.toString();
+        } catch (_error) {
+            // Fall back to string concatenation below.
+        }
+    }
+
+    const hashIndex = rawUrl.indexOf('#');
+    const hash = hashIndex >= 0 ? rawUrl.slice(hashIndex) : '';
+    const base = hashIndex >= 0 ? rawUrl.slice(0, hashIndex) : rawUrl;
+    return base + (base.indexOf('?') >= 0 ? '&' : '?') + '_profile_ts=' + encodeURIComponent(String(Date.now())) + hash;
+}
+
+function resolveProfessorProfilePhoto(context) {
+    const ctx = context && typeof context === 'object' ? context : {};
+    const professor = ctx.professor && typeof ctx.professor === 'object' ? ctx.professor : {};
+    const session = ctx.session && typeof ctx.session === 'object' ? ctx.session : (getUserSession() || {});
+    const sharedPhoto = SharedData && typeof SharedData.getProfilePhoto === 'function'
+        ? String(SharedData.getProfilePhoto('professor') || '').trim()
+        : '';
+    const candidates = [
+        sharedPhoto,
+        professor.profileImageUrl,
+        professor.profilePhoto,
+        professor.photoData,
+        professor.profileImage,
+        session.profileImageUrl,
+        session.profilePhoto,
+        session.photoData,
+        session.profileImage,
+    ];
+
+    for (let index = 0; index < candidates.length; index += 1) {
+        const value = String(candidates[index] || '').trim();
+        if (value) return value;
+    }
+
+    return buildProfessorProfilePhotoFallbackUrl(professor.id || session.userId);
+}
+
+function refreshProfessorProfilePhotoPreview(photo, options) {
+    const preview = document.getElementById('profilePhotoPreview');
+    const placeholder = document.getElementById('profilePhotoPlaceholder');
+    if (!preview || !placeholder) return false;
+
+    const resolvedPhoto = String(photo || '').trim();
+    if (resolvedPhoto) {
+        const currentPhoto = String(preview.dataset.profilePhotoCurrent || '');
+        if (currentPhoto !== resolvedPhoto) {
+            delete preview.dataset.profilePhotoRetry;
+        }
+        preview.dataset.profilePhotoCurrent = resolvedPhoto;
+        preview.onerror = function () {
+            const cfg = options && typeof options === 'object' ? options : {};
+            const canRetry = cfg.retry !== false
+                && !/^data:/i.test(resolvedPhoto)
+                && !/^blob:/i.test(resolvedPhoto)
+                && SharedData
+                && typeof SharedData.refreshSession === 'function'
+                && String(preview.dataset.profilePhotoRetry || '') !== resolvedPhoto;
+            if (canRetry) {
+                preview.dataset.profilePhotoRetry = resolvedPhoto;
+                try {
+                    const refreshedSession = SharedData.refreshSession(true);
+                    if (refreshedSession && refreshedSession.isAuthenticated === true) {
+                        const retryPhoto = appendProfessorProfilePhotoCacheBust(resolveProfessorProfilePhoto(professorPanelState.context));
+                        if (retryPhoto) {
+                            refreshProfessorProfilePhotoPreview(retryPhoto, { retry: false });
+                            return;
+                        }
+                    }
+                } catch (_error) {
+                    // The normal placeholder path below is enough if session refresh fails.
+                }
+            }
+
+            preview.onerror = null;
+            preview.removeAttribute('src');
+            preview.classList.remove('active');
+            placeholder.style.display = '';
+        };
+        preview.src = resolvedPhoto;
+        preview.classList.add('active');
+        placeholder.style.display = 'none';
+        return true;
+    }
+
+    preview.onerror = null;
+    preview.removeAttribute('src');
+    preview.classList.remove('active');
+    delete preview.dataset.profilePhotoCurrent;
+    delete preview.dataset.profilePhotoRetry;
+    placeholder.style.display = '';
+    return false;
 }
 
 function formatCountdownDistance(targetDate, now) {
@@ -713,9 +916,11 @@ function getEvaluationPeriodCountdown(typeKey, label) {
 }
 
 function buildPendingProfessorTargets(context) {
-    if (!context || !context.linked || !context.professor) return [];
-    const pendingAssignments = Array.isArray(context.pendingPeerAssignments)
-        ? context.pendingPeerAssignments
+    const account = resolveActiveProfessorAccount(context);
+    const activeContext = account.context || context;
+    if (!activeContext || !account.linked || !activeContext.professor) return [];
+    const pendingAssignments = Array.isArray(activeContext.pendingPeerAssignments)
+        ? activeContext.pendingPeerAssignments
         : [];
 
     return pendingAssignments.map(item => ({
@@ -776,14 +981,16 @@ function renderDashboardPendingTasks(context) {
     const badgeEl = document.getElementById('pending-tasks-count');
     if (!listEl || !badgeEl) return;
 
-    if (!context || !context.linked || !context.professor) {
+    const account = resolveActiveProfessorAccount(context);
+    const activeContext = account.context || context;
+    if (!activeContext || !account.linked || !activeContext.professor) {
         badgeEl.textContent = '0';
         listEl.innerHTML = '<p class="dashboard-widget-empty">Your login is not linked to an active professor account.</p>';
         return;
     }
 
     const peerPeriodOpen = SharedData.isEvalPeriodOpen('professor-professor');
-    const pendingTargets = buildPendingProfessorTargets(context);
+    const pendingTargets = buildPendingProfessorTargets(activeContext);
     const visiblePending = peerPeriodOpen ? pendingTargets : [];
     badgeEl.textContent = String(visiblePending.length);
 
@@ -853,6 +1060,7 @@ function refreshProfessorPanelData(options = {}) {
     if (!enforceActiveProfessorAccount({ inline: false, context })) {
         return;
     }
+    const account = resolveActiveProfessorAccount(context);
 
     const semesterId = preserveSelection && professorPanelState.currentSelection.semesterId
         ? professorPanelState.currentSelection.semesterId
@@ -879,7 +1087,7 @@ function refreshProfessorPanelData(options = {}) {
     populatePeerProfessorOptions(context);
     loadFacultySummary({ semesterId, evaluationType });
     initializeReports();
-    setProfessorActionsEnabled(context.linked);
+    setProfessorActionsEnabled(account.linked);
     applyReportBlackout();
     renderDashboardSupportWidgets(context);
     renderProfessorFacultyPaperList();
@@ -1026,6 +1234,7 @@ function switchView(viewName) {
         if (facultyPaperView) facultyPaperView.style.display = 'none';
         if (profileView) profileView.style.display = 'none';
         closeAllPanels();
+        return true;
     } else if (viewName === 'peerEvaluation') {
         if (dashboardView) dashboardView.style.display = 'none';
         if (peerEvaluationView) peerEvaluationView.style.display = 'block';
@@ -1037,6 +1246,7 @@ function switchView(viewName) {
 
         window.scrollTo(0, 0);
         closeAllPanels();
+        return true;
     } else if (viewName === 'reports') {
         const reportGate = resolveReportsGateState();
         if (reportGate.locked) {
@@ -1047,7 +1257,7 @@ function switchView(viewName) {
             if (profileView) profileView.style.display = 'none';
             updateNavigation('dashboard');
             closeAllPanels();
-            return;
+            return false;
         }
 
         if (dashboardView) dashboardView.style.display = 'none';
@@ -1059,6 +1269,7 @@ function switchView(viewName) {
         window.scrollTo(0, 0);
         closeAllPanels();
         scheduleProfessorReportViewportRefresh(120);
+        return true;
     } else if (viewName === 'facultyPaper') {
         const facultyPaperGate = resolveFacultyPaperGateState();
         if (facultyPaperGate.locked) {
@@ -1069,7 +1280,8 @@ function switchView(viewName) {
             if (profileView) profileView.style.display = 'none';
             updateNavigation('dashboard');
             closeAllPanels();
-            return;
+            alert(getFacultyPaperGateMessage());
+            return false;
         }
 
         if (dashboardView) dashboardView.style.display = 'none';
@@ -1080,15 +1292,25 @@ function switchView(viewName) {
         renderProfessorFacultyPaperList();
         window.scrollTo(0, 0);
         closeAllPanels();
+        return true;
     } else if (viewName === 'profile') {
+        const context = professorPanelState.context || buildProfessorPanelContext();
+        const account = resolveActiveProfessorAccount(context);
+        const profileContext = account.context || context;
+        const semesterId = professorPanelState.currentSelection.semesterId || (profileContext && profileContext.currentSemester) || '';
+        const semesterLabel = professorPanelState.currentSelection.semesterLabel || getSemesterLabelById(semesterId, profileContext && profileContext.semesterList);
         if (dashboardView) dashboardView.style.display = 'none';
         if (peerEvaluationView) peerEvaluationView.style.display = 'none';
         if (reportsView) reportsView.style.display = 'none';
         if (facultyPaperView) facultyPaperView.style.display = 'none';
         if (profileView) profileView.style.display = 'block';
+        renderProfileViewModel(profileContext, semesterLabel);
         window.scrollTo(0, 0);
         closeAllPanels();
+        return true;
     }
+
+    return false;
 }
 
 function isProfessorReportsViewActive() {
@@ -1444,22 +1666,25 @@ function setupProfessorHeroActions() {
 
     if (peerButton) {
         peerButton.addEventListener('click', function () {
-            switchView('peerEvaluation');
-            updateNavigation('peerEvaluation');
+            if (switchView('peerEvaluation') !== false) {
+                updateNavigation('peerEvaluation');
+            }
         });
     }
 
     if (reportsButton) {
         reportsButton.addEventListener('click', function () {
-            switchView('reports');
-            updateNavigation('reports');
+            if (switchView('reports') !== false) {
+                updateNavigation('reports');
+            }
         });
     }
 
     if (facultyPaperButton) {
         facultyPaperButton.addEventListener('click', function () {
-            switchView('facultyPaper');
-            updateNavigation('facultyPaper');
+            if (switchView('facultyPaper') !== false) {
+                updateNavigation('facultyPaper');
+            }
         });
     }
 }
@@ -1488,7 +1713,7 @@ function handleActionButton(actionTitle) {
     // Placeholder for future action functionality
     console.log(`Action clicked: ${actionTitle}`);
 
-    if (!professorPanelState.linked) {
+    if (!resolveActiveProfessorAccount(professorPanelState.context).linked) {
         alert('Your session is not linked to an active professor account.');
         return;
     }
@@ -1580,8 +1805,10 @@ function setSelectedFacultyPaperLoadType(value) {
  * Build payload for faculty acknowledgement paper.
  */
 function buildFacultyPaperData() {
-    const context = professorPanelState.context || buildProfessorPanelContext();
-    if (!context || !context.linked || !context.professor) return null;
+    const actor = getProfessorPaperActor();
+    const context = actor.context;
+    const professor = actor.professor || (context && context.professor ? context.professor : null);
+    if (!context || !actor.actorUserId || !professor) return null;
 
     const selectedSemesterLabel = String(professorPanelState.currentSelection && professorPanelState.currentSelection.semesterLabel || '').trim();
     const semesterLabel = selectedSemesterLabel || getSemesterLabelById(
@@ -1598,9 +1825,9 @@ function buildFacultyPaperData() {
     const supervisorSummary = professorPanelState.summaryByType.supervisor || PROFESSOR_PANEL_EMPTY_SUMMARY;
 
     return {
-        faculty_name: String(context.professor.name || '').trim() || 'N/A',
-        department: String(context.professor.department || '').trim() || 'N/A',
-        rank: String(context.professor.position || '').trim() || 'N/A',
+        faculty_name: String(professor.name || '').trim() || 'N/A',
+        department: String(professor.department || '').trim() || 'N/A',
+        rank: String(professor.position || '').trim() || 'N/A',
         semester_label: String(semesterLabel || '').trim() || 'N/A',
         load_type: loadType,
         set_rating: toPaperRatingPercent(studentSummary.totals && studentSummary.totals.averageScore),
@@ -1794,20 +2021,22 @@ async function openProfessorReportPdf() {
 
 function getProfessorPaperActor() {
     const context = professorPanelState.context || buildProfessorPanelContext();
-    const professor = context && context.professor ? context.professor : null;
-    const actorUserId = normalizeUserIdToken(professor && professor.id);
+    const account = resolveActiveProfessorAccount(context);
+    const professor = account.professor || (context && context.professor ? context.professor : null);
+    const actorUserId = normalizeUserIdToken(account.actorUserId || (professor && professor.id));
     return {
         role: 'professor',
         actorUserId,
-        context,
+        professor,
+        context: account.context || context,
     };
 }
 
 function buildFacultyPaperDraftPayload() {
     const actor = getProfessorPaperActor();
     const context = actor.context;
-    const professor = context && context.professor ? context.professor : null;
-    if (!context || !context.linked || !professor || !actor.actorUserId) return null;
+    const professor = actor.professor || (context && context.professor ? context.professor : null);
+    if (!context || !professor || !actor.actorUserId) return null;
 
     const paperData = buildFacultyPaperData();
     if (!paperData) return null;
@@ -2362,7 +2591,7 @@ async function renderProfessorFacultyPaperList() {
     }
 
     const actor = getProfessorPaperActor();
-    if (!actor.context || !actor.context.linked || !actor.actorUserId) {
+    if (!actor.context || !actor.actorUserId || !actor.professor) {
         tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="7">Your login is not linked to an active professor account.</td></tr>';
         if (detailCard) detailCard.style.display = 'none';
         return;
@@ -2567,7 +2796,7 @@ function refreshDashboardAverageScoreVisibility() {
     if (!scoreCard || !scoreSummaryCard) return;
 
     const gate = resolveReportsGateState();
-    const locked = gate.locked || !professorPanelState.linked;
+    const locked = gate.locked || !resolveActiveProfessorAccount(professorPanelState.context).linked;
     const numericScore = Number(scoreCard.dataset.averageScore || 0);
     const safeScore = Number.isFinite(numericScore) ? numericScore : 0;
 
@@ -2657,7 +2886,7 @@ function loadDynamicPeerQuestionnaire() {
     const container = document.getElementById('dynamic-peer-questions-container');
     if (!container) return;
 
-    if (!professorPanelState.linked) {
+    if (!resolveActiveProfessorAccount(professorPanelState.context).linked) {
         container.innerHTML = `
             <div class="empty-state" style="text-align: center; padding: 3rem 1rem;">
                 <i class="fas fa-user-lock" style="font-size: 3rem; color: #cbd5e1; margin-bottom: 1rem;"></i>
@@ -2877,7 +3106,7 @@ function refreshPeerTargetLockState() {
     const submitBtn = form ? form.querySelector('.btn-submit') : null;
     if (!form || !select || !submitBtn) return;
 
-    if (!professorPanelState.linked) {
+    if (!resolveActiveProfessorAccount(professorPanelState.context).linked) {
         submitBtn.disabled = true;
         return;
     }
@@ -3139,9 +3368,10 @@ function handlePeerEvaluation() {
         return;
     }
 
-    const context = professorPanelState.context || buildProfessorPanelContext();
+    const account = resolveActiveProfessorAccount(professorPanelState.context || buildProfessorPanelContext());
+    const context = account.context || professorPanelState.context || buildProfessorPanelContext();
 
-    if (!context.linked || !context.professor) {
+    if (!account.linked || !context.professor) {
         showFormMessage(form, 'Your login session is not linked to an active professor account.', 'error');
         return;
     }
@@ -3303,7 +3533,8 @@ function clearFormMessage(form) {
  * Build summary context for current professor/evaluation type
  */
 function loadFacultySummary(selection = {}) {
-    const context = professorPanelState.context || buildProfessorPanelContext();
+    const account = resolveActiveProfessorAccount(professorPanelState.context || buildProfessorPanelContext());
+    const context = account.context || professorPanelState.context || buildProfessorPanelContext();
     const semesterId = String(selection.semesterId || professorPanelState.currentSelection.semesterId || context.currentSemester || '').trim();
     const evaluationType = getEvaluationTypeMeta(selection.evaluationType || professorPanelState.currentSelection.evaluationType || 'student').id;
     const semesterLabel = getSemesterLabelById(semesterId, context.semesterList);
@@ -3317,7 +3548,7 @@ function loadFacultySummary(selection = {}) {
 
     updateSemesterLabels(semesterLabel, evalMeta.label);
 
-    if (!context.linked || !context.professor) {
+    if (!account.linked || !context.professor) {
         const unlinkedSummary = { ...PROFESSOR_PANEL_EMPTY_SUMMARY };
         professorPanelState.summaryByType = {
             student: { ...PROFESSOR_PANEL_EMPTY_SUMMARY },
@@ -3328,7 +3559,6 @@ function loadFacultySummary(selection = {}) {
         renderCriteriaSummary([]);
         renderBreakdownTable([], evaluationType);
         renderEvaluationCount([], unlinkedSummary.totals);
-        renderDetailedSummaryTable([], evaluationType);
         updateSummaryCards(unlinkedSummary.totals);
         resetProfessorSubjectCommentsPanel();
         renderSemestralEvaluationTrend(semesterId);
@@ -3343,7 +3573,6 @@ function loadFacultySummary(selection = {}) {
     renderCriteriaSummary(activeSummary.criteriaAverages);
     renderBreakdownTable(activeSummary.breakdownRows, evaluationType);
     renderEvaluationCount(activeSummary.breakdownRows, activeSummary.totals);
-    renderDetailedSummaryTable(activeSummary.detailedRows, evaluationType);
     updateSummaryCards(activeSummary.totals);
     resetProfessorSubjectCommentsPanel();
     renderSemestralEvaluationTrend(semesterId);
@@ -3437,12 +3666,18 @@ function setupProfilePhotoUpload() {
     const fullName = getProfileFullName();
     placeholder.textContent = buildInitials(fullName) || 'PP';
 
-    const storedPhoto = SharedData.getProfilePhoto('professor');
-    if (storedPhoto) {
-        preview.src = storedPhoto;
-        preview.classList.add('active');
-        placeholder.style.display = 'none';
+    function applyProfilePhotoPreview(photo) {
+        return refreshProfessorProfilePhotoPreview(photo);
     }
+
+    const storedPhoto = resolveProfessorProfilePhoto(professorPanelState.context);
+    applyProfilePhotoPreview(storedPhoto);
+
+    window.addEventListener('shareddata:change', function (event) {
+        if (event && event.detail && event.detail.key === 'profilePhoto') {
+            applyProfilePhotoPreview(event.detail.value);
+        }
+    });
 
     input.addEventListener('change', function () {
         const file = input.files && input.files[0];
@@ -3480,29 +3715,33 @@ function setupProfilePhotoUpload() {
             return;
         }
 
-        try {
-            const savedPhoto = SharedData.uploadProfilePhoto(file);
-            if (savedPhoto) {
-                preview.src = savedPhoto;
-            }
-            preview.classList.add('active');
-            placeholder.style.display = 'none';
-        } catch (error) {
+        function handleUploadError(error) {
             alert(error && error.message ? error.message : 'Failed to upload the profile image.');
             const storedPhoto = SharedData.getProfilePhoto('professor');
-            if (storedPhoto) {
-                preview.src = storedPhoto;
-                preview.classList.add('active');
-                placeholder.style.display = 'none';
-            } else {
-                preview.removeAttribute('src');
-                preview.classList.remove('active');
-                placeholder.style.display = '';
-            }
-        } finally {
+            applyProfilePhotoPreview(storedPhoto);
+        }
+
+        let uploadPromise;
+        try {
+            uploadPromise = typeof SharedData.uploadProfilePhotoAsync === 'function'
+                ? SharedData.uploadProfilePhotoAsync(file, { message: 'Uploading profile photo...' })
+                : Promise.resolve(SharedData.uploadProfilePhoto(file));
+        } catch (error) {
+            handleUploadError(error);
             URL.revokeObjectURL(localPreviewUrl);
             input.value = '';
+            return;
         }
+
+        Promise.resolve(uploadPromise)
+            .then(function (savedPhoto) {
+                applyProfilePhotoPreview(savedPhoto);
+            })
+            .catch(handleUploadError)
+            .finally(function () {
+                URL.revokeObjectURL(localPreviewUrl);
+                input.value = '';
+            });
     });
 }
 
@@ -4294,30 +4533,6 @@ function getFacultySummaryTotals() {
     return summary.totals || { required: 0, received: 0, responseRate: 0, averageScore: 0 };
 }
 
-function renderDetailedSummaryTable(rows, evaluationType) {
-    const tbody = document.getElementById('detailedSummaryTableBody');
-    if (!tbody) return;
-
-    const data = Array.isArray(rows) ? rows : [];
-    if (!data.length) {
-        tbody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="8">No data available.</td></tr>';
-        return;
-    }
-
-    tbody.innerHTML = data.map(item => `
-        <tr>
-            <td data-label="Category">${escapeHTML(item.category)}</td>
-            <td data-label="Avg Score"><span class="avg-score">${Number(item.avgScore || 0).toFixed(1)}</span></td>
-            <td data-label="Responses">${Number(item.responses || 0)}</td>
-            <td data-label="Excellent (5)"><span class="count excellent">${Number(item.excellent || 0)}</span></td>
-            <td data-label="Good (4)"><span class="count good">${Number(item.good || 0)}</span></td>
-            <td data-label="Fair (3)"><span class="count fair">${Number(item.fair || 0)}</span></td>
-            <td data-label="Poor (2)"><span class="count poor">${Number(item.poor || 0)}</span></td>
-            <td data-label="Very Poor (1)"><span class="count very-poor">${Number(item.veryPoor || 0)}</span></td>
-        </tr>
-    `).join('');
-}
-
 /**
  * Setup profile view actions for toggling account forms
  */
@@ -4630,10 +4845,12 @@ function setupReportGateSync() {
  * Apply report availability based on Student to Professor evaluation period
  */
 function applyReportBlackout() {
+    const account = resolveActiveProfessorAccount(professorPanelState.context);
+    const hasProfessorAccount = !!account.linked;
     const gate = resolveReportsGateState();
     const paperGate = resolveFacultyPaperGateState();
-    const locked = gate.locked || !professorPanelState.linked;
-    const facultyPaperLocked = paperGate.locked || !professorPanelState.linked;
+    const locked = gate.locked || !hasProfessorAccount;
+    const facultyPaperLocked = paperGate.locked || !hasProfessorAccount;
     const blackoutEl = document.getElementById('reportsBlackout');
     const contentEl = document.getElementById('reportsContent');
     const unlockDateEl = document.getElementById('reportUnlockDate');
@@ -4646,12 +4863,12 @@ function applyReportBlackout() {
     setDashboardReportActionVisibility(locked);
     refreshDashboardAverageScoreVisibility();
     if (createDraftBtn) {
-        createDraftBtn.disabled = facultyPaperLocked || !professorPanelState.linked;
+        createDraftBtn.disabled = facultyPaperLocked;
         createDraftBtn.setAttribute('aria-disabled', createDraftBtn.disabled ? 'true' : 'false');
     }
 
     if (unlockDateEl) {
-        unlockDateEl.textContent = !professorPanelState.linked
+        unlockDateEl.textContent = !hasProfessorAccount
             ? 'N/A'
             : gate.endDate
             ? formatDisplayDate(gate.endDate)
@@ -4672,6 +4889,8 @@ function applyReportBlackout() {
         switchView('dashboard');
         updateNavigation('dashboard');
     }
+
+    refreshProfessorProfilePhotoPreview(resolveProfessorProfilePhoto(account.context || professorPanelState.context));
 }
 
 function formatDisplayDate(dateString) {

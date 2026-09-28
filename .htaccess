@@ -11,9 +11,11 @@ RewriteRule ^JsScrip/vendor/xlsx\.full\.min\.js$ - [L,NC]
 # Block direct web access to sensitive project internals.
 RewriteRule (^|/)\.(?!well-known/) - [F,L]
 RewriteRule (^|/)(?:database|vendor|\.git|\.vs)(?:/|$) - [F,L,NC]
-RewriteRule ^api/(?:auth|db|state_helpers|time_helper|mailer_helper|setup_db|scheduled_student_eval_reminder|faculty_(?:report|pdf|docx|xlsx)_helper)\.php$ - [F,L,NC]
+RewriteRule ^files/faculty_papers(?:/|$) - [F,L,NC]
+RewriteRule ^api/faculty_paper_storage\.php$ - [F,L,NC]
+RewriteRule ^api/(?:auth|auth_rate_limit|backup_maintenance|backup_service|campus_authorization|db|error_helper|state_helpers|time_helper|mailer_helper|setup_db|scheduled_(?:student_eval_reminder|backup)|restore_backup|faculty_(?:report|pdf|docx|xlsx)_helper|faculty_paper_storage)\.php$ - [F,L,NC]
 RewriteRule (^|/)(?:README\.md|composer\.json|composer\.lock|composer\.phar|composer-setup\.php|package\.json|package-lock\.json|phpunit\.xml|webpack\.config\.js|vite\.config\.js)$ - [F,L,NC]
-RewriteRule (^|/).*\.(?:sql|sqlite|db|bak|backup|old|orig|save|zip|tar|gz|7z|rar|log)$ - [F,L,NC]
+RewriteRule (^|/).*\.(?:sql|sqlite|db|bak|backup|naapbak|old|orig|save|zip|tar|gz|7z|rar|log)$ - [F,L,NC]
 </IfModule>
 
 <IfModule mod_headers.c>

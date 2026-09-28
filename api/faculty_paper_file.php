@@ -27,6 +27,19 @@ function sendFileJsonError(string $message, int $statusCode = 400): void
     exit();
 }
 
+set_exception_handler(function (Throwable $error): void {
+    if ($error instanceof CampusAccessDeniedException) {
+        sendFileJsonError('Campus access denied.', 403);
+    }
+    if ($error instanceof CampusNotFoundException) {
+        sendFileJsonError('Invalid campus selected.', 404);
+    }
+    if (isNaapSchemaMigrationRequiredException($error)) {
+        sendNaapSchemaMigrationRequiredJson($error);
+    }
+    sendNaapServerErrorJson($error, 'faculty_paper_file.unhandled');
+});
+
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') {
     sendFileJsonError('Method not allowed', 405);
 }
@@ -44,9 +57,11 @@ if (strtolower(trim((string) ($sessionUser['status'] ?? 'active'))) === 'inactiv
 
 $actorRole = strtolower(trim((string) ($sessionUser['role'] ?? '')));
 $actorUserId = trim((string) ($sessionUser['id'] ?? ''));
-if (!in_array($actorRole, ['professor', 'dean', 'procoor', 'hr', 'vpaa'], true)) {
+if (!in_array($actorRole, ['professor', 'dean', 'procoor', 'hr', 'vpaa', 'admin'], true)) {
     sendFileJsonError('Permission denied.', 403);
 }
+$campusContext = buildCampusAuthorizationContext($pdo, $sessionUser);
+campusAuthorizationValidatePayloadCampuses($pdo, $campusContext, $_GET, 'faculty-paper-file');
 
 $paperId = trim((string) ($_GET['paper_id'] ?? ''));
 $versionNo = null;
@@ -61,21 +76,13 @@ if ($paperId === '') {
     sendFileJsonError('paper_id is required.', 400);
 }
 
-$papers = buildFacultyAcknowledgementPapersSnapshot($pdo);
-$paper = null;
-foreach ($papers as $row) {
-    if (!is_array($row)) {
-        continue;
-    }
-    if (trim((string) ($row['id'] ?? '')) === $paperId) {
-        $paper = $row;
-        break;
-    }
-}
+$paper = findFacultyAcknowledgementPaperSnapshotByCode($pdo, $paperId);
 
 if (!$paper) {
     sendFileJsonError('Paper not found.', 404);
 }
+
+campusAuthorizationAssertResourceAccess($pdo, $campusContext, 'faculty_paper', $paperId, 'faculty-paper-file');
 
 if (!facultyPdfCanAccessStoredFile($paper, $actorRole, $actorUserId, $sessionUser)) {
     sendFileJsonError('Permission denied.', 403);
@@ -84,7 +91,7 @@ if (!facultyPdfCanAccessStoredFile($paper, $actorRole, $actorUserId, $sessionUse
 try {
     $file = facultyPdfResolveStoredFile($paper, $versionNo);
 } catch (Throwable $exception) {
-    sendFileJsonError($exception->getMessage(), 404);
+    sendFileJsonError('Stored PDF file is unavailable.', 404);
 }
 
 $absPath = (string) ($file['absolute_path'] ?? '');
@@ -93,13 +100,33 @@ if ($absPath === '' || !is_file($absPath)) {
     sendFileJsonError('Stored PDF file is missing.', 404);
 }
 
+$fileHandle = @fopen($absPath, 'rb');
+if ($fileHandle === false) {
+    sendNaapServerErrorJson(
+        new RuntimeException('Unable to open the authorized faculty paper for streaming.'),
+        'faculty_paper_file.open'
+    );
+}
+$fileSize = @filesize($absPath);
+if ($fileSize === false) {
+    @fclose($fileHandle);
+    sendNaapServerErrorJson(
+        new RuntimeException('Unable to determine the authorized faculty paper size.'),
+        'faculty_paper_file.size'
+    );
+}
+
 header('Content-Type: application/pdf');
 header('Content-Disposition: inline; filename="' . str_replace('"', '', $fileName) . '"');
-header('Content-Length: ' . (string) filesize($absPath));
+header('Content-Length: ' . (string) $fileSize);
 header('Content-Transfer-Encoding: binary');
 
-$read = @readfile($absPath);
+$read = @fpassthru($fileHandle);
+@fclose($fileHandle);
 if ($read === false) {
-    sendFileJsonError('Unable to stream stored PDF file.', 500);
+    naapLogServerException(
+        new RuntimeException('Faculty paper streaming failed after response headers were sent.'),
+        'faculty_paper_file.stream'
+    );
 }
 exit();

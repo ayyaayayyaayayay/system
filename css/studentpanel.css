@@ -308,6 +308,10 @@ body {
     margin-top: 24px;
 }
 
+.change-password-feedback {
+    margin: 0 0 18px;
+}
+
 /* Summary Cards */
 .summary-cards {
     display: grid;
@@ -531,6 +535,92 @@ body {
     color: var(--bg-secondary);
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.student-clearance-panel {
+    margin: 0 0 24px;
+    padding: 20px;
+    border: 1px solid #dbe4ef;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+}
+
+.student-clearance-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.student-clearance-heading h2 {
+    margin: 3px 0 0;
+    font-size: 1.12rem;
+}
+
+.student-clearance-eyebrow {
+    color: #64748b;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.student-clearance-state {
+    border-radius: 999px;
+    padding: 6px 11px;
+    font-size: 0.78rem;
+    font-weight: 800;
+}
+
+.student-clearance-state.pending {
+    background: #fff7ed;
+    color: #9a3412;
+}
+
+.student-clearance-state.cleared {
+    background: #ecfdf3;
+    color: #166534;
+}
+
+.student-clearance-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.student-clearance-grid > div {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 5px;
+    padding: 12px;
+    border-radius: 10px;
+    background: #f8fafc;
+}
+
+.student-clearance-grid span {
+    color: #64748b;
+    font-size: 0.78rem;
+}
+
+.student-clearance-grid strong {
+    overflow-wrap: anywhere;
+    color: #172033;
+    font-size: 0.92rem;
+}
+
+.student-clearance-panel > p {
+    margin: 14px 0 0;
+    color: #64748b;
+    font-size: 0.84rem;
+}
+
+@media (max-width: 720px) {
+    .student-clearance-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 .btn-start:disabled {

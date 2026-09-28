@@ -8,8 +8,8 @@
     <link rel="icon" type="image/png" sizes="32x32" href="../design/favicon-32x32.png">
     <link rel="apple-touch-icon" href="../design/apple-touch-icon.png">
     <title>Student Dashboard - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/panel-theme.css?v=20260904c">
-    <link rel="stylesheet" href="../css/studentpanel.css?v=20260820b">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260907a">
+    <link rel="stylesheet" href="../css/studentpanel.css?v=20260925c">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
 </head>
@@ -176,6 +176,31 @@
                         </div>
                     </div>
                 </div>
+
+                <section class="student-clearance-panel" id="studentClearancePanel" aria-live="polite">
+                    <div class="student-clearance-heading">
+                        <div>
+                            <span class="student-clearance-eyebrow">Current semester</span>
+                            <h2>Clearance Reference</h2>
+                        </div>
+                        <span class="student-clearance-state pending" id="studentClearanceStatus">Pending</span>
+                    </div>
+                    <div class="student-clearance-grid">
+                        <div>
+                            <span>Clearance Reference</span>
+                            <strong id="studentClearanceReference">Not generated</strong>
+                        </div>
+                        <div>
+                            <span>Date Generated</span>
+                            <strong id="studentClearanceGeneratedAt">Not available</strong>
+                        </div>
+                        <div>
+                            <span>Clearance Method</span>
+                            <strong id="studentClearanceMethod">Not available</strong>
+                        </div>
+                    </div>
+                    <p id="studentClearanceNote">Complete all assigned evaluations to receive an automatic clearance reference.</p>
+                </section>
 
                 <!-- My Evaluations Section -->
                 <section class="evaluations-section">
@@ -421,6 +446,8 @@
                         <h2>Change Password</h2>
                         <p>Update your account password. This is the only editable section.</p>
                     </div>
+                    <div id="changePasswordFeedback" class="change-password-feedback ui-message"
+                        role="status" aria-live="polite" hidden></div>
                     <form id="changePasswordForm" class="evaluation-form">
                         <div class="form-section">
                             <h3 class="section-title">Account Credentials</h3>
@@ -428,7 +455,8 @@
                                 <label for="currentPassword">Current Password</label>
                                 <div class="password-field">
                                     <input type="password" id="currentPassword" name="currentPassword"
-                                        class="form-select" placeholder="Enter current password" required>
+                                        class="form-select" placeholder="Enter current password"
+                                        autocomplete="current-password" required>
                                     <button type="button" class="toggle-password" data-target="currentPassword"
                                         aria-label="Show password">
                                         <i class="fas fa-eye"></i>
@@ -439,7 +467,8 @@
                                 <label for="newPassword">New Password</label>
                                 <div class="password-field">
                                     <input type="password" id="newPassword" name="newPassword" class="form-select"
-                                        placeholder="Enter new password" required>
+                                        placeholder="Enter new password" autocomplete="new-password"
+                                        minlength="8" maxlength="255" required>
                                     <button type="button" class="toggle-password" data-target="newPassword"
                                         aria-label="Show password">
                                         <i class="fas fa-eye"></i>
@@ -450,7 +479,8 @@
                                 <label for="confirmPassword">Confirm New Password</label>
                                 <div class="password-field">
                                     <input type="password" id="confirmPassword" name="confirmPassword"
-                                        class="form-select" placeholder="Re-enter new password" required>
+                                        class="form-select" placeholder="Re-enter new password"
+                                        autocomplete="new-password" minlength="8" maxlength="255" required>
                                     <button type="button" class="toggle-password" data-target="confirmPassword"
                                         aria-label="Show password">
                                         <i class="fas fa-eye"></i>
@@ -460,12 +490,12 @@
                         </div>
 
                         <div class="api-info-box">
-                            <i class="fas fa-database"></i>
-                            <span>SQL Ready: connect to /api/student/change-password (POST)</span>
+                            <i class="fas fa-shield-alt"></i>
+                            <span>Your password is securely updated after your current password is verified.</span>
                         </div>
 
                         <div class="form-actions">
-                            <button type="submit" class="btn-submit">Update Password</button>
+                            <button type="submit" class="btn-submit" id="changePasswordSubmitBtn">Update Password</button>
                             <button type="reset" class="btn-cancel">Reset</button>
                         </div>
                     </form>
@@ -520,9 +550,10 @@
             <div class="history-modal-body" id="historyModalBody"></div>
         </div>
     </div>
-    <script src="../JsScrip/db-data.js?v=20260904c"></script>
+    <script src="../JsScrip/db-data.js?v=20260925c"></script>
+    <script src="../JsScrip/system-report.js?v=20260907a"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
-    <script src="../JsScrip/studentpanel.js?v=20260904c"></script>
+    <script src="../JsScrip/studentpanel.js?v=20260925c"></script>
 </body>
 
 </html>

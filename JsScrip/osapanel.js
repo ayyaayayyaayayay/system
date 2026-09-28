@@ -12,6 +12,7 @@ document.addEventListener("DOMContentLoaded", function () {
     setupMobileDrawer();
     initializeStatusMonitoring();
     setupDataSubscriptions();
+    refreshOsaAnalyticsDatabaseData();
     setupProfilePhotoUpload();
     setupProfileForms();
     setupProfileActionToggle();
@@ -29,6 +30,9 @@ let selectedAnalyticsDepartment = "";
 let selectedAnalyticsCampus = "all";
 let manualClearModalContext = null;
 let osaMobileDrawerBound = false;
+let osaAnalyticsUsers = [];
+let osaAnalyticsDataRefreshPromise = null;
+let osaAnalyticsDataRefreshSemester = "";
 
 function checkAuthentication() {
     return !!SharedData.requireSession("osa");
@@ -72,6 +76,7 @@ function setupLogout() {
 
 function initializeStatusMonitoring() {
     setupManualClearModal();
+    setupClearanceVerification();
     setupSearch();
     setupStatusActions();
     setupAnalyticsInteractions();
@@ -82,10 +87,13 @@ function setupDataSubscriptions() {
     if (!SharedData.onDataChange) return;
 
     SharedData.onDataChange(function (key) {
+        if (key === SharedData.KEYS.CURRENT_SEMESTER) {
+            refreshOsaAnalyticsDatabaseData();
+            return;
+        }
         if (
             key === SharedData.KEYS.EVALUATIONS ||
             key === SharedData.KEYS.SUBJECT_MANAGEMENT ||
-            key === SharedData.KEYS.CURRENT_SEMESTER ||
             key === SharedData.KEYS.USERS ||
             key === SharedData.KEYS.OSA_STUDENT_CLEARANCES ||
             key === SharedData.KEYS.STUDENT_EVAL_PROOF_REQUESTS
@@ -93,6 +101,56 @@ function setupDataSubscriptions() {
             refreshStatusAndAnalytics();
         }
     });
+}
+
+function normalizeOsaUserListResult(result) {
+    if (result && Array.isArray(result.users)) {
+        return result.users;
+    }
+    return Array.isArray(result) ? result : [];
+}
+
+function refreshOsaAnalyticsDatabaseData() {
+    const semesterId = getActiveSemesterId();
+    if (!semesterId) return Promise.resolve(null);
+
+    if (osaAnalyticsDataRefreshPromise && osaAnalyticsDataRefreshSemester === semesterId) {
+        return osaAnalyticsDataRefreshPromise;
+    }
+
+    const tasks = [];
+    if (SharedData.refreshUsers) {
+        tasks.push(
+            SharedData.refreshUsers({
+                roles: ["student", "osa"],
+                status: "active",
+                includeAll: true,
+            }).then(function (result) {
+                osaAnalyticsUsers = normalizeOsaUserListResult(result);
+                return osaAnalyticsUsers;
+            })
+        );
+    }
+    if (SharedData.refreshSubjectManagement) {
+        tasks.push(SharedData.refreshSubjectManagement({ semesterId: semesterId }));
+    }
+    if (SharedData.refreshEvaluations) {
+        tasks.push(SharedData.refreshEvaluations({ semesterId: semesterId }));
+    }
+
+    osaAnalyticsDataRefreshSemester = semesterId;
+    osaAnalyticsDataRefreshPromise = Promise.all(tasks)
+        .then(function () {
+            refreshStatusAndAnalytics();
+        })
+        .catch(function (error) {
+            console.warn("[OSA] Failed to refresh descriptive analytics data.", error);
+        })
+        .finally(function () {
+            osaAnalyticsDataRefreshPromise = null;
+        });
+
+    return osaAnalyticsDataRefreshPromise;
 }
 
 function setupNavigation() {
@@ -245,7 +303,7 @@ function getActiveSemesterId() {
 
 function isStudentEvaluationRecord(record) {
     const role = normalizeTextToken(record && (record.evaluatorRole || record.evaluationType));
-    return role === "" || role === "student";
+    return role === "" || role === "student" || role === "student-to-professor" || role === "student-professor";
 }
 
 function isSubmittedStatus(record) {
@@ -261,7 +319,10 @@ function isEvaluationInSemester(record, semesterId) {
 }
 
 function buildStudentDirectory() {
-    const users = SharedData.getUsers ? SharedData.getUsers() : [];
+    const cachedUsers = SharedData.getCachedUsers
+        ? SharedData.getCachedUsers()
+        : ((SharedData.getUsers && SharedData.getUsers()) || []);
+    const users = osaAnalyticsUsers.length ? osaAnalyticsUsers : cachedUsers;
     const directoryByUserId = new Map();
     const userIdByStudentNumber = new Map();
 
@@ -323,12 +384,16 @@ function buildStatusRows() {
     const directoryByUserId = directory.directoryByUserId;
     const userIdByStudentNumber = directory.userIdByStudentNumber;
 
-    const subjectManagement = SharedData.getSubjectManagement
-        ? SharedData.getSubjectManagement()
-        : { offerings: [], enrollments: [] };
+    const subjectManagement = SharedData.getCachedSubjectManagement
+        ? SharedData.getCachedSubjectManagement()
+        : (SharedData.getSubjectManagement
+            ? SharedData.getSubjectManagement()
+            : { offerings: [], enrollments: [] });
     const offerings = Array.isArray(subjectManagement.offerings) ? subjectManagement.offerings : [];
     const enrollments = Array.isArray(subjectManagement.enrollments) ? subjectManagement.enrollments : [];
-    const evaluations = SharedData.getEvaluations ? SharedData.getEvaluations() : [];
+    const evaluations = SharedData.getCachedEvaluations
+        ? SharedData.getCachedEvaluations()
+        : (SharedData.getEvaluations ? SharedData.getEvaluations() : []);
 
     const activeOfferingsById = new Map(
         offerings
@@ -466,12 +531,9 @@ function buildStatusRows() {
         const completedCount = (completedByStudent.get(studentUserId) || new Set()).size;
         const evaluated = expectedCount > 0 && completedCount >= expectedCount;
 
-        let clearance = null;
-        if (!evaluated) {
-            clearance = clearanceByUserAndSemester.get(`${studentUserId}|${semesterId}`)
-                || clearanceByNumberAndSemester.get(`${normalizeTextToken(meta.studentNumber)}|${semesterId}`)
-                || null;
-        }
+        const clearance = clearanceByUserAndSemester.get(`${studentUserId}|${semesterId}`)
+            || clearanceByNumberAndSemester.get(`${normalizeTextToken(meta.studentNumber)}|${semesterId}`)
+            || null;
 
         const cleared = Boolean(clearance);
         const proof = proofByUserAndSemester.get(`${studentUserId}|${semesterId}`)
@@ -491,8 +553,12 @@ function buildStatusRows() {
             completedCount,
             evaluated,
             cleared,
+            clearanceStatus: cleared ? String(clearance.status || "cleared").trim() : "pending",
+            clearanceReference: cleared ? String(clearance.clearanceReference || "").trim() : "",
+            clearanceGeneratedAt: cleared ? String(clearance.generatedAt || clearance.notedAt || "").trim() : "",
+            clearanceMethod: cleared ? String(clearance.generationMethod || "manual").trim() : "",
             clearanceReason: cleared ? String(clearance.reason || "").trim() : "",
-            clearanceNotedAt: cleared ? String(clearance.notedAt || "").trim() : "",
+            clearanceNotedAt: cleared ? String(clearance.generatedAt || clearance.notedAt || "").trim() : "",
             canReviewProof: !evaluated && !cleared && periodState.isClosed && proofStatus === "pending",
             proofId: proof ? String(proof.id || "").trim() : "",
             proofStatus: proofStatus,
@@ -764,10 +830,6 @@ function renderStatusTable(students, periodState) {
             statusClass = "done";
             statusText = "Done";
             icon = "fa-circle-check";
-        } else if (student.cleared) {
-            statusClass = "cleared";
-            statusText = "Cleared";
-            icon = "fa-file-circle-check";
         } else if (proofStatus === "pending") {
             statusClass = "pending-review";
             statusText = "Pending Review";
@@ -779,9 +841,6 @@ function renderStatusTable(students, periodState) {
         }
         const progressText = `${student.completedCount}/${student.expectedCount}`;
 
-        const clearedReasonBlock = student.cleared && student.clearanceReason
-            ? `<div class="status-reason">Cleared Reason: ${escapeHtml(student.clearanceReason)}${student.clearanceNotedAt ? ` (${escapeHtml(formatNotedAt(student.clearanceNotedAt))})` : ""}</div>`
-            : "";
         const proofReasonBlock = !student.evaluated && proofStatus
             ? `<div class="status-reason">Proof Reason: ${escapeHtml(student.proofReason || "N/A")}${student.proofSubmittedAt ? ` (${escapeHtml(formatNotedAt(student.proofSubmittedAt))})` : ""}</div>`
             : "";
@@ -791,6 +850,23 @@ function renderStatusTable(students, periodState) {
         const reviewNoteBlock = !student.evaluated && proofStatus === "rejected" && student.proofReviewNote
             ? `<div class="status-reason">OSA Review Note: ${escapeHtml(student.proofReviewNote)}${student.proofReviewedAt ? ` (${escapeHtml(formatNotedAt(student.proofReviewedAt))})` : ""}</div>`
             : "";
+        const clearanceMethodLabel = normalizeTextToken(student.clearanceMethod) === "automatic" ? "Automatic" : "Manual";
+        const clearanceCell = student.cleared
+            ? `
+                <div class="clearance-details is-cleared">
+                    <strong>Clearance Status: Cleared</strong>
+                    <span>Clearance Reference: ${escapeHtml(student.clearanceReference || "Unavailable")}</span>
+                    <span>Date Generated: ${escapeHtml(formatNotedAt(student.clearanceGeneratedAt) || "Unavailable")}</span>
+                    <span>Clearance Method: ${escapeHtml(clearanceMethodLabel)}</span>
+                    ${student.clearanceReason ? `<span>Reason: ${escapeHtml(student.clearanceReason)}</span>` : ""}
+                </div>
+            `
+            : `
+                <div class="clearance-details">
+                    <strong>Clearance Status: Pending</strong>
+                    <span>Clearance Reference: Not generated</span>
+                </div>
+            `;
 
         let actionCell = "";
         if (showActionColumn) {
@@ -851,12 +927,12 @@ function renderStatusTable(students, periodState) {
                             <i class="fas ${icon}"></i>
                             ${statusText}
                         </span>
-                        ${clearedReasonBlock}
                         ${proofReasonBlock}
                         ${proofLinkBlock}
                         ${reviewNoteBlock}
                     </div>
                 </td>
+                <td>${clearanceCell}</td>
                 ${actionCell}
             </tr>
         `;
@@ -1104,8 +1180,77 @@ function applySearchFilter(rows, keyword) {
     return rows.filter(function (student) {
         return (
             String(student.fullName || "").toLowerCase().includes(token) ||
-            String(student.studentNumber || "").toLowerCase().includes(token)
+            String(student.studentNumber || "").toLowerCase().includes(token) ||
+            String(student.clearanceReference || "").toLowerCase().includes(token)
         );
+    });
+}
+
+function setClearanceVerificationBusy(isBusy) {
+    const input = document.getElementById("clearanceReferenceVerifyInput");
+    const button = document.getElementById("clearanceReferenceVerifyBtn");
+    if (input) input.disabled = Boolean(isBusy);
+    if (button) {
+        button.disabled = Boolean(isBusy);
+        button.textContent = isBusy ? "Verifying..." : "Verify Reference";
+    }
+}
+
+function renderClearanceVerificationResult(type, message, clearance) {
+    const result = document.getElementById("clearanceVerificationResult");
+    if (!result) return;
+    result.className = `clearance-verification-result${type ? ` ${type}` : ""}`;
+    if (!clearance) {
+        result.textContent = String(message || "");
+        return;
+    }
+    const method = normalizeTextToken(clearance.generationMethod) === "automatic" ? "Automatic" : "Manual";
+    result.innerHTML = `
+        <strong>${escapeHtml(message || "Verified clearance reference.")}</strong>
+        <span>${escapeHtml(clearance.clearanceReference || "")}</span>
+        <span>${escapeHtml(clearance.studentName || "Unknown Student")} (${escapeHtml(clearance.studentNumber || "No student number")})</span>
+        <span>${escapeHtml(clearance.semesterLabel || clearance.semesterId || "Unknown semester")} · ${escapeHtml(clearance.campus || "Unknown campus")}</span>
+        <span>${escapeHtml(method)} · ${escapeHtml(formatNotedAt(clearance.generatedAt) || "Unknown date")}</span>
+    `;
+}
+
+function setupClearanceVerification() {
+    const form = document.getElementById("clearanceVerificationForm");
+    const input = document.getElementById("clearanceReferenceVerifyInput");
+    if (!form || !input) return;
+
+    form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        const reference = String(input.value || "").trim().toUpperCase();
+        if (!reference) {
+            renderClearanceVerificationResult("error", "Enter a clearance reference.");
+            input.focus();
+            return;
+        }
+        if (!SharedData.verifyOsaStudentClearance) {
+            renderClearanceVerificationResult("error", "Clearance verification is unavailable.");
+            return;
+        }
+
+        setClearanceVerificationBusy(true);
+        renderClearanceVerificationResult("", "");
+        SharedData.verifyOsaStudentClearance(reference)
+            .then(function (response) {
+                if (!response || response.success !== true) {
+                    throw new Error((response && response.error) || "Unable to verify this reference.");
+                }
+                if (!response.verified || !response.clearance) {
+                    renderClearanceVerificationResult("error", "No stored clearance matches this reference.");
+                    return;
+                }
+                renderClearanceVerificationResult("success", "Verified clearance reference", response.clearance);
+            })
+            .catch(function (error) {
+                renderClearanceVerificationResult("error", error && error.message ? error.message : "Unable to verify this reference.");
+            })
+            .finally(function () {
+                setClearanceVerificationBusy(false);
+            });
     });
 }
 
@@ -1225,9 +1370,8 @@ function persistManualClearRequest(context, manualReason) {
     }
 
     const saved = response.record || {};
-    const savedReason = String(saved.reason || "").trim();
     return {
-        alreadyLocked: Boolean(savedReason && savedReason !== manualReason),
+        alreadyLocked: response.created === false || saved.created === false,
     };
 }
 
@@ -1372,12 +1516,29 @@ function setupProfilePhotoUpload() {
     const fullName = getProfileFullName();
     placeholder.textContent = buildInitials(fullName) || "OS";
 
-    const storedPhoto = SharedData.getProfilePhoto('osa');
-    if (storedPhoto) {
-        preview.src = storedPhoto;
-        preview.classList.add("active");
-        placeholder.style.display = "none";
+    function applyProfilePhotoPreview(photo) {
+        const resolvedPhoto = String(photo || "").trim();
+        if (resolvedPhoto) {
+            preview.src = resolvedPhoto;
+            preview.classList.add("active");
+            placeholder.style.display = "none";
+            return true;
+        }
+
+        preview.removeAttribute("src");
+        preview.classList.remove("active");
+        placeholder.style.display = "";
+        return false;
     }
+
+    const storedPhoto = SharedData.getProfilePhoto('osa');
+    applyProfilePhotoPreview(storedPhoto);
+
+    window.addEventListener("shareddata:change", function (event) {
+        if (event && event.detail && event.detail.key === "profilePhoto") {
+            applyProfilePhotoPreview(event.detail.value);
+        }
+    });
 
     input.addEventListener("change", function () {
         const file = input.files && input.files[0];
@@ -1415,29 +1576,33 @@ function setupProfilePhotoUpload() {
             return;
         }
 
-        try {
-            const savedPhoto = SharedData.uploadProfilePhoto(file);
-            if (savedPhoto) {
-                preview.src = savedPhoto;
-            }
-            preview.classList.add("active");
-            placeholder.style.display = "none";
-        } catch (error) {
+        function handleUploadError(error) {
             alert(error && error.message ? error.message : "Failed to upload the profile image.");
             const storedPhoto = SharedData.getProfilePhoto('osa');
-            if (storedPhoto) {
-                preview.src = storedPhoto;
-                preview.classList.add("active");
-                placeholder.style.display = "none";
-            } else {
-                preview.removeAttribute("src");
-                preview.classList.remove("active");
-                placeholder.style.display = "";
-            }
-        } finally {
+            applyProfilePhotoPreview(storedPhoto);
+        }
+
+        let uploadPromise;
+        try {
+            uploadPromise = typeof SharedData.uploadProfilePhotoAsync === "function"
+                ? SharedData.uploadProfilePhotoAsync(file, { message: "Uploading profile photo..." })
+                : Promise.resolve(SharedData.uploadProfilePhoto(file));
+        } catch (error) {
+            handleUploadError(error);
             URL.revokeObjectURL(localPreviewUrl);
             input.value = "";
+            return;
         }
+
+        Promise.resolve(uploadPromise)
+            .then(function (savedPhoto) {
+                applyProfilePhotoPreview(savedPhoto);
+            })
+            .catch(handleUploadError)
+            .finally(function () {
+                URL.revokeObjectURL(localPreviewUrl);
+                input.value = "";
+            });
     });
 }
 

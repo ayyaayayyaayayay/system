@@ -197,12 +197,30 @@ body.auth-page::after {
   cursor: pointer;
   box-shadow: 0 12px 28px rgba(71, 87, 215, 0.28);
   transition: transform var(--motion-fast), box-shadow var(--motion-fast), opacity var(--motion-fast);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
 }
 
 .login-button span {
-  display: block;
-  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   text-align: center;
+}
+
+.login-button i {
+  width: 16px;
+  min-width: 16px;
+  font-size: 14px;
+  line-height: 1;
+  text-align: center;
+}
+
+.login-button.is-loading {
+  opacity: 1;
+  box-shadow: 0 14px 34px rgba(71, 87, 215, 0.34);
 }
 
 .login-button:hover:not(:disabled) {

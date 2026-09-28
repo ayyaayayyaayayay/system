@@ -10,11 +10,23 @@ let selectedCampusId = null;
 let subjectManagementState = { subjects: [], offerings: [], enrollments: [] };
 let editingSubjectId = null;
 let selectedOfferingForStudents = null;
+let offeringStudentCandidates = [];
+let offeringStudentCandidatesLoading = false;
+let offeringStudentCandidatesRequestId = 0;
+let offeringProfessorCandidatesRequestId = 0;
+let offeringProfessorCandidatesLoading = false;
 let offeringSearchAppliedTerm = '';
 let adminCurrentViewId = null;
+const ADMIN_USER_PAGE_SIZE_OPTIONS = [100, 250, 500, 'all'];
+const ADMIN_USERS_PAGE_SIZE = 'all';
+const ADMIN_USERS_COMPLETE_CHUNK_SIZE = 500;
+const ADMIN_PROFESSORS_PAGE_SIZE = 100;
 
 // Users loaded from PHP API (or SharedData centralized storage)
 let adminUsers = [];
+let adminUsersPage = 1;
+let adminUsersPageSize = ADMIN_USERS_PAGE_SIZE;
+let adminUsersPageMeta = { total: 0, limit: 0, offset: 0, page: 1, hasMore: false, complete: true };
 let adminEvaluationOverviewChartInstance = null;
 let adminSemestralPerformanceChartInstance = null;
 let announcementComposerReady = false;
@@ -23,6 +35,15 @@ let credentialDistributorParsedRows = [];
 let credentialDistributorFailures = [];
 let adminMobileDrawerBound = false;
 let adminUserCardActionsBound = false;
+let systemHealthVerificationReady = false;
+let backupManagementReady = false;
+let backupOperationInFlight = false;
+let adminDashboardRefreshTimer = null;
+let adminDashboardSummaryRefreshTimer = null;
+let adminDashboardSummaryPromise = null;
+let adminDashboardSummary = null;
+let adminDashboardCountFallbackPromise = null;
+let adminDashboardLastStats = null;
 let credentialDistributorSmtpConfig = {
     host: '',
     port: 587,
@@ -33,12 +54,16 @@ let credentialDistributorSmtpConfig = {
     fromName: '',
     timeout: 20,
     hasPassword: false,
+    secretStatus: 'missing',
+    migrationRequired: false,
     source: 'database'
 };
 let geminiRuntimeConfig = {
     model: 'gpt-5.6-luna',
     timeoutMs: 30000,
     hasApiKey: false,
+    secretStatus: 'missing',
+    migrationRequired: false,
     source: 'database',
     panelAccess: {
         admin: true,
@@ -63,6 +88,58 @@ function escapeAttr(value) {
     return escapeHtml(value);
 }
 
+function replaceSelectOptions(selectElement, options) {
+    if (!selectElement) return;
+    selectElement.replaceChildren();
+    (Array.isArray(options) ? options : []).forEach(optionData => {
+        const option = document.createElement('option');
+        option.value = String(optionData && optionData.value != null ? optionData.value : '');
+        option.textContent = String(optionData && optionData.label != null ? optionData.label : '');
+        option.disabled = !!(optionData && optionData.disabled);
+        selectElement.appendChild(option);
+    });
+}
+
+function createProgramTableRow(program) {
+    const row = document.createElement('tr');
+    const values = [
+        program && program.programCode,
+        program && program.programName,
+        String(program && program.campusSlug || '').toUpperCase(),
+        String(program && program.departmentCode || '').toUpperCase()
+    ];
+
+    values.forEach(value => {
+        const cell = document.createElement('td');
+        cell.textContent = String(value == null ? '' : value);
+        row.appendChild(cell);
+    });
+
+    const actionsCell = document.createElement('td');
+    const actions = document.createElement('div');
+    actions.className = 'professor-actions';
+    const programId = String(program && program.id != null ? program.id : '');
+    [
+        { action: 'edit-program', className: 'edit', title: 'Edit Program', icon: 'fa-edit' },
+        { action: 'delete-program', className: 'delete', title: 'Archive Program', icon: 'fa-archive' }
+    ].forEach(config => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `action-btn ${config.className}`;
+        button.dataset.action = config.action;
+        button.dataset.programId = programId;
+        button.title = config.title;
+        button.setAttribute('aria-label', config.title);
+        const icon = document.createElement('i');
+        icon.className = `fas ${config.icon}`;
+        button.appendChild(icon);
+        actions.appendChild(button);
+    });
+    actionsCell.appendChild(actions);
+    row.appendChild(actionsCell);
+    return row;
+}
+
 function inlineIdLiteral(value) {
     const text = String(value == null ? '' : value).trim();
     if (text !== '' && /^[+-]?(?:\d+|\d*\.\d+)$/.test(text)) {
@@ -77,30 +154,179 @@ function inlineIdLiteral(value) {
 /**
  * Fetch users from PHP API, falls back to hardcoded data
  */
-function fetchUsersFromApi(campus = 'all', search = '') {
-    return Promise.resolve().then(() => {
-        adminUsers = SharedData.listUsers({ campus, search });
-        return adminUsers;
-    }).catch(error => {
-        console.warn('[AdminPanel] Falling back to cached SharedData users:', error);
-        adminUsers = SharedData.getUsers();
+function getAdminUserFilterValue(id) {
+    const el = document.getElementById(id);
+    return el ? String(el.value || '').trim() : 'all';
+}
 
-        let filtered = [...adminUsers];
-        if (campus && campus !== 'all') {
-            filtered = filtered.filter(u => u.campus === campus);
+function isAdminUserCompletePageSize(value) {
+    return String(value || '').trim().toLowerCase() === 'all';
+}
+
+function normalizeAdminUserPageSize(value) {
+    if (isAdminUserCompletePageSize(value)) {
+        return 'all';
+    }
+    const requested = Math.max(1, Number(value) || ADMIN_USERS_COMPLETE_CHUNK_SIZE);
+    return ADMIN_USER_PAGE_SIZE_OPTIONS.includes(requested)
+        ? requested
+        : ADMIN_USERS_PAGE_SIZE;
+}
+
+function getAdminUserRequestLimit() {
+    return isAdminUserCompletePageSize(adminUsersPageSize)
+        ? ADMIN_USERS_COMPLETE_CHUNK_SIZE
+        : normalizeAdminUserPageSize(adminUsersPageSize);
+}
+
+function buildAdminUserFilters(campus = 'all', search = '', page = adminUsersPage, limitOverride) {
+    const filters = {
+        limit: Math.max(1, Number(limitOverride || getAdminUserRequestLimit()) || ADMIN_USERS_COMPLETE_CHUNK_SIZE),
+        page: Math.max(1, Number(page) || 1),
+    };
+    const normalizedCampus = String(campus || '').trim().toLowerCase();
+    const normalizedSearch = String(search || '').trim();
+    const role = getAdminUserFilterValue('user-role-filter').toLowerCase();
+    const department = getAdminUserFilterValue('user-department-filter').toUpperCase();
+    const status = getAdminUserFilterValue('user-status-filter').toLowerCase();
+    const program = normalizeProgramCode(getAdminUserFilterValue('user-program-filter'));
+
+    if (normalizedCampus && normalizedCampus !== 'all') filters.campus = normalizedCampus;
+    if (normalizedSearch) filters.search = normalizedSearch;
+    if (role && role !== 'all') filters.role = role;
+    if (department && department !== 'ALL') filters.department = department;
+    filters.status = status || 'active';
+    if (program && program !== 'ALL') filters.program = program;
+
+    return filters;
+}
+
+function buildAdminUserFilterScope(campus = 'all', search = '') {
+    const filters = buildAdminUserFilters(campus, search, 1, getAdminUserRequestLimit());
+    delete filters.limit;
+    delete filters.page;
+    return filters;
+}
+
+function normalizeUsersPageResult(result, fallbackFilters) {
+    if (result && Array.isArray(result.users)) {
+        return result;
+    }
+    const users = Array.isArray(result)
+        ? result
+        : (SharedData.listUsers ? SharedData.listUsers(fallbackFilters) : []);
+    const meta = SharedData.getLastUsersPageMeta
+        ? SharedData.getLastUsersPageMeta()
+        : (SharedData.getUserListMeta ? SharedData.getUserListMeta() : {});
+    return {
+        users: Array.isArray(users) ? users : [],
+        total: Number(meta.total) || (Array.isArray(users) ? users.length : 0),
+        limit: Number(meta.limit) || adminUsersPageSize,
+        offset: Number(meta.offset) || 0,
+        page: Number(meta.page) || Number(fallbackFilters && fallbackFilters.page) || 1,
+        hasMore: meta.hasMore === true,
+    };
+}
+
+async function fetchUsersByPagedFilters(baseFilters, chunkSize, options = {}) {
+    const loadedUsers = [];
+    const seen = new Set();
+    const pageSize = Math.max(1, Number(chunkSize) || ADMIN_USERS_COMPLETE_CHUNK_SIZE);
+    const opts = options && typeof options === 'object' ? options : {};
+    let page = Math.max(1, Number(opts.startPage) || 1);
+    let lastPageResult = null;
+
+    while (true) {
+        const filters = Object.assign({}, baseFilters || {}, { limit: pageSize, page });
+        const result = SharedData.refreshUsers
+            ? await SharedData.refreshUsers(filters)
+            : SharedData.listUsers(filters);
+        const pageResult = normalizeUsersPageResult(result, filters);
+        const pageUsers = Array.isArray(pageResult.users) ? pageResult.users : [];
+
+        pageUsers.forEach((user, index) => {
+            const key = String(user && user.id || user && user.email || `${page}:${index}`).trim();
+            if (key && seen.has(key)) return;
+            if (key) seen.add(key);
+            loadedUsers.push(user);
+        });
+
+        lastPageResult = pageResult;
+
+        if (typeof opts.onPage === 'function') {
+            opts.onPage({
+                page,
+                loaded: loadedUsers.length,
+                total: Number(pageResult.total) || loadedUsers.length,
+                pageSize,
+            });
         }
-        if (search) {
-            const query = search.toLowerCase();
-            filtered = filtered.filter(u =>
-                (u.name && u.name.toLowerCase().includes(query)) ||
-                (u.email && u.email.toLowerCase().includes(query)) ||
-                (u.department && u.department.toLowerCase().includes(query))
+
+        const total = Number(pageResult.total) || loadedUsers.length;
+        const limit = Number(pageResult.limit) || pageSize;
+        const hasMore = pageResult.hasMore === true || (pageUsers.length > 0 && page * limit < total);
+        if (!hasMore || pageUsers.length === 0) {
+            break;
+        }
+
+        page += 1;
+        await waitForBrowserPaint();
+    }
+
+    return {
+        users: loadedUsers,
+        total: Number(lastPageResult && lastPageResult.total) || loadedUsers.length,
+        limit: 0,
+        offset: 0,
+        page: 1,
+        hasMore: false,
+        complete: true,
+    };
+}
+
+async function fetchUsersFromApi(campus = 'all', search = '', options = {}) {
+    const page = options && options.page ? options.page : adminUsersPage;
+    const completeMode = isAdminUserCompletePageSize(adminUsersPageSize);
+    const filters = completeMode
+        ? buildAdminUserFilterScope(campus, search)
+        : buildAdminUserFilters(campus, search, page);
+
+    try {
+        const pageResult = completeMode
+            ? await fetchUsersByPagedFilters(filters, ADMIN_USERS_COMPLETE_CHUNK_SIZE, options)
+            : normalizeUsersPageResult(
+                SharedData.refreshUsers
+                    ? await SharedData.refreshUsers(filters)
+                    : SharedData.listUsers(filters),
+                filters
             );
-        }
-
-        adminUsers = filtered;
+        adminUsers = Array.isArray(pageResult.users) ? pageResult.users : [];
+        adminUsersPageMeta = {
+            total: Number(pageResult.total) || adminUsers.length,
+            limit: Number(pageResult.limit) || (completeMode ? 0 : getAdminUserRequestLimit()),
+            offset: Number(pageResult.offset) || 0,
+            page: Number(pageResult.page) || page,
+            hasMore: pageResult.hasMore === true,
+            complete: completeMode || pageResult.complete === true,
+        };
+        adminUsersPage = adminUsersPageMeta.page;
         return adminUsers;
-    });
+    } catch (error) {
+        console.warn('[AdminPanel] Falling back to cached SharedData users:', error);
+        const fallbackUsers = SharedData.listUsers
+            ? SharedData.listUsers(filters)
+            : (SharedData.getUsers ? SharedData.getUsers() : []);
+        adminUsers = Array.isArray(fallbackUsers) ? fallbackUsers : [];
+        adminUsersPageMeta = {
+            total: adminUsers.length,
+            limit: completeMode ? 0 : getAdminUserRequestLimit(),
+            offset: completeMode ? 0 : ((Math.max(1, Number(filters.page) || 1) - 1) * getAdminUserRequestLimit()),
+            page: Math.max(1, Number(filters.page) || 1),
+            hasMore: false,
+            complete: completeMode,
+        };
+        return adminUsers;
+    }
 }
 
 // Campus data from centralized SharedData storage
@@ -123,17 +349,22 @@ function initializeAdminPanel() {
     setupCampusManager();
     setupProgramManager();
     setupUserSearch();
+    setupUserManagementFilters();
     setupUserCardActions();
     setupEditUserModal();
     loadDashboardData();
-    initializeCharts();
     loadUsersByOrganization();
     setupQuickActions();
     setupDashboardHeroActions();
     setupAnnouncementComposer();
     showAdminLoginAnnouncements();
     setupActivityLogButton();
+    setupGeneralSettings();
+    if (window.StudentEvaluationReminderSettings) {
+        window.StudentEvaluationReminderSettings.setup();
+    }
     setupSecuritySettings();
+    setupSystemHealthVerification();
     setupCredentialDistributor();
     setupCredentialTestSmtpComposer();
     setupGeminiConfig();
@@ -384,6 +615,45 @@ function setupLogout() {
 /**
  * Setup modal functionality
  */
+function refreshAddUserOrganizationOptions() {
+    const latestCampuses = typeof SharedData.getCampuses === 'function'
+        ? SharedData.getCampuses()
+        : [];
+    if (Array.isArray(latestCampuses) && latestCampuses.some(campus => campus && campus.id && campus.id !== 'all')) {
+        campusData = latestCampuses;
+    }
+
+    const campusSelect = document.getElementById('new-user-campus');
+    const departmentSelect = document.getElementById('new-user-department');
+    const programSelect = document.getElementById('new-user-program');
+    const preferredCampus = campusSelect ? campusSelect.value : '';
+    const preferredDepartment = departmentSelect ? departmentSelect.value : '';
+    const preferredProgram = programSelect ? programSelect.value : '';
+
+    refreshCampusSelects(preferredCampus);
+
+    if (campusSelect && departmentSelect) {
+        populateDepartmentOptions(departmentSelect, campusSelect.value, preferredDepartment);
+    }
+    if (campusSelect && departmentSelect && programSelect) {
+        populateProgramOptions(programSelect, campusSelect.value, departmentSelect.value, preferredProgram);
+    }
+}
+
+function openAddUserModal() {
+    const modal = document.getElementById('add-user-modal');
+    if (!modal) return;
+
+    modal.classList.add('active');
+    refreshAddUserOrganizationOptions();
+
+    if (typeof SharedData.refreshBootstrap === 'function') {
+        Promise.resolve(SharedData.refreshBootstrap(false))
+            .catch(() => false)
+            .finally(refreshAddUserOrganizationOptions);
+    }
+}
+
 function setupModals() {
     const addUserBtn = document.getElementById('add-user-btn');
     const addUserModal = document.getElementById('add-user-modal');
@@ -392,13 +662,7 @@ function setupModals() {
     const addUserForm = document.getElementById('add-user-form');
 
     if (addUserBtn && addUserModal) {
-        addUserBtn.addEventListener('click', () => {
-            const campusSelect = document.getElementById('new-user-campus');
-            if (campusSelect) {
-                campusSelect.dispatchEvent(new Event('change'));
-            }
-            addUserModal.classList.add('active');
-        });
+        addUserBtn.addEventListener('click', openAddUserModal);
     }
 
     if (closeUserModal) {
@@ -473,6 +737,16 @@ const BULK_HEADER_ALIASES = {
 const BULK_ALLOWED_ROLES = new Set(['student', 'professor', 'dean', 'procoor', 'osa', 'vpaa', 'hr', 'admin']);
 const BULK_UNASSIGNED_DEPARTMENT = 'UNASSIGNED';
 const BULK_SIMPLE_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const BULK_REGISTER_BATCH_SIZE = 100;
+const BULK_REGISTER_VALIDATE_CHUNK_SIZE = 250;
+const SHEETJS_REQUIRED_VERSION = '0.20.3';
+const SHEETJS_ASSET_RELATIVE_URL = `../JsScrip/vendor/xlsx.full.min.js?v=${SHEETJS_REQUIRED_VERSION}`;
+const EXCEL_IMPORT_MAX_FILE_BYTES = 10 * 1024 * 1024;
+const EXCEL_IMPORT_MAX_DATA_ROWS = 25000;
+const EXCEL_IMPORT_MAX_COLUMNS = 100;
+const EXCEL_IMPORT_TIMEOUT_MS = 30000;
+const CREDENTIAL_DISTRIBUTOR_MAX_ROWS = 500;
+const DANGEROUS_EXCEL_PROPERTY_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
 const CREDENTIAL_DISTRIBUTOR_HEADER_ALIASES = {
     name: 'name',
     fullname: 'name',
@@ -501,6 +775,20 @@ function normalizeBulkHeaderKey(rawKey) {
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9]/g, '');
+}
+
+function isDangerousExcelPropertyName(value) {
+    return DANGEROUS_EXCEL_PROPERTY_NAMES.has(String(value == null ? '' : value).trim().toLowerCase());
+}
+
+function resolveExcelHeaderAlias(aliases, rawKey) {
+    if (!aliases || typeof aliases !== 'object' || isDangerousExcelPropertyName(rawKey)) {
+        return '';
+    }
+    const normalizedHeader = normalizeBulkHeaderKey(rawKey);
+    return Object.prototype.hasOwnProperty.call(aliases, normalizedHeader)
+        ? aliases[normalizedHeader]
+        : '';
 }
 
 function normalizeBulkLookupKey(value) {
@@ -580,8 +868,7 @@ function mapBulkRowToCanonical(rawRow) {
     };
 
     Object.entries(rawRow || {}).forEach(([key, value]) => {
-        const normalizedHeader = normalizeBulkHeaderKey(key);
-        const canonicalKey = BULK_HEADER_ALIASES[normalizedHeader];
+        const canonicalKey = resolveExcelHeaderAlias(BULK_HEADER_ALIASES, key);
         if (!canonicalKey) return;
         mapped[canonicalKey] = normalizeBulkText(value);
     });
@@ -606,15 +893,22 @@ function normalizeBulkDepartment(rawDepartment, campusSlug, departmentLookupByCa
     return trimmed.toUpperCase();
 }
 
+function normalizeEmploymentTypeValue(rawEmploymentType, fallbackValue = 'Regular') {
+    const trimmed = normalizeBulkText(rawEmploymentType);
+    if (!trimmed) return fallbackValue;
+
+    const lower = trimmed.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+    if (lower === 'regular' || lower === 'permanent') return 'Regular';
+    if (lower === 'temporary') return 'Temporary';
+    if (lower === 'cos' || lower === 'contract of service') return 'COS';
+    return fallbackValue;
+}
+
 function normalizeBulkEmploymentType(rawEmploymentType, role) {
     if (role === 'student') return '';
     const trimmed = normalizeBulkText(rawEmploymentType);
     if (!trimmed) return 'Regular';
-
-    const lower = trimmed.toLowerCase();
-    if (lower === 'regular') return 'Regular';
-    if (lower === 'temporary') return 'Temporary';
-    return trimmed;
+    return normalizeEmploymentTypeValue(trimmed, '');
 }
 
 function normalizeProgramCode(value) {
@@ -833,47 +1127,449 @@ function resolveProtectedAdminEmail(users = []) {
 }
 
 function getExcelParser() {
+    let parser = null;
     if (typeof globalThis !== 'undefined' && globalThis.XLSX) {
-        return globalThis.XLSX;
+        parser = globalThis.XLSX;
+    } else if (typeof window !== 'undefined' && window.XLSX) {
+        parser = window.XLSX;
     }
-    if (typeof window !== 'undefined' && window.XLSX) {
-        return window.XLSX;
-    }
-    return null;
+    return parser && String(parser.version || '') === SHEETJS_REQUIRED_VERSION
+        ? parser
+        : null;
 }
 
-function readExcelRows(file) {
+function getExcelWorkerParserUrl() {
+    if (typeof window === 'undefined' || typeof window.location === 'undefined' || typeof URL === 'undefined') {
+        return '';
+    }
+    return new URL(SHEETJS_ASSET_RELATIVE_URL, window.location.href).href;
+}
+
+function createExcelImportError(code, details = {}) {
+    const maxDataRows = Math.max(1, Number(details.maxDataRows) || EXCEL_IMPORT_MAX_DATA_ROWS);
+    const messages = {
+        unsupported_type: 'Please select an Excel file (.xlsx or .xls).',
+        empty_file: 'The selected Excel file is empty.',
+        file_too_large: 'The selected Excel file exceeds the 10 MiB import limit.',
+        invalid_signature: 'The selected file is not a valid XLSX or XLS workbook.',
+        invalid_workbook: 'The selected Excel file is invalid, corrupted, or unsupported.',
+        row_limit: 'The spreadsheet exceeds the ' + maxDataRows.toLocaleString() + '-row import limit.',
+        column_limit: 'The spreadsheet exceeds the ' + EXCEL_IMPORT_MAX_COLUMNS + '-column import limit.',
+        timeout: 'The spreadsheet took too long to process. Please use a smaller valid file.',
+        worker_unavailable: 'Secure Excel import is not available in this browser. Please update the browser and try again.',
+        parser_unavailable: 'Excel import is temporarily unavailable. Please refresh the page and try again.',
+        read_failed: 'Unable to read the selected Excel file.'
+    };
+    const normalizedCode = Object.prototype.hasOwnProperty.call(messages, code) ? code : 'invalid_workbook';
+    const error = new Error(messages[normalizedCode]);
+    error.excelImportCode = normalizedCode;
+    return error;
+}
+
+function resolveExcelImportMaxDataRows(options = {}) {
+    const requested = Number(options && options.maxDataRows);
+    if (!Number.isFinite(requested) || requested <= 0) {
+        return EXCEL_IMPORT_MAX_DATA_ROWS;
+    }
+    return Math.min(EXCEL_IMPORT_MAX_DATA_ROWS, Math.floor(requested));
+}
+
+function validateExcelImportFileMetadata(file) {
+    const fileName = String(file && file.name || '').trim();
+    const lowerName = fileName.toLowerCase();
+    const extension = lowerName.endsWith('.xlsx')
+        ? '.xlsx'
+        : (lowerName.endsWith('.xls') ? '.xls' : '');
+    if (!extension) {
+        throw createExcelImportError('unsupported_type');
+    }
+
+    const fileSize = Number(file && file.size);
+    if (!Number.isFinite(fileSize) || fileSize <= 0) {
+        throw createExcelImportError('empty_file');
+    }
+    if (fileSize > EXCEL_IMPORT_MAX_FILE_BYTES) {
+        throw createExcelImportError('file_too_large');
+    }
+    return extension;
+}
+
+function excelBytesStartWith(bytes, signature) {
+    if (!(bytes instanceof Uint8Array) || bytes.length < signature.length) return false;
+    return signature.every((value, index) => bytes[index] === value);
+}
+
+function validateExcelImportSignature(arrayBuffer, extension) {
+    const bytes = new Uint8Array(arrayBuffer || new ArrayBuffer(0));
+    if (extension === '.xlsx') {
+        if (!excelBytesStartWith(bytes, [0x50, 0x4B, 0x03, 0x04])) {
+            throw createExcelImportError('invalid_signature');
+        }
+        return;
+    }
+
+    const isCompoundFile = excelBytesStartWith(bytes, [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]);
+    const isBiffStream = bytes.length >= 2
+        && bytes[0] === 0x09
+        && [0x00, 0x02, 0x04, 0x08].includes(bytes[1]);
+    if (!isCompoundFile && !isBiffStream) {
+        throw createExcelImportError('invalid_signature');
+    }
+}
+
+function validateExcelWorksheetDimensions(parser, worksheet, maxDataRows) {
+    const rangeText = String(worksheet && (worksheet['!fullref'] || worksheet['!ref']) || '').trim();
+    if (!rangeText) return;
+    if (!parser || !parser.utils || typeof parser.utils.decode_range !== 'function') {
+        throw createExcelImportError('parser_unavailable');
+    }
+
+    let range;
+    try {
+        range = parser.utils.decode_range(rangeText);
+    } catch (_error) {
+        throw createExcelImportError('invalid_workbook');
+    }
+    const columnCount = Math.max(0, Number(range.e && range.e.c) - Number(range.s && range.s.c) + 1);
+    const dataRowCount = Math.max(0, Number(range.e && range.e.r) - Number(range.s && range.s.r));
+    if (!Number.isFinite(columnCount) || !Number.isFinite(dataRowCount)) {
+        throw createExcelImportError('invalid_workbook');
+    }
+    if (columnCount > EXCEL_IMPORT_MAX_COLUMNS) {
+        throw createExcelImportError('column_limit');
+    }
+    if (dataRowCount > maxDataRows) {
+        throw createExcelImportError('row_limit', { maxDataRows });
+    }
+}
+
+function readFileAsArrayBuffer(file) {
     return new Promise((resolve, reject) => {
-        const parser = getExcelParser();
-        if (!parser || typeof parser.read !== 'function' || !parser.utils || typeof parser.utils.sheet_to_json !== 'function') {
-            reject(new Error('Excel parser is not loaded.'));
+        const reader = new FileReader();
+        reader.onerror = () => reject(createExcelImportError('read_failed'));
+        reader.onload = (event) => {
+            resolve(event.target && event.target.result);
+        };
+        reader.readAsArrayBuffer(file);
+    });
+}
+
+function getValidatedExcelWorksheet(workbook) {
+    if (
+        !workbook
+        || typeof workbook !== 'object'
+        || !Object.prototype.hasOwnProperty.call(workbook, 'SheetNames')
+        || !Array.isArray(workbook.SheetNames)
+    ) {
+        throw createExcelImportError('invalid_workbook');
+    }
+    if (workbook.SheetNames.length === 0) {
+        return null;
+    }
+    if (!Object.prototype.hasOwnProperty.call(workbook.SheetNames, 0)) {
+        throw createExcelImportError('invalid_workbook');
+    }
+
+    const firstSheetName = workbook.SheetNames[0];
+    if (typeof firstSheetName !== 'string' || firstSheetName.trim() === '') {
+        throw createExcelImportError('invalid_workbook');
+    }
+    if (isDangerousExcelPropertyName(firstSheetName)) {
+        throw createExcelImportError('invalid_workbook');
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(workbook, 'Sheets')) {
+        throw createExcelImportError('invalid_workbook');
+    }
+    const sheets = workbook.Sheets;
+    if (!sheets || typeof sheets !== 'object' || !Object.prototype.hasOwnProperty.call(sheets, firstSheetName)) {
+        throw createExcelImportError('invalid_workbook');
+    }
+
+    const worksheet = sheets[firstSheetName];
+    if (!worksheet || typeof worksheet !== 'object') {
+        throw createExcelImportError('invalid_workbook');
+    }
+    return worksheet;
+}
+
+function parseExcelWorksheetMatrix(parser, worksheet, maxDataRows = EXCEL_IMPORT_MAX_DATA_ROWS) {
+    if (!worksheet) return [];
+    validateExcelWorksheetDimensions(parser, worksheet, maxDataRows);
+    const matrix = parser.utils.sheet_to_json(worksheet, {
+        header: 1,
+        defval: '',
+        blankrows: false
+    });
+    if (!Array.isArray(matrix) || matrix.some(row => !Array.isArray(row))) {
+        throw createExcelImportError('invalid_workbook');
+    }
+    if (matrix.length > maxDataRows + 1) {
+        throw createExcelImportError('row_limit', { maxDataRows });
+    }
+    if (matrix.some(row => row.length > EXCEL_IMPORT_MAX_COLUMNS)) {
+        throw createExcelImportError('column_limit');
+    }
+    return matrix;
+}
+
+function normalizeSafeExcelCellValue(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        return value;
+    }
+    throw createExcelImportError('invalid_workbook');
+}
+
+function buildSafeExcelRows(matrix) {
+    if (!Array.isArray(matrix) || matrix.length === 0) return [];
+    if (!Array.isArray(matrix[0])) {
+        throw createExcelImportError('invalid_workbook');
+    }
+
+    const usedHeaders = new Map();
+    const headers = matrix[0].map(value => {
+        const safeValue = normalizeSafeExcelCellValue(value);
+        const baseHeader = safeValue === '' ? '__EMPTY' : String(safeValue);
+        if (isDangerousExcelPropertyName(baseHeader)) {
+            throw createExcelImportError('invalid_workbook');
+        }
+
+        const duplicateIndex = usedHeaders.get(baseHeader) || 0;
+        usedHeaders.set(baseHeader, duplicateIndex + 1);
+        return duplicateIndex === 0 ? baseHeader : `${baseHeader}_${duplicateIndex}`;
+    });
+
+    return matrix.slice(1).map(values => {
+        if (!Array.isArray(values)) {
+            throw createExcelImportError('invalid_workbook');
+        }
+        const row = Object.create(null);
+        headers.forEach((header, columnIndex) => {
+            const value = columnIndex < values.length ? values[columnIndex] : '';
+            row[header] = normalizeSafeExcelCellValue(value);
+        });
+        return row;
+    });
+}
+
+function parseExcelRowsInWorker(arrayBuffer, options = {}) {
+    return new Promise((resolve, reject) => {
+        if (typeof Worker !== 'function' || typeof Blob !== 'function' || typeof URL === 'undefined') {
+            reject(createExcelImportError('worker_unavailable'));
             return;
         }
 
-        const reader = new FileReader();
+        const parserUrl = getExcelWorkerParserUrl();
+        if (!parserUrl) {
+            reject(createExcelImportError('worker_unavailable'));
+            return;
+        }
+        const maxDataRows = resolveExcelImportMaxDataRows(options);
+        const requestedTimeout = Number(options && options.timeoutMs);
+        const timeoutMs = Number.isFinite(requestedTimeout) && requestedTimeout > 0
+            ? Math.min(EXCEL_IMPORT_TIMEOUT_MS, Math.floor(requestedTimeout))
+            : EXCEL_IMPORT_TIMEOUT_MS;
 
-        reader.onerror = () => reject(new Error('Unable to read the selected Excel file.'));
-
-        reader.onload = (event) => {
-            try {
-                const arrayBuffer = event.target && event.target.result;
-                const workbook = parser.read(arrayBuffer, { type: 'array' });
-                const firstSheetName = workbook.SheetNames && workbook.SheetNames[0];
-                if (!firstSheetName) {
-                    resolve([]);
+        const workerSource = `
+            self.onmessage = function (event) {
+                var payload = event.data || {};
+                var maxDataRows = Math.max(1, Math.floor(Number(payload.maxDataRows) || 1));
+                var maxColumns = Math.max(1, Math.floor(Number(payload.maxColumns) || 1));
+                function fail(code) {
+                    var error = new Error(code);
+                    error.excelImportCode = code;
+                    throw error;
+                }
+                try {
+                    if (!self.XLSX) {
+                        importScripts(payload.parserUrl);
+                    }
+                } catch (error) {
+                    self.postMessage({ success: false, kind: 'infrastructure', code: 'worker_unavailable' });
                     return;
                 }
+                try {
+                    if (!self.XLSX || String(self.XLSX.version || '') !== payload.expectedVersion) {
+                        fail('parser_unavailable');
+                    }
+                    if (!self.XLSX.read || !self.XLSX.utils || !self.XLSX.utils.sheet_to_json || !self.XLSX.utils.decode_range) {
+                        fail('parser_unavailable');
+                    }
+                    var workbook = self.XLSX.read(payload.arrayBuffer, {
+                        type: 'array',
+                        dense: true,
+                        sheets: 0,
+                        sheetRows: maxDataRows + 2,
+                        cellFormula: false,
+                        cellHTML: false,
+                        cellStyles: false,
+                        bookDeps: false,
+                        bookVBA: false
+                    });
+                    if (!workbook || typeof workbook !== 'object' || !Object.prototype.hasOwnProperty.call(workbook, 'SheetNames') || !Array.isArray(workbook.SheetNames)) {
+                        fail('invalid_workbook');
+                    }
+                    if (workbook.SheetNames.length === 0) {
+                        self.postMessage({ success: true, matrix: [] });
+                        return;
+                    }
+                    if (!Object.prototype.hasOwnProperty.call(workbook.SheetNames, 0)) {
+                        fail('invalid_workbook');
+                    }
+                    var firstSheetName = workbook.SheetNames[0];
+                    var normalizedSheetName = typeof firstSheetName === 'string' ? firstSheetName.trim().toLowerCase() : '';
+                    if (!normalizedSheetName) {
+                        fail('invalid_workbook');
+                    }
+                    if (normalizedSheetName === '__proto__' || normalizedSheetName === 'constructor' || normalizedSheetName === 'prototype') {
+                        fail('invalid_workbook');
+                    }
+                    if (!Object.prototype.hasOwnProperty.call(workbook, 'Sheets') || !workbook.Sheets || typeof workbook.Sheets !== 'object' || !Object.prototype.hasOwnProperty.call(workbook.Sheets, firstSheetName)) {
+                        fail('invalid_workbook');
+                    }
+                    var worksheet = workbook.Sheets[firstSheetName];
+                    if (!worksheet || typeof worksheet !== 'object') {
+                        fail('invalid_workbook');
+                    }
+                    var rangeText = String(worksheet['!fullref'] || worksheet['!ref'] || '').trim();
+                    if (rangeText) {
+                        var range;
+                        try {
+                            range = self.XLSX.utils.decode_range(rangeText);
+                        } catch (rangeError) {
+                            fail('invalid_workbook');
+                        }
+                        var columnCount = Math.max(0, Number(range.e && range.e.c) - Number(range.s && range.s.c) + 1);
+                        var dataRowCount = Math.max(0, Number(range.e && range.e.r) - Number(range.s && range.s.r));
+                        if (!Number.isFinite(columnCount) || !Number.isFinite(dataRowCount)) {
+                            fail('invalid_workbook');
+                        }
+                        if (columnCount > maxColumns) {
+                            fail('column_limit');
+                        }
+                        if (dataRowCount > maxDataRows) {
+                            fail('row_limit');
+                        }
+                    }
+                    var matrix = self.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', blankrows: false });
+                    if (!Array.isArray(matrix) || matrix.some(function (row) { return !Array.isArray(row); })) {
+                        fail('invalid_workbook');
+                    }
+                    if (matrix.length > maxDataRows + 1) {
+                        fail('row_limit');
+                    }
+                    if (matrix.some(function (row) { return row.length > maxColumns; })) {
+                        fail('column_limit');
+                    }
+                    self.postMessage({ success: true, matrix: matrix });
+                } catch (error) {
+                    self.postMessage({
+                        success: false,
+                        kind: 'parse',
+                        code: error && error.excelImportCode ? error.excelImportCode : 'invalid_workbook',
+                        maxDataRows: maxDataRows
+                    });
+                }
+            };
+        `;
+        let blobUrl = '';
+        let worker;
+        try {
+            blobUrl = URL.createObjectURL(new Blob([workerSource], { type: 'application/javascript' }));
+            worker = new Worker(blobUrl);
+        } catch (_error) {
+            if (blobUrl) URL.revokeObjectURL(blobUrl);
+            reject(createExcelImportError('worker_unavailable'));
+            return;
+        }
+        let settled = false;
+        let timeoutId = null;
 
-                const worksheet = workbook.Sheets[firstSheetName];
-                const rows = parser.utils.sheet_to_json(worksheet, { defval: '' });
-                resolve(Array.isArray(rows) ? rows : []);
-            } catch (error) {
-                reject(error);
+        function cleanup() {
+            if (timeoutId !== null) {
+                clearTimeout(timeoutId);
+                timeoutId = null;
+            }
+            try {
+                worker.terminate();
+            } catch (_error) {
+                // Ignore cleanup failures.
+            }
+            URL.revokeObjectURL(blobUrl);
+        }
+
+        worker.onmessage = (event) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            const data = event.data || {};
+            if (data.success) {
+                try {
+                    resolve(buildSafeExcelRows(data.matrix));
+                } catch (error) {
+                    reject(error && error.excelImportCode ? error : createExcelImportError('invalid_workbook'));
+                }
+            } else {
+                reject(createExcelImportError(
+                    data.kind === 'infrastructure' ? 'worker_unavailable' : String(data.code || 'invalid_workbook'),
+                    { maxDataRows: data.maxDataRows || maxDataRows }
+                ));
             }
         };
+        worker.onerror = () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(createExcelImportError('worker_unavailable'));
+        };
 
-        reader.readAsArrayBuffer(file);
+        const workerBuffer = typeof arrayBuffer.slice === 'function' ? arrayBuffer.slice(0) : arrayBuffer;
+        timeoutId = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(createExcelImportError('timeout'));
+        }, timeoutMs);
+        try {
+            worker.postMessage({
+                parserUrl,
+                expectedVersion: SHEETJS_REQUIRED_VERSION,
+                maxDataRows,
+                maxColumns: EXCEL_IMPORT_MAX_COLUMNS,
+                arrayBuffer: workerBuffer
+            }, [workerBuffer]);
+        } catch (_error) {
+            if (!settled) {
+                settled = true;
+                cleanup();
+                reject(createExcelImportError('worker_unavailable'));
+            }
+        }
     });
+}
+
+async function readExcelRows(file, options = {}) {
+    const extension = validateExcelImportFileMetadata(file);
+    const maxDataRows = resolveExcelImportMaxDataRows(options);
+    let arrayBuffer;
+    try {
+        arrayBuffer = typeof file.arrayBuffer === 'function'
+            ? await file.arrayBuffer()
+            : await readFileAsArrayBuffer(file);
+    } catch (error) {
+        throw error && error.excelImportCode ? error : createExcelImportError('read_failed');
+    }
+    validateExcelImportSignature(arrayBuffer, extension);
+    return parseExcelRowsInWorker(arrayBuffer, { maxDataRows });
+}
+
+function hasRecognizedBulkColumn(rows, aliases) {
+    const firstRow = (Array.isArray(rows) ? rows : []).find(row => row && typeof row === 'object' && Object.keys(row).length > 0);
+    if (!firstRow) {
+        return false;
+    }
+    return Object.keys(firstRow).some(key => Boolean(resolveExcelHeaderAlias(aliases, key)));
 }
 
 function mapCredentialDistributorRow(rawRow, rowNumber) {
@@ -888,8 +1584,7 @@ function mapCredentialDistributorRow(rawRow, rowNumber) {
     };
 
     Object.entries(rawRow || {}).forEach(([key, value]) => {
-        const normalizedHeader = normalizeBulkHeaderKey(key);
-        const canonicalKey = CREDENTIAL_DISTRIBUTOR_HEADER_ALIASES[normalizedHeader];
+        const canonicalKey = resolveExcelHeaderAlias(CREDENTIAL_DISTRIBUTOR_HEADER_ALIASES, key);
         if (!canonicalKey) return;
         mapped[canonicalKey] = normalizeBulkText(value);
     });
@@ -905,7 +1600,7 @@ function extractCredentialDistributorRows(rawRows) {
         if (!rawRow || typeof rawRow !== 'object') return;
 
         const recognized = Object.keys(rawRow).some(key => {
-            return Boolean(CREDENTIAL_DISTRIBUTOR_HEADER_ALIASES[normalizeBulkHeaderKey(key)]);
+            return Boolean(resolveExcelHeaderAlias(CREDENTIAL_DISTRIBUTOR_HEADER_ALIASES, key));
         });
         if (recognized) hasRecognizedColumn = true;
 
@@ -1039,7 +1734,11 @@ function isCredentialDistributorSmtpConfigured() {
         return false;
     }
     if (credentialDistributorSmtpConfig.auth) {
-        return !!(credentialDistributorSmtpConfig.username && credentialDistributorSmtpConfig.hasPassword);
+        return !!(
+            credentialDistributorSmtpConfig.username
+            && credentialDistributorSmtpConfig.hasPassword
+            && credentialDistributorSmtpConfig.secretStatus === 'available'
+        );
     }
     return true;
 }
@@ -1130,7 +1829,13 @@ function setupCredentialDistributor() {
         if (config && config.fromEmail) {
             parts.push(`From: ${config.fromEmail}.`);
         }
-        parts.push(config && config.hasPassword ? 'Password is present.' : 'Password is missing.');
+        if (config && config.migrationRequired) {
+            parts.push('The saved password requires the CLI security migration.');
+        } else if (config && config.secretStatus === 'unavailable') {
+            parts.push('The saved password is configured but unavailable; check the server encryption key.');
+        } else {
+            parts.push(config && config.hasPassword ? 'Password is configured.' : 'Password is missing.');
+        }
 
         return parts.join(' ');
     }
@@ -1146,6 +1851,8 @@ function setupCredentialDistributor() {
             fromName: String(config && (config.fromName || config.senderName) || '').trim(),
             timeout: Number(config && config.timeout || 20),
             hasPassword: !!(config && (config.hasPassword || config.hasAppPassword)),
+            secretStatus: String(config && config.secretStatus || 'missing').trim() || 'missing',
+            migrationRequired: !!(config && config.migrationRequired),
             source: String(config && config.source || 'database').trim() || 'database'
         };
 
@@ -1158,10 +1865,14 @@ function setupCredentialDistributor() {
         if (fromEmailInput) fromEmailInput.value = credentialDistributorSmtpConfig.fromEmail;
         if (fromNameInput) fromNameInput.value = credentialDistributorSmtpConfig.fromName || 'NAAP Evaluation System';
         if (passwordInput) passwordInput.value = '';
+        syncGeneralSystemEmail(
+            credentialDistributorSmtpConfig.fromEmail,
+            credentialDistributorSmtpConfig.source
+        );
 
         setCredentialConfigStatus(
             buildCredentialConfigStatusMessage(credentialDistributorSmtpConfig),
-            isCredentialDistributorSmtpConfigured() ? 'success' : 'error'
+            isCredentialDistributorSmtpConfigured() && !credentialDistributorSmtpConfig.migrationRequired ? 'success' : 'error'
         );
     }
 
@@ -1170,7 +1881,7 @@ function setupCredentialDistributor() {
             const config = SharedData.getCredentialDistributorConfig(actor);
             applyCredentialSmtpConfig(config);
         } catch (error) {
-            console.error('[AdminPanel] Failed to load SMTP config.', error);
+            console.error('[AdminPanel] Failed to load SMTP config.');
             setCredentialConfigStatus('Unable to load SMTP config: ' + (error.message || 'Unknown error'), 'error');
         }
     }
@@ -1219,7 +1930,7 @@ function setupCredentialDistributor() {
                 applyCredentialSmtpConfig(saved);
                 setCredentialDistributorFeedback('success', 'SMTP configuration saved successfully.');
             } catch (error) {
-                console.error('[AdminPanel] Failed to save SMTP config.', error);
+                console.error('[AdminPanel] Failed to save SMTP config.');
                 setCredentialConfigStatus('Failed to save SMTP config: ' + (error.message || 'Unknown error'), 'error');
             } finally {
                 setCredentialDistributorBusyState(false);
@@ -1260,7 +1971,7 @@ function setupCredentialDistributor() {
                 applyCredentialSmtpConfig(saved);
                 setCredentialDistributorFeedback('info', 'Saved SMTP password cleared.');
             } catch (error) {
-                console.error('[AdminPanel] Failed to clear SMTP password.', error);
+                console.error('[AdminPanel] Failed to clear SMTP password.');
                 setCredentialConfigStatus('Failed to clear SMTP password: ' + (error.message || 'Unknown error'), 'error');
             } finally {
                 setCredentialDistributorBusyState(false);
@@ -1305,7 +2016,7 @@ function setupCredentialDistributor() {
         setCredentialDistributorBusyState(true);
         setCredentialDistributorFeedback('info', 'Reading Excel file...');
         try {
-            const rawRows = await readExcelRows(file);
+            const rawRows = await readExcelRows(file, { maxDataRows: CREDENTIAL_DISTRIBUTOR_MAX_ROWS });
             const parsed = extractCredentialDistributorRows(rawRows);
             if (!parsed.hasRecognizedColumn) {
                 setCredentialDistributorFeedback('error', 'No recognized columns found. Expected headers like email/password.');
@@ -1612,6 +2323,8 @@ function setupGeminiConfig() {
             model: String(config && config.model || 'gpt-5.6-luna').trim() || 'gpt-5.6-luna',
             timeoutMs: Number(config && config.timeoutMs || 30000),
             hasApiKey: !!(config && config.hasApiKey),
+            secretStatus: String(config && config.secretStatus || 'missing').trim() || 'missing',
+            migrationRequired: !!(config && config.migrationRequired),
             source: String(config && config.source || 'database').trim() || 'database',
             panelAccess
         };
@@ -1621,7 +2334,12 @@ function setupGeminiConfig() {
         apiKeyInput.value = '';
 
         const sourceLabel = formatGeminiConfigSource(geminiRuntimeConfig.source);
-        const keyLabel = geminiRuntimeConfig.hasApiKey ? 'API key is present.' : 'API key is missing.';
+        let keyLabel = geminiRuntimeConfig.hasApiKey ? 'API key is configured.' : 'API key is missing.';
+        if (geminiRuntimeConfig.migrationRequired) {
+            keyLabel = 'The saved API key requires the CLI security migration.';
+        } else if (geminiRuntimeConfig.secretStatus === 'unavailable') {
+            keyLabel = 'The saved API key is configured but unavailable; check the server encryption key.';
+        }
         const panelLabels = {
             admin: 'Admin',
             hr: 'HR',
@@ -1638,7 +2356,7 @@ function setupGeminiConfig() {
             : 'All panel AI access is on.';
         setGeminiConfigStatus(
             `OpenAI ready via ${sourceLabel}. Model: ${geminiRuntimeConfig.model}. Timeout: ${geminiRuntimeConfig.timeoutMs} ms. ${keyLabel} ${accessLabel}`,
-            geminiRuntimeConfig.hasApiKey ? 'success' : 'error'
+            geminiRuntimeConfig.hasApiKey && geminiRuntimeConfig.secretStatus === 'available' && !geminiRuntimeConfig.migrationRequired ? 'success' : 'error'
         );
     }
 
@@ -1647,7 +2365,7 @@ function setupGeminiConfig() {
             const config = SharedData.getOpenAiConfig ? SharedData.getOpenAiConfig(actor) : SharedData.getGeminiConfig(actor);
             applyGeminiConfig(config);
         } catch (error) {
-            console.error('[AdminPanel] Failed to load OpenAI config.', error);
+            console.error('[AdminPanel] Failed to load OpenAI config.');
             setGeminiConfigStatus('Unable to load OpenAI config: ' + (error.message || 'Unknown error'), 'error');
         }
     }
@@ -1678,7 +2396,7 @@ function setupGeminiConfig() {
             const saved = SharedData.saveOpenAiConfig ? SharedData.saveOpenAiConfig(payload, actor) : SharedData.saveGeminiConfig(payload, actor);
             applyGeminiConfig(saved);
         } catch (error) {
-            console.error('[AdminPanel] Failed to save OpenAI config.', error);
+            console.error('[AdminPanel] Failed to save OpenAI config.');
             setGeminiConfigStatus('Failed to save OpenAI config: ' + (error.message || 'Unknown error'), 'error');
         } finally {
             setGeminiBusyState(false);
@@ -1699,7 +2417,7 @@ function setupGeminiConfig() {
             }, actor);
             applyGeminiConfig(saved);
         } catch (error) {
-            console.error('[AdminPanel] Failed to clear OpenAI API key.', error);
+            console.error('[AdminPanel] Failed to clear OpenAI API key.');
             setGeminiConfigStatus('Failed to clear OpenAI API key: ' + (error.message || 'Unknown error'), 'error');
         } finally {
             setGeminiBusyState(false);
@@ -1709,7 +2427,7 @@ function setupGeminiConfig() {
     loadGeminiConfig();
 }
 
-function buildBulkUserFromRow(row, rowNumber, existingUsersByEmail, fileEmailSet, campusMap, departmentMap, programMap, importSeed, importIndex) {
+function buildBulkUserFromRow(row, rowNumber, fileEmailSet, campusMap, departmentMap, programMap, importSeed, importIndex) {
     const name = normalizeBulkText(row.name);
     const email = normalizeBulkText(row.email).toLowerCase();
     const role = normalizeRoleCode(row.role);
@@ -1742,8 +2460,6 @@ function buildBulkUserFromRow(row, rowNumber, existingUsersByEmail, fileEmailSet
     const yearSection = normalizeYearSection(row.yearSection);
     const roleRequiresProgram = roleRequiresProgramAssignment(role);
     const resolvedProgram = resolveBulkProgramRecord(campus, department, row.programCode, programMap);
-    const existingUser = existingUsersByEmail.get(email) || null;
-
     if (role === 'student') {
         if (!studentNumber || !yearSection) {
             return { error: `Row ${rowNumber}: student requires studentNumber and yearSection in Y-S format (e.g., 3-1).` };
@@ -1764,28 +2480,19 @@ function buildBulkUserFromRow(row, rowNumber, existingUsersByEmail, fileEmailSet
         }
     }
 
-    const providedPassword = normalizeBulkText(row.password);
-    let resolvedPassword = providedPassword;
-    let generatedPassword = '';
-
-    if (!resolvedPassword) {
-        if (existingUser) {
-            resolvedPassword = normalizeBulkText(existingUser.password);
-        } else {
-            generatedPassword = generateRandomPassword(6);
-            resolvedPassword = generatedPassword;
-        }
-    }
-
     const position = role === 'student' ? '' : normalizeBulkText(row.position);
     const employmentType = normalizeBulkEmploymentType(row.employmentType, role);
-    const userId = existingUser ? existingUser.id : `u${importSeed}_${importIndex}`;
+    if (role !== 'student' && !employmentType) {
+        return { error: `Row ${rowNumber}: employment type must be Regular, Temporary, or COS.` };
+    }
+    const userId = `u${importSeed}_${importIndex}`;
 
-    const user = Object.assign({}, existingUser || {}, {
+    const user = {
         id: userId,
+        rowNumber,
         name,
         email,
-        password: resolvedPassword,
+        password: normalizeBulkText(row.password),
         role,
         campus,
         department,
@@ -1799,15 +2506,69 @@ function buildBulkUserFromRow(row, rowNumber, existingUsersByEmail, fileEmailSet
         programName: roleRequiresProgram ? resolvedProgram.programName : '',
         status: 'active',
         isActive: true
-    });
+    };
 
     return {
         user,
-        password: resolvedPassword,
         email,
-        isUpdate: !!existingUser,
-        usedProvidedPassword: !!providedPassword,
-        generatedPassword
+    };
+}
+
+function createBulkImportId() {
+    const stamp = SharedData.getNowIsoString
+        ? SharedData.getNowIsoString()
+        : new Date().toISOString();
+    return 'bulk-' + stamp.replace(/[^0-9A-Za-z]+/g, '-').replace(/^-|-$/g, '');
+}
+
+function chunkBulkUsers(users, chunkSize = BULK_REGISTER_BATCH_SIZE) {
+    const rows = Array.isArray(users) ? users : [];
+    const size = Math.max(1, Number(chunkSize) || BULK_REGISTER_BATCH_SIZE);
+    const chunks = [];
+    for (let index = 0; index < rows.length; index += size) {
+        chunks.push(rows.slice(index, index + size));
+    }
+    return chunks;
+}
+
+function createBulkImportSummary() {
+    return {
+        processed: 0,
+        created: 0,
+        updated: 0,
+        skipped: 0,
+        failed: 0,
+    };
+}
+
+function mergeBulkImportSummary(target, source) {
+    const output = target || createBulkImportSummary();
+    const input = source && typeof source === 'object' ? source : {};
+    ['processed', 'created', 'updated', 'skipped', 'failed'].forEach(key => {
+        output[key] = (Number(output[key]) || 0) + (Number(input[key]) || 0);
+    });
+    return output;
+}
+
+function setBulkRegisterProgress(phase, summary, currentBatch = 0, totalBatches = 0) {
+    const stats = summary || createBulkImportSummary();
+    const batchText = totalBatches > 0
+        ? ` Batch ${currentBatch} of ${totalBatches}.`
+        : '';
+    const message = `${phase}.${batchText} Processed: ${Number(stats.processed) || 0}, created: ${Number(stats.created) || 0}, updated: ${Number(stats.updated) || 0}, skipped: ${Number(stats.skipped) || 0}, failed: ${Number(stats.failed) || 0}.`;
+    setBulkRegisterLoadingState(true, message, 'Processing Bulk Register');
+}
+
+function normalizeBulkBatchSummary(response) {
+    const summary = response && response.summary && typeof response.summary === 'object'
+        ? response.summary
+        : {};
+    return {
+        processed: Number(summary.processed) || 0,
+        created: Number(summary.created) || 0,
+        updated: Number(summary.updated) || 0,
+        skipped: Number(summary.skipped) || 0,
+        failed: Number(summary.failed) || 0,
     };
 }
 
@@ -1882,33 +2643,16 @@ function setupBulkRegister() {
                 return;
             }
 
-            const hasRecognizedColumn = rawRows.some(rawRow =>
-                Object.keys(rawRow || {}).some(key => Boolean(BULK_HEADER_ALIASES[normalizeBulkHeaderKey(key)]))
-            );
+            const hasRecognizedColumn = hasRecognizedBulkColumn(rawRows, BULK_HEADER_ALIASES);
             if (!hasRecognizedColumn) {
                 alert('No recognized columns found. Please use the required import headers.');
                 input.value = '';
                 return;
             }
 
-            const existingUsers = SharedData.getUsers();
-            const usersToPersist = existingUsers.map(user => ({ ...user }));
-            const protectedAdminEmail = resolveProtectedAdminEmail(usersToPersist);
-            const existingUserIndexByEmail = new Map();
-            usersToPersist.forEach((user, index) => {
-                const emailKey = normalizeBulkText(user.email).toLowerCase();
-                if (emailKey) {
-                    existingUserIndexByEmail.set(emailKey, index);
-                }
-            });
-            const existingUsersByEmail = new Map(
-                usersToPersist
-                    .map(user => [normalizeBulkText(user.email).toLowerCase(), user])
-                    .filter(([email]) => Boolean(email))
-            );
             const fileEmailSet = new Set();
-            const campusMap = buildBulkCampusMap(existingUsers);
-            const departmentMap = buildBulkDepartmentMap(existingUsers);
+            const campusMap = buildBulkCampusMap();
+            const departmentMap = buildBulkDepartmentMap();
             const programMap = buildBulkProgramMap();
 
             if (campusMap.size === 0) {
@@ -1918,27 +2662,39 @@ function setupBulkRegister() {
             }
 
             const importSeed = Date.now();
-            const affectedEmails = new Set();
-            let createdCount = 0;
-            let updatedCount = 0;
-            let inactivatedCount = 0;
+            const importId = createBulkImportId();
+            const usersToPersist = [];
             const credentialRows = [];
             const rowErrors = [];
             const postSaveWarnings = [];
+            const importSummary = createBulkImportSummary();
             let processedRows = 0;
 
-            rawRows.forEach((rawRow, index) => {
+            setBulkRegisterProgress('Validating rows', importSummary);
+            await waitForBrowserPaint();
+
+            const validationBatchTotal = Math.max(1, Math.ceil(rawRows.length / BULK_REGISTER_VALIDATE_CHUNK_SIZE));
+            for (let index = 0; index < rawRows.length; index += 1) {
+                const rawRow = rawRows[index];
                 const rowNumber = index + 2;
+                const validationBatch = Math.floor(index / BULK_REGISTER_VALIDATE_CHUNK_SIZE) + 1;
                 const normalizedRow = mapBulkRowToCanonical(rawRow);
                 const hasAnyValue = Object.values(normalizedRow).some(Boolean);
-                if (!hasAnyValue) return;
+                if (!hasAnyValue) {
+                    importSummary.skipped += 1;
+                    if ((index + 1) % BULK_REGISTER_VALIDATE_CHUNK_SIZE === 0) {
+                        setBulkRegisterProgress('Validating rows', importSummary, validationBatch, validationBatchTotal);
+                        await waitForBrowserPaint();
+                    }
+                    continue;
+                }
 
                 processedRows += 1;
+                importSummary.processed += 1;
 
                 const result = buildBulkUserFromRow(
                     normalizedRow,
                     rowNumber,
-                    existingUsersByEmail,
                     fileEmailSet,
                     campusMap,
                     departmentMap,
@@ -1948,44 +2704,40 @@ function setupBulkRegister() {
                 );
 
                 if (result.error) {
+                    importSummary.failed += 1;
                     rowErrors.push({
                         rowNumber,
                         error: result.error
                     });
-                    return;
+                    if ((index + 1) % BULK_REGISTER_VALIDATE_CHUNK_SIZE === 0) {
+                        setBulkRegisterProgress('Validating rows', importSummary, validationBatch, validationBatchTotal);
+                        await waitForBrowserPaint();
+                    }
+                    continue;
                 }
 
-                const existingIndex = existingUserIndexByEmail.get(result.email);
-                if (existingIndex !== undefined) {
-                    usersToPersist[existingIndex] = result.user;
-                    updatedCount += 1;
-                } else {
-                    usersToPersist.push(result.user);
-                    existingUserIndexByEmail.set(result.email, usersToPersist.length - 1);
-                    createdCount += 1;
-                }
-
-                existingUsersByEmail.set(result.email, result.user);
-                affectedEmails.add(result.email);
-                const idNumber = normalizeBulkText(result.user.employeeId || result.user.studentNumber);
-                credentialRows.push({
-                    name: result.user.name,
-                    email: result.user.email,
-                    role: result.user.role,
-                    campus: result.user.campus,
-                    idNumber,
-                    password: result.password
-                });
+                usersToPersist.push(result.user);
                 fileEmailSet.add(result.email);
-            });
+                if ((index + 1) % BULK_REGISTER_VALIDATE_CHUNK_SIZE === 0) {
+                    setBulkRegisterProgress('Validating rows', importSummary, validationBatch, validationBatchTotal);
+                    await waitForBrowserPaint();
+                }
+            }
 
             if (processedRows === 0) {
-                alert('No importable rows with data were found in the worksheet.');
+                alert([
+                    'Bulk registration complete.',
+                    'Rows processed: 0',
+                    'Created: 0',
+                    'Updated: 0',
+                    `Skipped: ${importSummary.skipped}`,
+                    'Failed: 0'
+                ].join('\n'));
                 input.value = '';
                 return;
             }
 
-            if (rowErrors.length > 0) {
+            if (usersToPersist.length === 0) {
                 downloadBulkInvalidRowsCsv(rowErrors);
                 const previewErrors = rowErrors
                     .slice(0, 20)
@@ -1995,10 +2747,10 @@ function setupBulkRegister() {
                 }
 
                 const errorSummary = [
-                    'Bulk registration failed.',
+                    'Bulk registration completed with no saved rows.',
                     `Rows processed: ${processedRows}`,
+                    `Skipped: ${importSummary.skipped}`,
                     `Failed: ${rowErrors.length}`,
-                    'No changes were saved because some rows are invalid.',
                     'An invalid-row CSV report was downloaded.'
                 ];
                 if (previewErrors.length > 0) {
@@ -2009,78 +2761,101 @@ function setupBulkRegister() {
                 return;
             }
 
-            usersToPersist.forEach(user => {
-                const emailKey = normalizeBulkText(user && user.email).toLowerCase();
-                if (!emailKey || affectedEmails.has(emailKey)) {
-                    return;
-                }
-                if (protectedAdminEmail && emailKey === protectedAdminEmail) {
-                    return;
-                }
+            const saveSummary = createBulkImportSummary();
+            const chunks = chunkBulkUsers(usersToPersist, BULK_REGISTER_BATCH_SIZE);
+            for (let batchIndex = 0; batchIndex < chunks.length; batchIndex += 1) {
+                const batch = chunks[batchIndex];
+                setBulkRegisterProgress('Saving rows', {
+                    processed: processedRows,
+                    created: saveSummary.created,
+                    updated: saveSummary.updated,
+                    skipped: importSummary.skipped + saveSummary.skipped,
+                    failed: rowErrors.length,
+                }, batchIndex + 1, chunks.length);
+                await waitForBrowserPaint();
 
-                const currentStatus = normalizeBulkText(user.status).toLowerCase();
-                if (currentStatus !== 'inactive') {
-                    inactivatedCount += 1;
-                }
-                user.status = 'inactive';
-                user.isActive = false;
-            });
-
-            if (processedRows > 0) {
-                let savedUsers = [];
                 try {
-                    setBulkRegisterLoadingState(true, `Saving ${processedRows} validated row(s) to the database.`, 'Saving Bulk Register');
-                    await waitForBrowserPaint();
-                    savedUsers = (typeof SharedData.bulkUpsertUsers === 'function')
-                        ? SharedData.bulkUpsertUsers(usersToPersist)
-                        : SharedData.setUsers(usersToPersist);
+                    const response = (typeof SharedData.bulkUpsertUsers === 'function')
+                        ? await SharedData.bulkUpsertUsers(batch, {
+                            importId,
+                            batchIndex: batchIndex + 1,
+                            batchTotal: chunks.length,
+                            allowPartial: true,
+                        })
+                        : await SharedData.setUsers(batch);
+                    mergeBulkImportSummary(saveSummary, normalizeBulkBatchSummary(response));
+
+                    if (response && Array.isArray(response.results)) {
+                        response.results.forEach(result => {
+                            if (!result || result.status !== 'failed') return;
+                            rowErrors.push({
+                                rowNumber: result.rowNumber || '',
+                                error: `Row ${result.rowNumber || '?'}: ${result.error || 'Unable to save row.'}`
+                            });
+                        });
+                    }
+
+                    if (response && Array.isArray(response.credentialRows)) {
+                        response.credentialRows.forEach(row => {
+                            if (row && row.password) {
+                                credentialRows.push(row);
+                            }
+                        });
+                    }
                 } catch (persistError) {
-                    console.error('[BulkRegister] Persist failed:', persistError);
-                    alert(`Bulk registration failed while saving to database: ${persistError.message || 'Unknown persistence error'}`);
-                    input.value = '';
-                    return;
-                }
-
-                savedUsers = Array.isArray(savedUsers) ? savedUsers : [];
-                adminUsers = savedUsers;
-
-                const persistedEmailSet = new Set(
-                    savedUsers
-                        .map(user => normalizeBulkText(user.email).toLowerCase())
-                        .filter(Boolean)
-                );
-                const missingAfterSave = Array.from(affectedEmails).filter(email => !persistedEmailSet.has(email));
-                if (missingAfterSave.length === affectedEmails.size) {
-                    alert('Bulk registration failed: no imported rows were persisted to database.');
-                    input.value = '';
-                    return;
-                }
-                if (missingAfterSave.length > 0) {
-                    missingAfterSave.forEach(email => {
-                        postSaveWarnings.push(`Post-save verification warning: ${email} not found after persistence.`);
+                    const message = persistError && persistError.message ? persistError.message : 'Unknown persistence error';
+                    saveSummary.processed += batch.length;
+                    saveSummary.failed += batch.length;
+                    batch.forEach(user => {
+                        rowErrors.push({
+                            rowNumber: user && user.rowNumber ? user.rowNumber : '',
+                            error: `Row ${user && user.rowNumber ? user.rowNumber : '?'}: ${message}`
+                        });
                     });
+                    if (persistError && (persistError.status === 401 || persistError.status === 403)) {
+                        const remainingRows = chunks.slice(batchIndex + 1).reduce((rows, chunk) => rows.concat(chunk), []);
+                        saveSummary.processed += remainingRows.length;
+                        saveSummary.failed += remainingRows.length;
+                        remainingRows.forEach(user => {
+                            rowErrors.push({
+                                rowNumber: user && user.rowNumber ? user.rowNumber : '',
+                                error: `Row ${user && user.rowNumber ? user.rowNumber : '?'}: Import stopped because the session is no longer authorized.`
+                            });
+                        });
+                        break;
+                    }
                 }
+            }
 
-                renderOrganizationView(getActiveCampusFilter());
-                updateOverviewCards();
+            try {
+                await refreshAdminCurrentUsersPage();
+                scheduleAdminDashboardSummaryRefresh(0);
+            } catch (refreshError) {
+                console.warn('[BulkRegister] Post-import list refresh failed:', refreshError);
+                postSaveWarnings.push('Post-save warning: current user list could not be refreshed.');
+            }
 
-                if (usersToPersist.some(user => normalizeRoleCode(user.role) === 'professor')) {
-                    loadProfessorsData();
-                    renderProfessors();
-                }
+            if (rowErrors.length > 0) {
+                downloadBulkInvalidRowsCsv(rowErrors);
+            }
 
+            if (credentialRows.length > 0) {
                 downloadBulkCredentialsCsv(credentialRows);
             }
 
+            const failedTotal = importSummary.failed + saveSummary.failed;
             const summaryLines = [
                 'Bulk registration complete.',
                 `Rows processed: ${processedRows}`,
-                `Created: ${createdCount}`,
-                `Updated: ${updatedCount}`,
-                `Inactivated: ${inactivatedCount}`,
-                `Failed: ${rowErrors.length}`
+                `Created: ${saveSummary.created}`,
+                `Updated: ${saveSummary.updated}`,
+                `Skipped: ${importSummary.skipped + saveSummary.skipped}`,
+                `Failed: ${failedTotal}`
             ];
 
+            if (rowErrors.length > 0) {
+                summaryLines.push('An invalid-row CSV report was downloaded.');
+            }
             if (postSaveWarnings.length > 0) {
                 summaryLines.push('', 'Warnings:');
                 postSaveWarnings.forEach(warning => summaryLines.push(`- ${warning}`));
@@ -2104,6 +2879,8 @@ function setupRoleBasedFields() {
     const roleSelect = document.getElementById('new-user-role');
     const studentFields = document.getElementById('student-fields');
     const employeeFields = document.getElementById('employee-fields');
+    const employmentTypeGroup = document.getElementById('new-user-employment-type-group');
+    const employmentTypeSelect = document.getElementById('new-user-employment-type');
     const deptField = document.getElementById('dept-field');
     const campusSelect = document.getElementById('new-user-campus');
     const deptSelect = document.getElementById('new-user-department');
@@ -2141,6 +2918,16 @@ function setupRoleBasedFields() {
                 }
             }
 
+            if (employmentTypeGroup) {
+                employmentTypeGroup.style.display = selectedRole !== 'student' ? 'block' : 'none';
+            }
+            if (employmentTypeSelect) {
+                employmentTypeSelect.required = selectedRole !== 'student';
+                if (selectedRole === 'student') {
+                    employmentTypeSelect.value = 'Regular';
+                }
+            }
+
             // Show/hide department field (not for HR)
             if (deptField) {
                 deptField.style.display = selectedRole === 'hr' ? 'none' : 'block';
@@ -2174,6 +2961,14 @@ function setupRoleBasedFields() {
         campusSelect.addEventListener('change', updateDeptOptions);
         deptSelect.addEventListener('change', syncProgramOptions);
         updateDeptOptions();
+    }
+
+    if (typeof SharedData.onDataChange === 'function') {
+        SharedData.onDataChange((key) => {
+            if (key === SharedData.KEYS.CAMPUSES || key === SharedData.KEYS.PROGRAMS) {
+                refreshAddUserOrganizationOptions();
+            }
+        });
     }
 }
 
@@ -2221,6 +3016,7 @@ function setupCampusFilter() {
     const campusSelect = document.getElementById('campus-filter-select');
     if (campusSelect) {
         campusSelect.addEventListener('change', () => {
+            adminUsersPage = 1;
             loadUsersByOrganization(getActiveCampusFilter());
         });
     }
@@ -2367,15 +3163,16 @@ function setupProgramManager() {
             ? preferredCampus
             : (campusSelect.value && campusOptions.some(campus => campus.id === campusSelect.value) ? campusSelect.value : fallbackCampus);
 
-        campusSelect.innerHTML = campusOptions.map(campus => (
-            `<option value="${escapeAttr(campus.id)}">${escapeHtml(campus.name)}</option>`
-        )).join('');
-
         if (!campusOptions.length) {
-            campusSelect.innerHTML = '<option value="">No campuses</option>';
+            replaceSelectOptions(campusSelect, [{ value: '', label: 'No campuses' }]);
             campusSelect.value = '';
             return;
         }
+
+        replaceSelectOptions(campusSelect, campusOptions.map(campus => ({
+            value: campus.id,
+            label: campus.name
+        })));
 
         campusSelect.value = targetCampus || fallbackCampus;
     }
@@ -2386,15 +3183,16 @@ function setupProgramManager() {
         const normalizedPreferred = String(preferredDepartment || '').toLowerCase();
         const normalizedCurrent = String(departmentSelect.value || '').toLowerCase();
 
-        departmentSelect.innerHTML = departments.map(dept => (
-            `<option value="${escapeAttr(dept)}">${escapeHtml(getDepartmentLabel(dept))}</option>`
-        )).join('');
-
         if (!departments.length) {
-            departmentSelect.innerHTML = '<option value="">No departments</option>';
+            replaceSelectOptions(departmentSelect, [{ value: '', label: 'No departments' }]);
             departmentSelect.value = '';
             return;
         }
+
+        replaceSelectOptions(departmentSelect, departments.map(dept => ({
+            value: dept,
+            label: getDepartmentLabel(dept)
+        })));
 
         const preferredMatch = departments.find(dept => String(dept).toLowerCase() === normalizedPreferred);
         if (preferredMatch) {
@@ -2424,29 +3222,19 @@ function setupProgramManager() {
 
     function renderProgramRows() {
         const rows = getFilteredPrograms();
+        listBody.replaceChildren();
         if (!rows.length) {
-            listBody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:14px;">No programs found for this campus/department.</td></tr>';
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 5;
+            cell.style.textAlign = 'center';
+            cell.style.padding = '14px';
+            cell.textContent = 'No programs found for this campus/department.';
+            row.appendChild(cell);
+            listBody.appendChild(row);
             return;
         }
-
-        listBody.innerHTML = rows.map(program => `
-            <tr>
-                <td>${program.programCode || ''}</td>
-                <td>${program.programName || ''}</td>
-                <td>${String(program.campusSlug || '').toUpperCase()}</td>
-                <td>${String(program.departmentCode || '').toUpperCase()}</td>
-                <td>
-                    <div class="professor-actions">
-                        <button type="button" class="action-btn edit" data-action="edit-program" data-program-id="${program.id}" title="Edit Program">
-                            <i class="fas fa-edit"></i>
-                        </button>
-                        <button type="button" class="action-btn delete" data-action="delete-program" data-program-id="${program.id}" title="Delete Program">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                </td>
-            </tr>
-        `).join('');
+        rows.forEach(program => listBody.appendChild(createProgramTableRow(program)));
     }
 
     function refreshProgramManager(preferredCampus, preferredDepartment) {
@@ -2557,7 +3345,7 @@ function setupProgramManager() {
         }
 
         if (action === 'delete-program') {
-            if (!confirm(`Delete program ${program.programCode}? Users under this program will be cleared from this program assignment.`)) {
+            if (!confirm(`Archive program ${program.programCode}? It will disappear from active selections while existing users and historical records keep their program reference.`)) {
                 return;
             }
             try {
@@ -2580,12 +3368,15 @@ function refreshCampusSelects(preselectId) {
         const el = document.getElementById(id);
         if (!el) return;
         const currentValue = el.value || preselectId || 'all';
-        const options = campusData
-            .filter(c => id === 'campus-filter-select' ? true : c.id !== 'all')
+        const availableCampuses = campusData
+            .filter(c => id === 'campus-filter-select' ? true : c.id !== 'all');
+        const options = availableCampuses
             .map(c => `<option value="${escapeAttr(c.id)}">${escapeHtml(c.name)}</option>`)
             .join('');
         el.innerHTML = options;
-        const valueToSet = campusData.some(c => c.id === currentValue) ? currentValue : (id === 'campus-filter-select' ? 'all' : campusData.find(c => c.id !== 'all')?.id);
+        const valueToSet = availableCampuses.some(c => c.id === currentValue)
+            ? currentValue
+            : (id === 'campus-filter-select' ? 'all' : availableCampuses[0]?.id);
         if (valueToSet) el.value = valueToSet;
     });
 
@@ -2612,14 +3403,14 @@ function renderCampusList() {
         return;
     }
     list.innerHTML = campuses.map(campus => `
-        <button class="campus-list-item ${campus.id === selectedCampusId ? 'active' : ''}" data-campus-id="${campus.id}">
+        <button class="campus-list-item ${campus.id === selectedCampusId ? 'active' : ''}" data-campus-id="${escapeAttr(campus.id)}">
             <div class="campus-list-title">
                 <i class="fas fa-building"></i>
-                <span>${campus.name}</span>
+                <span>${escapeHtml(campus.name)}</span>
             </div>
             <div class="campus-list-meta">
-                <span class="badge">${campus.departments.length} depts</span>
-                <span class="edit-campus-btn" data-campus-id="${campus.id}">
+                <span class="badge">${Number(Array.isArray(campus.departments) ? campus.departments.length : 0)} depts</span>
+                <span class="edit-campus-btn" data-campus-id="${escapeAttr(campus.id)}">
                     <i class="fas fa-pen"></i> Edit
                 </span>
             </div>
@@ -2645,24 +3436,24 @@ function renderCampusDetails() {
         <div class="campus-detail-header">
             <div>
                 <p class="eyebrow">Campus</p>
-                <h3>${campus.name}</h3>
-                <p class="muted">${campus.departments.length} departments</p>
+                <h3>${escapeHtml(campus.name)}</h3>
+                <p class="muted">${Number(Array.isArray(campus.departments) ? campus.departments.length : 0)} departments</p>
             </div>
-            <button class="remove-campus-btn danger" data-campus-id="${campus.id}">
+            <button class="remove-campus-btn danger" data-campus-id="${escapeAttr(campus.id)}">
                 <i class="fas fa-trash-alt"></i> Remove Campus
             </button>
         </div>
         <div class="campus-departments">
-            ${campus.departments.map(dept => `
+            ${(Array.isArray(campus.departments) ? campus.departments : []).map(dept => `
                 <span class="dept-chip">
-                    <i class="fas fa-layer-group"></i> ${dept}
-                    <button class="remove-dept-btn" data-campus-id="${campus.id}" data-dept="${dept}">&times;</button>
+                    <i class="fas fa-layer-group"></i> ${escapeHtml(dept)}
+                    <button class="remove-dept-btn" data-campus-id="${escapeAttr(campus.id)}" data-dept="${escapeAttr(dept)}">&times;</button>
                 </span>
             `).join('') || '<p class="muted">No departments yet.</p>'}
         </div>
         <div class="add-dept-row">
-            <input type="text" id="add-dept-input-${campus.id}" placeholder="Add department">
-            <button class="add-dept-btn" data-campus-id="${campus.id}">
+            <input type="text" id="add-dept-input-${escapeAttr(campus.id)}" placeholder="Add department">
+            <button class="add-dept-btn" data-campus-id="${escapeAttr(campus.id)}">
                 <i class="fas fa-plus"></i> Add Department
             </button>
         </div>
@@ -2688,9 +3479,12 @@ function getDepartmentsForCampus(campusId) {
     return [];
 }
 
-function populateDepartmentOptions(selectEl, campusId) {
+function populateDepartmentOptions(selectEl, campusId, preferredValue = '') {
     if (!selectEl) return;
     const departments = getDepartmentsForCampus(campusId);
+    const preferred = String(
+        preferredValue || selectEl.getAttribute('data-current') || selectEl.value || ''
+    ).trim().toLowerCase();
     if (!departments.length) {
         selectEl.innerHTML = '<option value="">No departments available</option>';
         selectEl.value = '';
@@ -2700,14 +3494,8 @@ function populateDepartmentOptions(selectEl, campusId) {
         const label = getDepartmentLabel(dept);
         return `<option value="${escapeAttr(dept)}">${escapeHtml(label)}</option>`;
     }).join('');
-    // Preserve previous value if still present
-    const current = selectEl.getAttribute('data-current');
-    if (current && departments.some(d => d === current)) {
-        selectEl.value = current;
-    }
-    if (!selectEl.value) {
-        selectEl.value = departments[0];
-    }
+    const matchedDepartment = departments.find(dept => String(dept).trim().toLowerCase() === preferred);
+    selectEl.value = matchedDepartment || departments[0];
 }
 
 function populateProgramOptions(selectEl, campusId, departmentCode, preferredValue = '') {
@@ -2746,7 +3534,7 @@ function renderDepartmentSections(departments) {
             <div class="department-block">
                 <div class="dept-header" data-toggle="${slug}-content">
                     <i class="fas fa-layer-group"></i>
-                    <h4>${label}</h4>
+                    <h4>${escapeHtml(label)}</h4>
                     <i class="fas fa-chevron-down toggle-icon"></i>
                 </div>
                 <div class="dept-content" id="${slug}-content">
@@ -2811,6 +3599,7 @@ function setupUserSearch() {
 
     const triggerSearch = () => {
         activeUserSearchTerm = searchInput.value.trim().toLowerCase();
+        adminUsersPage = 1;
         loadUsersByOrganization(getActiveCampusFilter());
     };
 
@@ -2826,6 +3615,69 @@ function setupUserSearch() {
             triggerSearch();
         });
     }
+}
+
+function setSelectOptions(select, options, selectedValue) {
+    if (!select) return;
+    const selected = String(selectedValue == null ? select.value : selectedValue);
+    select.innerHTML = options.map(option => {
+        const value = String(option.value == null ? '' : option.value);
+        return `<option value="${escapeAttr(value)}">${escapeHtml(option.label || value)}</option>`;
+    }).join('');
+    if (options.some(option => String(option.value) === selected)) {
+        select.value = selected;
+    }
+}
+
+function refreshAdminUserFilterOptions() {
+    setSelectOptions(document.getElementById('user-role-filter'), [
+        { value: 'all', label: 'All Roles' },
+        { value: 'admin', label: 'Admin' },
+        { value: 'hr', label: 'HR' },
+        { value: 'vpaa', label: 'VPAA' },
+        { value: 'osa', label: 'OSA' },
+        { value: 'dean', label: 'Dean' },
+        { value: 'procoor', label: 'Program Coordinator' },
+        { value: 'professor', label: 'Professor' },
+        { value: 'student', label: 'Student' },
+    ]);
+
+    const departments = SharedData.getAllDepartments ? SharedData.getAllDepartments() : [];
+    setSelectOptions(document.getElementById('user-department-filter'), [
+        { value: 'all', label: 'All Departments' },
+        ...departments.map(dept => ({ value: String(dept).toUpperCase(), label: String(dept).toUpperCase() })),
+    ]);
+
+    setSelectOptions(document.getElementById('user-status-filter'), [
+        { value: 'active', label: 'Active' },
+        { value: 'inactive', label: 'Inactive' },
+        { value: 'all', label: 'All Statuses' },
+    ]);
+
+    const programs = SharedData.getPrograms ? SharedData.getPrograms() : [];
+    setSelectOptions(document.getElementById('user-program-filter'), [
+        { value: 'all', label: 'All Programs' },
+        ...(Array.isArray(programs) ? programs : []).map(program => {
+            const code = normalizeProgramCode(program && program.programCode);
+            const name = String(program && program.programName || '').trim();
+            return {
+                value: code,
+                label: name ? `${code} - ${name}` : code,
+            };
+        }).filter(option => option.value),
+    ]);
+}
+
+function setupUserManagementFilters() {
+    refreshAdminUserFilterOptions();
+    ['user-role-filter', 'user-department-filter', 'user-status-filter', 'user-program-filter'].forEach(id => {
+        const select = document.getElementById(id);
+        if (!select) return;
+        select.addEventListener('change', () => {
+            adminUsersPage = 1;
+            loadUsersByOrganization(getActiveCampusFilter());
+        });
+    });
 }
 
 function getActiveCampusFilter() {
@@ -2880,7 +3732,10 @@ async function handleAddUser() {
         institute: departmentValue,
         yearSection: role === 'student' ? yearSection : '',
         studentNumber: role === 'student' ? studentNumber : '',
-        employeeId: formData.get('employeeId') || '',
+        employeeId: role === 'student' ? '' : normalizeBulkText(formData.get('employeeId')),
+        employmentType: role === 'student'
+            ? ''
+            : normalizeEmploymentTypeValue(formData.get('employmentType'), 'Regular'),
         programCode: selectedProgram ? selectedProgram.programCode : '',
         programName: selectedProgram ? selectedProgram.programName : '',
         status: 'active',
@@ -2892,19 +3747,17 @@ async function handleAddUser() {
         await waitForBrowserPaint();
 
         // Save directly to the local SharedData database
-        SharedData.addUser(userData);
-        adminUsers = SharedData.getUsers();
+        await SharedData.addUser(userData);
 
         setBulkRegisterLoadingState(false);
         alert('User added successfully to local database!');
         document.getElementById('add-user-modal').classList.remove('active');
         resetUserForm();
-        loadUsersByOrganization();
+        await refreshAdminCurrentUsersPage();
 
         // Refresh Professor Management data if the new user is a professor
         if (userData.role === 'professor') {
-            loadProfessorsData();
-            renderProfessors();
+            await refreshAdminProfessorPage();
         }
     } catch (error) {
         setBulkRegisterLoadingState(false);
@@ -2919,15 +3772,19 @@ async function handleAddUser() {
  * Load dashboard statistics from SharedData (live data)
  */
 function loadDashboardData() {
-    const stats = getDashboardStats();
-
-    animateValue('total-professors', 0, stats.professors, 1000);
-    animateValue('total-students', 0, stats.students, 1000);
-    animateValue('pending-evaluations', 0, stats.pendingEvaluations, 1000);
-    animateValue('completion-rate-overview', 0, stats.completionRate, 1000, '%');
+    adminDashboardSummary = SharedData.getAdminDashboardSummary ? SharedData.getAdminDashboardSummary() : null;
+    applyDashboardStats(getDashboardStats(), { animate: Boolean(adminDashboardSummary) });
+    scheduleAdminDashboardSummaryRefresh(0);
+    scheduleAdminDashboardCountFallback(450);
 
     // Listen for data changes to auto-refresh the cards
     SharedData.onDataChange(function (key) {
+        if (key === SharedData.KEYS.ADMIN_DASHBOARD_SUMMARY) {
+            adminDashboardSummary = SharedData.getAdminDashboardSummary ? SharedData.getAdminDashboardSummary() : null;
+            scheduleDashboardRefresh({ refreshSummary: false });
+            return;
+        }
+
         if (
             key === SharedData.KEYS.USERS ||
             key === SharedData.KEYS.PROFESSORS ||
@@ -2938,20 +3795,241 @@ function loadDashboardData() {
             key === SharedData.KEYS.SEMESTER_LIST ||
             key === SharedData.KEYS.QUESTIONNAIRES
         ) {
-            updateOverviewCards();
-            if (isContentViewVisible('dashboard-view')) {
-                initializeCharts();
-                loadReports();
-            }
+            scheduleDashboardRefresh({ refreshSummary: true });
         }
     });
+}
+
+function scheduleAdminDashboardSummaryRefresh(delayMs = 250) {
+    if (!SharedData.refreshAdminDashboardSummary || adminDashboardSummaryRefreshTimer || adminDashboardSummaryPromise) {
+        return;
+    }
+    adminDashboardSummaryRefreshTimer = setTimeout(function () {
+        adminDashboardSummaryRefreshTimer = null;
+        adminDashboardSummaryPromise = SharedData.refreshAdminDashboardSummary()
+            .then(function (summary) {
+                if (summary && typeof summary === 'object') {
+                    adminDashboardSummary = summary;
+                    applyDashboardStats(getDashboardStats(), { animate: false });
+                    scheduleDashboardRefresh({ refreshSummary: false });
+                    if (!hasAdminDashboardUserCounts(summary)) {
+                        scheduleAdminDashboardCountFallback(0);
+                    }
+                }
+            })
+            .catch(function (error) {
+                console.warn('[AdminPanel] Failed to refresh dashboard summary.', error);
+                scheduleAdminDashboardCountFallback(0);
+            })
+            .finally(function () {
+                adminDashboardSummaryPromise = null;
+            });
+    }, Math.max(0, Number(delayMs) || 0));
+}
+
+function hasAdminDashboardUserCounts(summary) {
+    const users = summary && summary.users && typeof summary.users === 'object' ? summary.users : null;
+    if (!users) return false;
+    return (Number(users.total) || 0) > 0
+        || (Number(users.professors) || 0) > 0
+        || (Number(users.students) || 0) > 0;
+}
+
+function scheduleAdminDashboardCountFallback(delayMs = 250) {
+    if (!SharedData.refreshUserCount || adminDashboardCountFallbackPromise) {
+        return;
+    }
+
+    setTimeout(function () {
+        if (adminDashboardCountFallbackPromise) {
+            return;
+        }
+
+        const summary = getCurrentAdminDashboardSummary();
+        if (hasAdminDashboardUserCounts(summary)) {
+            return;
+        }
+
+        adminDashboardCountFallbackPromise = Promise.all([
+            SharedData.refreshUserCount({ role: 'professor', status: 'active' }),
+            SharedData.refreshUserCount({ role: 'student', status: 'active' }),
+        ])
+            .then(function (counts) {
+                const baseStats = getDashboardStats();
+                const stats = normalizeDashboardStats({
+                    professors: Number(counts && counts[0]) || 0,
+                    students: Number(counts && counts[1]) || 0,
+                    completionRate: baseStats.completionRate,
+                    pendingEvaluations: baseStats.pendingEvaluations,
+                });
+                applyDashboardStats(stats, { animate: false });
+            })
+            .catch(function (error) {
+                console.warn('[AdminPanel] Failed to refresh dashboard user counts.', error);
+            })
+            .finally(function () {
+                adminDashboardCountFallbackPromise = null;
+            });
+    }, Math.max(0, Number(delayMs) || 0));
+}
+
+function scheduleDashboardRefresh(options = {}) {
+    const opts = options && typeof options === 'object' ? options : {};
+    if (opts.refreshSummary === true) {
+        scheduleAdminDashboardSummaryRefresh(250);
+    }
+    if (adminDashboardRefreshTimer) {
+        return;
+    }
+    adminDashboardRefreshTimer = setTimeout(function () {
+        adminDashboardRefreshTimer = null;
+        updateOverviewCards();
+        if (isContentViewVisible('dashboard-view')) {
+            initializeCharts();
+            loadReports();
+        }
+    }, 0);
+}
+
+function getCurrentAdminDashboardSummary() {
+    if (adminDashboardSummary && typeof adminDashboardSummary === 'object') {
+        return adminDashboardSummary;
+    }
+    return SharedData.getAdminDashboardSummary ? SharedData.getAdminDashboardSummary() : null;
+}
+
+function readAdminSummaryNumber(value, fallback = 0) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function normalizeDashboardStats(stats) {
+    const source = stats && typeof stats === 'object' ? stats : {};
+    return {
+        professors: Math.max(0, Math.round(readAdminSummaryNumber(source.professors, 0))),
+        students: Math.max(0, Math.round(readAdminSummaryNumber(source.students, 0))),
+        completionRate: Math.max(0, Math.min(100, Math.round(readAdminSummaryNumber(source.completionRate, 0)))),
+        pendingEvaluations: Math.max(0, Math.round(readAdminSummaryNumber(source.pendingEvaluations, 0))),
+    };
+}
+
+function applyDashboardStats(stats, options = {}) {
+    const normalized = normalizeDashboardStats(stats);
+    adminDashboardLastStats = normalized;
+
+    if (options && options.animate === true) {
+        animateValue('total-professors', 0, normalized.professors, 700);
+        animateValue('total-students', 0, normalized.students, 700);
+        animateValue('pending-evaluations', 0, normalized.pendingEvaluations, 700);
+        animateValue('completion-rate-overview', 0, normalized.completionRate, 700, '%');
+        return;
+    }
+
+    var profEl = document.getElementById('total-professors');
+    var studEl = document.getElementById('total-students');
+    var pendEl = document.getElementById('pending-evaluations');
+    var compEl = document.getElementById('completion-rate-overview');
+
+    if (profEl) profEl.textContent = normalized.professors.toLocaleString();
+    if (studEl) studEl.textContent = normalized.students.toLocaleString();
+    if (pendEl) pendEl.textContent = normalized.pendingEvaluations.toLocaleString();
+    if (compEl) compEl.textContent = normalized.completionRate + '%';
+}
+
+function normalizeAdminDashboardReportSummary(report) {
+    const source = report && typeof report === 'object' ? report : {};
+    const distribution = source.ratingDistribution && typeof source.ratingDistribution === 'object'
+        ? source.ratingDistribution
+        : {};
+    return {
+        categoryScores: Array.isArray(source.categoryScores) ? source.categoryScores : [],
+        ratingDistribution: {
+            5: readAdminSummaryNumber(distribution[5] ?? distribution['5'], 0),
+            4: readAdminSummaryNumber(distribution[4] ?? distribution['4'], 0),
+            3: readAdminSummaryNumber(distribution[3] ?? distribution['3'], 0),
+            2: readAdminSummaryNumber(distribution[2] ?? distribution['2'], 0),
+            1: readAdminSummaryNumber(distribution[1] ?? distribution['1'], 0),
+        },
+        averageRating: readAdminSummaryNumber(source.averageRating, 0),
+        totalEvaluations: readAdminSummaryNumber(source.totalEvaluations, 0),
+        evaluatedCount: readAdminSummaryNumber(source.evaluatedCount, 0),
+    };
+}
+
+function buildEvaluationDataFromAdminDashboardSummary(summary) {
+    const registration = summary && summary.studentRegistration && typeof summary.studentRegistration === 'object'
+        ? summary.studentRegistration
+        : {};
+    const overview = summary && summary.dashboardEvaluationOverview && typeof summary.dashboardEvaluationOverview === 'object'
+        ? summary.dashboardEvaluationOverview
+        : {};
+    const semestral = summary && summary.semestralPerformance && typeof summary.semestralPerformance === 'object'
+        ? summary.semestralPerformance
+        : {};
+    const reports = summary && summary.evaluationReports && typeof summary.evaluationReports === 'object'
+        ? summary.evaluationReports
+        : {};
+    const total = readAdminSummaryNumber(registration.total, 0);
+    const completed = readAdminSummaryNumber(registration.completed, 0);
+    const pending = readAdminSummaryNumber(registration.pending, Math.max(0, total - completed));
+
+    return {
+        overall: {
+            total,
+            completed,
+            pending,
+            completionRate: readAdminSummaryNumber(
+                registration.completionRate,
+                total > 0 ? Math.round((completed / total) * 100) : 0
+            ),
+        },
+        dashboardOverview: {
+            labels: Array.isArray(overview.labels) && overview.labels.length
+                ? overview.labels
+                : ['Completed', 'Pending', 'Not Started'],
+            values: Array.isArray(overview.values)
+                ? overview.values.map(value => readAdminSummaryNumber(value, 0))
+                : [
+                    completed,
+                    readAdminSummaryNumber(registration.inProgress, 0),
+                    readAdminSummaryNumber(registration.notStarted, Math.max(0, pending)),
+                ],
+        },
+        semestralPerformance: {
+            labels: Array.isArray(semestral.labels) && semestral.labels.length ? semestral.labels : ['No Semester Data'],
+            values: Array.isArray(semestral.values) && semestral.values.length
+                ? semestral.values.map(value => readAdminSummaryNumber(value, 0))
+                : [0],
+        },
+        studentToProfessor: normalizeAdminDashboardReportSummary(reports.studentToProfessor),
+        professorToProfessor: normalizeAdminDashboardReportSummary(reports.professorToProfessor),
+        supervisorToProfessor: normalizeAdminDashboardReportSummary(reports.supervisorToProfessor),
+    };
 }
 
 /**
  * Calculate dashboard stats from SharedData
  */
 function getDashboardStats() {
-    const users = SharedData.getUsers();
+    const summary = getCurrentAdminDashboardSummary();
+    if (summary && summary.users && summary.studentRegistration) {
+        const users = summary.users;
+        const registration = summary.studentRegistration;
+        return normalizeDashboardStats({
+            professors: readAdminSummaryNumber(users.professors, 0),
+            students: readAdminSummaryNumber(users.students, 0),
+            completionRate: readAdminSummaryNumber(registration.completionRate, 0),
+            pendingEvaluations: readAdminSummaryNumber(registration.pending, 0)
+        });
+    }
+
+    if (adminDashboardLastStats) {
+        return normalizeDashboardStats(adminDashboardLastStats);
+    }
+
+    const users = SharedData.getCachedUsers
+        ? SharedData.getCachedUsers()
+        : (SharedData.getUsers ? SharedData.getUsers() : []);
     const registrationStats = getStudentRegistrationEvaluationStats();
 
     // Count active professors from users list
@@ -2968,12 +4046,12 @@ function getDashboardStats() {
         ? Math.min(100, Math.round((registrationStats.completed / registrationStats.total) * 100))
         : 0;
 
-    return {
+    return normalizeDashboardStats({
         professors: activeProfessorCount,
         students: studentCount,
         completionRate: completionRate,
         pendingEvaluations: registrationStats.pending
-    };
+    });
 }
 
 function getStudentRegistrationEvaluationStats() {
@@ -2981,8 +4059,12 @@ function getStudentRegistrationEvaluationStats() {
         return String(value || '').trim().toLowerCase();
     }
 
-    const evaluations = SharedData.getEvaluations ? SharedData.getEvaluations() : [];
-    const subjectManagement = SharedData.getSubjectManagement ? SharedData.getSubjectManagement() : { offerings: [], enrollments: [] };
+    const evaluations = SharedData.getCachedEvaluations
+        ? SharedData.getCachedEvaluations()
+        : (SharedData.getEvaluations ? SharedData.getEvaluations() : []);
+    const subjectManagement = SharedData.getCachedSubjectManagement
+        ? SharedData.getCachedSubjectManagement()
+        : (SharedData.getSubjectManagement ? SharedData.getSubjectManagement() : { offerings: [], enrollments: [] });
     const currentSemester = String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : '').trim();
 
     const activeOfferingIds = new Set(
@@ -3034,7 +4116,11 @@ function getStudentRegistrationEvaluationStats() {
 }
 
 function getActiveStudentCount(usersInput) {
-    const users = Array.isArray(usersInput) ? usersInput : SharedData.getUsers();
+    const users = Array.isArray(usersInput)
+        ? usersInput
+        : (SharedData.getCachedUsers
+            ? SharedData.getCachedUsers()
+            : SharedData.getUsers());
     return users.filter(function (u) {
         const role = normalizeRoleCode(u.role);
         const status = String(u.status || '').trim().toLowerCase();
@@ -3043,16 +4129,7 @@ function getActiveStudentCount(usersInput) {
 }
 
 function updateOverviewCards() {
-    var stats = getDashboardStats();
-    var profEl = document.getElementById('total-professors');
-    var studEl = document.getElementById('total-students');
-    var pendEl = document.getElementById('pending-evaluations');
-    var compEl = document.getElementById('completion-rate-overview');
-
-    if (profEl) profEl.textContent = stats.professors;
-    if (studEl) studEl.textContent = stats.students;
-    if (pendEl) pendEl.textContent = stats.pendingEvaluations;
-    if (compEl) compEl.textContent = stats.completionRate + '%';
+    applyDashboardStats(getDashboardStats(), { animate: false });
 }
 
 /**
@@ -3095,10 +4172,16 @@ function normalizeAdminUserIdToken(value) {
 }
 
 function getAdminAnalyticsContext() {
-    const users = SharedData.getUsers ? SharedData.getUsers() : [];
-    const evaluations = SharedData.getEvaluations ? SharedData.getEvaluations() : [];
+    const users = SharedData.getCachedUsers
+        ? SharedData.getCachedUsers()
+        : (SharedData.getUsers ? SharedData.getUsers() : []);
+    const evaluations = SharedData.getCachedEvaluations
+        ? SharedData.getCachedEvaluations()
+        : (SharedData.getEvaluations ? SharedData.getEvaluations() : []);
     const studentEvaluationDrafts = SharedData.getStudentEvaluationDrafts ? SharedData.getStudentEvaluationDrafts() : [];
-    const subjectManagement = SharedData.getSubjectManagement ? SharedData.getSubjectManagement() : { offerings: [], enrollments: [] };
+    const subjectManagement = SharedData.getCachedSubjectManagement
+        ? SharedData.getCachedSubjectManagement()
+        : (SharedData.getSubjectManagement ? SharedData.getSubjectManagement() : { offerings: [], enrollments: [] });
     const semesterList = SharedData.getSemesterList ? SharedData.getSemesterList() : [];
     const questionnaires = SharedData.getQuestionnaires ? SharedData.getQuestionnaires() : {};
     const currentSemester = String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : '').trim();
@@ -3536,6 +4619,14 @@ function renderAdminSemestralPerformanceChart(data) {
  * Initialize dashboard charts
  */
 function initializeCharts() {
+    const summary = getCurrentAdminDashboardSummary();
+    if (summary) {
+        const data = buildEvaluationDataFromAdminDashboardSummary(summary);
+        renderAdminEvaluationOverviewChart(data.dashboardOverview);
+        renderAdminSemestralPerformanceChart(data.semestralPerformance);
+        return;
+    }
+
     const context = getAdminAnalyticsContext();
     const overview = buildAdminDashboardEvaluationOverview(context);
     const semestral = buildAdminSemestralPerformanceData(context);
@@ -3604,8 +4695,12 @@ function loadActivityList() {
 }
 
 function buildDashboardActivitySummary() {
-    const users = SharedData.getUsers ? SharedData.getUsers() : [];
-    const evaluations = SharedData.getEvaluations ? SharedData.getEvaluations() : [];
+    const users = SharedData.getCachedUsers
+        ? SharedData.getCachedUsers()
+        : (SharedData.getUsers ? SharedData.getUsers() : []);
+    const evaluations = SharedData.getCachedEvaluations
+        ? SharedData.getCachedEvaluations()
+        : (SharedData.getEvaluations ? SharedData.getEvaluations() : []);
     const activityLog = SharedData.getActivityLog ? SharedData.getActivityLog() : [];
     const now = SharedData.getNowDate ? SharedData.getNowDate() : new Date();
     const oneHourAgoMs = now.getTime() - (60 * 60 * 1000);
@@ -3838,11 +4933,108 @@ function getActivityIcon(type) {
 /**
  * Load users organized by structure — fetches from PHP API
  */
-function loadUsersByOrganization(campusFilter = 'all') {
+function loadUsersByOrganization(campusFilter = 'all', options = {}) {
     // Fetch from API then render
-    fetchUsersFromApi(campusFilter, getUserSearchTerm()).then(() => {
+    const loadOptions = options && typeof options === 'object' ? options : {};
+    fetchUsersFromApi(campusFilter, getUserSearchTerm(), {
+        page: loadOptions.page || adminUsersPage,
+    }).then(() => {
         renderOrganizationView(campusFilter);
     });
+}
+
+function renderAdminUsersPagination() {
+    const container = document.getElementById('admin-user-pagination');
+    if (!container) return;
+
+    const meta = adminUsersPageMeta || {};
+    const total = Math.max(0, Number(meta.total) || 0);
+    const completeMode = isAdminUserCompletePageSize(adminUsersPageSize) || meta.complete === true;
+    if (completeMode) {
+        container.innerHTML = '';
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = '';
+    const limit = Math.max(1, Number(meta.limit) || getAdminUserRequestLimit());
+    const page = Math.max(1, Number(meta.page) || adminUsersPage || 1);
+    const offset = Math.max(0, Number(meta.offset) || ((page - 1) * limit));
+    const shown = Array.isArray(adminUsers) ? adminUsers.length : 0;
+    const from = shown > 0 ? offset + 1 : 0;
+    const to = shown > 0 ? offset + shown : 0;
+    const hasPrevious = !completeMode && page > 1;
+    const hasNext = !completeMode && meta.hasMore === true;
+    const pageSize = normalizeAdminUserPageSize(completeMode ? 'all' : (meta.limit || adminUsersPageSize));
+    const pageSizeOptions = ADMIN_USER_PAGE_SIZE_OPTIONS.map(size => (
+        `<option value="${size}" ${String(size) === String(pageSize) ? 'selected' : ''}>${size === 'all' ? 'All' : size}</option>`
+    )).join('');
+    const summaryText = completeMode
+        ? `Showing all ${shown} of ${total || shown} users`
+        : `Showing ${from}-${to} of ${total} users - Page ${page}`;
+
+    container.innerHTML = `
+        <div class="pagination-summary">
+            Showing ${from}-${to} of ${total} users · Page ${page}
+        </div>
+        <div class="pagination-actions">
+            <label class="pagination-size-control" for="admin-user-page-size">
+                Rows
+                <select id="admin-user-page-size">
+                    ${pageSizeOptions}
+                </select>
+            </label>
+            <button type="button" class="pagination-btn" id="admin-user-prev-page" ${hasPrevious ? '' : 'disabled'}>
+                <i class="fas fa-chevron-left"></i>
+                Previous
+            </button>
+            <button type="button" class="pagination-btn" id="admin-user-next-page" ${hasNext ? '' : 'disabled'}>
+                Next
+                <i class="fas fa-chevron-right"></i>
+            </button>
+        </div>
+    `;
+
+    const summary = container.querySelector('.pagination-summary');
+    if (summary) {
+        summary.textContent = summaryText;
+    }
+
+    const prev = document.getElementById('admin-user-prev-page');
+    const next = document.getElementById('admin-user-next-page');
+    const sizeSelect = document.getElementById('admin-user-page-size');
+    if (sizeSelect) {
+        sizeSelect.addEventListener('change', () => {
+            const nextSize = normalizeAdminUserPageSize(sizeSelect.value);
+            if (String(nextSize) === String(adminUsersPageSize)) return;
+            adminUsersPageSize = nextSize;
+            adminUsersPage = 1;
+            adminUsersPageMeta = { total: 0, limit: isAdminUserCompletePageSize(adminUsersPageSize) ? 0 : getAdminUserRequestLimit(), offset: 0, page: 1, hasMore: false, complete: isAdminUserCompletePageSize(adminUsersPageSize) };
+            loadUsersByOrganization(getActiveCampusFilter(), { page: adminUsersPage });
+        });
+    }
+    if (prev) {
+        prev.addEventListener('click', () => {
+            if (!hasPrevious) return;
+            adminUsersPage = Math.max(1, page - 1);
+            loadUsersByOrganization(getActiveCampusFilter(), { page: adminUsersPage });
+        });
+    }
+    if (next) {
+        next.addEventListener('click', () => {
+            if (!hasNext) return;
+            adminUsersPage = page + 1;
+            loadUsersByOrganization(getActiveCampusFilter(), { page: adminUsersPage });
+        });
+    }
+}
+
+function refreshAdminCurrentUsersPage() {
+    return fetchUsersFromApi(getActiveCampusFilter(), getUserSearchTerm(), { page: adminUsersPage })
+        .then(() => {
+            renderOrganizationView(getActiveCampusFilter());
+            return adminUsers;
+        });
 }
 
 function normalizeCampusCode(value) {
@@ -4081,6 +5273,8 @@ function renderOrganizationView(campusFilter = 'all') {
         const studentContainer = document.getElementById(`${slug}-students`);
         if (studentContainer) studentContainer.innerHTML = students.length > 0 ? students.map(u => createUserCard(u)).join('') : createEmptyState('No students');
     });
+
+    renderAdminUsersPagination();
 }
 
 /**
@@ -4135,7 +5329,9 @@ function createSearchResultRow(user) {
     const programLabel = programCode
         ? `${programCode}${programName ? ` - ${programName}` : ''}`
         : '-';
-    const employmentType = role === 'student' ? 'Student' : (user.employmentType || 'Regular');
+    const employmentType = role === 'student'
+        ? 'Student'
+        : normalizeEmploymentTypeValue(user.employmentType, 'Regular');
     const position = role === 'student' ? (user.yearSection || 'Student') : (user.position || getRoleLabel(role));
     const campusLabel = user.campus ? user.campus.charAt(0).toUpperCase() + user.campus.slice(1) : '-';
     const statusLabel = user.status === 'inactive' ? 'Inactive' : 'Active';
@@ -4337,7 +5533,11 @@ function openEditUserModal(userId) {
     }
     toggleEditUserProgramField(user.role);
     const employmentTypeInput = document.getElementById('edit-user-employment-type');
-    if (employmentTypeInput) employmentTypeInput.value = user.employmentType || (isStudent ? 'Student' : 'Regular');
+    if (employmentTypeInput) {
+        employmentTypeInput.value = isStudent
+            ? 'Regular'
+            : normalizeEmploymentTypeValue(user.employmentType, 'Regular');
+    }
     const positionInput = document.getElementById('edit-user-position');
     if (positionInput) positionInput.value = isStudent ? '' : (user.position || '');
     const statusInput = document.getElementById('edit-user-status');
@@ -4353,7 +5553,7 @@ function closeEditUserModal() {
     editingUserId = null;
 }
 
-function handleEditUserSave() {
+async function handleEditUserSave() {
     const user = adminUsers.find(u => u.id === editingUserId);
     if (!user) return;
 
@@ -4377,11 +5577,11 @@ function handleEditUserSave() {
             return;
         }
         user.studentNumber = idNumber;
-        user.employeeId = undefined;
+        user.employeeId = '';
         user.yearSection = normalizedYearSection;
     } else {
         user.employeeId = idNumber;
-        user.studentNumber = undefined;
+        user.studentNumber = '';
         user.yearSection = '';
     }
 
@@ -4416,22 +5616,28 @@ function handleEditUserSave() {
         user.employmentType = '';
         user.position = '';
     } else {
-        if (employmentTypeInput) user.employmentType = employmentTypeInput.value;
+        if (employmentTypeInput) {
+            user.employmentType = normalizeEmploymentTypeValue(employmentTypeInput.value, 'Regular');
+        }
         if (positionInput) user.position = positionInput.value.trim();
     }
     if (statusInput) user.status = statusInput.value;
 
-    // Save directly to the local SharedData database
-    SharedData.updateUser(user.id, user);
+    try {
+        await SharedData.updateUser(user.id, user);
+    } catch (error) {
+        console.error('[AdminPanel] Failed to update user.', error);
+        alert('Failed to update user: ' + (error.message || 'Unknown error'));
+        return;
+    }
 
     alert('User updated successfully in local database!');
     closeEditUserModal();
-    loadUsersByOrganization(getActiveCampusFilter());
+    await refreshAdminCurrentUsersPage();
 
     // Refresh Professor Management data if the updated user is a professor
     if (normalizeRoleCode(user.role) === 'professor') {
-        loadProfessorsData();
-        renderProfessors();
+        await refreshAdminProfessorPage();
     }
 }
 
@@ -4465,22 +5671,29 @@ function createUserCard(user) {
     `;
 }
 
-function toggleUserStatus(button, email) {
+async function toggleUserStatus(button, email) {
     if (!button) return;
     const isActive = button.classList.contains('active');
     const emailKey = normalizeBulkText(email).toLowerCase();
 
-    // Find and update the user in SharedData
-    let users = SharedData.getUsers();
+    // Find and update the user in the current SQL-backed list scope.
+    let users = Array.isArray(adminUsers) ? adminUsers : [];
     const userIndex = users.findIndex(u => normalizeBulkText(u.email).toLowerCase() === emailKey);
 
     if (userIndex !== -1) {
+        const previousStatus = users[userIndex].status;
+        const previousIsActive = users[userIndex].isActive;
         users[userIndex].status = isActive ? 'inactive' : 'active';
         users[userIndex].isActive = !isActive;
-        SharedData.updateUser(users[userIndex]);
-
-        // Update local adminUsers cache
-        adminUsers = SharedData.getUsers();
+        try {
+            await SharedData.updateUser(users[userIndex]);
+        } catch (error) {
+            users[userIndex].status = previousStatus;
+            users[userIndex].isActive = previousIsActive;
+            console.error('[AdminPanel] Failed to update user status.', error);
+            alert('Failed to update user status: ' + (error.message || 'Unknown error'));
+            return;
+        }
 
         // Also update professorsData if applicable to sync instantly to Professor Management
         if (normalizeRoleCode(users[userIndex].role) === 'professor') {
@@ -4488,7 +5701,6 @@ function toggleUserStatus(button, email) {
             if (profIndex !== -1) {
                 professorsData[profIndex].isActive = !isActive;
                 professorsData[profIndex].status = isActive ? 'inactive' : 'active';
-                saveProfessorsToSharedData();
             } else {
                 loadProfessorsData(); // fallback
             }
@@ -4496,20 +5708,11 @@ function toggleUserStatus(button, email) {
         }
     }
 
-    if (isActive) {
-        button.classList.remove('active');
-        button.classList.add('inactive');
-        button.textContent = 'Inactive';
-    } else {
-        button.classList.remove('inactive');
-        button.classList.add('active');
-        button.textContent = 'Active';
-    }
-
-    // Refresh the User Management view to apply sorting and CSS changes
+    // Refresh the current filtered page to apply SQL-backed status filters and sorting.
     const activeTab = document.querySelector('.organization-tab.active');
     const campus = activeTab ? activeTab.getAttribute('data-campus') : 'all';
-    renderOrganizationView(campus);
+    await fetchUsersFromApi(campus || getActiveCampusFilter(), getUserSearchTerm(), { page: adminUsersPage });
+    renderOrganizationView(campus || getActiveCampusFilter());
 }
 
 /**
@@ -4815,13 +6018,546 @@ function setupActivityLogButton() {
     });
 }
 
+function setGeneralSettingsStatus(message, type) {
+    const status = document.getElementById('general-settings-status');
+    if (!status) return;
+
+    status.textContent = String(message || '');
+    status.style.color = type === 'error'
+        ? 'var(--danger-color)'
+        : (type === 'success' ? 'var(--success-color)' : 'var(--text-secondary)');
+}
+
+function syncGeneralSystemEmail(email, source) {
+    const input = document.getElementById('general-system-email');
+    if (!input) return;
+
+    const normalizedEmail = String(email || '').trim();
+    input.value = normalizedEmail;
+    input.defaultValue = normalizedEmail;
+    input.dataset.smtpSource = String(source || '').trim().toLowerCase();
+}
+
+function setupGeneralSettings() {
+    const institutionInput = document.getElementById('general-institution-name');
+    const systemEmailInput = document.getElementById('general-system-email');
+    const campusInput = document.getElementById('general-main-campus');
+    const saveButton = document.getElementById('general-settings-save-btn');
+    if (!institutionInput || !systemEmailInput || !campusInput || !saveButton) return;
+
+    const settings = SharedData.getSettings ? SharedData.getSettings() : {};
+    institutionInput.value = String(
+        settings.institutionName || 'National Aviation Academy of the Philippines'
+    ).trim();
+    campusInput.value = String(settings.mainCampus || 'villamor').trim().toLowerCase();
+    if (!campusInput.value) campusInput.value = 'villamor';
+    syncGeneralSystemEmail(settings.systemEmail || '', 'settings');
+
+    saveButton.addEventListener('click', async () => {
+        const institutionName = String(institutionInput.value || '').trim();
+        const mainCampus = String(campusInput.value || '').trim().toLowerCase();
+
+        if (!institutionName) {
+            setGeneralSettingsStatus('Institution name is required.', 'error');
+            institutionInput.focus();
+            return;
+        }
+        if (!mainCampus) {
+            setGeneralSettingsStatus('Main campus is required.', 'error');
+            campusInput.focus();
+            return;
+        }
+        if (!SharedData.updateSettingsAsync) {
+            setGeneralSettingsStatus('General settings service is unavailable.', 'error');
+            return;
+        }
+
+        const originalText = saveButton.textContent;
+        saveButton.disabled = true;
+        saveButton.textContent = 'Saving...';
+        setGeneralSettingsStatus('Saving general settings...', 'info');
+
+        try {
+            const saved = await SharedData.updateSettingsAsync({
+                institutionName,
+                mainCampus
+            });
+            institutionInput.value = String(saved.institutionName || institutionName).trim();
+            campusInput.value = String(saved.mainCampus || mainCampus).trim().toLowerCase();
+            syncGeneralSystemEmail(saved.systemEmail || '', 'smtp');
+            setGeneralSettingsStatus('General settings saved successfully.', 'success');
+        } catch (error) {
+            console.error('[AdminPanel] Failed to save general settings.');
+            setGeneralSettingsStatus(
+                error && error.message ? error.message : 'Failed to save general settings.',
+                'error'
+            );
+        } finally {
+            saveButton.disabled = false;
+            saveButton.textContent = originalText || 'Save General Settings';
+        }
+    });
+}
+
 function setupSecuritySettings() {
     const backupBtn = document.getElementById('backup-last-24-btn');
-    if (backupBtn) {
-        backupBtn.addEventListener('click', () => {
-            alert('Backup successful! Data from the last 24 hours has been archived.');
-        });
+    const historyBody = document.getElementById('backup-history-body');
+    if (!backupBtn || !historyBody || backupManagementReady) return;
+
+    backupBtn.addEventListener('click', runManualEncryptedBackup);
+    historyBody.addEventListener('click', event => {
+        const button = event.target.closest('button[data-backup-action]');
+        if (!button || backupOperationInFlight) return;
+        const backupId = String(button.dataset.backupId || '').trim();
+        if (!backupId) return;
+        if (button.dataset.backupAction === 'test') {
+            runBackupRestorationTest(backupId, button);
+        } else if (button.dataset.backupAction === 'download') {
+            downloadEncryptedBackup(backupId, button);
+        }
+    });
+    backupManagementReady = true;
+    loadBackupHistory();
+}
+
+function setBackupFeedback(message, type) {
+    const feedback = document.getElementById('backup-feedback');
+    if (!feedback) return;
+    feedback.className = 'system-health-feedback';
+    if (type === 'success' || type === 'error') feedback.classList.add(type);
+    feedback.textContent = String(message || '');
+}
+
+function getBackupSession() {
+    return SharedData.getSession ? SharedData.getSession() : null;
+}
+
+async function requestBackupApi(action, payload = {}) {
+    let session = getBackupSession();
+    if ((!session || !session.csrfToken) && SharedData.refreshSession) {
+        await SharedData.refreshSession();
+        session = getBackupSession();
     }
+    const csrfToken = String(session && session.csrfToken || '').trim();
+    if (!csrfToken) throw new Error('Authentication token is not ready. Please refresh and sign in again.');
+    const response = await fetch(`../api/backup_api.php?action=${encodeURIComponent(action)}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken,
+        },
+        body: JSON.stringify(payload || {}),
+    });
+    const text = await response.text();
+    let data = {};
+    try {
+        data = text ? JSON.parse(text) : {};
+    } catch (_error) {
+        data = {};
+    }
+    if (!response.ok || data.success !== true) {
+        const error = new Error(String(data.error || text || `Backup request failed with status ${response.status}`));
+        error.status = response.status;
+        throw error;
+    }
+    return data;
+}
+
+function normalizeBackupBadgeStatus(backup) {
+    if (!backup) return 'not-run';
+    if (backup.status === 'completed' && backup.integrityStatus === 'passed') return 'passed';
+    if (backup.status === 'failed' || backup.integrityStatus === 'failed') return 'failed';
+    return 'warning';
+}
+
+function backupStatusLabel(backup) {
+    if (!backup) return 'Not Run';
+    if (backup.status === 'completed' && backup.integrityStatus === 'passed') return 'Verified';
+    if (backup.status === 'failed') return 'Failed';
+    return 'In Progress';
+}
+
+function formatBackupBytes(bytes) {
+    const value = Number(bytes) || 0;
+    if (value <= 0) return '-';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const index = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)));
+    return `${(value / Math.pow(1024, index)).toFixed(index === 0 ? 0 : 2)} ${units[index]}`;
+}
+
+function formatBackupTimestamp(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '-';
+    return SharedData.formatDateTimeInPhilippines
+        ? SharedData.formatDateTimeInPhilippines(raw)
+        : raw;
+}
+
+function renderBackupConfiguration(configuration) {
+    const config = configuration && typeof configuration === 'object' ? configuration : {};
+    const schedule = document.getElementById('backup-schedule-label');
+    const retention = document.getElementById('backup-retention-label');
+    const readiness = document.getElementById('backup-readiness');
+    if (schedule) schedule.textContent = String(config.schedule || 'Daily at 02:00 Asia/Manila');
+    if (retention) retention.textContent = `Newest ${Number(config.retentionCount) || 30} artifacts`;
+    if (readiness) {
+        const storageReady = config.storageStatus === 'available';
+        const keyReady = config.keyStatus === 'available';
+        const databaseMethod = config.nativeDatabaseTools ? 'mysqldump with PDO fallback' : 'secure PHP/PDO export';
+        readiness.className = `backup-readiness ${storageReady && keyReady ? 'ready' : 'not-ready'}`;
+        readiness.textContent = storageReady && keyReady
+            ? `Ready · Private storage and encryption key available · ${databaseMethod}`
+            : `Setup required · Storage: ${storageReady ? 'ready' : 'unavailable'} · Encryption key: ${keyReady ? 'ready' : 'unavailable'}`;
+    }
+}
+
+function renderBackupOverview(latest) {
+    const badge = document.getElementById('backup-latest-status');
+    const lastRun = document.getElementById('backup-last-run');
+    const lastSize = document.getElementById('backup-last-size');
+    const integrity = document.getElementById('backup-last-integrity');
+    const restoreTest = document.getElementById('backup-last-restore-test');
+    const status = normalizeBackupBadgeStatus(latest);
+    if (badge) {
+        badge.className = `system-health-status-badge ${status}`;
+        badge.textContent = backupStatusLabel(latest);
+    }
+    if (lastRun) lastRun.textContent = latest ? formatBackupTimestamp(latest.completedAt || latest.startedAt) : 'No backup yet';
+    if (lastSize) lastSize.textContent = latest ? formatBackupBytes(latest.sizeBytes) : '-';
+    if (integrity) integrity.textContent = latest ? String(latest.integrityStatus || 'pending') : 'Not tested';
+    if (restoreTest) {
+        const test = latest && latest.latestTest;
+        restoreTest.textContent = test
+            ? `${String(test.status || 'unknown')} · ${String(test.mode || '').replace(/_/g, ' ')}`
+            : 'Not run';
+    }
+}
+
+function renderBackupHistory(history) {
+    const body = document.getElementById('backup-history-body');
+    if (!body) return;
+    const rows = Array.isArray(history) ? history : [];
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="8">No backup history found.</td></tr>';
+        return;
+    }
+    body.innerHTML = rows.map(backup => {
+        const badgeStatus = normalizeBackupBadgeStatus(backup);
+        const test = backup && backup.latestTest;
+        const restoreText = test
+            ? `${String(test.status || 'unknown')} (${String(test.mode || '').replace(/_/g, ' ')})`
+            : 'Not run';
+        const error = String(backup && backup.error || '').trim();
+        const actionsDisabled = backup.artifactState !== 'present' || backup.status !== 'completed';
+        return `
+            <tr title="${escapeAttr(error)}">
+                <td><strong>${escapeHtml(backup.id || '-')}</strong>${error ? `<small class="backup-error-text">${escapeHtml(error)}</small>` : ''}</td>
+                <td>${escapeHtml(formatBackupTimestamp(backup.completedAt || backup.startedAt))}</td>
+                <td>${escapeHtml(String(backup.trigger || '-').replace(/_/g, ' '))}<small>${escapeHtml(backup.databaseMethod || '')}</small></td>
+                <td><span class="system-health-check-badge ${badgeStatus}">${escapeHtml(backupStatusLabel(backup))}</span></td>
+                <td>${escapeHtml(formatBackupBytes(backup.sizeBytes))}</td>
+                <td>${escapeHtml(backup.integrityStatus || '-')}</td>
+                <td>${escapeHtml(restoreText)}</td>
+                <td class="backup-history-actions">
+                    <button type="button" class="action-btn" data-backup-action="test" data-backup-id="${escapeAttr(backup.id)}" title="Run safe restoration test" ${actionsDisabled ? 'disabled' : ''}><i class="fas fa-vial"></i></button>
+                    <button type="button" class="action-btn" data-backup-action="download" data-backup-id="${escapeAttr(backup.id)}" title="Download encrypted artifact" ${actionsDisabled || !backup.downloadAvailable ? 'disabled' : ''}><i class="fas fa-download"></i></button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+async function loadBackupHistory(options = {}) {
+    if (!document.getElementById('backup-history-body')) return;
+    if (!options.silent) setBackupFeedback('Loading encrypted backup history...', '');
+    try {
+        const response = await requestBackupApi('list', { limit: 50 });
+        const history = Array.isArray(response.history) ? response.history : [];
+        renderBackupConfiguration(response.configuration);
+        renderBackupOverview(response.latest || history[0] || null);
+        renderBackupHistory(history);
+        if (!options.silent) setBackupFeedback('', '');
+    } catch (error) {
+        console.error('[AdminPanel] Failed to load backup history.', error);
+        renderBackupHistory([]);
+        setBackupFeedback(error && error.message ? error.message : 'Failed to load backup history.', 'error');
+    }
+}
+
+async function runManualEncryptedBackup() {
+    if (backupOperationInFlight) return;
+    if (!window.confirm('Create and verify a full encrypted backup now?')) return;
+    const button = document.getElementById('backup-last-24-btn');
+    backupOperationInFlight = true;
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating & Verifying...';
+    }
+    setBackupFeedback('Exporting the database, collecting persistent files, encrypting, and verifying the artifact...', '');
+    try {
+        const response = await requestBackupApi('create', {});
+        const backup = response.backup;
+        if (!backup || backup.status !== 'completed' || backup.integrityStatus !== 'passed') {
+            throw new Error('The server did not confirm a completed and verified backup.');
+        }
+        renderBackupOverview(backup);
+        renderBackupHistory(response.history || []);
+        renderBackupConfiguration(response.configuration);
+        setBackupFeedback(`Backup ${backup.id} was created and verified successfully.`, 'success');
+    } catch (error) {
+        console.error('[AdminPanel] Encrypted backup failed.', error);
+        setBackupFeedback(error && error.message ? error.message : 'Encrypted backup failed.', 'error');
+        await loadBackupHistory({ silent: true });
+    } finally {
+        backupOperationInFlight = false;
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '<i class="fas fa-lock"></i> Run Encrypted Backup';
+        }
+    }
+}
+
+async function runBackupRestorationTest(backupId, button) {
+    if (!window.confirm(`Run a safe isolated restoration test for ${backupId}? Production will not be modified.`)) return;
+    backupOperationInFlight = true;
+    const originalHtml = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    setBackupFeedback(`Testing ${backupId} in an isolated temporary environment...`, '');
+    try {
+        const response = await requestBackupApi('test', { backupId });
+        const test = response.test || {};
+        renderBackupHistory(response.history || []);
+        renderBackupOverview((response.history || [])[0] || null);
+        const limitation = test.details && test.details.limitation ? ` ${test.details.limitation}` : '';
+        setBackupFeedback(`Restoration test passed (${String(test.mode || '').replace(/_/g, ' ')}).${limitation}`, 'success');
+    } catch (error) {
+        console.error('[AdminPanel] Restoration test failed.', error);
+        setBackupFeedback(error && error.message ? error.message : 'Restoration test failed.', 'error');
+        await loadBackupHistory({ silent: true });
+    } finally {
+        backupOperationInFlight = false;
+        button.disabled = false;
+        button.innerHTML = originalHtml;
+    }
+}
+
+async function downloadEncryptedBackup(backupId, button) {
+    backupOperationInFlight = true;
+    const originalHtml = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    setBackupFeedback(`Preparing secure one-use download for ${backupId}...`, '');
+    try {
+        const response = await requestBackupApi('download-ticket', { backupId });
+        const downloadUrl = new URL(String(response.downloadUrl || ''), window.location.href);
+        if (downloadUrl.origin !== window.location.origin || !downloadUrl.pathname.endsWith('/api/backup_download.php')) {
+            throw new Error('The server returned an invalid backup download URL.');
+        }
+        window.location.assign(downloadUrl.href);
+        setBackupFeedback(`Encrypted download for ${backupId} started.`, 'success');
+    } catch (error) {
+        console.error('[AdminPanel] Backup download failed.', error);
+        setBackupFeedback(error && error.message ? error.message : 'Backup download failed.', 'error');
+    } finally {
+        backupOperationInFlight = false;
+        button.disabled = false;
+        button.innerHTML = originalHtml;
+    }
+}
+
+function normalizeSystemHealthStatus(status) {
+    const token = String(status || '').trim().toLowerCase();
+    if (token === 'passed' || token === 'warning' || token === 'failed') return token;
+    return 'not-run';
+}
+
+function getSystemHealthStatusLabel(status) {
+    const token = normalizeSystemHealthStatus(status);
+    if (token === 'passed') return 'Passed';
+    if (token === 'warning') return 'Warning';
+    if (token === 'failed') return 'Failed';
+    return 'Not Run';
+}
+
+function formatSystemHealthTimestamp(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '-';
+    try {
+        return SharedData.formatDateTimeInPhilippines
+            ? SharedData.formatDateTimeInPhilippines(raw)
+            : raw;
+    } catch (_error) {
+        return raw;
+    }
+}
+
+function setSystemHealthFeedback(message, type) {
+    const feedback = document.getElementById('system-health-feedback');
+    if (!feedback) return;
+    feedback.className = 'system-health-feedback';
+    const normalizedType = String(type || '').trim().toLowerCase();
+    if (normalizedType === 'success' || normalizedType === 'error') {
+        feedback.classList.add(normalizedType);
+    }
+    feedback.textContent = String(message || '');
+}
+
+function renderSystemHealthTablePrompt(tbody, colspan, message) {
+    if (!tbody) return;
+    tbody.innerHTML = `
+        <tr>
+            <td colspan="${colspan}" style="text-align:center; padding:16px;">${escapeHtml(message)}</td>
+        </tr>
+    `;
+}
+
+function renderSystemHealthBadge(status) {
+    const normalizedStatus = normalizeSystemHealthStatus(status);
+    return `<span class="system-health-check-badge ${normalizedStatus}">${escapeHtml(getSystemHealthStatusLabel(normalizedStatus))}</span>`;
+}
+
+function renderSystemHealthOverview(record) {
+    const statusBadge = document.getElementById('system-health-status-badge');
+    const lastRun = document.getElementById('system-health-last-run');
+    const checkedBy = document.getElementById('system-health-checked-by');
+    const summary = document.getElementById('system-health-summary');
+
+    if (!record) {
+        if (statusBadge) {
+            statusBadge.className = 'system-health-status-badge not-run';
+            statusBadge.textContent = 'Not Run';
+        }
+        if (lastRun) lastRun.textContent = 'No verification yet';
+        if (checkedBy) checkedBy.textContent = '-';
+        if (summary) summary.textContent = '0 passed, 0 warning, 0 failed';
+        renderSystemHealthTablePrompt(document.getElementById('system-health-checks-body'), 4, 'Run verification to show check results.');
+        return;
+    }
+
+    const status = normalizeSystemHealthStatus(record.overallStatus);
+    if (statusBadge) {
+        statusBadge.className = `system-health-status-badge ${status}`;
+        statusBadge.textContent = getSystemHealthStatusLabel(status);
+    }
+    if (lastRun) lastRun.textContent = formatSystemHealthTimestamp(record.createdAt);
+    if (checkedBy) {
+        checkedBy.textContent = String(record.checkedByName || record.checkedByEmail || record.checkedByRole || '-');
+    }
+    if (summary) {
+        summary.textContent = `${Number(record.passed) || 0} passed, ${Number(record.warning) || 0} warning, ${Number(record.failed) || 0} failed`;
+    }
+    renderSystemHealthCheckRows(Array.isArray(record.checks) ? record.checks : []);
+}
+
+function renderSystemHealthCheckRows(checks) {
+    const tbody = document.getElementById('system-health-checks-body');
+    if (!tbody) return;
+    const rows = Array.isArray(checks) ? checks : [];
+    if (!rows.length) {
+        renderSystemHealthTablePrompt(tbody, 4, 'No check results found.');
+        return;
+    }
+
+    tbody.innerHTML = rows.map(check => {
+        const status = normalizeSystemHealthStatus(check && check.status);
+        return `
+            <tr>
+                <td>${renderSystemHealthBadge(status)}</td>
+                <td>${escapeHtml(check && check.label || '-')}</td>
+                <td>${escapeHtml(check && check.message || '-')}</td>
+                <td>${escapeHtml(formatSystemHealthTimestamp(check && check.checkedAt))}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function renderSystemHealthHistoryRows(history) {
+    const tbody = document.getElementById('system-health-history-body');
+    if (!tbody) return;
+    const rows = Array.isArray(history) ? history : [];
+    if (!rows.length) {
+        renderSystemHealthTablePrompt(tbody, 7, 'No verification history found.');
+        return;
+    }
+
+    tbody.innerHTML = rows.map(record => `
+        <tr>
+            <td>${escapeHtml(record && record.id || '-')}</td>
+            <td>${renderSystemHealthBadge(record && record.overallStatus)}</td>
+            <td>${escapeHtml(Number(record && record.passed) || 0)}</td>
+            <td>${escapeHtml(Number(record && record.warning) || 0)}</td>
+            <td>${escapeHtml(Number(record && record.failed) || 0)}</td>
+            <td>${escapeHtml(record && (record.checkedByName || record.checkedByEmail || record.checkedByRole) || '-')}</td>
+            <td>${escapeHtml(formatSystemHealthTimestamp(record && record.createdAt))}</td>
+        </tr>
+    `).join('');
+}
+
+function loadSystemHealthVerification() {
+    if (!document.getElementById('system-health-history-body')) return;
+    if (!SharedData.listSystemHealthChecks) {
+        renderSystemHealthOverview(null);
+        renderSystemHealthHistoryRows([]);
+        setSystemHealthFeedback('System health API is unavailable.', 'error');
+        return;
+    }
+
+    try {
+        const response = SharedData.listSystemHealthChecks(10);
+        const history = Array.isArray(response && response.history) ? response.history : [];
+        renderSystemHealthOverview(response && response.latest ? response.latest : (history[0] || null));
+        renderSystemHealthHistoryRows(history);
+        setSystemHealthFeedback('', '');
+    } catch (error) {
+        console.error('[AdminPanel] Failed to load system health checks.', error);
+        renderSystemHealthOverview(null);
+        renderSystemHealthHistoryRows([]);
+        setSystemHealthFeedback(error && error.message ? error.message : 'Failed to load verification history.', 'error');
+    }
+}
+
+function runSystemHealthVerification() {
+    const runBtn = document.getElementById('system-health-run-btn');
+    if (!SharedData.runSystemHealthCheck) {
+        setSystemHealthFeedback('System health API is unavailable.', 'error');
+        return;
+    }
+
+    if (runBtn) {
+        runBtn.disabled = true;
+        runBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running...';
+    }
+    setSystemHealthFeedback('Running read-only verification checks...', '');
+
+    window.setTimeout(() => {
+        try {
+            const response = SharedData.runSystemHealthCheck();
+            const result = response && response.result ? response.result : null;
+            const history = Array.isArray(response && response.history) ? response.history : [];
+            renderSystemHealthOverview(result);
+            renderSystemHealthHistoryRows(history);
+            setSystemHealthFeedback('Verification saved successfully.', 'success');
+        } catch (error) {
+            console.error('[AdminPanel] Failed to run system health check.', error);
+            setSystemHealthFeedback(error && error.message ? error.message : 'Failed to run verification.', 'error');
+        } finally {
+            if (runBtn) {
+                runBtn.disabled = false;
+                runBtn.innerHTML = '<i class="fas fa-play"></i> Run Verification';
+            }
+        }
+    }, 25);
+}
+
+function setupSystemHealthVerification() {
+    if (systemHealthVerificationReady) return;
+    const runBtn = document.getElementById('system-health-run-btn');
+    if (runBtn) {
+        runBtn.addEventListener('click', runSystemHealthVerification);
+    }
+    systemHealthVerificationReady = true;
 }
 
 /**
@@ -4830,7 +6566,7 @@ function setupSecuritySettings() {
 function handleQuickAction(action) {
     switch (action) {
         case 'add-user':
-            document.getElementById('add-user-modal').classList.add('active');
+            openAddUserModal();
             break;
         case 'manage-users':
             switchToView('users');
@@ -4845,7 +6581,11 @@ function handleQuickAction(action) {
             openAnnouncementComposerModal();
             break;
         case 'system-backup':
-            alert('System backup initiated!');
+            switchToView('system');
+            window.setTimeout(() => {
+                const group = document.getElementById('backup-management-group');
+                if (group) group.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 50);
             break;
         case 'system-settings':
             switchToView('system');
@@ -4908,6 +6648,9 @@ function handleViewShown(viewId) {
     }
     if (viewId === 'activity-log') {
         loadActivityLog();
+    }
+    if (viewId === 'system') {
+        loadSystemHealthVerification();
     }
     if (viewId === 'subject-management') {
         refreshSubjectManagementView();
@@ -5113,7 +6856,6 @@ function setupSubjectManagement() {
     SharedData.onDataChange(function (key) {
         if (
             key === SharedData.KEYS.SUBJECT_MANAGEMENT ||
-            key === SharedData.KEYS.USERS ||
             key === SharedData.KEYS.CAMPUSES ||
             key === SharedData.KEYS.PROGRAMS ||
             key === SharedData.KEYS.CURRENT_SEMESTER ||
@@ -5233,13 +6975,13 @@ function renderSubjectCatalog() {
 
     body.innerHTML = subjects.map(subject => `
         <tr>
-            <td data-label="Campus">${subject.campusName || subject.campusSlug || 'N/A'}</td>
-            <td data-label="Department">${getDepartmentLabel(subject.departmentCode || '')}</td>
-            <td data-label="Subject Code">${subject.subjectCode || ''}</td>
-            <td data-label="Subject Name">${subject.subjectName || ''}</td>
+            <td data-label="Campus">${escapeHtml(subject.campusName || subject.campusSlug || 'N/A')}</td>
+            <td data-label="Department">${escapeHtml(getDepartmentLabel(subject.departmentCode || ''))}</td>
+            <td data-label="Subject Code">${escapeHtml(subject.subjectCode || '')}</td>
+            <td data-label="Subject Name">${escapeHtml(subject.subjectName || '')}</td>
             <td data-label="Actions">
                 <div class="professor-actions">
-                    <button type="button" class="action-btn edit" data-action="edit-subject" data-subject-id="${subject.id}" title="Edit Subject" aria-label="Edit subject">
+                    <button type="button" class="action-btn edit" data-action="edit-subject" data-subject-id="${escapeAttr(subject.id)}" title="Edit Subject" aria-label="Edit subject">
                         <i class="fas fa-edit"></i>
                     </button>
                 </div>
@@ -5343,8 +7085,7 @@ function mapSubjectBulkRow(rawRow) {
     };
 
     Object.entries(rawRow || {}).forEach(([key, value]) => {
-        const normalizedKey = normalizeBulkHeaderKey(key);
-        const canonicalKey = SUBJECT_BULK_HEADER_ALIASES[normalizedKey];
+        const canonicalKey = resolveExcelHeaderAlias(SUBJECT_BULK_HEADER_ALIASES, key);
         if (!canonicalKey) return;
         mapped[canonicalKey] = normalizeBulkText(value);
     });
@@ -5450,8 +7191,7 @@ function mapOfferingBulkRow(rawRow) {
     };
 
     Object.entries(rawRow || {}).forEach(([key, value]) => {
-        const normalizedKey = normalizeBulkHeaderKey(key);
-        const canonicalKey = OFFERING_BULK_HEADER_ALIASES[normalizedKey];
+        const canonicalKey = resolveExcelHeaderAlias(OFFERING_BULK_HEADER_ALIASES, key);
         if (!canonicalKey) return;
         mapped[canonicalKey] = normalizeBulkText(value);
     });
@@ -5763,7 +7503,7 @@ function populateOfferingSubjectSelect() {
     subjectSelect.value = subjects.some(subject => String(subject.id) === String(previous)) ? previous : String(subjects[0].id);
 }
 
-function populateOfferingProfessorSelect() {
+async function populateOfferingProfessorSelect() {
     const campusSelect = document.getElementById('offering-campus');
     const departmentSelect = document.getElementById('offering-department');
     const programSelect = document.getElementById('offering-program');
@@ -5771,17 +7511,53 @@ function populateOfferingProfessorSelect() {
     if (!campusSelect || !departmentSelect || !programSelect || !professorSelect) return;
 
     const campusSlug = String(campusSelect.value || '').toLowerCase();
-    const departmentCode = String(departmentSelect.value || '').toLowerCase();
+    const departmentCode = String(departmentSelect.value || '').trim();
     const programCode = normalizeProgramCode(programSelect.value);
-    const professors = (SharedData.getUsers() || []).filter(user => (
+    const previous = professorSelect.value;
+    const requestId = offeringProfessorCandidatesRequestId + 1;
+    offeringProfessorCandidatesRequestId = requestId;
+
+    if (!campusSlug || !departmentCode || !programCode) {
+        professorSelect.innerHTML = '<option value="">Select campus, department, and program first</option>';
+        professorSelect.value = '';
+        return;
+    }
+
+    offeringProfessorCandidatesLoading = true;
+    professorSelect.innerHTML = '<option value="">Loading active professors...</option>';
+    professorSelect.value = '';
+
+    let professors = [];
+    const filters = {
+        role: 'professor',
+        status: 'active',
+        campus: campusSlug,
+        department: String(departmentCode || '').toUpperCase(),
+        program: programCode,
+    };
+
+    try {
+        const result = await fetchUsersByPagedFilters(filters, ADMIN_USERS_COMPLETE_CHUNK_SIZE);
+        professors = Array.isArray(result.users) ? result.users : [];
+    } catch (error) {
+        console.warn('[AdminPanel] Falling back to cached professor options:', error);
+        const fallbackUsers = SharedData.listUsers ? SharedData.listUsers(Object.assign({}, filters, { limit: ADMIN_USERS_COMPLETE_CHUNK_SIZE, page: 1 })) : [];
+        professors = Array.isArray(fallbackUsers) ? fallbackUsers : [];
+    } finally {
+        if (requestId !== offeringProfessorCandidatesRequestId) {
+            return;
+        }
+        offeringProfessorCandidatesLoading = false;
+    }
+
+    professors = professors.filter(user => (
         normalizeRoleCode(user.role) === 'professor' &&
         String(user.status || '').toLowerCase() === 'active' &&
         String(user.campus || '').toLowerCase() === campusSlug &&
-        String(user.department || '').toLowerCase() === departmentCode &&
+        String(user.department || '').toLowerCase() === String(departmentCode || '').toLowerCase() &&
         normalizeProgramCode(user.programCode) === programCode &&
         normalizeBulkText(user.employeeId) !== ''
-    ));
-    const previous = professorSelect.value;
+    )).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
 
     professorSelect.innerHTML = professors.map(professor => (
         `<option value="${escapeAttr(professor.employeeId)}">${escapeHtml(professor.name)}</option>`
@@ -5899,12 +7675,12 @@ function renderOfferingsTable() {
         const loadType = normalizeOfferingLoadType(offering.loadType || offering.load_type);
         return `
             <tr class="${offering.isActive ? '' : 'inactive'}">
-                <td data-label="Subject">${offering.subjectCode} - ${offering.subjectName}</td>
-                <td data-label="Section">${offering.sectionName}</td>
-                <td data-label="Professor">${offering.professorName}</td>
-                <td data-label="Employee ID">${offering.professorEmployeeId || '-'}</td>
-                <td data-label="Program">${offering.programCode || '-'}</td>
-                <td data-label="Campus/Dept">${String(offering.campusSlug || '').toUpperCase()} / ${String(offering.departmentCode || '').toUpperCase()}</td>
+                <td data-label="Subject">${escapeHtml(offering.subjectCode)} - ${escapeHtml(offering.subjectName)}</td>
+                <td data-label="Section">${escapeHtml(offering.sectionName)}</td>
+                <td data-label="Professor">${escapeHtml(offering.professorName)}</td>
+                <td data-label="Employee ID">${escapeHtml(offering.professorEmployeeId || '-')}</td>
+                <td data-label="Program">${escapeHtml(offering.programCode || '-')}</td>
+                <td data-label="Campus/Dept">${escapeHtml(String(offering.campusSlug || '').toUpperCase())} / ${escapeHtml(String(offering.departmentCode || '').toUpperCase())}</td>
                 <td data-label="Load">
                     <span class="status-pill load-${loadType}">
                         ${getOfferingLoadTypeLabel(loadType)}
@@ -5918,10 +7694,10 @@ function renderOfferingsTable() {
                 </td>
                 <td data-label="Actions">
                     <div class="professor-actions">
-                        <button type="button" class="action-btn view" data-action="manage-offering-students" data-offering-id="${offering.id}" title="Manage Students" aria-label="Manage offering students">
+                        <button type="button" class="action-btn view" data-action="manage-offering-students" data-offering-id="${escapeAttr(offering.id)}" title="Manage Students" aria-label="Manage offering students">
                             <i class="fas fa-user-check"></i>
                         </button>
-                        <button type="button" class="action-btn delete" data-action="deactivate-offering" data-offering-id="${offering.id}" title="Deactivate Offering" aria-label="Deactivate offering" ${offering.isActive ? '' : 'disabled'}>
+                        <button type="button" class="action-btn delete" data-action="deactivate-offering" data-offering-id="${escapeAttr(offering.id)}" title="Deactivate Offering" aria-label="Deactivate offering" ${offering.isActive ? '' : 'disabled'}>
                             <i class="fas fa-ban"></i>
                         </button>
                     </div>
@@ -5969,7 +7745,23 @@ function populateOfferingStudentsProgramFilter() {
     select.value = previousMatch ? previousMatch.programCode : 'all';
 }
 
-function openOfferingStudentsModal(offeringId) {
+function setOfferingStudentsSaveDisabled(disabled) {
+    const saveBtn = document.getElementById('save-offering-students-btn');
+    if (saveBtn) {
+        saveBtn.disabled = !!disabled;
+    }
+}
+
+function buildOfferingStudentCandidateFilters(offering) {
+    return {
+        role: 'student',
+        status: 'active',
+        campus: String(offering && offering.campusSlug || '').trim().toLowerCase(),
+        department: String(offering && offering.departmentCode || '').trim().toUpperCase(),
+    };
+}
+
+async function openOfferingStudentsModal(offeringId) {
     const offering = getOfferingById(offeringId);
     if (!offering) {
         alert('Offering not found.');
@@ -5977,15 +7769,43 @@ function openOfferingStudentsModal(offeringId) {
     }
 
     selectedOfferingForStudents = offering;
+    offeringStudentCandidates = [];
+    offeringStudentCandidatesLoading = true;
+    const requestId = offeringStudentCandidatesRequestId + 1;
+    offeringStudentCandidatesRequestId = requestId;
+
     const offeringIdInput = document.getElementById('students-offering-id');
     if (offeringIdInput) offeringIdInput.value = String(offering.id);
     const searchInput = document.getElementById('offering-students-search');
     if (searchInput) searchInput.value = '';
     populateOfferingStudentsProgramFilter();
 
-    renderOfferingStudentsList();
     const modal = document.getElementById('offering-students-modal');
     if (modal) modal.classList.add('active');
+    renderOfferingStudentsList();
+
+    const filters = buildOfferingStudentCandidateFilters(offering);
+    let candidates = [];
+    try {
+        const result = await fetchUsersByPagedFilters(filters, ADMIN_USERS_COMPLETE_CHUNK_SIZE);
+        candidates = Array.isArray(result.users) ? result.users : [];
+    } catch (error) {
+        console.warn('[AdminPanel] Falling back to cached offering student options:', error);
+        const fallbackUsers = SharedData.listUsers ? SharedData.listUsers(Object.assign({}, filters, { limit: ADMIN_USERS_COMPLETE_CHUNK_SIZE, page: 1 })) : [];
+        candidates = Array.isArray(fallbackUsers) ? fallbackUsers : [];
+    }
+
+    if (
+        requestId !== offeringStudentCandidatesRequestId ||
+        !selectedOfferingForStudents ||
+        Number(selectedOfferingForStudents.id) !== Number(offering.id)
+    ) {
+        return;
+    }
+
+    offeringStudentCandidates = candidates;
+    offeringStudentCandidatesLoading = false;
+    renderOfferingStudentsList();
 }
 
 function closeOfferingStudentsModal() {
@@ -5993,6 +7813,10 @@ function closeOfferingStudentsModal() {
     if (modal) modal.classList.remove('active');
     const programFilter = document.getElementById('offering-students-program-filter');
     if (programFilter) programFilter.value = 'all';
+    offeringStudentCandidatesRequestId += 1;
+    offeringStudentCandidates = [];
+    offeringStudentCandidatesLoading = false;
+    setOfferingStudentsSaveDisabled(false);
     selectedOfferingForStudents = null;
 }
 
@@ -6005,7 +7829,13 @@ function renderOfferingStudentsList() {
     const campus = String(selectedOfferingForStudents.campusSlug || '').toLowerCase();
     const department = String(selectedOfferingForStudents.departmentCode || '').toLowerCase();
 
-    const users = SharedData.getUsers() || [];
+    setOfferingStudentsSaveDisabled(offeringStudentCandidatesLoading);
+    if (offeringStudentCandidatesLoading) {
+        container.innerHTML = '<div style="padding:12px; color:#64748b;">Loading eligible students...</div>';
+        return;
+    }
+
+    const users = offeringStudentCandidates;
     let students = users.filter(user => (
         normalizeRoleCode(user.role) === 'student' &&
         String(user.status || '').toLowerCase() === 'active' &&
@@ -6046,27 +7876,37 @@ function renderOfferingStudentsList() {
         return `
             <label class="offering-student-row">
                 <div class="offering-student-meta">
-                    <span class="name">${student.name || 'N/A'}</span>
-                    <span class="sub">${student.studentNumber || 'No Student Number'}</span>
+                    <span class="name">${escapeHtml(student.name || 'N/A')}</span>
+                    <span class="sub">${escapeHtml(student.studentNumber || 'No Student Number')}</span>
                 </div>
-                <input type="checkbox" class="offering-student-checkbox" value="${student.id}" ${checked}>
+                <input type="checkbox" class="offering-student-checkbox" value="${escapeAttr(student.id)}" ${checked}>
             </label>
         `;
     }).join('');
 }
 
-function saveOfferingStudentsSelection() {
+async function saveOfferingStudentsSelection() {
     if (!selectedOfferingForStudents) return;
+    if (offeringStudentCandidatesLoading) {
+        alert('Please wait until eligible students finish loading.');
+        return;
+    }
     const checkboxes = document.querySelectorAll('#offering-students-list .offering-student-checkbox:checked');
     const studentUserIds = Array.from(checkboxes).map(checkbox => checkbox.value);
+    const saveBtn = document.getElementById('save-offering-students-btn');
 
     try {
-        SharedData.setCourseOfferingStudents(selectedOfferingForStudents.id, studentUserIds);
+        if (saveBtn) saveBtn.disabled = true;
+        await SharedData.setCourseOfferingStudents(selectedOfferingForStudents.id, studentUserIds);
         closeOfferingStudentsModal();
         refreshSubjectManagementView();
         updateOverviewCards();
     } catch (error) {
         alert('Unable to save assigned students: ' + (error.message || 'Unknown error'));
+    } finally {
+        if (saveBtn && selectedOfferingForStudents) {
+            saveBtn.disabled = false;
+        }
     }
 }
 
@@ -6098,21 +7938,25 @@ function editUser(userId) {
 /**
  * Delete user function
  */
-function deleteUser(email) {
-    if (confirm(`Are you sure you want to delete user: ${email}?`)) {
+async function deleteUser(email) {
+    if (confirm(`Deactivate user ${email}? The account will no longer be able to sign in, while historical records remain available.`)) {
         const user = adminUsers.find(u => u.email === email);
         if (!user) return;
 
-        // Delete directly from the local SharedData database
-        SharedData.deleteUser(user.id);
+        try {
+            await SharedData.deleteUser(user.id);
+        } catch (error) {
+            console.error('[AdminPanel] Failed to deactivate user.', error);
+            alert('Failed to deactivate user: ' + (error.message || 'Unknown error'));
+            return;
+        }
 
-        alert(`User ${email} deleted from local database!`);
-        loadUsersByOrganization();
+        alert(`User ${email} was deactivated. Historical records were retained.`);
+        await refreshAdminCurrentUsersPage();
 
         // Refresh Professor Management data if the deleted user was a professor
         if (normalizeRoleCode(user.role) === 'professor') {
-            loadProfessorsData();
-            renderProfessors();
+            await refreshAdminProfessorPage();
         }
     }
 }
@@ -6235,12 +8079,29 @@ function setupAdminProfilePhotoUpload() {
     const fullName = getAdminProfileFullName();
     placeholder.textContent = buildInitials(fullName) || 'AD';
 
-    const storedPhoto = SharedData.getProfilePhoto('admin');
-    if (storedPhoto) {
-        preview.src = storedPhoto;
-        preview.classList.add('active');
-        placeholder.style.display = 'none';
+    function applyProfilePhotoPreview(photo) {
+        const resolvedPhoto = String(photo || '').trim();
+        if (resolvedPhoto) {
+            preview.src = resolvedPhoto;
+            preview.classList.add('active');
+            placeholder.style.display = 'none';
+            return true;
+        }
+
+        preview.removeAttribute('src');
+        preview.classList.remove('active');
+        placeholder.style.display = '';
+        return false;
     }
+
+    const storedPhoto = SharedData.getProfilePhoto('admin');
+    applyProfilePhotoPreview(storedPhoto);
+
+    window.addEventListener('shareddata:change', function (event) {
+        if (event && event.detail && event.detail.key === 'profilePhoto') {
+            applyProfilePhotoPreview(event.detail.value);
+        }
+    });
 
     input.addEventListener('change', function () {
         const file = input.files && input.files[0];
@@ -6278,29 +8139,33 @@ function setupAdminProfilePhotoUpload() {
             return;
         }
 
-        try {
-            const savedPhoto = SharedData.uploadProfilePhoto(file);
-            if (savedPhoto) {
-                preview.src = savedPhoto;
-            }
-            preview.classList.add('active');
-            placeholder.style.display = 'none';
-        } catch (error) {
+        function handleUploadError(error) {
             alert(error && error.message ? error.message : 'Failed to upload the profile image.');
             const storedPhoto = SharedData.getProfilePhoto('admin');
-            if (storedPhoto) {
-                preview.src = storedPhoto;
-                preview.classList.add('active');
-                placeholder.style.display = 'none';
-            } else {
-                preview.removeAttribute('src');
-                preview.classList.remove('active');
-                placeholder.style.display = '';
-            }
-        } finally {
+            applyProfilePhotoPreview(storedPhoto);
+        }
+
+        let uploadPromise;
+        try {
+            uploadPromise = typeof SharedData.uploadProfilePhotoAsync === 'function'
+                ? SharedData.uploadProfilePhotoAsync(file, { message: 'Uploading profile photo...' })
+                : Promise.resolve(SharedData.uploadProfilePhoto(file));
+        } catch (error) {
+            handleUploadError(error);
             URL.revokeObjectURL(localPreviewUrl);
             input.value = '';
+            return;
         }
+
+        Promise.resolve(uploadPromise)
+            .then(function (savedPhoto) {
+                applyProfilePhotoPreview(savedPhoto);
+            })
+            .catch(handleUploadError)
+            .finally(function () {
+                URL.revokeObjectURL(localPreviewUrl);
+                input.value = '';
+            });
     });
 }
 
@@ -6521,6 +8386,8 @@ let currentDepartmentFilter = 'all';
 let currentProfessorCampusFilter = 'all';
 let lastProfessorSearchTerm = '';
 let hasProfessorSearchRun = false;
+let adminProfessorPage = 1;
+let adminProfessorPageMeta = { total: 0, limit: ADMIN_PROFESSORS_PAGE_SIZE, offset: 0, page: 1, hasMore: false };
 let currentAnalyticsSemester = 'all';
 let currentAnalyticsEvaluationType = 'student';
 let professorManagementDataSyncBound = false;
@@ -6575,9 +8442,7 @@ function deriveEmployeeIdFallback(userId) {
 }
 
 function formatEmploymentType(type) {
-    if (!type) return 'Regular';
-    const normalized = String(type).toLowerCase();
-    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+    return normalizeEmploymentTypeValue(type, 'Regular');
 }
 
 function getSemesterLabel(id) {
@@ -6616,7 +8481,9 @@ function getSemesterOptions() {
         pushOption(currentSemester, currentSemesterLabel || currentSemester);
     }
 
-    const evaluations = SharedData.getEvaluations ? SharedData.getEvaluations() : [];
+    const evaluations = SharedData.getCachedEvaluations
+        ? SharedData.getCachedEvaluations()
+        : (SharedData.getEvaluations ? SharedData.getEvaluations() : []);
     if (Array.isArray(evaluations)) {
         evaluations.forEach(evaluation => {
             pushOption(evaluation && evaluation.semesterId, evaluation && evaluation.semesterId);
@@ -6704,7 +8571,9 @@ function getAdminOverallSasrDepartments(campusId) {
         });
     }
 
-    const users = SharedData.getUsers ? SharedData.getUsers() : [];
+    const users = SharedData.getCachedUsers
+        ? SharedData.getCachedUsers()
+        : (SharedData.getUsers ? SharedData.getUsers() : []);
     users.forEach(user => {
         if (!user || normalizeAdminAnalyticsToken(user.role) !== 'professor') return;
         if (campusToken !== 'all' && normalizeAdminAnalyticsToken(user.campus || user.campusSlug) !== campusToken) return;
@@ -7004,6 +8873,720 @@ function openAdminOverallSasrModal() {
     populateAdminOverallSasrBaseOptions(modal);
     refreshAdminOverallSasrScopeOptions(modal);
     modal.style.display = 'flex';
+}
+
+function getAdminProfessorById(professorId) {
+    const targetId = String(professorId || '').trim();
+    if (!targetId) return null;
+
+    const localMatch = professorsData.find(professor => String(professor && professor.id || '').trim() === targetId);
+    if (localMatch) return localMatch;
+
+    const sourceUsers = SharedData.listUsers
+        ? SharedData.listUsers({ role: 'professor', userId: targetId, limit: 1, page: 1 })
+        : [];
+    return (Array.isArray(sourceUsers) ? sourceUsers : []).find(user =>
+        String(user && user.id || '').trim() === targetId &&
+        normalizeRoleCode(user && user.role) === 'professor'
+    ) || null;
+}
+
+function normalizeAdminReportLoadType(value) {
+    return String(value || '').trim().toLowerCase() === 'excess' ? 'excess' : 'main';
+}
+
+function getAdminReportLoadTypeLabel(value) {
+    return normalizeAdminReportLoadType(value) === 'excess' ? 'Excess Load' : 'Main Load';
+}
+
+function getAdminReportSemesterChoices() {
+    return getSemesterOptions().filter(option => option && option.id && option.id !== 'all');
+}
+
+function hasAdminStoredFacultyPaperFile(paper) {
+    if (!paper || typeof paper !== 'object') return false;
+    if (String(paper.latest_file_path || '').trim()) return true;
+    return Array.isArray(paper.pdf_versions) && paper.pdf_versions.some(version =>
+        String(version && version.file_path || '').trim()
+    );
+}
+
+function getAdminStoredFacultyPaperVersionNo(paper) {
+    const versions = Array.isArray(paper && paper.pdf_versions) ? paper.pdf_versions : [];
+    let latest = 0;
+    versions.forEach(version => {
+        const versionNo = Number(version && version.version_no);
+        if (Number.isFinite(versionNo) && versionNo > latest) {
+            latest = versionNo;
+        }
+    });
+    return latest > 0 ? latest : null;
+}
+
+function buildAdminAcknowledgementSemesterChoices(professor, loadType, sourcePapers) {
+    const professorId = normalizeAdminUserIdToken(professor && professor.id);
+    if (!professorId) return [];
+    const selectedLoadType = loadType ? normalizeAdminReportLoadType(loadType) : '';
+    const papers = Array.isArray(sourcePapers)
+        ? sourcePapers
+        : (SharedData.getFacultyPapers ? SharedData.getFacultyPapers() : []);
+    const bySemester = new Map();
+
+    (Array.isArray(papers) ? papers : []).forEach(paper => {
+        if (!paper || typeof paper !== 'object') return;
+        if (normalizeAdminUserIdToken(paper.professor_user_id) !== professorId) return;
+        if (!hasAdminStoredFacultyPaperFile(paper)) return;
+        const paperLoadType = normalizeAdminReportLoadType(paper.load_type || paper.loadType);
+        if (selectedLoadType && paperLoadType !== selectedLoadType) return;
+
+        const semesterId = String(paper.semester_id || '').trim();
+        if (!semesterId) return;
+
+        bySemester.set(`${paperLoadType}:${semesterId}`, {
+            id: semesterId,
+            label: String(paper.semester_label || getSemesterLabel(semesterId) || semesterId).trim(),
+            loadType: paperLoadType,
+            paper,
+        });
+    });
+
+    const order = getAdminReportSemesterChoices().map(option => option.id);
+    return Array.from(bySemester.values()).sort((left, right) => {
+        const leftIndex = order.indexOf(left.id);
+        const rightIndex = order.indexOf(right.id);
+        if (leftIndex === -1 && rightIndex === -1) return String(left.label).localeCompare(String(right.label));
+        if (leftIndex === -1) return 1;
+        if (rightIndex === -1) return -1;
+        return leftIndex - rightIndex;
+    });
+}
+
+async function refreshAdminAcknowledgementPapersForProfessor(professor) {
+    const professorId = normalizeAdminUserIdToken(professor && professor.id);
+    if (!professorId) return [];
+    const filters = {
+        professorUserId: professorId,
+        statuses: ['sent', 'completed'],
+        limit: 500,
+        page: 1,
+    };
+
+    if (SharedData.refreshFacultyPapers) {
+        const page = await SharedData.refreshFacultyPapers(filters);
+        return page && Array.isArray(page.papers) ? page.papers : [];
+    }
+
+    if (SharedData.listFacultyPapers) {
+        return SharedData.listFacultyPapers(filters);
+    }
+
+    return SharedData.getFacultyPapers ? SharedData.getFacultyPapers() : [];
+}
+
+function ensureAdminReportTypeModal() {
+    let modal = document.getElementById('adminReportTypeModal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'adminReportTypeModal';
+    modal.className = 'modal admin-report-type-modal';
+    modal.innerHTML = `
+        <div class="modal-content admin-report-type-modal-content" role="dialog" aria-modal="true" aria-label="Select faculty file">
+            <div class="modal-header">
+                <h2 id="adminReportTypeTitle">Select File Type</h2>
+                <button type="button" class="modal-close" id="adminReportTypeCloseBtn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="admin-report-type-body">
+                <p class="admin-report-modal-note" id="adminReportTypeNote">Choose which faculty file to open.</p>
+                <div class="admin-report-type-grid">
+                    <button type="button" class="admin-report-type-card" data-report-type="ifer">
+                        <i class="fas fa-file-word"></i>
+                        <strong>IFER</strong>
+                        <span>Generate the Individual Faculty Evaluation Report.</span>
+                    </button>
+                    <button type="button" class="admin-report-type-card" data-report-type="sasr">
+                        <i class="fas fa-file-excel"></i>
+                        <strong>SASR</strong>
+                        <span>Generate the SET and SEF rating summary.</span>
+                    </button>
+                    <button type="button" class="admin-report-type-card" data-report-type="acknowledgement">
+                        <i class="fas fa-file-pdf"></i>
+                        <strong>Acknowledgement</strong>
+                        <span>Open the stored acknowledgement PDF.</span>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-actions admin-report-modal-actions">
+                <button type="button" class="btn-cancel" id="adminReportTypeCancelBtn">Cancel</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const close = function () {
+        modal.style.display = 'none';
+        modal._professorId = '';
+        modal._acknowledgementPapers = [];
+    };
+
+    modal.addEventListener('click', function (event) {
+        if (event.target === modal) close();
+    });
+
+    const closeBtn = document.getElementById('adminReportTypeCloseBtn');
+    const cancelBtn = document.getElementById('adminReportTypeCancelBtn');
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    if (cancelBtn) cancelBtn.addEventListener('click', close);
+
+    modal.querySelectorAll('[data-report-type]').forEach(button => {
+        button.addEventListener('click', function () {
+            const reportType = String(this.getAttribute('data-report-type') || '').trim();
+            const professorId = String(modal._professorId || '').trim();
+            const acknowledgementPapers = Array.isArray(modal._acknowledgementPapers) ? modal._acknowledgementPapers : [];
+            close();
+
+            if (!professorId || !reportType) {
+                alert('Unable to open the selected file option.');
+                return;
+            }
+
+            if (reportType === 'ifer') {
+                openAdminProfessorIferFlow(professorId);
+                return;
+            }
+            if (reportType === 'sasr') {
+                openAdminProfessorSasrFlow(professorId);
+                return;
+            }
+            if (reportType === 'acknowledgement') {
+                openAdminProfessorAcknowledgementFlow(professorId, acknowledgementPapers);
+            }
+        });
+    });
+
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && modal.style.display === 'flex') {
+            close();
+        }
+    });
+
+    return modal;
+}
+
+function updateAdminReportTypeAcknowledgementState(modal, professor, papers, isLoading) {
+    const title = document.getElementById('adminReportTypeTitle');
+    const note = document.getElementById('adminReportTypeNote');
+    const acknowledgementButton = modal.querySelector('[data-report-type="acknowledgement"]');
+    const acknowledgementAvailable = buildAdminAcknowledgementSemesterChoices(professor, '', papers).length > 0;
+
+    if (title) {
+        title.textContent = `Faculty Files for ${String(professor && professor.name || 'Professor')}`;
+    }
+    if (note) {
+        note.textContent = isLoading
+            ? 'Choose IFER or SASR now. Checking stored acknowledgement PDFs...'
+            : (acknowledgementAvailable
+                ? 'Choose which faculty file to open.'
+                : 'Choose IFER or SASR. Stored acknowledgement PDF is currently unavailable.');
+    }
+    if (acknowledgementButton) {
+        acknowledgementButton.classList.toggle('is-unavailable', !acknowledgementAvailable);
+        acknowledgementButton.disabled = !!isLoading || !acknowledgementAvailable;
+    }
+}
+
+async function openAdminProfessorFileOptions(professorId) {
+    const professor = getAdminProfessorById(professorId);
+    if (!professor) {
+        alert('Professor not found. Please try again.');
+        return;
+    }
+
+    const modal = ensureAdminReportTypeModal();
+    modal._professorId = String(professorId || '').trim();
+    modal._acknowledgementPapers = [];
+    updateAdminReportTypeAcknowledgementState(modal, professor, [], true);
+    modal.style.display = 'flex';
+
+    try {
+        const papers = await refreshAdminAcknowledgementPapersForProfessor(professor);
+        if (String(modal._professorId || '') !== String(professorId || '')) return;
+        modal._acknowledgementPapers = Array.isArray(papers) ? papers : [];
+        updateAdminReportTypeAcknowledgementState(modal, professor, modal._acknowledgementPapers, false);
+    } catch (error) {
+        console.warn('[AdminPanel] Failed to load stored acknowledgement papers:', error);
+        if (String(modal._professorId || '') === String(professorId || '')) {
+            updateAdminReportTypeAcknowledgementState(modal, professor, [], false);
+        }
+    }
+}
+
+function ensureAdminReportSemesterModal() {
+    let modal = document.getElementById('adminReportSemesterModal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'adminReportSemesterModal';
+    modal.className = 'modal admin-report-modal';
+    modal.innerHTML = `
+        <div class="modal-content admin-report-modal-content" role="dialog" aria-modal="true" aria-label="Select report semester">
+            <div class="modal-header">
+                <h2 id="adminReportSemesterTitle">Select Semester</h2>
+                <button type="button" class="modal-close" id="adminReportSemesterCloseBtn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="admin-report-modal-body">
+                <p class="admin-report-modal-note" id="adminReportSemesterNote">Choose the semester for this report.</p>
+                <div class="form-group" id="adminReportLoadTypeGroup" style="display:none">
+                    <label for="adminReportLoadTypeSelect">Load Type</label>
+                    <select id="adminReportLoadTypeSelect"></select>
+                </div>
+                <div class="form-group">
+                    <label for="adminReportSemesterSelect">Semester</label>
+                    <select id="adminReportSemesterSelect"></select>
+                </div>
+            </div>
+            <div class="modal-actions admin-report-modal-actions">
+                <button type="button" class="btn-cancel" id="adminReportSemesterCancelBtn">Cancel</button>
+                <button type="button" class="btn-submit" id="adminReportSemesterConfirmBtn">Continue</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const close = function () {
+        modal.style.display = 'none';
+        modal._onConfirm = null;
+    };
+
+    modal.addEventListener('click', function (event) {
+        if (event.target === modal) close();
+    });
+
+    const closeBtn = document.getElementById('adminReportSemesterCloseBtn');
+    const cancelBtn = document.getElementById('adminReportSemesterCancelBtn');
+    const confirmBtn = document.getElementById('adminReportSemesterConfirmBtn');
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    if (cancelBtn) cancelBtn.addEventListener('click', close);
+    if (confirmBtn) {
+        confirmBtn.addEventListener('click', function () {
+            const select = document.getElementById('adminReportSemesterSelect');
+            const loadSelect = document.getElementById('adminReportLoadTypeSelect');
+            const semesterId = String(select && select.value || '').trim();
+            const loadType = normalizeAdminReportLoadType(loadSelect && loadSelect.value);
+            if (!semesterId) {
+                alert('Select a semester first.');
+                return;
+            }
+            const handler = modal._onConfirm;
+            close();
+            if (typeof handler === 'function') {
+                handler(semesterId, loadType);
+            }
+        });
+    }
+
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && modal.style.display === 'flex') {
+            close();
+        }
+    });
+
+    return modal;
+}
+
+function openAdminReportSemesterPicker(config) {
+    const modal = ensureAdminReportSemesterModal();
+    const title = document.getElementById('adminReportSemesterTitle');
+    const note = document.getElementById('adminReportSemesterNote');
+    const select = document.getElementById('adminReportSemesterSelect');
+    const loadGroup = document.getElementById('adminReportLoadTypeGroup');
+    const loadSelect = document.getElementById('adminReportLoadTypeSelect');
+    const confirmBtn = document.getElementById('adminReportSemesterConfirmBtn');
+    const baseOptions = Array.isArray(config && config.options) ? config.options : [];
+    const scopedOptionsProvider = typeof (config && config.loadScopedOptionsProvider) === 'function'
+        ? config.loadScopedOptionsProvider
+        : null;
+    const preferredSemesterId = String(config && config.selectedSemesterId || '').trim();
+    const showLoadType = !!(config && config.showLoadType);
+    const preferredLoadType = normalizeAdminReportLoadType(config && config.selectedLoadType);
+
+    if (loadSelect) {
+        loadSelect.innerHTML = `
+            <option value="main">Main Load</option>
+            <option value="excess">Excess Load</option>
+        `;
+        loadSelect.value = preferredLoadType;
+    }
+
+    const resolveOptions = function () {
+        const currentLoadType = normalizeAdminReportLoadType(loadSelect && loadSelect.value || preferredLoadType);
+        const scoped = scopedOptionsProvider ? scopedOptionsProvider(currentLoadType) : baseOptions;
+        return Array.isArray(scoped) ? scoped : [];
+    };
+
+    if (!select || !resolveOptions().length) {
+        alert('No semester is available for this report.');
+        return;
+    }
+
+    if (title) title.textContent = String(config && config.title || 'Select Semester');
+    if (note) note.textContent = String(config && config.note || 'Choose the semester for this report.');
+    if (confirmBtn) confirmBtn.textContent = String(config && config.confirmLabel || 'Continue');
+    if (loadGroup) loadGroup.style.display = showLoadType ? '' : 'none';
+
+    const renderSemesterOptions = function () {
+        const currentOptions = resolveOptions();
+        if (!currentOptions.length) {
+            select.innerHTML = '<option value="">No stored paper for this load</option>';
+            return;
+        }
+        select.innerHTML = currentOptions.map(option => `
+            <option value="${escapeAttr(option.id)}">${escapeHtml(option.label || option.id)}</option>
+        `).join('');
+
+        const selectedOption = currentOptions.some(option => option.id === preferredSemesterId)
+            ? preferredSemesterId
+            : String(currentOptions[0].id || '').trim();
+        select.value = selectedOption;
+    };
+
+    renderSemesterOptions();
+    if (loadSelect) {
+        loadSelect.onchange = renderSemesterOptions;
+    }
+    modal._onConfirm = typeof config.onConfirm === 'function' ? config.onConfirm : null;
+    modal.style.display = 'flex';
+}
+
+async function downloadAdminProfessorIferReport(professor, semesterId, loadType) {
+    const professorUserId = String(professor && professor.id || '').trim();
+    if (!professorUserId) {
+        alert('Unable to resolve professor account for IFER download.');
+        return;
+    }
+    let response;
+    try {
+        response = await fetch('../api/generate_ifer.php', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                professor_user_id: professorUserId,
+                semester_id: semesterId,
+                load_type: normalizeAdminReportLoadType(loadType),
+            }),
+        });
+    } catch (_error) {
+        alert('Unable to connect to the IFER generator.');
+        return;
+    }
+
+    if (!response.ok) {
+        let errorMessage = 'Failed to generate IFER Word file.';
+        try {
+            const data = await response.json();
+            if (data && data.error) errorMessage = String(data.error);
+        } catch (_error) {
+            // Ignore non-JSON error bodies.
+        }
+        alert(errorMessage);
+        return;
+    }
+
+    const wordBlob = await response.blob();
+    const fileName = parseAdminFilenameFromDisposition(response.headers.get('Content-Disposition'))
+        || `${String(professor && professor.name || 'Professor').trim() || 'Professor'} IFER.docx`;
+    const blobUrl = URL.createObjectURL(wordBlob);
+    const anchor = document.createElement('a');
+    anchor.href = blobUrl;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+}
+
+async function downloadAdminProfessorSasrReport(professor, semesterId, loadType) {
+    const professorUserId = String(professor && professor.id || '').trim();
+    if (!professorUserId) {
+        alert('Unable to resolve professor account for SASR download.');
+        return;
+    }
+    let response;
+    try {
+        response = await fetch('../api/generate_sasr.php', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                professor_user_id: professorUserId,
+                semester_id: semesterId,
+                load_type: normalizeAdminReportLoadType(loadType),
+            }),
+        });
+    } catch (_error) {
+        alert('Unable to connect to the SASR generator.');
+        return;
+    }
+
+    if (!response.ok) {
+        let errorMessage = 'Failed to generate SASR Excel file.';
+        try {
+            const data = await response.json();
+            if (data && data.error) errorMessage = String(data.error);
+        } catch (_error) {
+            // Ignore non-JSON error bodies.
+        }
+        alert(errorMessage);
+        return;
+    }
+
+    const excelBlob = await response.blob();
+    const fileName = parseAdminFilenameFromDisposition(response.headers.get('Content-Disposition'))
+        || `${String(professor && professor.name || 'Professor').trim() || 'Professor'} SASR.xlsx`;
+    const blobUrl = URL.createObjectURL(excelBlob);
+    const anchor = document.createElement('a');
+    anchor.href = blobUrl;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+}
+
+function closeAdminPdfPreviewModal() {
+    const modal = document.getElementById('adminPdfPreviewModal');
+    const frame = document.getElementById('adminPdfPreviewFrame');
+    if (frame) frame.src = 'about:blank';
+    if (modal) modal.classList.remove('active');
+
+    if (closeAdminPdfPreviewModal._blobUrl) {
+        URL.revokeObjectURL(closeAdminPdfPreviewModal._blobUrl);
+        closeAdminPdfPreviewModal._blobUrl = '';
+    }
+    closeAdminPdfPreviewModal._filename = '';
+}
+
+function ensureAdminPdfPreviewModal() {
+    let modal = document.getElementById('adminPdfPreviewModal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'adminPdfPreviewModal';
+    modal.className = 'pdf-preview-modal admin-pdf-preview-modal';
+    modal.innerHTML = `
+        <div class="pdf-preview-dialog" role="dialog" aria-modal="true" aria-label="PDF preview">
+            <div class="pdf-preview-toolbar">
+                <div>
+                    <h3 id="adminPdfPreviewTitle">PDF Preview</h3>
+                    <div class="pdf-preview-filename" id="adminPdfPreviewFilename">report.pdf</div>
+                </div>
+                <div class="pdf-preview-actions">
+                    <button type="button" class="btn-submit pdf-preview-download-btn" id="adminPdfPreviewDownloadBtn">Download</button>
+                    <button type="button" class="btn-cancel pdf-preview-close-btn" id="adminPdfPreviewCloseBtn">Close</button>
+                </div>
+            </div>
+            <iframe id="adminPdfPreviewFrame" class="pdf-preview-frame" title="PDF Preview"></iframe>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const closeBtn = document.getElementById('adminPdfPreviewCloseBtn');
+    const downloadBtn = document.getElementById('adminPdfPreviewDownloadBtn');
+    if (closeBtn) closeBtn.addEventListener('click', closeAdminPdfPreviewModal);
+    if (downloadBtn) {
+        downloadBtn.addEventListener('click', function () {
+            if (!closeAdminPdfPreviewModal._blobUrl) return;
+            const anchor = document.createElement('a');
+            anchor.href = closeAdminPdfPreviewModal._blobUrl;
+            anchor.download = closeAdminPdfPreviewModal._filename || 'report.pdf';
+            document.body.appendChild(anchor);
+            anchor.click();
+            document.body.removeChild(anchor);
+        });
+    }
+    modal.addEventListener('click', function (event) {
+        if (event.target === modal) closeAdminPdfPreviewModal();
+    });
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && modal.classList.contains('active')) {
+            closeAdminPdfPreviewModal();
+        }
+    });
+
+    return modal;
+}
+
+function openAdminPdfBlobPreview(config) {
+    const blob = config && config.blob;
+    if (!(blob instanceof Blob)) {
+        alert('Unable to preview the requested PDF file.');
+        return;
+    }
+
+    const modal = ensureAdminPdfPreviewModal();
+    const frame = document.getElementById('adminPdfPreviewFrame');
+    const title = document.getElementById('adminPdfPreviewTitle');
+    const filename = document.getElementById('adminPdfPreviewFilename');
+    const fileName = String(config && config.fileName || 'report.pdf').trim() || 'report.pdf';
+    const dialogTitle = String(config && config.title || 'PDF Preview').trim() || 'PDF Preview';
+    const blobUrl = URL.createObjectURL(blob);
+
+    if (closeAdminPdfPreviewModal._blobUrl) {
+        URL.revokeObjectURL(closeAdminPdfPreviewModal._blobUrl);
+    }
+    closeAdminPdfPreviewModal._blobUrl = blobUrl;
+    closeAdminPdfPreviewModal._filename = fileName;
+
+    if (title) title.textContent = dialogTitle;
+    if (filename) filename.textContent = fileName;
+    if (frame) frame.src = `${blobUrl}#toolbar=1&navpanes=0&scrollbar=1`;
+    if (modal) modal.classList.add('active');
+}
+
+async function openAdminStoredFacultyPaperPreview(professor, paper) {
+    if (!paper || !paper.id) {
+        alert('Stored acknowledgement PDF is unavailable for this semester.');
+        return;
+    }
+
+    const params = new URLSearchParams();
+    params.set('paper_id', String(paper.id));
+    const versionNo = getAdminStoredFacultyPaperVersionNo(paper);
+    if (versionNo) {
+        params.set('version_no', String(versionNo));
+    }
+
+    let response;
+    try {
+        response = await fetch(`../api/faculty_paper_file.php?${params.toString()}`, {
+            method: 'GET',
+            credentials: 'same-origin',
+        });
+    } catch (_error) {
+        alert('Unable to open the stored acknowledgement PDF.');
+        return;
+    }
+
+    if (!response.ok) {
+        let errorMessage = 'Stored acknowledgement PDF is unavailable.';
+        try {
+            const data = await response.json();
+            if (data && data.error) errorMessage = String(data.error);
+        } catch (_error) {
+            // Ignore non-JSON error bodies.
+        }
+        alert(errorMessage);
+        return;
+    }
+
+    const pdfBlob = await response.blob();
+    const fileName = parseAdminFilenameFromDisposition(response.headers.get('Content-Disposition'))
+        || String(paper.latest_file_name || 'faculty_acknowledgement.pdf').trim()
+        || 'faculty_acknowledgement.pdf';
+    openAdminPdfBlobPreview({
+        blob: pdfBlob,
+        fileName,
+        title: `${String(professor && professor.name || 'Professor')} Acknowledgement`,
+    });
+}
+
+function openAdminProfessorIferFlow(professorId) {
+    const professor = getAdminProfessorById(professorId);
+    if (!professor) {
+        alert('Professor not found. Please try again.');
+        return;
+    }
+
+    const semesterOptions = getAdminReportSemesterChoices();
+    if (!semesterOptions.length) {
+        alert('No semester is available for IFER generation.');
+        return;
+    }
+
+    openAdminReportSemesterPicker({
+        title: `Select IFER Semester for ${String(professor.name || 'Professor')}`,
+        note: 'Choose the load type and semester to generate the Individual Faculty Evaluation Report.',
+        options: semesterOptions,
+        selectedSemesterId: String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : '').trim(),
+        selectedLoadType: 'main',
+        showLoadType: true,
+        confirmLabel: 'Download',
+        onConfirm: function (semesterId, loadType) {
+            downloadAdminProfessorIferReport(professor, semesterId, loadType);
+        },
+    });
+}
+
+function openAdminProfessorSasrFlow(professorId) {
+    const professor = getAdminProfessorById(professorId);
+    if (!professor) {
+        alert('Professor not found. Please try again.');
+        return;
+    }
+
+    const semesterOptions = getAdminReportSemesterChoices();
+    if (!semesterOptions.length) {
+        alert('No semester is available for SASR generation.');
+        return;
+    }
+
+    openAdminReportSemesterPicker({
+        title: `Select SASR Semester for ${String(professor.name || 'Professor')}`,
+        note: 'Choose the load type and semester to generate the SET and SEF rating summary Excel file.',
+        options: semesterOptions,
+        selectedSemesterId: String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : '').trim(),
+        selectedLoadType: 'main',
+        showLoadType: true,
+        confirmLabel: 'Download',
+        onConfirm: function (semesterId, loadType) {
+            downloadAdminProfessorSasrReport(professor, semesterId, loadType);
+        },
+    });
+}
+
+function openAdminProfessorAcknowledgementFlow(professorId, sourcePapers) {
+    const professor = getAdminProfessorById(professorId);
+    if (!professor) {
+        alert('Professor not found. Please try again.');
+        return;
+    }
+
+    const mainSemesterOptions = buildAdminAcknowledgementSemesterChoices(professor, 'main', sourcePapers);
+    const excessSemesterOptions = buildAdminAcknowledgementSemesterChoices(professor, 'excess', sourcePapers);
+    const defaultLoadType = mainSemesterOptions.length ? 'main' : 'excess';
+    const semesterOptions = defaultLoadType === 'main' ? mainSemesterOptions : excessSemesterOptions;
+    if (!semesterOptions.length) {
+        alert('No stored acknowledgement PDF is available for this professor.');
+        return;
+    }
+
+    openAdminReportSemesterPicker({
+        title: `Select Acknowledgement Semester for ${String(professor.name || 'Professor')}`,
+        note: 'Choose the load type and semester. Only matching stored acknowledgement PDFs are available.',
+        options: semesterOptions,
+        selectedSemesterId: semesterOptions[semesterOptions.length - 1].id,
+        selectedLoadType: defaultLoadType,
+        showLoadType: true,
+        loadScopedOptionsProvider: function (loadType) {
+            return buildAdminAcknowledgementSemesterChoices(professor, loadType, sourcePapers);
+        },
+        confirmLabel: 'Preview PDF',
+        onConfirm: function (semesterId, loadType) {
+            const selectedLoadType = normalizeAdminReportLoadType(loadType);
+            const selectedOptions = buildAdminAcknowledgementSemesterChoices(professor, selectedLoadType, sourcePapers);
+            const selected = selectedOptions.find(option => option.id === semesterId);
+            if (!selected || !selected.paper) {
+                alert(`Stored ${getAdminReportLoadTypeLabel(selectedLoadType).toLowerCase()} acknowledgement PDF is unavailable for this semester.`);
+                return;
+            }
+            openAdminStoredFacultyPaperPreview(professor, selected.paper);
+        },
+    });
 }
 
 function getEvaluationTypeOptions() {
@@ -7634,24 +10217,116 @@ function formatProfessorHistoricalTrendDelta(value) {
  */
 if (typeof saveProfessorsToSharedData !== 'function') {
     function getProfessorsFromSharedData() {
-        return SharedData.getUsers().filter(function (u) { return normalizeRoleCode(u.role) === 'professor'; });
+        return SharedData.listUsers
+            ? SharedData.listUsers({ role: 'professor', limit: ADMIN_PROFESSORS_PAGE_SIZE, page: adminProfessorPage })
+            : [];
     }
-    function saveProfessorsToSharedData() {
+    async function saveProfessorsToSharedData() {
         var professorsWithRole = professorsData.map(function (p) {
             return Object.assign({}, p, { role: 'professor', status: p.isActive !== false ? 'active' : 'inactive' });
         });
-        SharedData.bulkUpsertUsers(professorsWithRole);
+        return SharedData.bulkUpsertUsers(professorsWithRole);
     }
+}
+
+function getAdminProfessorFilterValue(id) {
+    const el = document.getElementById(id);
+    return el ? String(el.value || '').trim() : 'all';
+}
+
+function buildAdminProfessorFilters(page = adminProfessorPage) {
+    const filters = {
+        role: 'professor',
+        limit: ADMIN_PROFESSORS_PAGE_SIZE,
+        page: Math.max(1, Number(page) || 1),
+    };
+    const search = normalizeProfessorFilterToken(lastProfessorSearchTerm);
+    const campus = normalizeProfessorFilterToken(currentProfessorCampusFilter);
+    const department = String(currentDepartmentFilter || '').trim().toUpperCase();
+    const status = getAdminProfessorFilterValue('professor-status-filter').toLowerCase();
+    const program = normalizeProgramCode(getAdminProfessorFilterValue('professor-program-filter'));
+
+    if (search) filters.search = search;
+    if (campus && campus !== 'all') filters.campus = campus;
+    if (department && department !== 'ALL') filters.department = department;
+    filters.status = status || 'active';
+    if (program && program !== 'ALL') filters.program = program;
+
+    return filters;
+}
+
+function normalizeAdminProfessorPageResult(result, fallbackFilters) {
+    if (result && Array.isArray(result.users)) {
+        return result;
+    }
+    const users = Array.isArray(result)
+        ? result
+        : (SharedData.listUsers ? SharedData.listUsers(fallbackFilters) : []);
+    const meta = SharedData.getLastUsersPageMeta
+        ? SharedData.getLastUsersPageMeta()
+        : (SharedData.getUserListMeta ? SharedData.getUserListMeta() : {});
+    return {
+        users: Array.isArray(users) ? users : [],
+        total: Number(meta.total) || (Array.isArray(users) ? users.length : 0),
+        limit: Number(meta.limit) || ADMIN_PROFESSORS_PAGE_SIZE,
+        offset: Number(meta.offset) || 0,
+        page: Number(meta.page) || Number(fallbackFilters && fallbackFilters.page) || 1,
+        hasMore: meta.hasMore === true,
+    };
+}
+
+async function refreshAdminProfessorPage(options = {}) {
+    const opts = options && typeof options === 'object' ? options : {};
+    const page = Math.max(1, Number(opts.page || adminProfessorPage) || 1);
+    const searchTerm = normalizeProfessorFilterToken(lastProfessorSearchTerm);
+    if (!hasProfessorSearchRun || !searchTerm) {
+        adminProfessorPage = 1;
+        adminProfessorPageMeta = { total: 0, limit: ADMIN_PROFESSORS_PAGE_SIZE, offset: 0, page: 1, hasMore: false };
+        professorsData = [];
+        renderProfessors();
+        return professorsData;
+    }
+
+    const filters = buildAdminProfessorFilters(page);
+    try {
+        const result = SharedData.refreshUsers
+            ? await SharedData.refreshUsers(filters)
+            : SharedData.listUsers(filters);
+        const pageResult = normalizeAdminProfessorPageResult(result, filters);
+        adminProfessorPageMeta = {
+            total: Number(pageResult.total) || 0,
+            limit: Number(pageResult.limit) || ADMIN_PROFESSORS_PAGE_SIZE,
+            offset: Number(pageResult.offset) || 0,
+            page: Number(pageResult.page) || page,
+            hasMore: pageResult.hasMore === true,
+        };
+        adminProfessorPage = adminProfessorPageMeta.page;
+        loadProfessorsData(pageResult.users);
+    } catch (error) {
+        console.warn('[AdminPanel] Falling back to cached professor users:', error);
+        const fallbackUsers = SharedData.listUsers ? SharedData.listUsers(filters) : [];
+        adminProfessorPageMeta = {
+            total: Array.isArray(fallbackUsers) ? fallbackUsers.length : 0,
+            limit: ADMIN_PROFESSORS_PAGE_SIZE,
+            offset: (page - 1) * ADMIN_PROFESSORS_PAGE_SIZE,
+            page,
+            hasMore: false,
+        };
+        adminProfessorPage = page;
+        loadProfessorsData(fallbackUsers);
+    }
+    renderProfessors();
+    return professorsData;
 }
 
 /**
  * Generate random professor data
  * Load professors data from localStorage or generate new
  */
-function loadProfessorsData() {
-    // Always load from the canonical shared user snapshot.
-    // Using filtered adminUsers can drop professors when later persisted.
-    const sourceUsers = SharedData.getUsers ? SharedData.getUsers() : [];
+function loadProfessorsData(sourceUsersOverride) {
+    const sourceUsers = Array.isArray(sourceUsersOverride)
+        ? sourceUsersOverride
+        : (Array.isArray(adminUsers) ? adminUsers : []);
     professorsData = sourceUsers.filter(function (u) {
         return String(u.role || '').toLowerCase() === 'professor';
     });
@@ -7663,9 +10338,7 @@ function loadProfessorsData() {
             updated.employeeId = deriveEmployeeIdFallback(updated.id);
         }
 
-        if (!updated.employmentType) {
-            updated.employmentType = 'Regular';
-        }
+        updated.employmentType = normalizeEmploymentTypeValue(updated.employmentType, 'Regular');
 
         if (!updated.department && updated.institute) {
             updated.department = updated.institute;
@@ -7703,7 +10376,9 @@ function limitProfessorsPerDepartment() {
 
     if (limitedData.length > 0 && limitedData.length !== professorsData.length) {
         professorsData = limitedData;
-        saveProfessorsToSharedData();
+        saveProfessorsToSharedData().catch(function (error) {
+            console.error('[AdminPanel] Failed to persist limited professor list.', error);
+        });
     }
 }
 
@@ -7718,19 +10393,21 @@ function renderProfessorSearchPrompt(message) {
     professorsList.innerHTML = `
         <div class="empty-state professor-search-gate">
             <i class="fas fa-search"></i>
-            <p>${message}</p>
+            <p>${escapeHtml(message)}</p>
         </div>
     `;
+    renderAdminProfessorPagination();
 }
 
-function runProfessorSearch() {
+async function runProfessorSearch() {
     const searchInput = document.getElementById('professor-search');
     const campusSelect = document.getElementById('professor-campus-filter');
 
     lastProfessorSearchTerm = normalizeProfessorFilterToken(searchInput ? searchInput.value : '');
     currentProfessorCampusFilter = campusSelect ? campusSelect.value || 'all' : 'all';
     hasProfessorSearchRun = Boolean(lastProfessorSearchTerm);
-    renderProfessors();
+    adminProfessorPage = 1;
+    await refreshAdminProfessorPage();
 }
 
 function clearProfessorSearchFilters() {
@@ -7743,8 +10420,51 @@ function clearProfessorSearchFilters() {
     currentDepartmentFilter = 'all';
     lastProfessorSearchTerm = '';
     hasProfessorSearchRun = false;
+    adminProfessorPage = 1;
     renderProfessorDepartmentTabs();
     renderProfessors();
+}
+
+function populateAdminProfessorProgramFilter() {
+    const select = document.getElementById('professor-program-filter');
+    if (!select) return;
+    const current = select.value || 'all';
+    const campus = normalizeProfessorFilterToken(currentProfessorCampusFilter);
+    const programs = SharedData.getPrograms ? SharedData.getPrograms() : [];
+    const options = [
+        { value: 'all', label: 'All Programs' },
+        ...(Array.isArray(programs) ? programs : []).filter(program => {
+            const programCampus = normalizeProfessorFilterToken(program && program.campusSlug);
+            return !campus || campus === 'all' || !programCampus || programCampus === campus;
+        }).map(program => {
+            const code = normalizeProgramCode(program && program.programCode);
+            const name = String(program && program.programName || '').trim();
+            return { value: code, label: name ? `${code} - ${name}` : code };
+        }).filter(option => option.value),
+    ];
+    setSelectOptions(select, options, current);
+}
+
+function setupAdminProfessorFilters() {
+    setSelectOptions(document.getElementById('professor-status-filter'), [
+        { value: 'active', label: 'Active' },
+        { value: 'inactive', label: 'Inactive' },
+        { value: 'all', label: 'All Statuses' },
+    ]);
+    populateAdminProfessorProgramFilter();
+
+    ['professor-status-filter', 'professor-program-filter'].forEach(id => {
+        const select = document.getElementById(id);
+        if (!select) return;
+        select.addEventListener('change', () => {
+            adminProfessorPage = 1;
+            if (hasProfessorSearchRun) {
+                refreshAdminProfessorPage();
+            } else {
+                renderProfessors();
+            }
+        });
+    });
 }
 
 /**
@@ -7754,6 +10474,7 @@ function setupProfessorManagement() {
     // Load professor data from SharedData
     loadProfessorsData();
     populateProfessorCampusFilter();
+    setupAdminProfessorFilters();
 
     if (!professorManagementDataSyncBound && SharedData.onDataChange) {
         professorManagementDataSyncBound = true;
@@ -7766,11 +10487,14 @@ function setupProfessorManagement() {
                 key === SharedData.KEYS.CURRENT_SEMESTER ||
                 key === SharedData.KEYS.SEMESTER_LIST
             ) {
-                loadProfessorsData();
                 if (isContentViewVisible('hr-professors-view')) {
                     populateProfessorCampusFilter();
+                    populateAdminProfessorProgramFilter();
                     renderProfessorDepartmentOptions();
                     renderProfessorDepartmentTabs();
+                    if (!hasProfessorSearchRun) {
+                        loadProfessorsData();
+                    }
                     renderProfessors();
                 }
             }
@@ -7784,7 +10508,12 @@ function setupProfessorManagement() {
             deptTabs.forEach(t => t.classList.remove('active'));
             this.classList.add('active');
             currentDepartmentFilter = this.getAttribute('data-department');
-            renderProfessors();
+            adminProfessorPage = 1;
+            if (hasProfessorSearchRun) {
+                refreshAdminProfessorPage();
+            } else {
+                renderProfessors();
+            }
         });
     });
 
@@ -7813,7 +10542,13 @@ function setupProfessorManagement() {
     if (campusFilter) {
         campusFilter.addEventListener('change', function () {
             currentProfessorCampusFilter = this.value || 'all';
-            renderProfessors();
+            adminProfessorPage = 1;
+            populateAdminProfessorProgramFilter();
+            if (hasProfessorSearchRun) {
+                refreshAdminProfessorPage();
+            } else {
+                renderProfessors();
+            }
         });
     }
 
@@ -7886,15 +10621,17 @@ function setupProfessorManagement() {
  * Load user management view
  */
 function loadUserManagement() {
-    loadProfessorsData();
+    if (!hasProfessorSearchRun) {
+        loadProfessorsData();
+    }
     renderProfessors();
 
-    if (professorManagementRefreshQueued) {
+    if (!hasProfessorSearchRun || professorManagementRefreshQueued) {
         return;
     }
     professorManagementRefreshQueued = true;
     setTimeout(() => {
-        fetchUsersFromApi('all', '')
+        refreshAdminProfessorPage()
             .catch(error => {
                 console.warn('[AdminPanel] Failed to refresh professor management users.', error);
             })
@@ -7903,12 +10640,66 @@ function loadUserManagement() {
                 if (!isContentViewVisible('hr-professors-view')) {
                     return;
                 }
-                loadProfessorsData();
                 renderProfessorDepartmentTabs();
                 populateProfessorCampusFilter();
+                populateAdminProfessorProgramFilter();
                 renderProfessors();
             });
     }, 0);
+}
+
+function renderAdminProfessorPagination() {
+    const container = document.getElementById('admin-professor-pagination');
+    if (!container) return;
+    const searchTerm = normalizeProfessorFilterToken(lastProfessorSearchTerm);
+    if (!hasProfessorSearchRun || !searchTerm) {
+        container.innerHTML = '';
+        return;
+    }
+
+    const meta = adminProfessorPageMeta || {};
+    const total = Math.max(0, Number(meta.total) || 0);
+    const limit = Math.max(1, Number(meta.limit) || ADMIN_PROFESSORS_PAGE_SIZE);
+    const page = Math.max(1, Number(meta.page) || adminProfessorPage || 1);
+    const offset = Math.max(0, Number(meta.offset) || ((page - 1) * limit));
+    const shown = Array.isArray(professorsData) ? professorsData.length : 0;
+    const from = shown > 0 ? offset + 1 : 0;
+    const to = shown > 0 ? offset + shown : 0;
+    const hasPrevious = page > 1;
+    const hasNext = meta.hasMore === true;
+
+    container.innerHTML = `
+        <div class="pagination-summary">
+            Showing ${from}-${to} of ${total} professors · Page ${page}
+        </div>
+        <div class="pagination-actions">
+            <button type="button" class="pagination-btn" id="admin-professor-prev-page" ${hasPrevious ? '' : 'disabled'}>
+                <i class="fas fa-chevron-left"></i>
+                Previous
+            </button>
+            <button type="button" class="pagination-btn" id="admin-professor-next-page" ${hasNext ? '' : 'disabled'}>
+                Next
+                <i class="fas fa-chevron-right"></i>
+            </button>
+        </div>
+    `;
+
+    const prev = document.getElementById('admin-professor-prev-page');
+    const next = document.getElementById('admin-professor-next-page');
+    if (prev) {
+        prev.addEventListener('click', () => {
+            if (!hasPrevious) return;
+            adminProfessorPage = page - 1;
+            refreshAdminProfessorPage({ page: adminProfessorPage });
+        });
+    }
+    if (next) {
+        next.addEventListener('click', () => {
+            if (!hasNext) return;
+            adminProfessorPage = page + 1;
+            refreshAdminProfessorPage({ page: adminProfessorPage });
+        });
+    }
 }
 
 /**
@@ -7961,6 +10752,7 @@ function renderProfessors() {
                 <p>No professors match your search</p>
             </div>
         `;
+        renderAdminProfessorPagination();
         return;
     }
 
@@ -7990,18 +10782,18 @@ function renderProfessors() {
                         ) || 0;
 
                         return `
-                        <tr class="${professor.isActive === false ? 'inactive' : ''}" data-id="${professor.id}">
+                        <tr class="${professor.isActive === false ? 'inactive' : ''}" data-id="${escapeAttr(professor.id)}">
                             <td data-label="Professor">
                                 <div class="professor-table-name">
                                     <i class="fas fa-user-tie"></i>
-                                    <span>${professor.name || 'N/A'}</span>
+                                    <span>${escapeHtml(professor.name || 'N/A')}</span>
                                 </div>
                             </td>
-                            <td data-label="Email">${professor.email || 'N/A'}</td>
-                            <td data-label="Employee ID">${professor.employeeId || 'N/A'}</td>
-                            <td data-label="Department"><span class="dept-badge dept-${professor.department}">${professor.department || 'N/A'}</span></td>
-                            <td data-label="Position">${professor.position || 'Professor'}</td>
-                            <td data-label="Employment">${formatEmploymentType(professor.employmentType)}</td>
+                            <td data-label="Email">${escapeHtml(professor.email || 'N/A')}</td>
+                            <td data-label="Employee ID">${escapeHtml(professor.employeeId || 'N/A')}</td>
+                            <td data-label="Department"><span class="dept-badge dept-${escapeAttr(professor.department)}">${escapeHtml(professor.department || 'N/A')}</span></td>
+                            <td data-label="Position">${escapeHtml(professor.position || 'Professor')}</td>
+                            <td data-label="Employment">${escapeHtml(formatEmploymentType(professor.employmentType))}</td>
                             <td data-label="Students Evaluated">${studentsEvaluated}</td>
                             <td data-label="Status">
                                 <span class="status-pill ${professor.isActive ? 'active' : 'inactive'}">
@@ -8010,13 +10802,16 @@ function renderProfessors() {
                             </td>
                             <td data-label="Actions">
                                 <div class="professor-actions">
-                                    <button class="action-btn view" data-action="view" data-professor-id="${professor.id}" title="View Details" aria-label="View professor details">
+                                    <button class="action-btn view" data-action="view" data-professor-id="${escapeAttr(professor.id)}" title="View Details" aria-label="View professor details">
                                         <i class="fas fa-eye"></i>
                                     </button>
-                                    <button class="action-btn analytics" data-action="analytics" data-professor-id="${professor.id}" title="Analytics" aria-label="View professor analytics">
+                                    <button class="action-btn analytics" data-action="analytics" data-professor-id="${escapeAttr(professor.id)}" title="Analytics" aria-label="View professor analytics">
                                         <i class="fas fa-chart-line"></i>
                                     </button>
-                                    <button class="action-btn edit" data-action="edit" data-professor-id="${professor.id}" title="Edit" aria-label="Edit professor">
+                                    <button class="action-btn files" data-action="files" data-professor-id="${escapeAttr(professor.id)}" title="Faculty Files" aria-label="Open professor faculty files">
+                                        <i class="fas fa-file-circle-plus"></i>
+                                    </button>
+                                    <button class="action-btn edit" data-action="edit" data-professor-id="${escapeAttr(professor.id)}" title="Edit" aria-label="Edit professor">
                                         <i class="fas fa-edit"></i>
                                     </button>
                                 </div>
@@ -8059,11 +10854,15 @@ function renderProfessors() {
                 case 'edit':
                     editProfessor(professorId);
                     break;
+                case 'files':
+                    openAdminProfessorFileOptions(professorId);
+                    break;
                 default:
                     console.error('Unknown action:', action);
             }
         });
     });
+    renderAdminProfessorPagination();
 }
 
 /**
@@ -8100,7 +10899,7 @@ function closeProfessorModal() {
 /**
  * Handle professor form submission
  */
-function handleProfessorFormSubmit(e) {
+async function handleProfessorFormSubmit(e) {
     e.preventDefault();
 
     const employeeIdInput = document.getElementById('professor-employee-id');
@@ -8113,6 +10912,10 @@ function handleProfessorFormSubmit(e) {
         email: document.getElementById('professor-email').value,
         department: document.getElementById('professor-department').value,
         position: document.getElementById('professor-position').value || 'Professor',
+        employmentType: normalizeEmploymentTypeValue(
+            document.getElementById('professor-employment-type').value,
+            'Regular'
+        ),
         isActive: isActive,
         employeeId: employeeIdValue
     };
@@ -8148,10 +10951,15 @@ function handleProfessorFormSubmit(e) {
     }
 
     // Save to centralized SharedData
-    saveProfessorsToSharedData();
+    try {
+        await saveProfessorsToSharedData();
+    } catch (error) {
+        console.error('[AdminPanel] Failed to save professor data.', error);
+        alert('Failed to save professor data: ' + (error.message || 'Unknown error'));
+        return;
+    }
 
-    // Re-render and close modal
-    renderProfessors();
+    await refreshAdminProfessorPage();
     closeProfessorModal();
     updateOverviewCards();
 }
@@ -8174,6 +10982,10 @@ function editProfessor(professorId) {
         if (employeeIdInput) employeeIdInput.value = professor.employeeId || '';
         document.getElementById('professor-department').value = professor.department;
         document.getElementById('professor-position').value = professor.position;
+        const employmentTypeSelect = document.getElementById('professor-employment-type');
+        if (employmentTypeSelect) {
+            employmentTypeSelect.value = normalizeEmploymentTypeValue(professor.employmentType, 'Regular');
+        }
         const activeCheckbox = document.getElementById('professor-active');
         if (activeCheckbox) activeCheckbox.checked = professor.isActive !== false;
         currentEditingProfessorId = professorId;
@@ -8184,14 +10996,20 @@ function editProfessor(professorId) {
 /**
  * Delete professor
  */
-function deleteProfessor(professorId) {
+async function deleteProfessor(professorId) {
     const professor = professorsData.find(t => String(t.id) === String(professorId));
     if (!professor) return;
 
-    if (confirm(`Are you sure you want to delete ${professor.name}?\n\nThis action cannot be undone.`)) {
-        professorsData = professorsData.filter(t => t.id !== professorId);
-        saveProfessorsToSharedData();
-        renderProfessors();
+    if (confirm(`Deactivate ${professor.name}? The account will no longer be able to sign in, while historical evaluations and reports remain available.`)) {
+        try {
+            await SharedData.deleteUser(professorId);
+            professorsData = professorsData.filter(t => t.id !== professorId);
+        } catch (error) {
+            console.error('[AdminPanel] Failed to deactivate professor.', error);
+            alert('Failed to deactivate professor: ' + (error.message || 'Unknown error'));
+            return;
+        }
+        await refreshAdminProfessorPage();
         updateOverviewCards();
     }
 }
@@ -8241,34 +11059,34 @@ function viewProfessorDetails(professorId) {
                 <div class="detail-header">
                     ${buildAdminProfessorAvatarHtml(professor, 'detail-avatar')}
                     <div class="detail-name">
-                        <h2>${professor.name}</h2>
-                        <span class="dept-badge dept-${professor.department}">${professor.department}</span>
+                        <h2>${escapeHtml(professor.name)}</h2>
+                        <span class="dept-badge dept-${escapeAttr(professor.department)}">${escapeHtml(professor.department)}</span>
                     </div>
                 </div>
                 <div class="detail-info">
                     <div class="info-row">
                         <label><i class="fas fa-envelope"></i> Email:</label>
-                        <span>${professor.email}</span>
+                        <span>${escapeHtml(professor.email)}</span>
                     </div>
                     <div class="info-row">
                         <label><i class="fas fa-id-badge"></i> Employee ID:</label>
-                        <span>${professor.employeeId || 'N/A'}</span>
+                        <span>${escapeHtml(professor.employeeId || 'N/A')}</span>
                     </div>
                     <div class="info-row">
                         <label><i class="fas fa-clipboard-list"></i> Employment Type:</label>
-                        <span>${professor.employmentType || 'Not set'}</span>
+                        <span>${escapeHtml(formatEmploymentType(professor.employmentType))}</span>
                     </div>
                     <div class="info-row">
                         <label><i class="fas fa-briefcase"></i> Position:</label>
-                        <span>${professor.position}</span>
+                        <span>${escapeHtml(professor.position)}</span>
                     </div>
                     <div class="info-row">
                         <label><i class="fas fa-building"></i> Department:</label>
-                        <span>${professor.department}</span>
+                        <span>${escapeHtml(professor.department)}</span>
                     </div>
                     <div class="info-row">
                         <label><i class="fas fa-graduation-cap"></i> Program:</label>
-                        <span>${programLabel}</span>
+                        <span>${escapeHtml(programLabel)}</span>
                     </div>
                     <div class="info-row">
                         <label><i class="fas fa-toggle-${professor.isActive ? 'on' : 'off'}"></i> Status:</label>
@@ -8276,16 +11094,23 @@ function viewProfessorDetails(professorId) {
                     </div>
                     <div class="info-row highlight">
                         <label><i class="fas fa-user-check"></i> Students Evaluated:</label>
-                        <span class="evaluation-count">${professor.evaluatedCount || professor.evaluationsCount || 0}</span>
+                        <span class="evaluation-count">${Number(professor.evaluatedCount || professor.evaluationsCount) || 0}</span>
                     </div>
                 </div>
                 <div class="detail-actions">
-                    <button class="btn-edit-detail" onclick="closeProfessorDetailsModal(); editProfessor(${JSON.stringify(String(professor.id))});">
+                    <button class="btn-edit-detail" type="button" data-professor-id="${escapeAttr(professor.id)}">
                         <i class="fas fa-edit"></i> Edit Profile
                     </button>
                 </div>
             </div>
         `;
+        const editButton = content.querySelector('.btn-edit-detail[data-professor-id]');
+        if (editButton) {
+            editButton.addEventListener('click', () => {
+                closeProfessorDetailsModal();
+                editProfessor(editButton.getAttribute('data-professor-id') || '');
+            });
+        }
         const semesterSelect = document.getElementById('analytics-semester-select');
         const semesterStatus = document.getElementById('analytics-semester-status');
         if (semesterSelect && semesterStatus) {
@@ -8401,8 +11226,8 @@ function viewProfessorAnalytics(professorId) {
             <div class="analytics-header">
                 ${buildAdminProfessorAvatarHtml(professor, 'analytics-avatar')}
                 <div class="analytics-name">
-                    <h2>${professor.name}</h2>
-                    <span class="dept-badge dept-${professor.department}">${professor.department}</span>
+                    <h2>${escapeAdminAnalyticsHtml(professor.name)}</h2>
+                    <span class="dept-badge dept-${escapeAdminAnalyticsAttr(professor.department)}">${escapeAdminAnalyticsHtml(professor.department)}</span>
                 </div>
             </div>
 
@@ -8420,7 +11245,7 @@ function viewProfessorAnalytics(professorId) {
                     </select>
                 </div>
                 <div class="analytics-filter-note" id="analytics-filter-summary">
-                    ${normalizedSemester === 'all' ? 'Showing overall data' : `Showing ${getSemesterLabel(normalizedSemester)} data`}  -  ${evaluationMeta.label}
+                    ${normalizedSemester === 'all' ? 'Showing overall data' : `Showing ${escapeAdminAnalyticsHtml(getSemesterLabel(normalizedSemester))} data`}  -  ${escapeAdminAnalyticsHtml(evaluationMeta.label)}
                 </div>
             </div>
             
@@ -8453,7 +11278,7 @@ function viewProfessorAnalytics(professorId) {
             <div class="analytics-section">
                 <h3 class="section-title">
                     <i class="${evaluationMeta.icon}"></i>
-                    ${evaluationMeta.statusTitle}
+                    ${escapeAdminAnalyticsHtml(evaluationMeta.statusTitle)}
                 </h3>
                 <div class="evaluation-stats">
                     <div class="evaluation-item evaluated">
@@ -8462,7 +11287,7 @@ function viewProfessorAnalytics(professorId) {
                         </div>
                         <div class="evaluation-info">
                             <h4>Evaluated</h4>
-                            <p class="evaluation-count">${evaluatedCount} ${evaluationMeta.unitLabel}</p>
+                            <p class="evaluation-count">${evaluatedCount} ${escapeAdminAnalyticsHtml(evaluationMeta.unitLabel)}</p>
                             <div class="progress-bar">
                                 <div class="progress-fill evaluated-fill" style="width: ${totalRaters > 0 ? (evaluatedCount / totalRaters) * 100 : 0}%"></div>
                             </div>
@@ -8475,7 +11300,7 @@ function viewProfessorAnalytics(professorId) {
                         </div>
                         <div class="evaluation-info">
                             <h4>Not Yet Evaluated</h4>
-                            <p class="evaluation-count">${notEvaluatedCount} ${evaluationMeta.unitLabel}</p>
+                            <p class="evaluation-count">${notEvaluatedCount} ${escapeAdminAnalyticsHtml(evaluationMeta.unitLabel)}</p>
                             <div class="progress-bar">
                                 <div class="progress-fill not-evaluated-fill" style="width: ${totalRaters > 0 ? (notEvaluatedCount / totalRaters) * 100 : 0}%"></div>
                             </div>
@@ -8487,8 +11312,8 @@ function viewProfessorAnalytics(professorId) {
                             <i class="${evaluationMeta.icon}"></i>
                         </div>
                         <div class="evaluation-info">
-                            <h4>${evaluationMeta.totalLabel}</h4>
-                            <p class="evaluation-count">${totalRaters} ${evaluationMeta.unitLabel}</p>
+                            <h4>${escapeAdminAnalyticsHtml(evaluationMeta.totalLabel)}</h4>
+                            <p class="evaluation-count">${totalRaters} ${escapeAdminAnalyticsHtml(evaluationMeta.unitLabel)}</p>
                         </div>
                     </div>
                 </div>
@@ -8564,7 +11389,7 @@ function viewProfessorAnalytics(professorId) {
                 <div class="section-header-with-button">
                     <h3 class="section-title">
                         <i class="fas fa-comments"></i>
-                        ${evaluationMeta.label} Feedback
+                        ${escapeAdminAnalyticsHtml(evaluationMeta.label)} Feedback
                     </h3>
                     <button class="btn-ai-analytics" id="ai-analytics-btn" type="button">
                         <i class="fas fa-robot"></i>
@@ -8581,15 +11406,15 @@ function viewProfessorAnalytics(professorId) {
                                         <i class="${evaluationMeta.feedbackIcon}"></i>
                                     </div>
                                     <div class="response-meta">
-                                        <span class="response-label">${evaluationMeta.label} Feedback</span>
-                                        <span class="response-student">${response.studentName || evaluatorLabel}  -  ${response.studentNumber || 'N/A'}</span>
+                                        <span class="response-label">${escapeAdminAnalyticsHtml(evaluationMeta.label)} Feedback</span>
+                                        <span class="response-student">${escapeAdminAnalyticsHtml(response.studentName || evaluatorLabel)}  -  ${escapeAdminAnalyticsHtml(response.studentNumber || 'N/A')}</span>
                                     </div>
-                                    <span class="response-date">${response.date}</span>
+                                    <span class="response-date">${escapeAdminAnalyticsHtml(response.date)}</span>
                                 </div>
-                                <p class="response-text">"${response.text}"</p>
+                                <p class="response-text">"${escapeAdminAnalyticsHtml(response.text)}"</p>
                             </div>
                         `).join('')
-                : `<div class="no-responses"><p>No ${evaluationMeta.label.toLowerCase()} feedback available for ${getSemesterLabel(normalizedSemester).toLowerCase()}.</p></div>`
+                : `<div class="no-responses"><p>No ${escapeAdminAnalyticsHtml(evaluationMeta.label.toLowerCase())} feedback available for ${escapeAdminAnalyticsHtml(getSemesterLabel(normalizedSemester).toLowerCase())}.</p></div>`
             }
                 </div>
             </div>
@@ -9483,6 +12308,11 @@ function generateEvaluationTypeData(type, contextInput, semesterIdInput) {
 }
 
 function generateEvaluationData() {
+    const summary = getCurrentAdminDashboardSummary();
+    if (summary) {
+        return buildEvaluationDataFromAdminDashboardSummary(summary);
+    }
+
     const context = getAdminAnalyticsContext();
     const semesterId = context.currentSemester || 'all';
     const registrationStats = getStudentRegistrationEvaluationStats();
@@ -9516,9 +12346,26 @@ function updateOverallStatus(data) {
 }
 
 function renderAdminRatingDistributionChart(canvas, data) {
+    const isDashboardPhoneChart = Boolean(
+        canvas
+        && canvas.closest('#dashboard-view .reports-container')
+        && window.matchMedia
+        && window.matchMedia('(max-width: 640px)').matches
+    );
+
     return window.AppChartDesign.renderRatingDistributionChart(canvas, {
         ratingDistribution: data && data.ratingDistribution,
-        averageRating: data && data.averageRating
+        averageRating: data && data.averageRating,
+        showLegend: !isDashboardPhoneChart,
+        cutout: isDashboardPhoneChart ? '70%' : undefined,
+        radius: isDashboardPhoneChart ? '78%' : undefined,
+        layoutPadding: isDashboardPhoneChart
+            ? { top: 2, right: 8, bottom: 2, left: 8 }
+            : undefined,
+        centerTitleFontSize: isDashboardPhoneChart ? 20 : undefined,
+        centerSubtitleFontSize: isDashboardPhoneChart ? 10 : undefined,
+        centerTitleOffset: isDashboardPhoneChart ? -6 : undefined,
+        centerSubtitleOffset: isDashboardPhoneChart ? 12 : undefined
     });
 }
 
@@ -9536,110 +12383,127 @@ function createAdminBarGradient(context, colors) {
 function renderAdminBarChart(canvas, config) {
     if (!canvas || typeof Chart === 'undefined') return null;
 
-    const existingChart = Chart.getChart(canvas);
-    if (existingChart) existingChart.destroy();
-
     const chartConfig = config || {};
+    const isDashboardPhoneChart = Boolean(
+        canvas.closest('#dashboard-view .reports-container')
+        && window.matchMedia
+        && window.matchMedia('(max-width: 640px)').matches
+    );
     const labels = Array.isArray(chartConfig.labels) && chartConfig.labels.length ? chartConfig.labels : ['No data'];
     const values = Array.isArray(chartConfig.values) && chartConfig.values.length ? chartConfig.values : [0];
     const colors = chartConfig.colors || ['#4f46e5', '#22c55e'];
     const maxValue = Number(chartConfig.maxValue);
     const stepSize = Number(chartConfig.stepSize);
 
-    return new Chart(canvas, {
-        type: 'bar',
-        data: {
-            labels,
-            datasets: [{
-                label: chartConfig.label || 'Value',
-                data: values,
-                backgroundColor: context => createAdminBarGradient(context, colors),
-                borderColor: colors[1],
-                borderWidth: 1,
-                borderRadius: 12,
-                borderSkipped: false,
-                hoverBackgroundColor: colors[1],
-                barPercentage: 0.72,
-                categoryPercentage: 0.64
-            }]
+    const chartData = {
+        labels,
+        datasets: [{
+            label: chartConfig.label || 'Value',
+            data: values,
+            backgroundColor: context => createAdminBarGradient(context, colors),
+            borderColor: colors[1],
+            borderWidth: 1,
+            borderRadius: 12,
+            borderSkipped: false,
+            hoverBackgroundColor: colors[1],
+            barPercentage: 0.72,
+            categoryPercentage: 0.64
+        }]
+    };
+    const chartOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        layout: {
+            padding: isDashboardPhoneChart
+                ? { top: 4, right: 8, bottom: 18, left: 0 }
+                : { top: 8, right: 12, bottom: 12, left: 4 }
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            layout: {
-                padding: { top: 8, right: 12, bottom: 12, left: 4 }
-            },
-            scales: {
-                x: {
-                    grid: { display: false },
-                    border: { display: false },
-                    ticks: {
-                        maxRotation: 0,
-                        minRotation: 0,
-                        autoSkip: Boolean(chartConfig.autoSkipX),
-                        maxTicksLimit: chartConfig.maxTicksLimit || 6,
-                        padding: 6,
-                        color: '#64748b',
-                        font: { size: 11, weight: 600 }
-                    }
-                },
-                y: {
-                    beginAtZero: true,
-                    max: Number.isFinite(maxValue) ? maxValue : undefined,
-                    grid: {
-                        color: 'rgba(148, 163, 184, 0.22)',
-                        drawTicks: false
-                    },
-                    border: { display: false },
-                    ticks: {
-                        stepSize: Number.isFinite(stepSize) ? stepSize : undefined,
-                        color: '#64748b',
-                        padding: 8,
-                        font: { size: 11, weight: 600 }
-                    }
+        scales: {
+            x: {
+                grid: { display: false },
+                border: { display: false },
+                ticks: {
+                    maxRotation: 0,
+                    minRotation: 0,
+                    autoSkip: Boolean(chartConfig.autoSkipX),
+                    maxTicksLimit: chartConfig.maxTicksLimit || 6,
+                    padding: 6,
+                    color: '#64748b',
+                    font: { size: isDashboardPhoneChart ? 10 : 11, weight: 600 }
                 }
             },
-            plugins: {
-                legend: {
-                    display: chartConfig.showLegend !== false,
-                    position: 'bottom',
-                    labels: {
-                        usePointStyle: true,
-                        pointStyle: 'rectRounded',
-                        boxWidth: 10,
-                        boxHeight: 10,
-                        padding: 16,
-                        color: '#475569',
-                        font: { size: 12, weight: 600 }
-                    }
+            y: {
+                beginAtZero: true,
+                max: Number.isFinite(maxValue) ? maxValue : undefined,
+                grid: {
+                    color: 'rgba(148, 163, 184, 0.22)',
+                    drawTicks: false
                 },
-                tooltip: {
-                    backgroundColor: '#111827',
-                    borderColor: 'rgba(255, 255, 255, 0.18)',
-                    borderWidth: 1,
-                    padding: 12,
-                    displayColors: true,
-                    callbacks: {
-                        title(items) {
-                            const item = Array.isArray(items) && items.length ? items[0] : null;
-                            const index = item ? item.dataIndex : -1;
-                            return chartConfig.fullLabels && chartConfig.fullLabels[index]
-                                ? chartConfig.fullLabels[index]
-                                : (item ? item.label : '');
-                        },
-                        label(context) {
-                            const value = Number(context.parsed.y) || 0;
-                            const suffix = chartConfig.valueSuffix || '';
-                            const decimals = Number(chartConfig.tooltipDecimals);
-                            const displayValue = Number.isFinite(decimals)
-                                ? value.toFixed(Math.max(0, decimals))
-                                : String(value);
-                            return `${context.dataset.label}: ${displayValue}${suffix}`;
-                        }
+                border: { display: false },
+                ticks: {
+                    stepSize: Number.isFinite(stepSize) ? stepSize : undefined,
+                    color: '#64748b',
+                    padding: isDashboardPhoneChart ? 4 : 8,
+                    maxTicksLimit: isDashboardPhoneChart ? 4 : undefined,
+                    font: { size: isDashboardPhoneChart ? 10 : 11, weight: 600 }
+                }
+            }
+        },
+        plugins: {
+            legend: {
+                display: !isDashboardPhoneChart && chartConfig.showLegend !== false,
+                position: 'bottom',
+                labels: {
+                    usePointStyle: true,
+                    pointStyle: 'rectRounded',
+                    boxWidth: 10,
+                    boxHeight: 10,
+                    padding: 16,
+                    color: '#475569',
+                    font: { size: 12, weight: 600 }
+                }
+            },
+            tooltip: {
+                backgroundColor: '#111827',
+                borderColor: 'rgba(255, 255, 255, 0.18)',
+                borderWidth: 1,
+                padding: 12,
+                displayColors: true,
+                callbacks: {
+                    title(items) {
+                        const item = Array.isArray(items) && items.length ? items[0] : null;
+                        const index = item ? item.dataIndex : -1;
+                        return chartConfig.fullLabels && chartConfig.fullLabels[index]
+                            ? chartConfig.fullLabels[index]
+                            : (item ? item.label : '');
+                    },
+                    label(context) {
+                        const value = Number(context.parsed.y) || 0;
+                        const suffix = chartConfig.valueSuffix || '';
+                        const decimals = Number(chartConfig.tooltipDecimals);
+                        const displayValue = Number.isFinite(decimals)
+                            ? value.toFixed(Math.max(0, decimals))
+                            : String(value);
+                        return `${context.dataset.label}: ${displayValue}${suffix}`;
                     }
                 }
             }
         }
+    };
+    const existingChart = Chart.getChart(canvas);
+    if (existingChart && existingChart.config && existingChart.config.type === 'bar') {
+        existingChart.data = chartData;
+        existingChart.options = chartOptions;
+        existingChart.update('none');
+        return existingChart;
+    }
+    if (existingChart) existingChart.destroy();
+
+    return new Chart(canvas, {
+        type: 'bar',
+        data: chartData,
+        options: chartOptions
     });
 }
 
@@ -11107,7 +13971,7 @@ function deleteQuestion(questionId) {
     const question = currentQuestions.find(q => q.id === questionId);
     if (!question) return;
 
-    if (confirm(`Are you sure you want to delete this question?\n\n"${question.text}"\n\nThis action cannot be undone.`)) {
+    if (confirm(`Archive this question?\n\n"${question.text}"\n\nIt will leave active questionnaires, but historical evaluation responses will be retained.`)) {
         const updatedQuestions = currentQuestions.filter(q => q.id !== questionId);
         // Reorder remaining questions in the same section
         if (question.sectionId) {
@@ -11329,11 +14193,11 @@ function deleteSection(sectionId) {
     // Check if section has questions
     const sectionQuestions = currentQuestions.filter(q => q.sectionId === sectionId);
     if (sectionQuestions.length > 0) {
-        if (!confirm(`This section has ${sectionQuestions.length} question(s). Deleting it will also delete all questions in this section.\n\nAre you sure you want to delete section "${section.letter}. ${section.title}"?\n\nThis action cannot be undone.`)) {
+        if (!confirm(`This section has ${sectionQuestions.length} question(s). Archiving it will also remove those questions from active questionnaires.\n\nArchive section "${section.letter}. ${section.title}"? Historical responses will be retained.`)) {
             return;
         }
     } else {
-        if (!confirm(`Are you sure you want to delete section "${section.letter}. ${section.title}"?\n\nThis action cannot be undone.`)) {
+        if (!confirm(`Archive section "${section.letter}. ${section.title}"? Historical records will be retained.`)) {
             return;
         }
     }

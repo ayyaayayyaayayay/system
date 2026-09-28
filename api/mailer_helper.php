@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/secret_helper.php';
+
 use PHPMailer\PHPMailer\Exception as PHPMailerException;
 use PHPMailer\PHPMailer\PHPMailer;
 
@@ -102,6 +104,14 @@ function credentialMailerResolvePassword(array $smtpConfig): string
 {
     $password = trim((string) ($smtpConfig['password'] ?? ($smtpConfig['appPassword'] ?? '')));
     return preg_replace('/\s+/', '', $password) ?? '';
+}
+
+function credentialMailerSafeErrorMessage(Throwable $error, array $smtpConfig): string
+{
+    return naapRedactSecretsFromText(
+        $error->getMessage(),
+        [credentialMailerResolvePassword($smtpConfig)]
+    );
 }
 
 function credentialMailerBuildMailer(array $smtpConfig, bool $keepAlive = false): PHPMailer
@@ -239,7 +249,7 @@ function credentialMailerSendCredentials(array $smtpConfig, array $payload): voi
         $mailer->AltBody = $textBody;
         $mailer->send();
     } catch (PHPMailerException $error) {
-        throw new RuntimeException('Failed to send email to ' . $recipientEmail . ': ' . $error->getMessage());
+        throw new RuntimeException('Failed to send email to ' . $recipientEmail . ': ' . credentialMailerSafeErrorMessage($error, $smtpConfig));
     }
 }
 
@@ -285,7 +295,7 @@ function credentialMailerSendOtp(array $smtpConfig, array $payload): void
         $mailer->AltBody = $textBody;
         $mailer->send();
     } catch (PHPMailerException $error) {
-        throw new RuntimeException('Failed to send OTP email to ' . $recipientEmail . ': ' . $error->getMessage());
+        throw new RuntimeException('Failed to send OTP email to ' . $recipientEmail . ': ' . credentialMailerSafeErrorMessage($error, $smtpConfig));
     }
 }
 
@@ -333,7 +343,7 @@ function credentialMailerSendPasswordReset(array $smtpConfig, array $payload): v
         $mailer->AltBody = $textBody;
         $mailer->send();
     } catch (PHPMailerException $error) {
-        throw new RuntimeException('Failed to send password reset email to ' . $recipientEmail . ': ' . $error->getMessage());
+        throw new RuntimeException('Failed to send password reset email to ' . $recipientEmail . ': ' . credentialMailerSafeErrorMessage($error, $smtpConfig));
     }
 }
 
@@ -369,7 +379,7 @@ function credentialMailerSendCustomMessage(array $smtpConfig, array $payload): v
         $mailer->AltBody = $bodies['text'];
         $mailer->send();
     } catch (PHPMailerException $error) {
-        throw new RuntimeException('Failed to send email to ' . $recipientEmail . ': ' . $error->getMessage());
+        throw new RuntimeException('Failed to send email to ' . $recipientEmail . ': ' . credentialMailerSafeErrorMessage($error, $smtpConfig));
     }
 }
 
@@ -428,14 +438,14 @@ function credentialMailerSendCustomMessageBatch(array $smtpConfig, array $payloa
             } catch (PHPMailerException $error) {
                 $failures[] = [
                     'email' => $recipientEmail,
-                    'reason' => $error->getMessage(),
+                    'reason' => credentialMailerSafeErrorMessage($error, $smtpConfig),
                 ];
             }
         }
 
         $mailer->smtpClose();
     } catch (PHPMailerException $error) {
-        throw new RuntimeException('Failed to initialize batch email sending: ' . $error->getMessage());
+        throw new RuntimeException('Failed to initialize batch email sending: ' . credentialMailerSafeErrorMessage($error, $smtpConfig));
     }
 
     return [

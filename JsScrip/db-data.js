@@ -10,6 +10,7 @@
 
     const DEFAULT_MESSAGE = 'Loading, please wait...';
     const NETWORK_MESSAGE = 'Processing request...';
+    const NETWORK_OVERLAY_DELAY_MS = 350;
     const DEDICATED_OVERLAY_IDS = ['bulk-register-loading', 'credential-distributor-loading'];
 
     function buildHourglassMarkup(size) {
@@ -39,12 +40,14 @@
     const state = {
         manualInFlight: 0,
         networkInFlight: 0,
+        networkVisible: false,
         manualMessage: '',
         networkMessage: NETWORK_MESSAGE,
     };
 
     let overlayEl = null;
     let textEl = null;
+    let networkOverlayTimer = null;
     let dedicatedOverlayObserver = null;
 
     function normalizeMessage(value, fallback) {
@@ -92,7 +95,7 @@
             return;
         }
 
-        const hasActivity = state.manualInFlight > 0 || state.networkInFlight > 0;
+        const hasActivity = state.manualInFlight > 0 || (state.networkInFlight > 0 && state.networkVisible);
         const shouldShow = hasActivity && !isDedicatedOverlayActive();
         const message = state.manualMessage || state.networkMessage || DEFAULT_MESSAGE;
 
@@ -125,6 +128,15 @@
         }
         state.networkInFlight += 1;
         state.networkMessage = NETWORK_MESSAGE;
+        if (!state.networkVisible && !networkOverlayTimer) {
+            networkOverlayTimer = setTimeout(function () {
+                networkOverlayTimer = null;
+                if (state.networkInFlight > 0) {
+                    state.networkVisible = true;
+                    renderOverlay();
+                }
+            }, NETWORK_OVERLAY_DELAY_MS);
+        }
         renderOverlay();
         return true;
     }
@@ -132,6 +144,11 @@
     function endNetworkRequest() {
         state.networkInFlight = Math.max(0, state.networkInFlight - 1);
         if (state.networkInFlight === 0) {
+            if (networkOverlayTimer) {
+                clearTimeout(networkOverlayTimer);
+                networkOverlayTimer = null;
+            }
+            state.networkVisible = false;
             state.networkMessage = NETWORK_MESSAGE;
         }
         renderOverlay();
@@ -157,8 +174,14 @@
             if (parsed.searchParams.get('_heartbeat') === '1') {
                 return false;
             }
+            if (parsed.searchParams.get('_background') === '1') {
+                return false;
+            }
             return /\/api\//i.test(parsed.pathname);
         } catch (_error) {
+            if (/[?&]_background=1(?:&|$)/.test(raw) || /[?&]_heartbeat=1(?:&|$)/.test(raw)) {
+                return false;
+            }
             return /\/api\//i.test(raw);
         }
     }
@@ -327,6 +350,143 @@
     }
 })();
 
+window.StudentEvaluationReminderSettings = window.StudentEvaluationReminderSettings || (() => {
+    const DEFAULT_CONFIG = {
+        enabled: true,
+        frequencyDays: 7,
+        subject: 'NAAP Evaluation Reminder: Please Complete Your Evaluation',
+        body: 'Please complete your evaluation while the student evaluation period is open.\n'
+            + 'Log in to the NAAP Evaluation System and submit your pending evaluation today.',
+    };
+    const ALLOWED_PLACEHOLDERS = [
+        'student_name',
+        'evaluation_end_date',
+        'academic_year',
+        'semester',
+    ];
+    let bound = false;
+
+    function getElements() {
+        return {
+            enabled: document.getElementById('student-eval-reminder-enabled'),
+            frequency: document.getElementById('reminder-freq'),
+            subject: document.getElementById('student-eval-reminder-subject'),
+            body: document.getElementById('student-eval-reminder-body'),
+            reset: document.getElementById('student-eval-reminder-reset-btn'),
+            save: document.getElementById('student-eval-reminder-save-btn'),
+            status: document.getElementById('student-eval-reminder-status'),
+        };
+    }
+
+    function setStatus(element, message, type) {
+        if (!element) return;
+        element.textContent = String(message || '');
+        element.classList.remove('is-success', 'is-error', 'is-info');
+        if (type) element.classList.add('is-' + type);
+    }
+
+    function render(config, elements) {
+        const value = Object.assign({}, DEFAULT_CONFIG, config || {});
+        elements.enabled.checked = value.enabled === true;
+        elements.frequency.value = String(Number(value.frequencyDays) || DEFAULT_CONFIG.frequencyDays);
+        elements.subject.value = String(value.subject || DEFAULT_CONFIG.subject);
+        elements.body.value = String(value.body || DEFAULT_CONFIG.body);
+    }
+
+    function validatePlaceholders(value, label) {
+        const source = String(value || '');
+        const pattern = /\{\{\s*([a-z][a-z0-9_]*)\s*\}\}/gi;
+        let match;
+        while ((match = pattern.exec(source)) !== null) {
+            const placeholder = String(match[1] || '').toLowerCase();
+            if (!ALLOWED_PLACEHOLDERS.includes(placeholder)) {
+                throw new Error(label + ' contains an unsupported placeholder: {{' + placeholder + '}}.');
+            }
+        }
+        const remaining = source.replace(pattern, '');
+        if (remaining.includes('{{') || remaining.includes('}}')) {
+            throw new Error(label + ' contains an invalid placeholder.');
+        }
+    }
+
+    function collect(elements) {
+        const frequencyDays = Number(elements.frequency.value);
+        if (!Number.isInteger(frequencyDays) || frequencyDays < 1 || frequencyDays > 365) {
+            throw new Error('Reminder frequency must be a whole number between 1 and 365 days.');
+        }
+
+        const subject = String(elements.subject.value || '').trim();
+        const body = String(elements.body.value || '').trim();
+        if (!subject) throw new Error('Reminder email subject is required.');
+        if (!body) throw new Error('Reminder email message is required.');
+        if (subject.length > 200) throw new Error('Reminder email subject must not exceed 200 characters.');
+        if (/\r|\n/.test(subject)) throw new Error('Reminder email subject must be a single line.');
+        if (body.length > 6000) throw new Error('Reminder email message must not exceed 6,000 characters.');
+        validatePlaceholders(subject, 'Reminder email subject');
+        validatePlaceholders(body, 'Reminder email message');
+
+        return {
+            enabled: elements.enabled.checked === true,
+            frequencyDays,
+            subject,
+            body,
+        };
+    }
+
+    function setup() {
+        if (bound) return;
+        const elements = getElements();
+        if (!elements.enabled || !elements.frequency || !elements.subject || !elements.body
+            || !elements.reset || !elements.save) {
+            return;
+        }
+        bound = true;
+
+        render(SharedData.getStudentEvaluationReminderConfig(), elements);
+        SharedData.onDataChange(function (key, value) {
+            if (key === SharedData.KEYS.STUDENT_EVAL_REMINDER_CONFIG && value && typeof value === 'object') {
+                render(value, elements);
+            }
+        });
+
+        elements.reset.addEventListener('click', function () {
+            render(DEFAULT_CONFIG, elements);
+            setStatus(elements.status, 'Defaults restored locally. Save to apply them.', 'info');
+        });
+
+        elements.save.addEventListener('click', async function () {
+            let config;
+            try {
+                config = collect(elements);
+            } catch (error) {
+                setStatus(elements.status, error && error.message ? error.message : 'Invalid reminder settings.', 'error');
+                return;
+            }
+
+            const originalText = elements.save.textContent;
+            elements.save.disabled = true;
+            elements.save.textContent = 'Saving...';
+            setStatus(elements.status, 'Saving reminder settings...', 'info');
+            try {
+                const saved = await SharedData.updateStudentEvaluationReminderConfigAsync(config);
+                render(saved, elements);
+                setStatus(elements.status, 'Student evaluation reminder settings saved.', 'success');
+            } catch (error) {
+                setStatus(
+                    elements.status,
+                    error && error.message ? error.message : 'Failed to save reminder settings.',
+                    'error'
+                );
+            } finally {
+                elements.save.disabled = false;
+                elements.save.textContent = originalText || 'Save Reminder Settings';
+            }
+        });
+    }
+
+    return { setup };
+})();
+
 window.AppChartDesign = window.AppChartDesign || (() => {
     const RATING_LABELS = ['5 Stars', '4 Stars', '3 Stars', '2 Stars', '1 Star'];
     const RATING_COLORS = ['#059669', '#22c55e', '#f59e0b', '#f97316', '#ef4444'];
@@ -343,16 +503,20 @@ window.AppChartDesign = window.AppChartDesign || (() => {
             const title = pluginOptions && pluginOptions.title ? pluginOptions.title : 'No data';
             const subtitle = pluginOptions && pluginOptions.subtitle ? pluginOptions.subtitle : '0 ratings';
             const muted = Boolean(pluginOptions && pluginOptions.muted);
+            const titleFontSize = Number(pluginOptions && pluginOptions.titleFontSize) || 24;
+            const subtitleFontSize = Number(pluginOptions && pluginOptions.subtitleFontSize) || 11;
+            const titleOffset = Number(pluginOptions && pluginOptions.titleOffset);
+            const subtitleOffset = Number(pluginOptions && pluginOptions.subtitleOffset);
 
             ctx.save();
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillStyle = muted ? '#94a3b8' : '#111827';
-            ctx.font = '700 24px Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-            ctx.fillText(title, centerX, centerY - 8);
+            ctx.font = `700 ${titleFontSize}px Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+            ctx.fillText(title, centerX, centerY + (Number.isFinite(titleOffset) ? titleOffset : -8));
             ctx.fillStyle = muted ? '#cbd5e1' : '#64748b';
-            ctx.font = '600 11px Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-            ctx.fillText(subtitle, centerX, centerY + 14);
+            ctx.font = `600 ${subtitleFontSize}px Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+            ctx.fillText(subtitle, centerX, centerY + (Number.isFinite(subtitleOffset) ? subtitleOffset : 14));
             ctx.restore();
         }
     };
@@ -361,9 +525,6 @@ window.AppChartDesign = window.AppChartDesign || (() => {
         if (!canvas || typeof Chart === 'undefined') return null;
 
         const config = options || {};
-        const existingChart = Chart.getChart(canvas);
-        if (existingChart) existingChart.destroy();
-
         const sourceDistribution = config.ratingDistribution || {};
         const values = Array.isArray(config.values)
             ? config.values.map(value => Number(value) || 0)
@@ -375,66 +536,82 @@ window.AppChartDesign = window.AppChartDesign || (() => {
         const colors = config.colors || RATING_COLORS;
         const totalLabel = config.totalLabel || 'rating';
 
-        return new Chart(canvas, {
-            type: 'doughnut',
-            data: {
-                labels: hasData ? labels : ['No ratings yet'],
-                datasets: [{
-                    data: hasData ? values : [1],
-                    backgroundColor: hasData ? colors : ['#e5e7eb'],
-                    borderColor: '#ffffff',
-                    borderWidth: 4,
-                    borderRadius: hasData ? 10 : 0,
-                    hoverBorderWidth: 4,
-                    hoverOffset: hasData ? 12 : 0,
-                    spacing: hasData ? 3 : 0
-                }]
+        const chartData = {
+            labels: hasData ? labels : ['No ratings yet'],
+            datasets: [{
+                data: hasData ? values : [1],
+                backgroundColor: hasData ? colors : ['#e5e7eb'],
+                borderColor: '#ffffff',
+                borderWidth: 4,
+                borderRadius: hasData ? 10 : 0,
+                hoverBorderWidth: 4,
+                hoverOffset: hasData ? 12 : 0,
+                spacing: hasData ? 3 : 0
+            }]
+        };
+        const chartOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            cutout: config.cutout || '64%',
+            radius: config.radius || '86%',
+            rotation: -90,
+            layout: {
+                padding: config.layoutPadding || { top: 8, right: 14, bottom: 4, left: 14 }
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                cutout: '64%',
-                radius: '86%',
-                rotation: -90,
-                layout: {
-                    padding: { top: 8, right: 14, bottom: 4, left: 14 }
+            plugins: {
+                appRatingDistributionCenterText: {
+                    title: hasData && averageRating > 0 ? averageRating.toFixed(2) : 'No data',
+                    subtitle: `${total} ${total === 1 ? totalLabel : totalLabel + 's'}`,
+                    muted: !hasData,
+                    titleFontSize: config.centerTitleFontSize,
+                    subtitleFontSize: config.centerSubtitleFontSize,
+                    titleOffset: config.centerTitleOffset,
+                    subtitleOffset: config.centerSubtitleOffset
                 },
-                plugins: {
-                    appRatingDistributionCenterText: {
-                        title: hasData && averageRating > 0 ? averageRating.toFixed(2) : 'No data',
-                        subtitle: `${total} ${total === 1 ? totalLabel : totalLabel + 's'}`,
-                        muted: !hasData
-                    },
-                    legend: {
-                        display: hasData,
-                        position: 'bottom',
-                        labels: {
-                            usePointStyle: true,
-                            pointStyle: 'rectRounded',
-                            boxWidth: 10,
-                            boxHeight: 10,
-                            padding: 16,
-                            color: '#475569',
-                            font: { size: 12, weight: 600 }
-                        }
-                    },
-                    tooltip: {
-                        enabled: hasData,
-                        backgroundColor: '#111827',
-                        borderColor: 'rgba(255, 255, 255, 0.18)',
-                        borderWidth: 1,
-                        padding: 12,
-                        displayColors: true,
-                        callbacks: {
-                            label(context) {
-                                const value = Number(context.parsed) || 0;
-                                const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
-                                return `${context.label}: ${value} (${percentage}%)`;
-                            }
+                legend: {
+                    display: hasData && config.showLegend !== false,
+                    position: 'bottom',
+                    labels: {
+                        usePointStyle: true,
+                        pointStyle: 'rectRounded',
+                        boxWidth: 10,
+                        boxHeight: 10,
+                        padding: 16,
+                        color: '#475569',
+                        font: { size: 12, weight: 600 }
+                    }
+                },
+                tooltip: {
+                    enabled: hasData,
+                    backgroundColor: '#111827',
+                    borderColor: 'rgba(255, 255, 255, 0.18)',
+                    borderWidth: 1,
+                    padding: 12,
+                    displayColors: true,
+                    callbacks: {
+                        label(context) {
+                            const value = Number(context.parsed) || 0;
+                            const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
+                            return `${context.label}: ${value} (${percentage}%)`;
                         }
                     }
                 }
-            },
+            }
+        };
+        const existingChart = Chart.getChart(canvas);
+        if (existingChart && existingChart.config && existingChart.config.type === 'doughnut') {
+            existingChart.data = chartData;
+            existingChart.options = chartOptions;
+            existingChart.update('none');
+            return existingChart;
+        }
+        if (existingChart) existingChart.destroy();
+
+        return new Chart(canvas, {
+            type: 'doughnut',
+            data: chartData,
+            options: chartOptions,
             plugins: [centerTextPlugin]
         });
     }
@@ -443,9 +620,6 @@ window.AppChartDesign = window.AppChartDesign || (() => {
         if (!canvas || typeof Chart === 'undefined') return null;
 
         const config = options || {};
-        const existingChart = Chart.getChart(canvas);
-        if (existingChart) existingChart.destroy();
-
         const values = Array.isArray(config.values) ? config.values.map(value => Number(value) || 0) : [];
         const total = values.reduce((sum, value) => sum + value, 0);
         const hasData = total > 0;
@@ -456,66 +630,78 @@ window.AppChartDesign = window.AppChartDesign || (() => {
         const title = config.centerTitle || String(total || 0);
         const subtitle = config.centerSubtitle || 'Total';
 
-        return new Chart(canvas, {
-            type: 'doughnut',
-            data: {
-                labels: hasData ? labels : ['No data'],
-                datasets: [{
-                    data: hasData ? values : [1],
-                    backgroundColor: hasData ? colors : ['#e5e7eb'],
-                    borderColor: '#ffffff',
-                    borderWidth: 4,
-                    borderRadius: hasData ? 10 : 0,
-                    hoverBorderWidth: 4,
-                    hoverOffset: hasData ? 12 : 0,
-                    spacing: hasData ? 3 : 0
-                }]
+        const chartData = {
+            labels: hasData ? labels : ['No data'],
+            datasets: [{
+                data: hasData ? values : [1],
+                backgroundColor: hasData ? colors : ['#e5e7eb'],
+                borderColor: '#ffffff',
+                borderWidth: 4,
+                borderRadius: hasData ? 10 : 0,
+                hoverBorderWidth: 4,
+                hoverOffset: hasData ? 12 : 0,
+                spacing: hasData ? 3 : 0
+            }]
+        };
+        const chartOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            cutout: '64%',
+            radius: '86%',
+            rotation: -90,
+            layout: {
+                padding: { top: 8, right: 14, bottom: 4, left: 14 }
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                cutout: '64%',
-                radius: '86%',
-                rotation: -90,
-                layout: {
-                    padding: { top: 8, right: 14, bottom: 4, left: 14 }
+            plugins: {
+                appRatingDistributionCenterText: {
+                    title: hasData ? title : 'No data',
+                    subtitle,
+                    muted: !hasData
                 },
-                plugins: {
-                    appRatingDistributionCenterText: {
-                        title: hasData ? title : 'No data',
-                        subtitle,
-                        muted: !hasData
-                    },
-                    legend: {
-                        display: hasData,
-                        position: 'bottom',
-                        labels: {
-                            usePointStyle: true,
-                            pointStyle: 'rectRounded',
-                            boxWidth: 10,
-                            boxHeight: 10,
-                            padding: 16,
-                            color: '#475569',
-                            font: { size: 12, weight: 600 }
-                        }
-                    },
-                    tooltip: {
-                        enabled: hasData,
-                        backgroundColor: '#111827',
-                        borderColor: 'rgba(255, 255, 255, 0.18)',
-                        borderWidth: 1,
-                        padding: 12,
-                        displayColors: true,
-                        callbacks: {
-                            label(context) {
-                                const value = Number(context.parsed) || 0;
-                                const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
-                                return `${context.label}: ${value} (${percentage}%)`;
-                            }
+                legend: {
+                    display: hasData,
+                    position: 'bottom',
+                    labels: {
+                        usePointStyle: true,
+                        pointStyle: 'rectRounded',
+                        boxWidth: 10,
+                        boxHeight: 10,
+                        padding: 16,
+                        color: '#475569',
+                        font: { size: 12, weight: 600 }
+                    }
+                },
+                tooltip: {
+                    enabled: hasData,
+                    backgroundColor: '#111827',
+                    borderColor: 'rgba(255, 255, 255, 0.18)',
+                    borderWidth: 1,
+                    padding: 12,
+                    displayColors: true,
+                    callbacks: {
+                        label(context) {
+                            const value = Number(context.parsed) || 0;
+                            const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
+                            return `${context.label}: ${value} (${percentage}%)`;
                         }
                     }
                 }
-            },
+            }
+        };
+        const existingChart = Chart.getChart(canvas);
+        if (existingChart && existingChart.config && existingChart.config.type === 'doughnut') {
+            existingChart.data = chartData;
+            existingChart.options = chartOptions;
+            existingChart.update('none');
+            return existingChart;
+        }
+        if (existingChart) existingChart.destroy();
+
+        return new Chart(canvas, {
+            type: 'doughnut',
+            data: chartData,
+            options: chartOptions,
             plugins: [centerTextPlugin]
         });
     }
@@ -804,6 +990,7 @@ const SharedData = (() => {
         ACTIVITY_LOG: 'sharedActivityLog',
         ANNOUNCEMENTS: 'sharedAnnouncements',
         SETTINGS: 'sharedSettings',
+        STUDENT_EVAL_REMINDER_CONFIG: 'studentEvaluationReminderConfig',
         EVAL_PERIODS: 'sharedEvalPeriods',
         SEMESTER_LIST: 'sharedSemesterList',
         EVALUATIONS: 'sharedEvaluations',
@@ -814,6 +1001,8 @@ const SharedData = (() => {
         SUBJECT_MANAGEMENT: 'subjectManagement',
         PROGRAMS: 'sharedProgramsData',
         FACULTY_PAPERS: 'facultyAcknowledgementPapers',
+        ADMIN_DASHBOARD_SUMMARY: 'adminDashboardSummary',
+        LOGOUT_PENDING: 'naapLogoutPending',
     };
 
     const API_URL = '../api/app_state.php';
@@ -853,6 +1042,18 @@ const SharedData = (() => {
             evaluationPeriodOpen: false,
             systemName: 'Student Professor Evaluation System',
             academicYear: '2025-2026',
+            institutionName: 'National Aviation Academy of the Philippines',
+            systemEmail: '',
+            mainCampus: 'villamor',
+        },
+        studentEvaluationReminderConfig: {
+            enabled: true,
+            frequencyDays: 7,
+            subject: 'NAAP Evaluation Reminder: Please Complete Your Evaluation',
+            body: 'Please complete your evaluation while the student evaluation period is open. Log in to the NAAP Evaluation System and submit your pending evaluation today.',
+            allowedPlaceholders: ['student_name', 'evaluation_end_date', 'academic_year', 'semester'],
+            updatedAt: '',
+            updatedByUserId: '',
         },
         evalPeriods: {
             'student-professor': { start: '', end: '' },
@@ -872,19 +1073,47 @@ const SharedData = (() => {
             offerings: [],
             enrollments: [],
         },
+        adminDashboardSummary: null,
         facultyAcknowledgementPapers: [],
+        facultyPaperListMeta: { total: 0, limit: 0, offset: 0, page: 1, hasMore: false },
         profileData: null,
         profilePhotos: null,
+        bootstrapMeta: {},
+        userListMeta: { total: 0, limit: 0, offset: 0, page: 1, hasMore: false },
     };
 
     let initialized = false;
+    let bootstrapPromise = null;
+    const refreshPromises = {
+        users: null,
+        evaluations: null,
+        subjectManagement: null,
+        osaStudentClearances: null,
+        studentEvaluationProofRequests: null,
+        adminDashboardSummary: null,
+        facultyPapers: null,
+    };
+    const refreshPromiseKeys = {
+        users: '',
+        evaluations: '',
+        subjectManagement: '',
+        osaStudentClearances: '',
+        studentEvaluationProofRequests: '',
+        adminDashboardSummary: '',
+        facultyPapers: '',
+    };
     let usersLastSyncedAt = 0;
+    let evaluationsLastSyncedAt = 0;
+    let subjectManagementLastSyncedAt = 0;
     let lastUserActivityAt = Date.now();
     let lastHeartbeatSentAt = 0;
     let heartbeatTimerId = null;
     let heartbeatInFlight = false;
     let heartbeatListenersAttached = false;
     let sessionCsrfToken = '';
+    let sessionClearGeneration = 0;
+    let sessionLogoutInProgress = false;
+    let profilePhotoStateVersion = 0;
     const clockState = {
         baseUnixMs: null,
         capturedAtMs: 0,
@@ -894,6 +1123,33 @@ const SharedData = (() => {
 
     function deepClone(value) {
         return value == null ? value : JSON.parse(JSON.stringify(value));
+    }
+
+    function getBootstrapDatasetMeta(key) {
+        const meta = state.bootstrapMeta && typeof state.bootstrapMeta === 'object'
+            ? state.bootstrapMeta[key]
+            : null;
+        return meta && typeof meta === 'object' ? meta : {};
+    }
+
+    function isBootstrapDatasetPartial(key) {
+        return getBootstrapDatasetMeta(key).partial === true;
+    }
+
+    function markBootstrapDatasetComplete(key) {
+        if (!state.bootstrapMeta || typeof state.bootstrapMeta !== 'object') {
+            state.bootstrapMeta = {};
+        }
+        const current = getBootstrapDatasetMeta(key);
+        state.bootstrapMeta[key] = Object.assign({}, current, { partial: false });
+    }
+
+    function markBootstrapDatasetPartial(key) {
+        if (!state.bootstrapMeta || typeof state.bootstrapMeta !== 'object') {
+            state.bootstrapMeta = {};
+        }
+        const current = getBootstrapDatasetMeta(key);
+        state.bootstrapMeta[key] = Object.assign({}, current, { partial: true });
     }
 
     function getMonotonicNow() {
@@ -1083,6 +1339,12 @@ const SharedData = (() => {
             email: String(source.email || '').trim(),
             studentNumber: String(source.studentNumber || '').trim(),
             employeeId: String(source.employeeId || '').trim(),
+            campus: String(source.campus || source.campusSlug || '').trim(),
+            department: String(source.department || source.institute || '').trim(),
+            institute: String(source.institute || source.department || '').trim(),
+            programCode: String(source.programCode || source.program || '').trim(),
+            programName: String(source.programName || '').trim(),
+            position: String(source.position || '').trim(),
             status: String(source.status || 'active').trim().toLowerCase() === 'inactive' ? 'inactive' : 'active',
             profileImage: String(source.profileImage || '').trim(),
             profileImageUrl: String(source.profileImageUrl || source.profilePhoto || '').trim(),
@@ -1098,20 +1360,92 @@ const SharedData = (() => {
         return storedSession;
     }
 
+    function hasLogoutPendingMarker() {
+        try {
+            const storage = getSessionStorage();
+            return storage.getItem(KEYS.LOGOUT_PENDING) === '1';
+        } catch (_error) {
+            return false;
+        }
+    }
+
+    function setLogoutPendingMarker() {
+        try {
+            const storage = getSessionStorage();
+            storage.setItem(KEYS.LOGOUT_PENDING, '1');
+        } catch (_error) {
+            // Logout must continue even if local storage is unavailable.
+        }
+    }
+
+    function clearLogoutPendingMarker() {
+        try {
+            const storage = getSessionStorage();
+            storage.removeItem(KEYS.LOGOUT_PENDING);
+        } catch (_error) {
+            // Logout marker cleanup is best-effort.
+        }
+    }
+
+    function consumeLogoutPendingMarker() {
+        const pending = hasLogoutPendingMarker();
+        if (pending) {
+            clearLogoutPendingMarker();
+        }
+        return pending;
+    }
+
     function storeSessionPayload(payload) {
+        if (sessionLogoutInProgress || hasLogoutPendingMarker()) {
+            return null;
+        }
         setClockReference(payload);
         const session = normalizeSessionPayload(payload);
         if (!session) {
             return null;
         }
         setJSON(KEYS.USER_SESSION, sanitizeSessionForStorage(session));
+        const sessionPhoto = String(session.profileImageUrl || session.profilePhoto || session.photoData || '').trim();
+        profilePhotoStateVersion += 1;
+        state.profilePhotos = sessionPhoto ? appendProfilePhotoCacheBust(sessionPhoto) : null;
+        dispatchChange('profilePhoto', state.profilePhotos);
         startSessionHeartbeat();
         return session;
     }
 
+    function extractSessionPayloadFromResponse(payload) {
+        if (!payload || typeof payload !== 'object') {
+            return null;
+        }
+        const source = payload.user && typeof payload.user === 'object'
+            ? payload.user
+            : (payload.session && typeof payload.session === 'object' ? payload.session : payload);
+        if (!source || typeof source !== 'object') {
+            return null;
+        }
+        const sessionPayload = Object.assign({}, source);
+        const responseCsrfToken = String(payload.csrfToken || '').trim();
+        if (responseCsrfToken && !sessionPayload.csrfToken) {
+            sessionPayload.csrfToken = responseCsrfToken;
+        }
+        return sessionPayload;
+    }
+
     function clearSessionCache() {
+        sessionClearGeneration += 1;
         sessionCsrfToken = '';
         remove(KEYS.USER_SESSION);
+        remove('currentUser');
+        try {
+            if (typeof window !== 'undefined' && window.sessionStorage) {
+                window.sessionStorage.removeItem('selectedProfessor');
+                window.sessionStorage.removeItem('selectedCourse');
+                window.sessionStorage.removeItem('selectedEvaluationTarget');
+                window.sessionStorage.removeItem('selectedCourseOfferingId');
+            }
+        } catch (_error) {
+            // Session-scoped navigation hints are best-effort cleanup.
+        }
         stopSessionHeartbeat();
     }
 
@@ -1129,6 +1463,8 @@ const SharedData = (() => {
     function handleServerEndedSession() {
         initialized = false;
         usersLastSyncedAt = 0;
+        evaluationsLastSyncedAt = 0;
+        subjectManagementLastSyncedAt = 0;
         clearSessionCache();
         clearProfilePhotoState();
 
@@ -1223,6 +1559,7 @@ const SharedData = (() => {
 
         heartbeatInFlight = true;
         lastHeartbeatSentAt = now;
+        const requestSessionGeneration = sessionClearGeneration;
 
         const payload = JSON.stringify({ action: 'heartbeat' });
         const headers = {
@@ -1255,11 +1592,14 @@ const SharedData = (() => {
                     });
                 })
                 .then(function (result) {
+                    if (requestSessionGeneration !== sessionClearGeneration || sessionLogoutInProgress) {
+                        return;
+                    }
                     if (result.ok && result.data && result.data.session) {
                         storeSessionPayload(result.data.session);
                         return;
                     }
-                    if (result.status === 401 || result.status === 403) {
+                    if (responseEndedAuthenticatedSession(result.status, result.data)) {
                         handleServerEndedSession();
                     }
                 })
@@ -1281,18 +1621,19 @@ const SharedData = (() => {
                 return;
             }
             heartbeatInFlight = false;
+            let response = {};
+            try {
+                response = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+            } catch (_error) {
+                response = {};
+            }
             if (xhr.status >= 200 && xhr.status < 300) {
-                try {
-                    const response = xhr.responseText ? JSON.parse(xhr.responseText) : {};
-                    if (response && response.session) {
-                        storeSessionPayload(response.session);
-                    }
-                } catch (_error) {
-                    // Ignore malformed heartbeat responses.
+                if (requestSessionGeneration === sessionClearGeneration && !sessionLogoutInProgress && response && response.session) {
+                    storeSessionPayload(response.session);
                 }
                 return;
             }
-            if (xhr.status === 401 || xhr.status === 403) {
+            if (responseEndedAuthenticatedSession(xhr.status, response)) {
                 handleServerEndedSession();
             }
         };
@@ -1302,61 +1643,43 @@ const SharedData = (() => {
         xhr.send(payload);
     }
 
-    function syncRequest(method, action, payload) {
-        const xhr = new XMLHttpRequest();
-        let url = API_URL + '?action=' + encodeURIComponent(action);
-        if (method === 'GET') {
-            url += '&_ts=' + Date.now();
-        }
-        xhr.open(method, url, false);
-        xhr.setRequestHeader('Content-Type', 'application/json');
-        if (method !== 'GET') {
-            const session = getSession();
-            const csrfToken = String(session && session.csrfToken || '').trim();
-            if (csrfToken) {
-                xhr.setRequestHeader('X-CSRF-Token', csrfToken);
-            }
-        }
-        xhr.send(payload ? JSON.stringify(payload) : null);
-
-        if (xhr.status < 200 || xhr.status >= 300) {
-            let message = 'Request failed with status ' + xhr.status;
-            if (xhr.responseText) {
-                try {
-                    const parsed = JSON.parse(xhr.responseText);
-                    message = parsed && parsed.error ? String(parsed.error) : xhr.responseText;
-                } catch (_error) {
-                    message = xhr.responseText;
-                }
-            }
-            if (xhr.status === 401 || xhr.status === 403) {
-                initialized = false;
-                clearSessionCache();
-                clearProfilePhotoState();
-            }
-            const error = new Error(message);
-            error.status = xhr.status;
-            throw error;
-        }
-
-        const response = xhr.responseText ? JSON.parse(xhr.responseText) : {};
-        setClockReference(response);
-        if (response && response.session) {
-            storeSessionPayload(response.session);
-        }
-        return response;
+    function handleRequestAuthFailure() {
+        initialized = false;
+        usersLastSyncedAt = 0;
+        evaluationsLastSyncedAt = 0;
+        subjectManagementLastSyncedAt = 0;
+        clearSessionCache();
+        clearProfilePhotoState();
     }
 
-    function asyncRequest(method, action, payload) {
-        bootstrap();
+    function responseEndedAuthenticatedSession(status, payload) {
+        const statusCode = Number(status) || 0;
+        if (statusCode === 401) {
+            return true;
+        }
+        if (statusCode !== 403 || !payload || typeof payload !== 'object') {
+            return false;
+        }
+
+        return payload.authenticated === false
+            || payload.signedInElsewhere === true
+            || payload.idleTimeout === true;
+    }
+
+    function requestJson(method, action, payload, options) {
+        if (typeof fetch !== 'function') {
+            return Promise.reject(new Error('This browser does not support asynchronous SharedData requests.'));
+        }
+
+        const opts = options && typeof options === 'object' ? options : {};
         let url = API_URL + '?action=' + encodeURIComponent(action);
         if (method === 'GET') {
             url += '&_ts=' + Date.now();
         }
-
-        if (typeof fetch !== 'function') {
-            return Promise.resolve(syncRequest(method, action, payload));
+        if (opts.background === true) {
+            url += '&_background=1';
         }
+        const requestSessionGeneration = sessionClearGeneration;
 
         const headers = {
             'Content-Type': 'application/json',
@@ -1364,6 +1687,14 @@ const SharedData = (() => {
         if (method !== 'GET') {
             const session = getSession();
             const csrfToken = String(session && session.csrfToken || '').trim();
+            if (!csrfToken && opts.skipBootstrapWait !== true) {
+                return startBootstrap(false).then(function () {
+                    return requestJson(method, action, payload, Object.assign({}, opts, { skipBootstrapWait: true }));
+                });
+            }
+            if (!csrfToken) {
+                return Promise.reject(new Error('Authentication token is not ready. Please refresh and sign in again.'));
+            }
             if (csrfToken) {
                 headers['X-CSRF-Token'] = csrfToken;
             }
@@ -1389,10 +1720,8 @@ const SharedData = (() => {
                     const message = parsed && parsed.error
                         ? String(parsed.error)
                         : (text || ('Request failed with status ' + response.status));
-                    if (response.status === 401 || response.status === 403) {
-                        initialized = false;
-                        clearSessionCache();
-                        clearProfilePhotoState();
+                    if (responseEndedAuthenticatedSession(response.status, parsed)) {
+                        handleRequestAuthFailure();
                     }
                     const error = new Error(message);
                     error.status = response.status;
@@ -1400,7 +1729,7 @@ const SharedData = (() => {
                 }
 
                 setClockReference(parsed);
-                if (parsed && parsed.session) {
+                if (requestSessionGeneration === sessionClearGeneration && !sessionLogoutInProgress && parsed && parsed.session) {
                     storeSessionPayload(parsed.session);
                 }
                 return parsed;
@@ -1408,10 +1737,68 @@ const SharedData = (() => {
         });
     }
 
-    function applyBootstrap(snapshot) {
+    function syncRequest(method, action, payload) {
+        const xhr = new XMLHttpRequest();
+        let url = API_URL + '?action=' + encodeURIComponent(action);
+        if (method === 'GET') {
+            url += '&_ts=' + Date.now();
+        }
+        const requestSessionGeneration = sessionClearGeneration;
+        xhr.open(method, url, false);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        if (method !== 'GET') {
+            const session = getSession();
+            const csrfToken = String(session && session.csrfToken || '').trim();
+            if (csrfToken) {
+                xhr.setRequestHeader('X-CSRF-Token', csrfToken);
+            }
+        }
+        xhr.send(payload ? JSON.stringify(payload) : null);
+
+        if (xhr.status < 200 || xhr.status >= 300) {
+            let message = 'Request failed with status ' + xhr.status;
+            let parsedError = {};
+            if (xhr.responseText) {
+                try {
+                    parsedError = JSON.parse(xhr.responseText);
+                    message = parsedError && parsedError.error ? String(parsedError.error) : xhr.responseText;
+                } catch (_error) {
+                    message = xhr.responseText;
+                }
+            }
+            if (responseEndedAuthenticatedSession(xhr.status, parsedError)) {
+                handleRequestAuthFailure();
+            }
+            const error = new Error(message);
+            error.status = xhr.status;
+            error.response = parsedError;
+            throw error;
+        }
+
+        const response = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+        setClockReference(response);
+        if (requestSessionGeneration === sessionClearGeneration && !sessionLogoutInProgress && response && response.session) {
+            storeSessionPayload(response.session);
+        }
+        return response;
+    }
+
+    function asyncRequest(method, action, payload, options) {
+        startBootstrap(false);
+        return requestJson(method, action, payload, options);
+    }
+
+    function applyBootstrap(snapshot, options) {
+        const preserveProfilePhoto = Boolean(options && options.preserveProfilePhoto);
         setClockReference(snapshot);
+        state.bootstrapMeta = snapshot.bootstrapMeta && typeof snapshot.bootstrapMeta === 'object'
+            ? snapshot.bootstrapMeta
+            : {};
         state.users = Array.isArray(snapshot.users) ? snapshot.users : [];
-        usersLastSyncedAt = state.users.length ? Date.now() : 0;
+        state.userListMeta = snapshot.userListMeta && typeof snapshot.userListMeta === 'object'
+            ? snapshot.userListMeta
+            : { total: state.users.length, limit: 0, offset: 0, page: 1, hasMore: false };
+        usersLastSyncedAt = state.users.length && !isBootstrapDatasetPartial('users') ? Date.now() : 0;
         state.programs = Array.isArray(snapshot.programs) ? snapshot.programs : [];
         state.campuses = Array.isArray(snapshot.campuses) && snapshot.campuses.length
             ? snapshot.campuses
@@ -1421,9 +1808,15 @@ const SharedData = (() => {
         state.activityLog = Array.isArray(snapshot.activityLog) ? snapshot.activityLog : [];
         state.announcements = normalizeAnnouncementList(snapshot.announcements);
         state.settings = Object.assign({}, state.settings, snapshot.settings || {});
+        state.studentEvaluationReminderConfig = Object.assign(
+            {},
+            state.studentEvaluationReminderConfig,
+            snapshot.studentEvaluationReminderConfig || {}
+        );
         state.evalPeriods = Object.assign({}, state.evalPeriods, snapshot.evalPeriods || {});
         state.semesterList = Array.isArray(snapshot.semesterList) ? snapshot.semesterList : [];
         state.evaluations = Array.isArray(snapshot.evaluations) ? snapshot.evaluations : [];
+        evaluationsLastSyncedAt = state.evaluations.length && !isBootstrapDatasetPartial('evaluations') ? Date.now() : 0;
         state.studentEvaluationDrafts = Array.isArray(snapshot.studentEvaluationDrafts) ? snapshot.studentEvaluationDrafts : [];
         state.studentDataPrivacyConsents = Array.isArray(snapshot.studentDataPrivacyConsents) ? snapshot.studentDataPrivacyConsents : [];
         state.dataPrivacyConsentNotice = snapshot.dataPrivacyConsentNotice && typeof snapshot.dataPrivacyConsentNotice === 'object'
@@ -1440,75 +1833,282 @@ const SharedData = (() => {
             offerings: Array.isArray(subjectManagement.offerings) ? subjectManagement.offerings : [],
             enrollments: Array.isArray(subjectManagement.enrollments) ? subjectManagement.enrollments : [],
         };
+        subjectManagementLastSyncedAt = !isBootstrapDatasetPartial('subjectManagement') ? Date.now() : 0;
         state.facultyAcknowledgementPapers = Array.isArray(snapshot.facultyAcknowledgementPapers)
             ? snapshot.facultyAcknowledgementPapers
             : [];
+        state.facultyPaperListMeta = snapshot.facultyAcknowledgementPapersMeta && typeof snapshot.facultyAcknowledgementPapersMeta === 'object'
+            ? snapshot.facultyAcknowledgementPapersMeta
+            : { total: state.facultyAcknowledgementPapers.length, limit: 0, offset: 0, page: 1, hasMore: false };
         state.profileData = snapshot.currentUserProfileData && typeof snapshot.currentUserProfileData === 'object'
             ? snapshot.currentUserProfileData
             : null;
-        state.profilePhotos = typeof snapshot.currentUserProfileImageUrl === 'string' && snapshot.currentUserProfileImageUrl
+        const bootstrapProfilePhoto = typeof snapshot.currentUserProfileImageUrl === 'string' && snapshot.currentUserProfileImageUrl
             ? snapshot.currentUserProfileImageUrl
             : (typeof snapshot.currentUserProfilePhoto === 'string'
                 ? snapshot.currentUserProfilePhoto
                 : null);
+        if (!preserveProfilePhoto || (!state.profilePhotos && bootstrapProfilePhoto)) {
+            state.profilePhotos = bootstrapProfilePhoto;
+        }
+
+        persistLocalSettingsFallback();
+
+        dispatchChange(KEYS.USERS, deepClone(state.users));
+        dispatchChange(KEYS.PROGRAMS, deepClone(state.programs));
+        dispatchChange(KEYS.CAMPUSES, deepClone(state.campuses));
+        dispatchChange(KEYS.CURRENT_SEMESTER, state.currentSemester);
+        dispatchChange(KEYS.QUESTIONNAIRES, deepClone(state.questionnaires));
+        dispatchChange(KEYS.ACTIVITY_LOG, deepClone(state.activityLog));
+        dispatchChange(KEYS.ANNOUNCEMENTS, deepClone(state.announcements));
+        dispatchChange(KEYS.SETTINGS, deepClone(state.settings));
+        dispatchChange(
+            KEYS.STUDENT_EVAL_REMINDER_CONFIG,
+            deepClone(state.studentEvaluationReminderConfig)
+        );
+        dispatchChange(KEYS.EVAL_PERIODS, deepClone(state.evalPeriods));
+        dispatchChange(KEYS.SEMESTER_LIST, deepClone(state.semesterList));
+        dispatchChange(KEYS.EVALUATIONS, deepClone(state.evaluations));
+        dispatchChange(KEYS.STUDENT_EVAL_DRAFTS, deepClone(state.studentEvaluationDrafts));
+        dispatchChange(KEYS.STUDENT_DATA_PRIVACY_CONSENTS, deepClone(state.studentDataPrivacyConsents));
+        dispatchChange(KEYS.OSA_STUDENT_CLEARANCES, deepClone(state.osaStudentClearances));
+        dispatchChange(KEYS.STUDENT_EVAL_PROOF_REQUESTS, deepClone(state.studentEvaluationProofRequests));
+        dispatchChange(KEYS.SUBJECT_MANAGEMENT, deepClone(state.subjectManagement));
+        dispatchChange(KEYS.FACULTY_PAPERS, deepClone(state.facultyAcknowledgementPapers));
+        dispatchChange('profileData', deepClone(state.profileData));
+        dispatchChange('profilePhoto', state.profilePhotos);
     }
 
     function uploadProfilePhoto(file) {
-        bootstrap();
+        startBootstrap(false);
 
         if (!file) {
             throw new Error('Please choose an image file to upload.');
         }
 
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', PROFILE_IMAGE_UPLOAD_URL, false);
-
-        const session = getSession();
-        const csrfToken = String(session && session.csrfToken || '').trim();
-        if (csrfToken) {
-            xhr.setRequestHeader('X-CSRF-Token', csrfToken);
-        }
-
-        const formData = new FormData();
-        formData.append('profile_image', file);
-        xhr.send(formData);
-
-        if (xhr.status < 200 || xhr.status >= 300) {
-            let message = 'Upload failed with status ' + xhr.status;
-            if (xhr.responseText) {
-                try {
-                    const parsed = JSON.parse(xhr.responseText);
-                    message = parsed && parsed.error ? String(parsed.error) : xhr.responseText;
-                } catch (_error) {
-                    message = xhr.responseText;
+        let session = getSessionWithCsrfTokenSync();
+        let response;
+        try {
+            response = sendProfilePhotoUploadRequest(file, session.csrfToken);
+        } catch (error) {
+            if (isInvalidCsrfResponse(error && error.status, error && error.message)) {
+                session = getSessionWithCsrfTokenSync(true);
+                response = sendProfilePhotoUploadRequest(file, session.csrfToken);
+            } else {
+                if (error && responseEndedAuthenticatedSession(error.status, error.response)) {
+                    handleRequestAuthFailure();
                 }
+                throw error;
             }
-            if (xhr.status === 401 || xhr.status === 403) {
-                initialized = false;
-                clearSessionCache();
-                clearProfilePhotoState();
-            }
-            const error = new Error(message);
-            error.status = xhr.status;
-            throw error;
         }
 
-        const response = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+        return applyProfilePhotoUploadResponse(response);
+    }
+
+    function uploadProfilePhotoAsync(file, options) {
+        startBootstrap(false);
+
+        if (!file) {
+            return Promise.reject(new Error('Please choose an image file to upload.'));
+        }
+
+        const opts = options && typeof options === 'object' ? options : {};
+        const loadingOverlay = typeof window !== 'undefined' ? window.AppLoadingOverlay : null;
+        const useOverlay = opts.showOverlay !== false
+            && loadingOverlay
+            && typeof loadingOverlay.show === 'function'
+            && typeof loadingOverlay.hide === 'function';
+        if (useOverlay) {
+            loadingOverlay.show(opts.message || 'Uploading profile photo...');
+        }
+
+        return new Promise(function (resolve) {
+            setTimeout(resolve, 0);
+        }).then(function () {
+            const session = getSessionWithCsrfTokenSync();
+            return sendProfilePhotoUploadRequestAsync(file, session.csrfToken)
+                .catch(function (error) {
+                    if (!isInvalidCsrfResponse(error && error.status, error && error.message)) {
+                        if (error && responseEndedAuthenticatedSession(error.status, error.response)) {
+                            handleRequestAuthFailure();
+                        }
+                        throw error;
+                    }
+
+                    const refreshedSession = getSessionWithCsrfTokenSync(true);
+                    return sendProfilePhotoUploadRequestAsync(file, refreshedSession.csrfToken);
+                });
+        }).then(function (response) {
+            return applyProfilePhotoUploadResponse(response);
+        }).finally(function () {
+            if (useOverlay) {
+                loadingOverlay.hide();
+            }
+        });
+    }
+
+    function applyProfilePhotoUploadResponse(response) {
         if (response && response.session) {
             storeSessionPayload(response.session);
         }
 
-        state.profilePhotos = typeof response.profileImageUrl === 'string'
+        const savedUrl = typeof response.profileImageUrl === 'string'
             ? response.profileImageUrl
             : (typeof response.profilePhoto === 'string' ? response.profilePhoto : '');
+        profilePhotoStateVersion += 1;
+        state.profilePhotos = appendProfilePhotoCacheBust(savedUrl);
+        if (response && response.user && typeof response.user === 'object') {
+            updateCachedUserRecord(Object.assign({}, response.user, {
+                profileImageUrl: state.profilePhotos,
+                profilePhoto: state.profilePhotos,
+                photoData: state.profilePhotos,
+            }));
+        }
+        if (state.profilePhotos) {
+            patchSessionData({
+                profileImageUrl: state.profilePhotos,
+                profilePhoto: state.profilePhotos,
+                profileImage: '',
+            });
+        }
         dispatchChange('profilePhoto', state.profilePhotos);
 
         return state.profilePhotos || null;
     }
 
     function clearProfilePhotoState() {
+        profilePhotoStateVersion += 1;
         state.profilePhotos = null;
         dispatchChange('profilePhoto', state.profilePhotos);
+    }
+
+    function isInvalidCsrfResponse(status, message) {
+        return Number(status) === 403 && /invalid\s+csrf\s+token/i.test(String(message || ''));
+    }
+
+    function appendProfilePhotoCacheBust(urlValue) {
+        const rawUrl = String(urlValue || '').trim();
+        if (!rawUrl) {
+            return '';
+        }
+        if (/^data:/i.test(rawUrl)) {
+            return rawUrl;
+        }
+
+        const version = String(Date.now());
+        if (typeof URL === 'function' && typeof window !== 'undefined' && window.location) {
+            try {
+                const parsed = new URL(rawUrl, window.location.href);
+                parsed.searchParams.set('_profile_ts', version);
+                if (parsed.origin === window.location.origin) {
+                    return parsed.pathname + parsed.search + parsed.hash;
+                }
+                return parsed.toString();
+            } catch (_error) {
+                // Fall through to the string-based cache buster.
+            }
+        }
+
+        const hashIndex = rawUrl.indexOf('#');
+        const hash = hashIndex >= 0 ? rawUrl.slice(hashIndex) : '';
+        const base = hashIndex >= 0 ? rawUrl.slice(0, hashIndex) : rawUrl;
+        return base + (base.indexOf('?') >= 0 ? '&' : '?') + '_profile_ts=' + encodeURIComponent(version) + hash;
+    }
+
+    function getSessionWithCsrfTokenSync(forceRefresh) {
+        const force = forceRefresh === true;
+        let session = getSession();
+        if (!force && session && session.isAuthenticated === true && String(session.csrfToken || '').trim()) {
+            return session;
+        }
+
+        try {
+            session = refreshSession(true);
+        } catch (error) {
+            throw error;
+        }
+
+        if (session && session.isAuthenticated === true && String(session.csrfToken || '').trim()) {
+            return session;
+        }
+
+        throw new Error('Authentication token is not ready. Please refresh and sign in again.');
+    }
+
+    function sendProfilePhotoUploadRequest(file, csrfToken) {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', PROFILE_IMAGE_UPLOAD_URL, false);
+
+        const token = String(csrfToken || '').trim();
+        if (token) {
+            xhr.setRequestHeader('X-CSRF-Token', token);
+        }
+
+        const formData = new FormData();
+        formData.append('profile_image', file);
+        xhr.send(formData);
+
+        let parsed = {};
+        if (xhr.responseText) {
+            try {
+                parsed = JSON.parse(xhr.responseText);
+            } catch (_error) {
+                parsed = {};
+            }
+        }
+
+        if (xhr.status < 200 || xhr.status >= 300) {
+            const message = parsed && parsed.error
+                ? String(parsed.error)
+                : (xhr.responseText || ('Upload failed with status ' + xhr.status));
+            const error = new Error(message);
+            error.status = xhr.status;
+            error.response = parsed;
+            throw error;
+        }
+
+        return parsed;
+    }
+
+    function sendProfilePhotoUploadRequestAsync(file, csrfToken) {
+        const token = String(csrfToken || '').trim();
+        const headers = {};
+        if (token) {
+            headers['X-CSRF-Token'] = token;
+        }
+
+        const formData = new FormData();
+        formData.append('profile_image', file);
+
+        return fetch(PROFILE_IMAGE_UPLOAD_URL, {
+            method: 'POST',
+            headers,
+            body: formData,
+            credentials: 'same-origin',
+        }).then(function (response) {
+            return response.text().then(function (text) {
+                let parsed = {};
+                if (text) {
+                    try {
+                        parsed = JSON.parse(text);
+                    } catch (_error) {
+                        parsed = {};
+                    }
+                }
+
+                if (!response.ok) {
+                    const message = parsed && parsed.error
+                        ? String(parsed.error)
+                        : (text || ('Upload failed with status ' + response.status));
+                    const error = new Error(message);
+                    error.status = response.status;
+                    error.response = parsed;
+                    throw error;
+                }
+
+                return parsed;
+            });
+        });
     }
 
     function setProfilePhoto(role, dataUrl) {
@@ -1520,13 +2120,15 @@ const SharedData = (() => {
             return uploadProfilePhoto(dataUrl);
         }
 
-        bootstrap();
+        startBootstrap(false);
+        profilePhotoStateVersion += 1;
         state.profilePhotos = dataUrl || '';
         dispatchChange('profilePhoto', state.profilePhotos);
         try {
             const response = syncRequest('POST', 'setProfilePhoto', { dataUrl: dataUrl || '' });
             if (response && Object.prototype.hasOwnProperty.call(response, 'profilePhoto')) {
-                state.profilePhotos = response.profilePhoto || '';
+                profilePhotoStateVersion += 1;
+                state.profilePhotos = appendProfilePhotoCacheBust(response.profilePhoto || '');
                 dispatchChange('profilePhoto', state.profilePhotos);
             }
         } catch (error) {
@@ -1537,36 +2139,103 @@ const SharedData = (() => {
     }
 
     function getProfilePhoto() {
-        bootstrap();
-        return state.profilePhotos || null;
+        startBootstrap(false);
+        if (state.profilePhotos) {
+            return state.profilePhotos;
+        }
+
+        const session = getSession();
+        const sessionPhoto = String(session && (session.profileImageUrl || session.profilePhoto) || '').trim();
+        if (sessionPhoto) {
+            state.profilePhotos = sessionPhoto;
+            return state.profilePhotos;
+        }
+
+        return null;
     }
 
     function setProfilePhotoFromResponse(urlValue) {
-        state.profilePhotos = typeof urlValue === 'string' && urlValue.trim() ? urlValue.trim() : null;
+        profilePhotoStateVersion += 1;
+        state.profilePhotos = typeof urlValue === 'string' && urlValue.trim() ? appendProfilePhotoCacheBust(urlValue) : null;
         dispatchChange('profilePhoto', state.profilePhotos);
         return state.profilePhotos;
     }
 
-    function clearSession(options) {
-        const session = getSession();
-        const config = options && typeof options === 'object' ? options : {};
-        if (!config.localOnly && session && session.isAuthenticated === true) {
+    function sendLogoutRequest(session) {
+        const payload = JSON.stringify({ action: 'logout' });
+        const headers = {
+            'Content-Type': 'application/json',
+        };
+        const csrfToken = String(session && session.csrfToken || '').trim();
+        if (csrfToken) {
+            headers['X-CSRF-Token'] = csrfToken;
+        }
+
+        if (typeof fetch === 'function') {
+            return fetch(LOGIN_API_URL, {
+                method: 'POST',
+                headers: headers,
+                body: payload,
+                credentials: 'same-origin',
+                keepalive: true,
+            }).then(function (response) {
+                return response.ok;
+            }).catch(function (error) {
+                console.warn('[DBData] Logout request failed.', error);
+                return false;
+            });
+        }
+
+        return new Promise(function (resolve) {
             try {
                 const xhr = new XMLHttpRequest();
-                xhr.open('POST', LOGIN_API_URL, false);
+                xhr.open('POST', LOGIN_API_URL, true);
                 xhr.setRequestHeader('Content-Type', 'application/json');
-                if (session.csrfToken) {
-                    xhr.setRequestHeader('X-CSRF-Token', session.csrfToken);
+                if (csrfToken) {
+                    xhr.setRequestHeader('X-CSRF-Token', csrfToken);
                 }
-                xhr.send(JSON.stringify({ action: 'logout' }));
+                xhr.onreadystatechange = function () {
+                    if (xhr.readyState === 4) {
+                        resolve(xhr.status >= 200 && xhr.status < 300);
+                    }
+                };
+                xhr.onerror = function () {
+                    resolve(false);
+                };
+                xhr.send(payload);
             } catch (error) {
                 console.warn('[DBData] Logout request failed.', error);
+                resolve(false);
+            }
+        });
+    }
+
+    function clearSession(options) {
+        const config = options && typeof options === 'object' ? options : {};
+        const session = getSession();
+        const notifyServer = !config.localOnly;
+        let logoutPromise = Promise.resolve(true);
+        if (notifyServer) {
+            setLogoutPendingMarker();
+            logoutPromise = sendLogoutRequest(session).finally(function () {
+                sessionLogoutInProgress = false;
+            });
+        }
+
+        sessionLogoutInProgress = true;
+        try {
+            initialized = false;
+            usersLastSyncedAt = 0;
+            evaluationsLastSyncedAt = 0;
+            subjectManagementLastSyncedAt = 0;
+            clearSessionCache();
+            clearProfilePhotoState();
+        } finally {
+            if (!notifyServer) {
+                sessionLogoutInProgress = false;
             }
         }
-        initialized = false;
-        usersLastSyncedAt = 0;
-        clearSessionCache();
-        clearProfilePhotoState();
+        return logoutPromise;
     }
     
 
@@ -1581,6 +2250,8 @@ const SharedData = (() => {
             offerings: Array.isArray(snapshot.offerings) ? snapshot.offerings : [],
             enrollments: Array.isArray(snapshot.enrollments) ? snapshot.enrollments : [],
         };
+        subjectManagementLastSyncedAt = Date.now();
+        markBootstrapDatasetComplete('subjectManagement');
         dispatchChange(KEYS.SUBJECT_MANAGEMENT, deepClone(state.subjectManagement));
         return state.subjectManagement;
     }
@@ -1598,11 +2269,25 @@ const SharedData = (() => {
         if (xhr.status >= 200 && xhr.status < 300) {
             const payload = xhr.responseText ? JSON.parse(xhr.responseText) : {};
             setClockReference(payload);
-            return storeSessionPayload(payload);
+            if (payload && payload.authenticated === false) {
+                clearSessionCache();
+                clearProfilePhotoState();
+                return null;
+            }
+            const sessionPayload = extractSessionPayloadFromResponse(payload);
+            if (!sessionPayload) {
+                clearSessionCache();
+                clearProfilePhotoState();
+                return null;
+            }
+            return storeSessionPayload(sessionPayload);
         }
 
         if (xhr.status === 401 || xhr.status === 403) {
             initialized = false;
+            usersLastSyncedAt = 0;
+            evaluationsLastSyncedAt = 0;
+            subjectManagementLastSyncedAt = 0;
             clearSessionCache();
             clearProfilePhotoState();
             return null;
@@ -1638,32 +2323,55 @@ const SharedData = (() => {
         return session;
     }
 
-    function bootstrap(forceRefresh) {
+    function startBootstrap(forceRefresh) {
         if (initialized && !forceRefresh) {
-            return true;
+            return Promise.resolve(true);
+        }
+        if (bootstrapPromise && !forceRefresh) {
+            return bootstrapPromise;
         }
 
-        try {
-            const response = syncRequest('GET', 'bootstrap');
-            if (response && response.success && response.state) {
-                applyBootstrap(response.state);
-                if (response.session) {
-                    storeSessionPayload(response.session);
+        const requestSessionGeneration = sessionClearGeneration;
+        const requestProfilePhotoVersion = profilePhotoStateVersion;
+        bootstrapPromise = requestJson('GET', 'bootstrap', null, { background: true })
+            .then(function (response) {
+                if (response && response.success && response.state) {
+                    applyBootstrap(response.state, {
+                        preserveProfilePhoto: profilePhotoStateVersion !== requestProfilePhotoVersion,
+                    });
+                    if (requestSessionGeneration === sessionClearGeneration && !sessionLogoutInProgress && response.session) {
+                        storeSessionPayload(response.session);
+                    }
+                    initialized = true;
+                    return true;
                 }
                 initialized = true;
-                return true;
-            }
-        } catch (error) {
-            if (!error || (error.status !== 401 && error.status !== 403)) {
-                console.warn(
-                    '[DBData] Bootstrap failed. Open the site through Apache/XAMPP over http://localhost so ../api/app_state.php can run.',
-                    error
-                );
-            }
-        }
+                return false;
+            })
+            .catch(function (error) {
+                if (!error || (error.status !== 401 && error.status !== 403)) {
+                    console.warn(
+                        '[DBData] Bootstrap failed. Open the site through Apache/XAMPP over http://localhost so ../api/app_state.php can run.',
+                        error
+                    );
+                }
+                initialized = true;
+                return false;
+            })
+            .finally(function () {
+                bootstrapPromise = null;
+            });
 
-        initialized = true;
-        return false;
+        return bootstrapPromise;
+    }
+
+    function refreshBootstrap(forceRefresh) {
+        return startBootstrap(forceRefresh !== false);
+    }
+
+    function bootstrap(forceRefresh) {
+        startBootstrap(!!forceRefresh);
+        return initialized;
     }
 
     function getSessionStorage() {
@@ -1685,6 +2393,50 @@ const SharedData = (() => {
         const storage = getSessionStorage();
         storage.setItem(key, JSON.stringify(value));
         dispatchChange(key, value);
+    }
+
+    function writeLocalFallbackJSON(key, value) {
+        try {
+            const storage = getSessionStorage();
+            storage.setItem(key, JSON.stringify(value));
+        } catch (_error) {
+            // Local fallback is best-effort only.
+        }
+    }
+
+    function hydrateLocalFallbackState() {
+        const localSettings = getJSON(KEYS.SETTINGS, null);
+        if (localSettings && typeof localSettings === 'object') {
+            state.settings = Object.assign({}, state.settings, localSettings);
+        }
+
+        const localEvalPeriods = getJSON(KEYS.EVAL_PERIODS, null);
+        if (localEvalPeriods && typeof localEvalPeriods === 'object') {
+            state.evalPeriods = Object.assign({}, state.evalPeriods, localEvalPeriods);
+        }
+
+        const localSemesterList = getJSON(KEYS.SEMESTER_LIST, null);
+        if (Array.isArray(localSemesterList)) {
+            state.semesterList = localSemesterList;
+        }
+
+        const localCurrentSemester = getJSON(KEYS.CURRENT_SEMESTER, null);
+        if (typeof localCurrentSemester === 'string') {
+            state.currentSemester = localCurrentSemester;
+        }
+
+        const localQuestionnaires = getJSON(KEYS.QUESTIONNAIRES, null);
+        if (localQuestionnaires && typeof localQuestionnaires === 'object') {
+            state.questionnaires = localQuestionnaires;
+        }
+    }
+
+    function persistLocalSettingsFallback() {
+        writeLocalFallbackJSON(KEYS.SETTINGS, state.settings || {});
+        writeLocalFallbackJSON(KEYS.EVAL_PERIODS, state.evalPeriods || {});
+        writeLocalFallbackJSON(KEYS.SEMESTER_LIST, state.semesterList || []);
+        writeLocalFallbackJSON(KEYS.CURRENT_SEMESTER, state.currentSemester || '');
+        writeLocalFallbackJSON(KEYS.QUESTIONNAIRES, state.questionnaires || {});
     }
 
     function remove(key) {
@@ -1717,6 +2469,7 @@ const SharedData = (() => {
     }
 
     function setSession(username, role, extra = {}) {
+        clearLogoutPendingMarker();
         if (username && typeof username === 'object') {
             return storeSessionPayload(username);
         }
@@ -1745,12 +2498,12 @@ const SharedData = (() => {
     }
 
     function getProfileData() {
-        bootstrap();
+        startBootstrap(false);
         return state.profileData || null;
     }
 
     function setProfileData(role, data) {
-        bootstrap();
+        startBootstrap(false);
         state.profileData = data && typeof data === 'object' ? data : null;
         dispatchChange('profileData', deepClone(state.profileData));
         try {
@@ -1767,24 +2520,96 @@ const SharedData = (() => {
     }
 
     function getUsers() {
-        bootstrap();
+        startBootstrap(false);
+        if (isBootstrapDatasetPartial('users') || (Date.now() - usersLastSyncedAt) >= USERS_CACHE_TTL_MS) {
+            scheduleUsersRefresh({ forceRefresh: true, limit: 100, page: 1 });
+        }
         return state.users;
     }
 
+    function getCachedUsers() {
+        return state.users;
+    }
+
+    function getUserListMeta() {
+        return state.userListMeta && typeof state.userListMeta === 'object'
+            ? Object.assign({}, state.userListMeta)
+            : { total: Array.isArray(state.users) ? state.users.length : 0, limit: 0, offset: 0, page: 1, hasMore: false };
+    }
+
+    function getLastUsersPageMeta() {
+        return getUserListMeta();
+    }
+
     function getPrograms() {
-        bootstrap();
+        startBootstrap(false);
         return state.programs || [];
+    }
+
+    function buildRefreshKey(filters) {
+        const source = filters && typeof filters === 'object' ? filters : {};
+        return JSON.stringify(Object.keys(source).sort().reduce(function (output, key) {
+            output[key] = source[key];
+            return output;
+        }, {}));
     }
 
     function filterCachedUsers(filters) {
         const cfg = filters && typeof filters === 'object' ? filters : {};
         const campus = String(cfg.campus || '').trim().toLowerCase();
-        const search = String(cfg.search || '').trim().toLowerCase();
+        const search = String(cfg.search || cfg.term || '').trim().toLowerCase();
+        const department = String(cfg.department || cfg.departmentCode || '').trim().toLowerCase();
+        const program = String(cfg.program || cfg.programCode || '').trim().toLowerCase();
+        const status = String(cfg.status || 'active').trim().toLowerCase();
+        const roleValues = Array.isArray(cfg.roles)
+            ? cfg.roles
+            : (cfg.role ? [cfg.role] : []);
+        const roleSet = roleValues.reduce(function (set, value) {
+            const token = String(value || '').trim().toLowerCase();
+            if (token && token !== 'all') {
+                set[token] = true;
+            }
+            return set;
+        }, {});
+        const idValues = Array.isArray(cfg.userIds)
+            ? cfg.userIds
+            : (Array.isArray(cfg.ids) ? cfg.ids : (cfg.userId ? [cfg.userId] : []));
+        const idSet = idValues.reduce(function (set, value) {
+            const token = String(value || '').trim().toLowerCase();
+            if (token) {
+                set[token] = true;
+                set[token.replace(/^u/i, '')] = true;
+                set['u' + token.replace(/^u/i, '')] = true;
+            }
+            return set;
+        }, {});
+        const hasRoleFilter = Object.keys(roleSet).length > 0;
+        const hasIdFilter = Object.keys(idSet).length > 0;
         const users = Array.isArray(state.users) ? state.users : [];
 
-        return users.filter(function (user) {
+        const filtered = users.filter(function (user) {
             if (campus && campus !== 'all' && String(user && user.campus || '').trim().toLowerCase() !== campus) {
                 return false;
+            }
+            if (hasRoleFilter && !roleSet[String(user && user.role || '').trim().toLowerCase()]) {
+                return false;
+            }
+            if (department && department !== 'all') {
+                const userDepartment = String((user && (user.department || user.institute)) || '').trim().toLowerCase();
+                if (userDepartment !== department) return false;
+            }
+            if (program && program !== 'all') {
+                const userProgram = String((user && (user.programCode || user.program)) || '').trim().toLowerCase();
+                if (userProgram !== program) return false;
+            }
+            if (status && status !== 'all') {
+                const userStatus = String(user && user.status || 'active').trim().toLowerCase();
+                const normalizedStatus = userStatus === 'inactive' || (user && user.isActive === false) ? 'inactive' : 'active';
+                if (normalizedStatus !== (status === 'inactive' ? 'inactive' : 'active')) return false;
+            }
+            if (hasIdFilter) {
+                const userId = String(user && user.id || '').trim().toLowerCase();
+                if (!idSet[userId] && !idSet[userId.replace(/^u/i, '')]) return false;
             }
 
             if (!search) {
@@ -1796,6 +2621,9 @@ const SharedData = (() => {
                 String(user && user.email || '').trim().toLowerCase(),
                 String(user && user.role || '').trim().toLowerCase(),
                 String(user && user.department || '').trim().toLowerCase(),
+                String(user && user.institute || '').trim().toLowerCase(),
+                String(user && user.programCode || '').trim().toLowerCase(),
+                String(user && user.programName || '').trim().toLowerCase(),
                 String(user && user.employeeId || '').trim().toLowerCase(),
                 String(user && user.studentNumber || '').trim().toLowerCase(),
             ];
@@ -1804,61 +2632,206 @@ const SharedData = (() => {
                 return value && value.indexOf(search) !== -1;
             });
         });
+
+        const limit = Math.max(0, Number(cfg.limit) || 0);
+        if (limit <= 0) {
+            return filtered;
+        }
+        const page = Math.max(1, Number(cfg.page) || 1);
+        const offset = Math.max(0, Number(cfg.offset) || ((page - 1) * limit));
+        return filtered.slice(offset, offset + limit);
     }
 
-    function applyUsersResponse(response) {
+    function hasMeaningfulUserListFilters(filters) {
+        const cfg = filters && typeof filters === 'object' ? filters : {};
+        const tokenKeys = ['campus', 'role', 'status', 'department', 'departmentCode', 'program', 'programCode', 'search', 'term', 'userId'];
+        if (Array.isArray(cfg.roles) && cfg.roles.some(function (role) {
+            const token = String(role || '').trim().toLowerCase();
+            return token && token !== 'all';
+        })) {
+            return true;
+        }
+        if (Array.isArray(cfg.userIds) && cfg.userIds.length > 0) return true;
+        if (Array.isArray(cfg.ids) && cfg.ids.length > 0) return true;
+
+        return tokenKeys.some(function (key) {
+            const value = String(cfg[key] == null ? '' : cfg[key]).trim().toLowerCase();
+            return value !== '' && value !== 'all';
+        });
+    }
+
+    function applyUsersResponse(response, options) {
+        const opts = options && typeof options === 'object' ? options : {};
         if (response && Array.isArray(response.users)) {
             state.users = response.users;
+            const responseLimit = Number(response.limit) || 0;
+            const responseOffset = Number(response.offset) || 0;
+            const responsePage = Number(response.page) || (responseLimit > 0 ? Math.floor(responseOffset / responseLimit) + 1 : 1);
+            const responseTotal = Number(response.total);
+            const total = Number.isFinite(responseTotal) && responseTotal >= 0 ? responseTotal : state.users.length;
+            const hasMore = response.hasMore === true;
+            state.userListMeta = {
+                total,
+                limit: responseLimit,
+                offset: responseOffset,
+                page: responsePage,
+                hasMore,
+            };
             usersLastSyncedAt = Date.now();
+            if (opts.filtered || (responseLimit > 0 && (hasMore || responseOffset > 0 || total > state.users.length))) {
+                markBootstrapDatasetPartial('users');
+            } else {
+                markBootstrapDatasetComplete('users');
+            }
             dispatchChange(KEYS.USERS, deepClone(state.users));
+        } else if (response && response.user && typeof response.user === 'object') {
+            updateCachedUserRecord(response.user);
+        } else if (response && (response.deletedUserId || response.userId)) {
+            removeCachedUserRecord(response.deletedUserId || response.userId);
+        } else if (response && response.summary) {
+            markBootstrapDatasetPartial('users');
         }
         return state.users;
     }
 
-    function listUsers(filters) {
-        bootstrap();
+    function buildUsersPageResult(response, filters) {
+        const users = response && Array.isArray(response.users)
+            ? response.users
+            : filterCachedUsers(filters);
+        const meta = getUserListMeta();
+        return {
+            users,
+            total: Number(meta.total) || users.length,
+            limit: Number(meta.limit) || 0,
+            offset: Number(meta.offset) || 0,
+            page: Number(meta.page) || 1,
+            hasMore: meta.hasMore === true,
+        };
+    }
+
+    function refreshUsers(filters) {
         const normalizedFilters = filters && typeof filters === 'object' ? filters : {};
+        const refreshKey = buildRefreshKey(normalizedFilters);
+        if (refreshPromises.users && refreshPromiseKeys.users === refreshKey) {
+            return refreshPromises.users;
+        }
+
+        startBootstrap(false);
+        refreshPromiseKeys.users = refreshKey;
+        refreshPromises.users = requestJson('POST', 'listUsers', { filters: normalizedFilters }, { background: true })
+            .then(function (response) {
+                applyUsersResponse(response, { filtered: hasMeaningfulUserListFilters(normalizedFilters) });
+                return buildUsersPageResult(response, normalizedFilters);
+            })
+            .finally(function () {
+                refreshPromises.users = null;
+                refreshPromiseKeys.users = '';
+        });
+        return refreshPromises.users;
+    }
+
+    function refreshUserCount(filters) {
+        const normalizedFilters = Object.assign({}, filters && typeof filters === 'object' ? filters : {});
+        delete normalizedFilters.all;
+        delete normalizedFilters.includeAll;
+        delete normalizedFilters.offset;
+        normalizedFilters.limit = 1;
+        normalizedFilters.page = 1;
+
+        return requestJson('POST', 'listUsers', { filters: normalizedFilters }, { background: true })
+            .then(function (response) {
+                return Math.max(0, Number(response && response.total) || 0);
+            });
+    }
+
+    function fetchUsersPage(filters) {
+        const normalizedFilters = Object.assign({}, filters && typeof filters === 'object' ? filters : {});
+        delete normalizedFilters.all;
+        delete normalizedFilters.includeAll;
+        return requestJson('POST', 'listUsers', { filters: normalizedFilters }, { background: true })
+            .then(function (response) {
+                const users = Array.isArray(response && response.users) ? response.users : [];
+                return {
+                    users: users,
+                    total: Math.max(0, Number(response && response.total) || users.length),
+                    limit: Math.max(0, Number(response && response.limit) || 0),
+                    offset: Math.max(0, Number(response && response.offset) || 0),
+                    page: Math.max(1, Number(response && response.page) || Number(normalizedFilters.page) || 1),
+                    hasMore: response && response.hasMore === true,
+                };
+            });
+    }
+
+    function scheduleUsersRefresh(filters) {
+        refreshUsers(filters).catch(function (error) {
+            console.warn('[DBData] Failed to refresh users.', error);
+        });
+    }
+
+    function listUsers(filters) {
+        startBootstrap(false);
+        const normalizedFilters = filters && typeof filters === 'object' ? filters : {};
+        const filterKeys = Object.keys(normalizedFilters).filter(function (key) {
+            return key !== 'forceRefresh';
+        });
         const shouldUseCache = Array.isArray(state.users)
             && state.users.length > 0
+            && !isBootstrapDatasetPartial('users')
             && (Date.now() - usersLastSyncedAt) < USERS_CACHE_TTL_MS
+            && filterKeys.length === 0
             && normalizedFilters.forceRefresh !== true;
 
         if (shouldUseCache) {
             return filterCachedUsers(normalizedFilters);
         }
 
-        const response = syncRequest('POST', 'listUsers', { filters: normalizedFilters });
-        applyUsersResponse(response);
+        scheduleUsersRefresh(normalizedFilters);
         return filterCachedUsers(normalizedFilters);
     }
 
-    function bulkUpsertUsers(users) {
-        bootstrap();
-        const response = syncRequest('POST', 'bulkUpsertUsers', {
+    function bulkUpsertUsers(users, meta) {
+        const options = meta && typeof meta === 'object' ? meta : {};
+        const body = Object.assign({}, meta && typeof meta === 'object' ? meta : {}, {
             users: Array.isArray(users) ? users : [],
         });
-        return applyUsersResponse(response);
+        startBootstrap(false);
+        return requestJson('POST', 'bulkUpsertUsers', body).then(function (response) {
+            const failedRows = Number(response && response.summary && response.summary.failed) || 0;
+            if (failedRows > 0 && options.allowPartial !== true) {
+                throw new Error(`${failedRows} user row(s) failed to save.`);
+            }
+            applyUsersResponse(response);
+            return response || {};
+        });
+    }
+
+    function bulkUpsertUsersLegacy(users) {
+        return bulkUpsertUsers(users).then(function (response) {
+            return applyUsersResponse(response);
+        });
     }
 
     function setUsers(users) {
-        return bulkUpsertUsers(users);
+        return bulkUpsertUsersLegacy(users);
     }
 
     function setUsersStrict(users) {
-        return bulkUpsertUsers(users);
+        return bulkUpsertUsersLegacy(users);
     }
 
     function addUser(user) {
-        bootstrap();
-        const response = syncRequest('POST', 'createUser', { user: user || {} });
-        if (response && response.user) {
-            updateCachedUserRecord(response.user);
-        }
-        return applyUsersResponse(response);
+        startBootstrap(false);
+        return requestJson('POST', 'createUser', { user: user || {} }).then(function (response) {
+            if (response && response.user) {
+                updateCachedUserRecord(response.user);
+            }
+            applyUsersResponse(response);
+            return response && response.user ? response.user : null;
+        });
     }
 
     function updateUser(idOrUser, updatedData) {
-        bootstrap();
+        startBootstrap(false);
 
         let id = idOrUser;
         let patch = updatedData;
@@ -1867,29 +2840,33 @@ const SharedData = (() => {
             patch = idOrUser;
         }
 
-        const response = syncRequest('POST', 'updateUser', {
+        return requestJson('POST', 'updateUser', {
             userId: id,
             user: patch || {},
+        }).then(function (response) {
+            if (response && response.user) {
+                updateCachedUserRecord(response.user);
+            }
+            applyUsersResponse(response);
+            return response && response.user ? response.user : null;
         });
-        if (response && response.user) {
-            updateCachedUserRecord(response.user);
-        }
-        return applyUsersResponse(response);
     }
 
     function deleteUser(id) {
-        bootstrap();
-        const response = syncRequest('POST', 'deleteUser', { userId: id });
-        return applyUsersResponse(response);
+        startBootstrap(false);
+        return requestJson('POST', 'deleteUser', { userId: id }).then(function (response) {
+            applyUsersResponse(response);
+            return response || {};
+        });
     }
 
     function getCampuses() {
-        bootstrap();
+        startBootstrap(false);
         return state.campuses;
     }
 
     function setCampuses(campuses) {
-        bootstrap();
+        startBootstrap(false);
         state.campuses = Array.isArray(campuses) ? campuses : state.campuses;
         dispatchChange(KEYS.CAMPUSES, deepClone(state.campuses));
         try {
@@ -1900,7 +2877,7 @@ const SharedData = (() => {
     }
 
     function upsertProgram(program) {
-        bootstrap();
+        startBootstrap(false);
         const response = syncRequest('POST', 'upsertProgram', { program: program || {} });
         if (response && Array.isArray(response.programs)) {
             state.programs = response.programs;
@@ -1914,7 +2891,7 @@ const SharedData = (() => {
     }
 
     function deleteProgram(programId) {
-        bootstrap();
+        startBootstrap(false);
         const response = syncRequest('POST', 'deleteProgram', { programId: programId });
         if (response && Array.isArray(response.programs)) {
             state.programs = response.programs;
@@ -1928,7 +2905,7 @@ const SharedData = (() => {
     }
 
     function getAllDepartments() {
-        bootstrap();
+        startBootstrap(false);
         const deptSet = new Set();
         state.campuses.forEach(function (campus) {
             if (!campus || campus.id === 'all' || !Array.isArray(campus.departments)) return;
@@ -1942,14 +2919,14 @@ const SharedData = (() => {
     }
 
     function getProfessors() {
-        bootstrap();
+        startBootstrap(false);
         return state.users.filter(function (user) {
             return user.role === 'professor';
         });
     }
 
     function setProfessors(professors) {
-        bootstrap();
+        startBootstrap(false);
         const nonProfessors = state.users.filter(function (user) {
             return user.role !== 'professor';
         });
@@ -1957,17 +2934,18 @@ const SharedData = (() => {
             return Object.assign({}, professor, { role: 'professor' });
         }) : [];
         state.users = nonProfessors.concat(professorUsers);
-        return persistUsers();
+        return bulkUpsertUsers(professorUsers);
     }
 
     function getCurrentSemester() {
-        bootstrap();
+        startBootstrap(false);
         return state.currentSemester || '';
     }
 
     function setCurrentSemester(value) {
-        bootstrap();
+        startBootstrap(false);
         state.currentSemester = value || '';
+        writeLocalFallbackJSON(KEYS.CURRENT_SEMESTER, state.currentSemester);
         dispatchChange(KEYS.CURRENT_SEMESTER, state.currentSemester);
         try {
             syncRequest('POST', 'setCurrentSemester', { value: state.currentSemester });
@@ -1977,13 +2955,14 @@ const SharedData = (() => {
     }
 
     function getQuestionnaires() {
-        bootstrap();
+        startBootstrap(false);
         return state.questionnaires || {};
     }
 
     function setQuestionnaires(data) {
-        bootstrap();
+        startBootstrap(false);
         state.questionnaires = data || {};
+        writeLocalFallbackJSON(KEYS.QUESTIONNAIRES, state.questionnaires);
         dispatchChange(KEYS.QUESTIONNAIRES, deepClone(state.questionnaires));
         try {
             const response = syncRequest('POST', 'setQuestionnaires', { data: state.questionnaires });
@@ -1995,6 +2974,7 @@ const SharedData = (() => {
                 if (response.dataPrivacyConsentNotices && typeof response.dataPrivacyConsentNotices === 'object') {
                     state.dataPrivacyConsentNotices = response.dataPrivacyConsentNotices;
                 }
+                writeLocalFallbackJSON(KEYS.QUESTIONNAIRES, state.questionnaires);
                 dispatchChange(KEYS.QUESTIONNAIRES, deepClone(state.questionnaires));
             }
             return deepClone(state.questionnaires);
@@ -2005,7 +2985,84 @@ const SharedData = (() => {
     }
 
     function getEvaluations() {
-        bootstrap();
+        startBootstrap(false);
+        if (isBootstrapDatasetPartial('evaluations') && (Date.now() - evaluationsLastSyncedAt) >= USERS_CACHE_TTL_MS) {
+            scheduleEvaluationsRefresh({ forceRefresh: true, limit: 100, offset: 0 });
+        }
+        return state.evaluations || [];
+    }
+
+    function getCachedEvaluations() {
+        return state.evaluations || [];
+    }
+
+    function applyEvaluationsResponse(response, options) {
+        const opts = options && typeof options === 'object' ? options : {};
+        if (response && Array.isArray(response.evaluations)) {
+            state.evaluations = response.evaluations;
+            evaluationsLastSyncedAt = Date.now();
+            if (opts.partial || Number(response.limit) > 0 || Number(response.offset) > 0 || response.hasMore === true) {
+                markBootstrapDatasetPartial('evaluations');
+            } else {
+                markBootstrapDatasetComplete('evaluations');
+            }
+            dispatchChange(KEYS.EVALUATIONS, deepClone(state.evaluations));
+        }
+        return state.evaluations || [];
+    }
+
+    function hasMeaningfulEvaluationListFilters(filters) {
+        const cfg = filters && typeof filters === 'object' ? filters : {};
+        const scalarKeys = [
+            'semester',
+            'semesterId',
+            'evaluationType',
+            'evaluatorUserId',
+            'evaluateeUserId',
+            'involvedUserId',
+            'courseOfferingId',
+        ];
+        if (cfg.forceEmpty) return true;
+        if (Array.isArray(cfg.scopeEvaluateeUserIds) && cfg.scopeEvaluateeUserIds.length > 0) return true;
+        if (Array.isArray(cfg.courseOfferingIds) && cfg.courseOfferingIds.length > 0) return true;
+        return scalarKeys.some(function (key) {
+            const value = String(cfg[key] == null ? '' : cfg[key]).trim().toLowerCase();
+            return value !== '' && value !== 'all';
+        });
+    }
+
+    function refreshEvaluations(filters) {
+        const normalizedFilters = Object.assign({}, filters || {});
+        const refreshKey = buildRefreshKey(normalizedFilters);
+        if (refreshPromises.evaluations && refreshPromiseKeys.evaluations === refreshKey) {
+            return refreshPromises.evaluations;
+        }
+
+        startBootstrap(false);
+        refreshPromiseKeys.evaluations = refreshKey;
+        refreshPromises.evaluations = requestJson('POST', 'listEvaluations', {
+            filters: normalizedFilters,
+        }, { background: true }).then(function (response) {
+            return applyEvaluationsResponse(response, {
+                partial: Number(normalizedFilters.limit) > 0
+                    || Number(normalizedFilters.offset) > 0
+                    || hasMeaningfulEvaluationListFilters(normalizedFilters),
+            });
+        }).finally(function () {
+            refreshPromises.evaluations = null;
+            refreshPromiseKeys.evaluations = '';
+        });
+        return refreshPromises.evaluations;
+    }
+
+    function scheduleEvaluationsRefresh(filters) {
+        refreshEvaluations(filters).catch(function (error) {
+            console.warn('[DBData] Failed to refresh evaluations.', error);
+        });
+    }
+
+    function listEvaluations(filters) {
+        scheduleEvaluationsRefresh(Object.assign({}, filters || {}));
         return state.evaluations || [];
     }
 
@@ -2023,8 +3080,7 @@ const SharedData = (() => {
         }
     }
 
-    function addEvaluation(evalData) {
-        bootstrap();
+    function buildEvaluationPayload(evalData) {
         const session = getSession() || {};
         const payload = Object.assign({}, evalData || {});
 
@@ -2037,6 +3093,12 @@ const SharedData = (() => {
             payload.evaluatorName = session.fullName || session.username;
         }
         if (!payload.evaluatorRole && session.role) payload.evaluatorRole = session.role;
+        return payload;
+    }
+
+    function addEvaluation(evalData) {
+        startBootstrap(false);
+        const payload = buildEvaluationPayload(evalData);
 
         const response = syncRequest('POST', 'addEvaluation', { evaluation: payload });
         if (!response || response.success !== true || !response.evaluation) {
@@ -2045,63 +3107,116 @@ const SharedData = (() => {
 
         state.evaluations.push(response.evaluation);
         dispatchChange(KEYS.EVALUATIONS, deepClone(state.evaluations));
+        if (response.clearance) {
+            applyOsaStudentClearanceRecord(response.clearance);
+        }
         return response.evaluation;
     }
 
+    function addEvaluationAsync(evalData) {
+        startBootstrap(false);
+        const payload = buildEvaluationPayload(evalData);
+
+        return asyncRequest('POST', 'addEvaluation', { evaluation: payload }).then(function (response) {
+            if (!response || response.success !== true || !response.evaluation) {
+                throw new Error(response && response.error ? response.error : 'Failed to save evaluation.');
+            }
+
+            state.evaluations.push(response.evaluation);
+            dispatchChange(KEYS.EVALUATIONS, deepClone(state.evaluations));
+            if (response.clearance) {
+                applyOsaStudentClearanceRecord(response.clearance);
+            }
+            return response.evaluation;
+        });
+    }
+
     function getStudentEvaluationDrafts() {
-        bootstrap();
+        startBootstrap(false);
         return deepClone(state.studentEvaluationDrafts || []);
     }
 
-    function upsertStudentEvaluationDraft(draft) {
-        bootstrap();
-        const response = syncRequest('POST', 'upsertStudentEvaluationDraft', { draft: draft || {} });
-        if (Array.isArray(response && response.studentEvaluationDrafts)) {
-            state.studentEvaluationDrafts = response.studentEvaluationDrafts;
-            dispatchChange(KEYS.STUDENT_EVAL_DRAFTS, deepClone(state.studentEvaluationDrafts));
-        } else if (response && response.draft) {
+    function findStudentEvaluationDraftIndex(drafts, savedDraft) {
+        const savedKey = String(savedDraft && savedDraft.draftKey || '').trim().toLowerCase();
+        const savedStudentUserId = String(savedDraft && savedDraft.studentUserId || '').trim().toLowerCase();
+        const savedStudentId = String(savedDraft && savedDraft.studentId || '').trim().toLowerCase();
+        return drafts.findIndex(function (item) {
+            if (!item) return false;
+            const itemKey = String(item.draftKey || '').trim().toLowerCase();
+            if (itemKey !== savedKey) return false;
+            const itemStudentUserId = String(item.studentUserId || '').trim().toLowerCase();
+            const itemStudentId = String(item.studentId || '').trim().toLowerCase();
+            return (savedStudentUserId && itemStudentUserId === savedStudentUserId)
+                || (savedStudentId && itemStudentId === savedStudentId);
+        });
+    }
+
+    function applyStudentEvaluationDraftResponse(response) {
+        if (response && response.draft) {
             const next = Array.isArray(state.studentEvaluationDrafts) ? [...state.studentEvaluationDrafts] : [];
             const savedDraft = response.draft;
-            const savedKey = String(savedDraft.draftKey || '').trim().toLowerCase();
-            const savedStudentUserId = String(savedDraft.studentUserId || '').trim().toLowerCase();
-            const savedStudentId = String(savedDraft.studentId || '').trim().toLowerCase();
-            const index = next.findIndex(function (item) {
-                if (!item) return false;
-                const itemKey = String(item.draftKey || '').trim().toLowerCase();
-                if (itemKey !== savedKey) return false;
-                const itemStudentUserId = String(item.studentUserId || '').trim().toLowerCase();
-                const itemStudentId = String(item.studentId || '').trim().toLowerCase();
-                return (savedStudentUserId && itemStudentUserId === savedStudentUserId)
-                    || (savedStudentId && itemStudentId === savedStudentId);
-            });
+            const index = findStudentEvaluationDraftIndex(next, savedDraft);
             if (index >= 0) {
                 next[index] = savedDraft;
             } else {
                 next.push(savedDraft);
             }
             state.studentEvaluationDrafts = next;
+            markBootstrapDatasetComplete('studentEvaluationDrafts');
+            dispatchChange(KEYS.STUDENT_EVAL_DRAFTS, deepClone(state.studentEvaluationDrafts));
+        } else if (Array.isArray(response && response.studentEvaluationDrafts)) {
+            state.studentEvaluationDrafts = response.studentEvaluationDrafts;
+            markBootstrapDatasetComplete('studentEvaluationDrafts');
             dispatchChange(KEYS.STUDENT_EVAL_DRAFTS, deepClone(state.studentEvaluationDrafts));
         }
         return response || {};
     }
 
+    function upsertStudentEvaluationDraft(draft) {
+        startBootstrap(false);
+        return asyncRequest('POST', 'upsertStudentEvaluationDraft', {
+            draft: draft || {},
+            includeDrafts: false,
+        }, { background: true })
+            .then(function (response) {
+                return applyStudentEvaluationDraftResponse(response);
+            });
+    }
+
     function removeStudentEvaluationDraft(draftKey, studentIdentity) {
-        bootstrap();
+        startBootstrap(false);
         const payload = {
             draftKey: draftKey,
             studentUserId: studentIdentity && studentIdentity.studentUserId ? studentIdentity.studentUserId : '',
             studentId: studentIdentity && studentIdentity.studentId ? studentIdentity.studentId : '',
         };
-        const response = syncRequest('POST', 'removeStudentEvaluationDraft', payload);
-        if (Array.isArray(response && response.studentEvaluationDrafts)) {
-            state.studentEvaluationDrafts = response.studentEvaluationDrafts;
-            dispatchChange(KEYS.STUDENT_EVAL_DRAFTS, deepClone(state.studentEvaluationDrafts));
-        }
-        return response || {};
+        return asyncRequest('POST', 'removeStudentEvaluationDraft', payload, { background: true })
+            .then(function (response) {
+                if (Array.isArray(response && response.studentEvaluationDrafts)) {
+                    state.studentEvaluationDrafts = response.studentEvaluationDrafts;
+                    markBootstrapDatasetComplete('studentEvaluationDrafts');
+                    dispatchChange(KEYS.STUDENT_EVAL_DRAFTS, deepClone(state.studentEvaluationDrafts));
+                } else if (!response || response.success !== false) {
+                    const draftKeyToken = String(draftKey || '').trim().toLowerCase();
+                    const studentUserIdToken = String(payload.studentUserId || '').trim().toLowerCase();
+                    const studentIdToken = String(payload.studentId || '').trim().toLowerCase();
+                    state.studentEvaluationDrafts = (Array.isArray(state.studentEvaluationDrafts) ? state.studentEvaluationDrafts : []).filter(function (item) {
+                        if (!item) return false;
+                        if (String(item.draftKey || '').trim().toLowerCase() !== draftKeyToken) return true;
+                        const itemUserId = String(item.studentUserId || '').trim().toLowerCase();
+                        const itemStudentId = String(item.studentId || '').trim().toLowerCase();
+                        return !((studentUserIdToken && itemUserId === studentUserIdToken)
+                            || (studentIdToken && itemStudentId === studentIdToken));
+                    });
+                    markBootstrapDatasetComplete('studentEvaluationDrafts');
+                    dispatchChange(KEYS.STUDENT_EVAL_DRAFTS, deepClone(state.studentEvaluationDrafts));
+                }
+                return response || {};
+            });
     }
 
     function getDataPrivacyConsentNotice(questionnaireType) {
-        bootstrap();
+        startBootstrap(false);
         const typeToken = String(questionnaireType || '').trim();
         if (typeToken && state.dataPrivacyConsentNotices && state.dataPrivacyConsentNotices[typeToken]) {
             return deepClone(state.dataPrivacyConsentNotices[typeToken] || {});
@@ -2110,12 +3225,12 @@ const SharedData = (() => {
     }
 
     function getStudentDataPrivacyConsents() {
-        bootstrap();
+        startBootstrap(false);
         return deepClone(state.studentDataPrivacyConsents || []);
     }
 
     function hasStudentDataPrivacyConsent(semesterId, consentVersion, questionnaireType) {
-        bootstrap();
+        startBootstrap(false);
         const semesterToken = String(semesterId || state.currentSemester || '').trim().toLowerCase();
         const typeToken = String(questionnaireType || 'student-to-professor').trim();
         const notice = typeToken && state.dataPrivacyConsentNotices && state.dataPrivacyConsentNotices[typeToken]
@@ -2138,7 +3253,7 @@ const SharedData = (() => {
     }
 
     function recordStudentDataPrivacyConsent(payload) {
-        bootstrap();
+        startBootstrap(false);
         const response = syncRequest('POST', 'recordStudentDataPrivacyConsent', payload || {});
         if (Array.isArray(response && response.studentDataPrivacyConsents)) {
             state.studentDataPrivacyConsents = response.studentDataPrivacyConsents;
@@ -2166,59 +3281,153 @@ const SharedData = (() => {
     }
 
     function getOsaStudentClearances() {
-        bootstrap();
+        startBootstrap(false);
+        if (isBootstrapDatasetPartial('osaStudentClearances')) {
+            scheduleOsaStudentClearancesRefresh();
+        }
         return deepClone(state.osaStudentClearances || []);
     }
 
+    function applyOsaStudentClearanceRecord(recordItem) {
+        if (!recordItem || typeof recordItem !== 'object') return;
+        const next = Array.isArray(state.osaStudentClearances) ? [...state.osaStudentClearances] : [];
+        const recordReference = String(recordItem.clearanceReference || '').trim().toLowerCase();
+        const recordPeriod = String(recordItem.evaluationPeriodId || '').trim();
+        const recordSemester = String(recordItem.semesterId || '').trim().toLowerCase();
+        const recordUser = String(recordItem.studentUserId || '').trim().toLowerCase();
+        const idx = next.findIndex(function (item) {
+            if (!item) return false;
+            const itemReference = String(item.clearanceReference || '').trim().toLowerCase();
+            if (recordReference && itemReference === recordReference) return true;
+            const itemPeriod = String(item.evaluationPeriodId || '').trim();
+            const itemSemester = String(item.semesterId || '').trim().toLowerCase();
+            const itemUser = String(item.studentUserId || '').trim().toLowerCase();
+            return recordUser && itemUser === recordUser && (
+                (recordPeriod && itemPeriod === recordPeriod)
+                || (!recordPeriod && recordSemester && itemSemester === recordSemester)
+            );
+        });
+        if (idx >= 0) {
+            next[idx] = recordItem;
+        } else {
+            next.push(recordItem);
+        }
+        state.osaStudentClearances = next;
+        markBootstrapDatasetComplete('osaStudentClearances');
+        dispatchChange(KEYS.OSA_STUDENT_CLEARANCES, deepClone(state.osaStudentClearances));
+    }
+
+    function refreshOsaStudentClearances() {
+        if (refreshPromises.osaStudentClearances) {
+            return refreshPromises.osaStudentClearances;
+        }
+
+        startBootstrap(false);
+        refreshPromises.osaStudentClearances = requestJson(
+            'POST',
+            'listOsaStudentClearances',
+            {},
+            { background: true }
+        ).then(function (response) {
+            state.osaStudentClearances = Array.isArray(response && response.osaStudentClearances)
+                ? response.osaStudentClearances
+                : [];
+            markBootstrapDatasetComplete('osaStudentClearances');
+            dispatchChange(KEYS.OSA_STUDENT_CLEARANCES, deepClone(state.osaStudentClearances));
+            return deepClone(state.osaStudentClearances);
+        }).finally(function () {
+            refreshPromises.osaStudentClearances = null;
+        });
+
+        return refreshPromises.osaStudentClearances;
+    }
+
+    function scheduleOsaStudentClearancesRefresh() {
+        refreshOsaStudentClearances().catch(function (error) {
+            console.warn('[DBData] Failed to refresh OSA student clearances.', error);
+        });
+    }
+
     function upsertOsaStudentClearance(record) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({ record: record || {} }, buildActorPayload(record || {}));
         const response = syncRequest('POST', 'upsertOsaStudentClearance', body);
         if (Array.isArray(response && response.osaStudentClearances)) {
             state.osaStudentClearances = response.osaStudentClearances;
+            markBootstrapDatasetComplete('osaStudentClearances');
             dispatchChange(KEYS.OSA_STUDENT_CLEARANCES, deepClone(state.osaStudentClearances));
         } else if (response && response.record) {
-            const next = Array.isArray(state.osaStudentClearances) ? [...state.osaStudentClearances] : [];
-            const recordItem = response.record;
-            const recordSemester = String(recordItem.semesterId || '').trim().toLowerCase();
-            const recordUser = String(recordItem.studentUserId || '').trim().toLowerCase();
-            const recordNumber = String(recordItem.studentNumber || '').trim().toLowerCase();
-            const idx = next.findIndex(function (item) {
-                if (!item) return false;
-                const sameSemester = String(item.semesterId || '').trim().toLowerCase() === recordSemester;
-                if (!sameSemester) return false;
-                const itemUser = String(item.studentUserId || '').trim().toLowerCase();
-                const itemNumber = String(item.studentNumber || '').trim().toLowerCase();
-                return (recordUser && itemUser && recordUser === itemUser)
-                    || (recordNumber && itemNumber && recordNumber === itemNumber);
-            });
-            if (idx >= 0) {
-                next[idx] = recordItem;
-            } else {
-                next.push(recordItem);
-            }
-            state.osaStudentClearances = next;
-            dispatchChange(KEYS.OSA_STUDENT_CLEARANCES, deepClone(state.osaStudentClearances));
+            applyOsaStudentClearanceRecord(response.record);
         }
         return response || {};
     }
 
+    function verifyOsaStudentClearance(reference) {
+        startBootstrap(false);
+        return requestJson('POST', 'verifyOsaStudentClearance', {
+            reference: String(reference || '').trim(),
+        });
+    }
+
     function getStudentEvaluationProofRequests() {
-        bootstrap();
+        startBootstrap(false);
+        if (isBootstrapDatasetPartial('studentEvaluationProofRequests')) {
+            scheduleStudentEvaluationProofRequestsRefresh();
+        }
         return deepClone(state.studentEvaluationProofRequests || []);
     }
 
+    function isStudentEvaluationProofRequestsReady() {
+        return initialized && getBootstrapDatasetMeta('studentEvaluationProofRequests').partial === false;
+    }
+
+    function refreshStudentEvaluationProofRequests() {
+        if (refreshPromises.studentEvaluationProofRequests) {
+            return refreshPromises.studentEvaluationProofRequests;
+        }
+
+        startBootstrap(false);
+        refreshPromises.studentEvaluationProofRequests = requestJson(
+            'POST',
+            'listStudentEvaluationProofRequests',
+            {},
+            { background: true }
+        ).then(function (response) {
+            state.studentEvaluationProofRequests = Array.isArray(response && response.studentEvaluationProofRequests)
+                ? response.studentEvaluationProofRequests
+                : [];
+            markBootstrapDatasetComplete('studentEvaluationProofRequests');
+            dispatchChange(
+                KEYS.STUDENT_EVAL_PROOF_REQUESTS,
+                deepClone(state.studentEvaluationProofRequests)
+            );
+            return deepClone(state.studentEvaluationProofRequests);
+        }).finally(function () {
+            refreshPromises.studentEvaluationProofRequests = null;
+        });
+
+        return refreshPromises.studentEvaluationProofRequests;
+    }
+
+    function scheduleStudentEvaluationProofRequestsRefresh() {
+        refreshStudentEvaluationProofRequests().catch(function (error) {
+            console.warn('[DBData] Failed to refresh student evaluation proof requests.', error);
+        });
+    }
+
     function submitStudentEvaluationProof(record) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({ record: record || {} }, buildActorPayload(record || {}));
         const response = syncRequest('POST', 'submitStudentEvaluationProof', body);
 
         if (Array.isArray(response && response.studentEvaluationProofRequests)) {
             state.studentEvaluationProofRequests = response.studentEvaluationProofRequests;
+            markBootstrapDatasetComplete('studentEvaluationProofRequests');
             dispatchChange(KEYS.STUDENT_EVAL_PROOF_REQUESTS, deepClone(state.studentEvaluationProofRequests));
         }
         if (Array.isArray(response && response.osaStudentClearances)) {
             state.osaStudentClearances = response.osaStudentClearances;
+            markBootstrapDatasetComplete('osaStudentClearances');
             dispatchChange(KEYS.OSA_STUDENT_CLEARANCES, deepClone(state.osaStudentClearances));
         }
 
@@ -2226,16 +3435,18 @@ const SharedData = (() => {
     }
 
     function reviewStudentEvaluationProof(payload) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({ payload: payload || {} }, buildActorPayload(payload || {}));
         const response = syncRequest('POST', 'reviewStudentEvaluationProof', body);
 
         if (Array.isArray(response && response.studentEvaluationProofRequests)) {
             state.studentEvaluationProofRequests = response.studentEvaluationProofRequests;
+            markBootstrapDatasetComplete('studentEvaluationProofRequests');
             dispatchChange(KEYS.STUDENT_EVAL_PROOF_REQUESTS, deepClone(state.studentEvaluationProofRequests));
         }
         if (Array.isArray(response && response.osaStudentClearances)) {
             state.osaStudentClearances = response.osaStudentClearances;
+            markBootstrapDatasetComplete('osaStudentClearances');
             dispatchChange(KEYS.OSA_STUDENT_CLEARANCES, deepClone(state.osaStudentClearances));
         }
 
@@ -2243,33 +3454,105 @@ const SharedData = (() => {
     }
 
     function getSubjectManagement() {
-        bootstrap();
+        startBootstrap(false);
+        if (isBootstrapDatasetPartial('subjectManagement') && (Date.now() - subjectManagementLastSyncedAt) >= USERS_CACHE_TTL_MS) {
+            scheduleSubjectManagementRefresh({});
+        }
         return deepClone(state.subjectManagement);
     }
 
+    function getCachedSubjectManagement() {
+        return deepClone(state.subjectManagement);
+    }
+
+    function refreshSubjectManagement(filters) {
+        const normalizedFilters = Object.assign({}, filters || {});
+        const refreshKey = buildRefreshKey(normalizedFilters);
+        if (refreshPromises.subjectManagement && refreshPromiseKeys.subjectManagement === refreshKey) {
+            return refreshPromises.subjectManagement;
+        }
+
+        startBootstrap(false);
+        refreshPromiseKeys.subjectManagement = refreshKey;
+        refreshPromises.subjectManagement = requestJson('POST', 'listSubjectManagement', normalizedFilters, { background: true })
+            .then(function (response) {
+                return applySubjectManagementSnapshot(response);
+            })
+            .finally(function () {
+                refreshPromises.subjectManagement = null;
+                refreshPromiseKeys.subjectManagement = '';
+            });
+        return refreshPromises.subjectManagement;
+    }
+
+    function scheduleSubjectManagementRefresh(filters) {
+        refreshSubjectManagement(filters).catch(function (error) {
+            console.warn('[DBData] Failed to refresh subject management data.', error);
+        });
+    }
+
+    function getAdminDashboardSummary() {
+        return state.adminDashboardSummary ? deepClone(state.adminDashboardSummary) : null;
+    }
+
+    function applyAdminDashboardSummaryResponse(response) {
+        const summary = response && response.dashboardSummary && typeof response.dashboardSummary === 'object'
+            ? response.dashboardSummary
+            : (response && response.summary && typeof response.summary === 'object' ? response.summary : null);
+        if (!summary) {
+            return state.adminDashboardSummary ? deepClone(state.adminDashboardSummary) : null;
+        }
+
+        state.adminDashboardSummary = summary;
+        dispatchChange(KEYS.ADMIN_DASHBOARD_SUMMARY, deepClone(state.adminDashboardSummary));
+        return deepClone(state.adminDashboardSummary);
+    }
+
+    function refreshAdminDashboardSummary(filters) {
+        const normalizedFilters = Object.assign({}, filters || {});
+        const refreshKey = buildRefreshKey(normalizedFilters);
+        if (refreshPromises.adminDashboardSummary && refreshPromiseKeys.adminDashboardSummary === refreshKey) {
+            return refreshPromises.adminDashboardSummary;
+        }
+
+        startBootstrap(false);
+        refreshPromiseKeys.adminDashboardSummary = refreshKey;
+        refreshPromises.adminDashboardSummary = requestJson('POST', 'getAdminDashboardSummary', {
+            filters: normalizedFilters,
+        }, { background: true })
+            .then(function (response) {
+                return applyAdminDashboardSummaryResponse(response);
+            })
+            .finally(function () {
+                refreshPromises.adminDashboardSummary = null;
+                refreshPromiseKeys.adminDashboardSummary = '';
+            });
+        return refreshPromises.adminDashboardSummary;
+    }
+
     function upsertSubject(subject) {
-        bootstrap();
+        startBootstrap(false);
         const response = syncRequest('POST', 'upsertSubject', { subject: subject || {} });
         applySubjectManagementSnapshot(response);
         return response;
     }
 
     function importSubjects(rows) {
-        bootstrap();
+        startBootstrap(false);
         const response = syncRequest('POST', 'importSubjects', { rows: Array.isArray(rows) ? rows : [] });
         applySubjectManagementSnapshot(response);
         return response;
     }
 
     function upsertCourseOffering(offering) {
-        bootstrap();
+        startBootstrap(false);
         const response = syncRequest('POST', 'upsertCourseOffering', { offering: offering || {} });
         applySubjectManagementSnapshot(response);
         return response;
     }
 
     function importCourseOfferings(rows, options) {
-        bootstrap();
+        startBootstrap(false);
         const payload = {
             rows: Array.isArray(rows) ? rows : [],
             replaceExisting: !!(options && options.replaceExisting),
@@ -2280,7 +3563,7 @@ const SharedData = (() => {
     }
 
     function markExcessCourseOfferings(rows) {
-        bootstrap();
+        startBootstrap(false);
         const response = syncRequest('POST', 'markExcessCourseOfferings', {
             rows: Array.isArray(rows) ? rows : [],
         });
@@ -2289,17 +3572,18 @@ const SharedData = (() => {
     }
 
     function setCourseOfferingStudents(courseOfferingId, studentUserIds) {
-        bootstrap();
-        const response = syncRequest('POST', 'setCourseOfferingStudents', {
+        startBootstrap(false);
+        return requestJson('POST', 'setCourseOfferingStudents', {
             courseOfferingId: courseOfferingId,
             studentUserIds: Array.isArray(studentUserIds) ? studentUserIds : [],
+        }).then(function (response) {
+            applySubjectManagementSnapshot(response);
+            return response;
         });
-        applySubjectManagementSnapshot(response);
-        return response;
     }
 
     function deactivateCourseOffering(courseOfferingId) {
-        bootstrap();
+        startBootstrap(false);
         const response = syncRequest('POST', 'deactivateCourseOffering', {
             courseOfferingId: courseOfferingId,
         });
@@ -2308,12 +3592,12 @@ const SharedData = (() => {
     }
 
     function getActivityLog() {
-        bootstrap();
+        startBootstrap(false);
         return state.activityLog || [];
     }
 
     function searchActivityLog(filters) {
-        bootstrap();
+        startBootstrap(false);
         const response = syncRequest('POST', 'searchActivityLog', {
             filters: Object.assign({}, filters || {}),
         });
@@ -2321,7 +3605,7 @@ const SharedData = (() => {
     }
 
     function addActivityLogEntry(entry) {
-        bootstrap();
+        startBootstrap(false);
         const payload = Object.assign({}, entry || {});
 
         let logEntry = null;
@@ -2348,8 +3632,30 @@ const SharedData = (() => {
         return logEntry;
     }
 
+    function addActivityLogEntryAsync(entry) {
+        startBootstrap(false);
+        const payload = Object.assign({}, entry || {});
+
+        return asyncRequest('POST', 'addActivityLogEntry', { entry: payload }).then(function (response) {
+            const logEntry = response && response.entry ? response.entry : null;
+            if (!logEntry) {
+                return null;
+            }
+
+            state.activityLog.unshift(logEntry);
+            if (state.activityLog.length > 200) {
+                state.activityLog.length = 200;
+            }
+            dispatchChange(KEYS.ACTIVITY_LOG, deepClone(state.activityLog));
+            return logEntry;
+        }).catch(function (error) {
+            console.error('[DBData] Failed to persist activity log entry.', error);
+            return null;
+        });
+    }
+
     function getCredentialDistributorConfig(actor) {
-        bootstrap();
+        startBootstrap(false);
         const body = buildActorPayload(actor || {});
         const response = syncRequest('POST', 'getCredentialDistributorConfig', body);
         const config = response && response.config ? response.config : {};
@@ -2364,11 +3670,13 @@ const SharedData = (() => {
             timeout: Number(config.timeout || 20),
             hasPassword: !!(config.hasPassword || config.hasAppPassword),
             source: String(config.source || 'database'),
+            secretStatus: String(config.secretStatus || 'missing'),
+            migrationRequired: !!config.migrationRequired,
         };
     }
 
     function saveCredentialDistributorConfig(config, actor) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             config: Object.assign({}, config || {}),
         });
@@ -2385,6 +3693,8 @@ const SharedData = (() => {
             timeout: Number(savedConfig.timeout || 20),
             hasPassword: !!(savedConfig.hasPassword || savedConfig.hasAppPassword),
             source: String(savedConfig.source || 'database'),
+            secretStatus: String(savedConfig.secretStatus || 'missing'),
+            migrationRequired: !!savedConfig.migrationRequired,
         };
     }
 
@@ -2407,7 +3717,7 @@ const SharedData = (() => {
     }
 
     function getOpenAiConfig(actor) {
-        bootstrap();
+        startBootstrap(false);
         const body = buildActorPayload(actor || {});
         const response = syncRequest('POST', 'getOpenAiConfig', body);
         const config = response && response.config ? response.config : {};
@@ -2416,12 +3726,14 @@ const SharedData = (() => {
             timeoutMs: Number(config.timeoutMs || 30000),
             hasApiKey: !!config.hasApiKey,
             source: String(config.source || 'database'),
+            secretStatus: String(config.secretStatus || 'missing'),
+            migrationRequired: !!config.migrationRequired,
             panelAccess: normalizeOpenAiPanelAccessConfig(config.panelAccess),
         };
     }
 
     function saveOpenAiConfig(config, actor) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             config: Object.assign({}, config || {}),
         });
@@ -2432,6 +3744,8 @@ const SharedData = (() => {
             timeoutMs: Number(savedConfig.timeoutMs || 30000),
             hasApiKey: !!savedConfig.hasApiKey,
             source: String(savedConfig.source || 'database'),
+            secretStatus: String(savedConfig.secretStatus || 'missing'),
+            migrationRequired: !!savedConfig.migrationRequired,
             panelAccess: normalizeOpenAiPanelAccessConfig(savedConfig.panelAccess),
         };
     }
@@ -2440,7 +3754,7 @@ const SharedData = (() => {
     const saveGeminiConfig = saveOpenAiConfig;
 
     function getOpenAiPanelAccess(actor) {
-        bootstrap();
+        startBootstrap(false);
         const response = syncRequest('POST', 'getOpenAiPanelAccess', buildActorPayload(actor || {}));
         const access = response && response.access && typeof response.access === 'object'
             ? response.access
@@ -2452,7 +3766,7 @@ const SharedData = (() => {
     }
 
     function summarizeFeedbackComments(payload, actor) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             payload: payload && typeof payload === 'object' ? payload : {},
         });
@@ -2471,7 +3785,7 @@ const SharedData = (() => {
     }
 
     function bulkDistributeCredentials(rows, actor) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             rows: Array.isArray(rows) ? rows : [],
         });
@@ -2483,7 +3797,7 @@ const SharedData = (() => {
     }
 
     function sendBulkTestGmail(subject, message, actor) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             subject: String(subject || ''),
             message: String(message || ''),
@@ -2496,7 +3810,7 @@ const SharedData = (() => {
     }
 
     function sendTestSmtpEmail(recipientEmail, subject, message, actor) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             recipientEmail: String(recipientEmail || ''),
             subject: String(subject || ''),
@@ -2509,8 +3823,45 @@ const SharedData = (() => {
         };
     }
 
+    function submitSystemReport(report) {
+        startBootstrap(false);
+        const payload = Object.assign({}, report || {});
+        return asyncRequest('POST', 'submitSystemReport', { report: payload })
+            .then(function (response) {
+                return {
+                    success: response && response.success === true,
+                    reportCode: String(response && response.reportCode || ''),
+                    emailStatus: String(response && response.emailStatus || 'failed'),
+                    recipientEmail: String(response && response.recipientEmail || ''),
+                    error: String(response && response.error || ''),
+                };
+            });
+    }
+
+    function listSystemHealthChecks(limit) {
+        startBootstrap(false);
+        const response = syncRequest('POST', 'listSystemHealthChecks', {
+            limit: Math.max(1, Math.min(50, Number(limit) || 10)),
+        });
+        return {
+            success: response && response.success === true,
+            latest: response && response.latest ? response.latest : null,
+            history: Array.isArray(response && response.history) ? response.history : [],
+        };
+    }
+
+    function runSystemHealthCheck() {
+        startBootstrap(false);
+        const response = syncRequest('POST', 'runSystemHealthCheck', {});
+        return {
+            success: response && response.success === true,
+            result: response && response.result ? response.result : null,
+            history: Array.isArray(response && response.history) ? response.history : [],
+        };
+    }
+
     function analyzeBiasComments(filters, actor) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             filters: Object.assign({}, filters || {}),
         });
@@ -2523,7 +3874,7 @@ const SharedData = (() => {
     }
 
     function analyzeEvaluationExplainability(payload, actor) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             payload: payload && typeof payload === 'object' ? payload : {},
         });
@@ -2553,7 +3904,7 @@ const SharedData = (() => {
     }
 
     function generateFacultyPaperSectionCRecommendations(payload) {
-        bootstrap();
+        startBootstrap(false);
         const response = syncRequest('POST', 'generateFacultyPaperSectionCRecommendations', payload || {});
         return {
             success: response && response.success === true,
@@ -2889,13 +4240,13 @@ const SharedData = (() => {
     }
 
     function getAnnouncements() {
-        bootstrap();
+        startBootstrap(false);
         state.announcements = normalizeAnnouncementList(state.announcements || []);
         return deepClone(state.announcements);
     }
 
     function getAnnouncementsForCurrentUser(options) {
-        bootstrap();
+        startBootstrap(false);
         const cfg = options && typeof options === 'object' ? options : {};
         const session = getSession() || {};
         const users = Array.isArray(state.users) ? state.users : [];
@@ -2944,7 +4295,7 @@ const SharedData = (() => {
     }
 
     function addAnnouncement(announcement) {
-        bootstrap();
+        startBootstrap(false);
         const session = getSession() || {};
         const nowIso = getNowIsoString();
         const entry = Object.assign({
@@ -2977,7 +4328,7 @@ const SharedData = (() => {
     }
 
     function markAnnouncementsRead(ids) {
-        bootstrap();
+        startBootstrap(false);
         const targetIds = (Array.isArray(ids) ? ids : [ids])
             .map(function (id) { return String(id || '').trim(); })
             .filter(Boolean);
@@ -3017,7 +4368,7 @@ const SharedData = (() => {
     }
 
     function getUnreadAnnouncementCount() {
-        bootstrap();
+        startBootstrap(false);
         return getUnreadAnnouncementsForCurrentUser().length;
     }
 
@@ -3090,11 +4441,10 @@ const SharedData = (() => {
         return modal;
     }
 
-    function showUnreadAnnouncementLoginPopup(options) {
-        bootstrap();
-        if (typeof document === 'undefined' || !document.body) return [];
+    function presentUnreadAnnouncementLoginPopup(cfg) {
+        const session = getSession();
+        if (!session || session.isAuthenticated !== true) return [];
 
-        const cfg = options && typeof options === 'object' ? options : {};
         const unread = getUnreadAnnouncementsForCurrentUser({ limit: cfg.limit || 20 })
             .filter(function (announcement) {
                 const id = String(announcement && announcement.id || '').trim();
@@ -3145,31 +4495,104 @@ const SharedData = (() => {
         return deepClone(unread);
     }
 
+    function showUnreadAnnouncementLoginPopup(options) {
+        if (typeof document === 'undefined' || !document.body) return [];
+
+        const cfg = options && typeof options === 'object' ? options : {};
+        const bootstrapWasReady = initialized;
+        const pendingBootstrap = startBootstrap(false);
+
+        if (!bootstrapWasReady) {
+            Promise.resolve(pendingBootstrap)
+                .then(function () {
+                    presentUnreadAnnouncementLoginPopup(cfg);
+                })
+                .catch(function (error) {
+                    console.warn('[DBData] Unable to load login announcements.', error);
+                });
+            return [];
+        }
+
+        return presentUnreadAnnouncementLoginPopup(cfg);
+    }
+
     function getSettings() {
-        bootstrap();
+        startBootstrap(false);
         return Object.assign({}, state.settings);
     }
 
     function updateSettings(partial) {
-        bootstrap();
+        startBootstrap(false);
         state.settings = Object.assign({}, state.settings, partial || {});
+        writeLocalFallbackJSON(KEYS.SETTINGS, state.settings);
         dispatchChange(KEYS.SETTINGS, deepClone(state.settings));
         try {
-            syncRequest('POST', 'updateSettings', { settings: partial || {} });
+            const response = syncRequest('POST', 'updateSettings', { settings: partial || {} });
+            if (response && response.settings && typeof response.settings === 'object') {
+                state.settings = Object.assign({}, state.settings, response.settings);
+                writeLocalFallbackJSON(KEYS.SETTINGS, state.settings);
+                dispatchChange(KEYS.SETTINGS, deepClone(state.settings));
+            }
         } catch (error) {
             console.error('[DBData] Failed to persist settings.', error);
         }
         return state.settings;
     }
 
+    function updateSettingsAsync(partial) {
+        startBootstrap(false);
+        const requestedSettings = partial && typeof partial === 'object' ? partial : {};
+        return requestJson('POST', 'updateSettings', { settings: requestedSettings }).then(function (response) {
+            const savedSettings = response && response.settings && typeof response.settings === 'object'
+                ? response.settings
+                : requestedSettings;
+            state.settings = Object.assign({}, state.settings, savedSettings);
+            writeLocalFallbackJSON(KEYS.SETTINGS, state.settings);
+            dispatchChange(KEYS.SETTINGS, deepClone(state.settings));
+            return Object.assign({}, state.settings);
+        });
+    }
+
+    function getStudentEvaluationReminderConfig() {
+        startBootstrap(false);
+        return Object.assign({}, state.studentEvaluationReminderConfig, {
+            allowedPlaceholders: Array.isArray(state.studentEvaluationReminderConfig.allowedPlaceholders)
+                ? state.studentEvaluationReminderConfig.allowedPlaceholders.slice()
+                : [],
+        });
+    }
+
+    function updateStudentEvaluationReminderConfigAsync(config) {
+        startBootstrap(false);
+        const requestedConfig = config && typeof config === 'object' ? config : {};
+        return requestJson('POST', 'updateStudentEvaluationReminderConfig', {
+            config: requestedConfig,
+        }).then(function (response) {
+            const savedConfig = response && response.config && typeof response.config === 'object'
+                ? response.config
+                : requestedConfig;
+            state.studentEvaluationReminderConfig = Object.assign(
+                {},
+                state.studentEvaluationReminderConfig,
+                savedConfig
+            );
+            dispatchChange(
+                KEYS.STUDENT_EVAL_REMINDER_CONFIG,
+                deepClone(state.studentEvaluationReminderConfig)
+            );
+            return getStudentEvaluationReminderConfig();
+        });
+    }
+
     function getEvalPeriods() {
-        bootstrap();
+        startBootstrap(false);
         return Object.assign({}, state.evalPeriods);
     }
 
     function setEvalPeriods(periods) {
-        bootstrap();
+        startBootstrap(false);
         state.evalPeriods = Object.assign({}, state.evalPeriods, periods || {});
+        writeLocalFallbackJSON(KEYS.EVAL_PERIODS, state.evalPeriods);
         dispatchChange(KEYS.EVAL_PERIODS, deepClone(state.evalPeriods));
         try {
             syncRequest('POST', 'setEvalPeriods', { periods: state.evalPeriods });
@@ -3193,20 +4616,22 @@ const SharedData = (() => {
     }
 
     function getSemesterList() {
-        bootstrap();
+        startBootstrap(false);
         return state.semesterList || [];
     }
 
     function setSemesterList(list) {
-        bootstrap();
+        startBootstrap(false);
         state.semesterList = Array.isArray(list) ? list : [];
+        writeLocalFallbackJSON(KEYS.SEMESTER_LIST, state.semesterList);
         dispatchChange(KEYS.SEMESTER_LIST, deepClone(state.semesterList));
     }
 
     function addSemester(value, label) {
-        bootstrap();
+        startBootstrap(false);
         if (!state.semesterList.find(function (item) { return item.value === value; })) {
             state.semesterList.push({ value, label });
+            writeLocalFallbackJSON(KEYS.SEMESTER_LIST, state.semesterList);
             dispatchChange(KEYS.SEMESTER_LIST, deepClone(state.semesterList));
             try {
                 syncRequest('POST', 'addSemester', { value, label });
@@ -3248,14 +4673,33 @@ const SharedData = (() => {
             const userEmail = String(user && user.email || '').trim().toLowerCase();
             return (targetId && userId === targetId) || (targetEmail && userEmail === targetEmail);
         });
-        if (index < 0) return;
+        if (index < 0) {
+            state.users.push(Object.assign({}, updatedUser));
+            usersLastSyncedAt = Date.now();
+            dispatchChange(KEYS.USERS, deepClone(state.users));
+            return;
+        }
 
         state.users[index] = Object.assign({}, state.users[index], updatedUser);
+        usersLastSyncedAt = Date.now();
+        dispatchChange(KEYS.USERS, deepClone(state.users));
+    }
+
+    function removeCachedUserRecord(userId) {
+        const targetId = String(userId || '').trim();
+        if (!targetId) return;
+        const nextUsers = state.users.filter(function (user) {
+            return String(user && user.id || '').trim() !== targetId;
+        });
+        if (nextUsers.length === state.users.length) return;
+
+        state.users = nextUsers;
+        usersLastSyncedAt = Date.now();
         dispatchChange(KEYS.USERS, deepClone(state.users));
     }
 
     function changeOwnEmail(currentEmail, newEmail, actor) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             currentEmail: String(currentEmail || '').trim(),
             newEmail: String(newEmail || '').trim(),
@@ -3290,8 +4734,45 @@ const SharedData = (() => {
         };
     }
 
+    function changeOwnEmailAsync(currentEmail, newEmail, actor) {
+        startBootstrap(false);
+        const body = Object.assign({}, buildActorPayload(actor || {}), {
+            currentEmail: String(currentEmail || '').trim(),
+            newEmail: String(newEmail || '').trim(),
+        });
+
+        return requestJson('POST', 'changeOwnEmail', body).then(function (response) {
+            const updatedUser = response && response.user && typeof response.user === 'object'
+                ? response.user
+                : null;
+            const updatedEmail = String(response && response.email || body.newEmail || '').trim();
+
+            if (updatedUser) {
+                updateCachedUserRecord(updatedUser);
+            }
+
+            if (updatedEmail) {
+                const currentSession = getSession() || {};
+                const sessionUserId = String(currentSession.userId || '').trim();
+                const updatedUserId = String(updatedUser && updatedUser.id || '').trim();
+                const shouldPatchSession =
+                    (sessionUserId && updatedUserId && sessionUserId === updatedUserId) ||
+                    (sessionUserId === '' && sessionUserId === updatedUserId);
+                if (shouldPatchSession || !updatedUserId) {
+                    patchSessionData({ email: updatedEmail });
+                }
+            }
+
+            return {
+                success: !!(response && response.success !== false),
+                email: updatedEmail,
+                user: updatedUser,
+            };
+        });
+    }
+
     function changeOwnPassword(currentPassword, newPassword, actor) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             currentPassword: String(currentPassword || ''),
             newPassword: String(newPassword || ''),
@@ -3303,101 +4784,180 @@ const SharedData = (() => {
         };
     }
 
+    function changeOwnPasswordAsync(currentPassword, newPassword, actor) {
+        startBootstrap(false);
+        const body = Object.assign({}, buildActorPayload(actor || {}), {
+            currentPassword: String(currentPassword || ''),
+            newPassword: String(newPassword || ''),
+        });
+        return requestJson('POST', 'changeOwnPassword', body).then(function (response) {
+            return {
+                success: !!(response && response.success !== false),
+                updated: !!(response && response.updated),
+            };
+        });
+    }
+
     function generateDeanProgramPeerAssignments(payload) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
         return syncRequest('POST', 'generateDeanProgramPeerAssignments', body);
     }
 
     function generateCoordinatorProgramPeerAssignments(payload) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
         return syncRequest('POST', 'generateCoordinatorProgramPeerAssignments', body);
     }
 
     function listDeanProgramPeerAssignmentsCurrent(actor) {
-        bootstrap();
+        startBootstrap(false);
         return syncRequest('POST', 'listDeanProgramPeerAssignmentsCurrent', buildActorPayload(actor || {}));
     }
 
     function listCoordinatorProgramPeerAssignmentsCurrent(actor) {
-        bootstrap();
+        startBootstrap(false);
         return syncRequest('POST', 'listCoordinatorProgramPeerAssignmentsCurrent', buildActorPayload(actor || {}));
     }
 
     function listDeanProgramPeerAssignmentDetailsCurrent(payload) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
         return syncRequest('POST', 'listDeanProgramPeerAssignmentDetailsCurrent', body);
     }
 
     function listCoordinatorProgramPeerAssignmentDetailsCurrent(payload) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
         return syncRequest('POST', 'listCoordinatorProgramPeerAssignmentDetailsCurrent', body);
     }
 
     function autoGeneratePeerRoom(payload) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
         return syncRequest('POST', 'autoGeneratePeerRoom', body);
     }
 
     function listDeanPeerRoomsCurrent(actor) {
-        bootstrap();
+        startBootstrap(false);
         return syncRequest('POST', 'listDeanPeerRoomsCurrent', buildActorPayload(actor || {}));
     }
 
     function listProfessorPeerAssignmentsCurrent(actor) {
-        bootstrap();
+        startBootstrap(false);
         return syncRequest('POST', 'listProfessorPeerAssignmentsCurrent', buildActorPayload(actor || {}));
     }
 
     function listDeanPeerRoomMembersCurrent(actor, roomId) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({ roomId: roomId }, buildActorPayload(actor || {}));
         return syncRequest('POST', 'listDeanPeerRoomMembersCurrent', body);
     }
 
     function listDeanPeerRoomEligibleProfessorsCurrent(actor, roomId) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({ roomId: roomId }, buildActorPayload(actor || {}));
         return syncRequest('POST', 'listDeanPeerRoomEligibleProfessorsCurrent', body);
     }
 
     function addDeanPeerRoomMembers(payload) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
         return syncRequest('POST', 'addDeanPeerRoomMembers', body);
     }
 
     function removeDeanPeerRoomMember(payload) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
         return syncRequest('POST', 'removeDeanPeerRoomMember', body);
     }
 
     function dismantleDeanPeerRoom(payload) {
-        bootstrap();
+        startBootstrap(false);
         const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
         return syncRequest('POST', 'dismantleDeanPeerRoom', body);
     }
 
-    function listFacultyPapers(actorRole, actorUserId) {
-        bootstrap();
-        const response = syncRequest('POST', 'listFacultyPapers', {});
-        state.facultyAcknowledgementPapers = Array.isArray(response.papers) ? response.papers : [];
+    function applyFacultyPapersResponse(response) {
+        const payload = response && typeof response === 'object' ? response : {};
+        state.facultyAcknowledgementPapers = Array.isArray(payload.papers) ? payload.papers : [];
+        const responseLimit = Number(payload.limit) || 0;
+        const responseOffset = Number(payload.offset) || 0;
+        const responsePage = Number(payload.page) || (responseLimit > 0 ? Math.floor(responseOffset / responseLimit) + 1 : 1);
+        const responseTotal = Number(payload.total);
+        state.facultyPaperListMeta = {
+            total: Number.isFinite(responseTotal) && responseTotal >= 0 ? responseTotal : state.facultyAcknowledgementPapers.length,
+            limit: responseLimit,
+            offset: responseOffset,
+            page: responsePage,
+            hasMore: payload.hasMore === true,
+        };
+        if (responseLimit > 0 && (state.facultyPaperListMeta.hasMore || responseOffset > 0 || state.facultyPaperListMeta.total > state.facultyAcknowledgementPapers.length)) {
+            markBootstrapDatasetPartial('facultyAcknowledgementPapers');
+        } else {
+            markBootstrapDatasetComplete('facultyAcknowledgementPapers');
+        }
         dispatchChange(KEYS.FACULTY_PAPERS, deepClone(state.facultyAcknowledgementPapers));
         return deepClone(state.facultyAcknowledgementPapers);
     }
 
+    function buildFacultyPapersPageResult(response) {
+        return {
+            papers: response && Array.isArray(response.papers)
+                ? response.papers
+                : deepClone(state.facultyAcknowledgementPapers),
+            total: Number(state.facultyPaperListMeta.total) || 0,
+            limit: Number(state.facultyPaperListMeta.limit) || 0,
+            offset: Number(state.facultyPaperListMeta.offset) || 0,
+            page: Number(state.facultyPaperListMeta.page) || 1,
+            hasMore: state.facultyPaperListMeta.hasMore === true,
+        };
+    }
+
+    function refreshFacultyPapers(filters) {
+        const normalizedFilters = filters && typeof filters === 'object' ? filters : {};
+        const refreshKey = buildRefreshKey(normalizedFilters);
+        if (refreshPromises.facultyPapers && refreshPromiseKeys.facultyPapers === refreshKey) {
+            return refreshPromises.facultyPapers;
+        }
+
+        startBootstrap(false);
+        refreshPromiseKeys.facultyPapers = refreshKey;
+        refreshPromises.facultyPapers = requestJson('POST', 'listFacultyPapers', { filters: normalizedFilters }, { background: true })
+            .then(function (response) {
+                applyFacultyPapersResponse(response || {});
+                return buildFacultyPapersPageResult(response || {});
+            })
+            .finally(function () {
+                refreshPromises.facultyPapers = null;
+                refreshPromiseKeys.facultyPapers = '';
+            });
+        return refreshPromises.facultyPapers;
+    }
+
+    function listFacultyPapers(actorRole, actorUserId) {
+        startBootstrap(false);
+        const filters = actorRole && typeof actorRole === 'object'
+            ? actorRole
+            : (arguments.length >= 3 && arguments[2] && typeof arguments[2] === 'object' ? arguments[2] : {});
+        const response = syncRequest('POST', 'listFacultyPapers', { filters });
+        applyFacultyPapersResponse(response || {});
+        return deepClone(state.facultyAcknowledgementPapers);
+    }
+
+    function getFacultyPaperListMeta() {
+        return state.facultyPaperListMeta && typeof state.facultyPaperListMeta === 'object'
+            ? Object.assign({}, state.facultyPaperListMeta)
+            : { total: Array.isArray(state.facultyAcknowledgementPapers) ? state.facultyAcknowledgementPapers.length : 0, limit: 0, offset: 0, page: 1, hasMore: false };
+    }
+
     function getFacultyPapers() {
-        bootstrap();
+        startBootstrap(false);
         return deepClone(state.facultyAcknowledgementPapers);
     }
 
     function upsertFacultyPaperDraft(payload) {
-        bootstrap();
+        startBootstrap(false);
         const response = syncRequest('POST', 'upsertFacultyPaperDraft', payload || {});
         if (response && response.paper) {
             dispatchChange(KEYS.FACULTY_PAPERS, response.paper);
@@ -3406,7 +4966,7 @@ const SharedData = (() => {
     }
 
     function archiveFacultyPaper(payload) {
-        bootstrap();
+        startBootstrap(false);
         const response = syncRequest('POST', 'archiveFacultyPaper', payload || {});
         if (Array.isArray(response && response.papers)) {
             state.facultyAcknowledgementPapers = response.papers;
@@ -3416,7 +4976,7 @@ const SharedData = (() => {
     }
 
     function sendFacultyPaper(payload) {
-        bootstrap();
+        startBootstrap(false);
         const response = syncRequest('POST', 'sendFacultyPaper', payload || {});
         if (Array.isArray(response && response.papers)) {
             state.facultyAcknowledgementPapers = response.papers;
@@ -3426,7 +4986,7 @@ const SharedData = (() => {
     }
 
     function saveFacultyPaperSectionC(payload) {
-        bootstrap();
+        startBootstrap(false);
         const response = syncRequest('POST', 'saveFacultyPaperSectionC', payload || {});
         if (response && response.paper) {
             dispatchChange(KEYS.FACULTY_PAPERS, response.paper);
@@ -3449,7 +5009,8 @@ const SharedData = (() => {
         });
     }
 
-    bootstrap(false);
+    hydrateLocalFallbackState();
+    startBootstrap(false);
 
     return {
         KEYS,
@@ -3464,20 +5025,29 @@ const SharedData = (() => {
         parsePhilippineDateBoundary,
         formatDateTimeInPhilippines,
         formatDateInPhilippines,
+        refreshBootstrap,
         refreshSession,
         requireSession,
         setSession,
         clearSession,
+        consumeLogoutPendingMarker,
         isAuthenticated,
         getRole,
         getUsername,
         getProfilePhoto,
         setProfilePhoto,
         uploadProfilePhoto,
+        uploadProfilePhotoAsync,
         getProfileData,
         setProfileData,
         getUsers,
+        getCachedUsers,
+        getUserListMeta,
+        getLastUsersPageMeta,
         listUsers,
+        refreshUsers,
+        refreshUserCount,
+        fetchUsersPage,
         getPrograms,
         bulkUpsertUsers,
         setUsers,
@@ -3497,7 +5067,11 @@ const SharedData = (() => {
         getQuestionnaires,
         setQuestionnaires,
         getEvaluations,
+        getCachedEvaluations,
+        listEvaluations,
+        refreshEvaluations,
         addEvaluation,
+        addEvaluationAsync,
         getStudentEvaluationDrafts,
         upsertStudentEvaluationDraft,
         removeStudentEvaluationDraft,
@@ -3506,11 +5080,19 @@ const SharedData = (() => {
         hasStudentDataPrivacyConsent,
         recordStudentDataPrivacyConsent,
         getOsaStudentClearances,
+        refreshOsaStudentClearances,
         upsertOsaStudentClearance,
+        verifyOsaStudentClearance,
         getStudentEvaluationProofRequests,
+        isStudentEvaluationProofRequestsReady,
+        refreshStudentEvaluationProofRequests,
         submitStudentEvaluationProof,
         reviewStudentEvaluationProof,
+        getAdminDashboardSummary,
+        refreshAdminDashboardSummary,
         getSubjectManagement,
+        getCachedSubjectManagement,
+        refreshSubjectManagement,
         upsertSubject,
         importSubjects,
         upsertCourseOffering,
@@ -3521,6 +5103,7 @@ const SharedData = (() => {
         getActivityLog,
         searchActivityLog,
         addActivityLogEntry,
+        addActivityLogEntryAsync,
         getCredentialDistributorConfig,
         saveCredentialDistributorConfig,
         getOpenAiConfig,
@@ -3532,6 +5115,9 @@ const SharedData = (() => {
         bulkDistributeCredentials,
         sendBulkTestGmail,
         sendTestSmtpEmail,
+        submitSystemReport,
+        listSystemHealthChecks,
+        runSystemHealthCheck,
         analyzeBiasComments,
         analyzeEvaluationExplainability,
         generateFacultyPaperSectionCRecommendations,
@@ -3545,6 +5131,9 @@ const SharedData = (() => {
         showUnreadAnnouncementLoginPopup,
         getSettings,
         updateSettings,
+        updateSettingsAsync,
+        getStudentEvaluationReminderConfig,
+        updateStudentEvaluationReminderConfigAsync,
         getEvalPeriods,
         setEvalPeriods,
         isEvalPeriodOpen,
@@ -3553,7 +5142,9 @@ const SharedData = (() => {
         setSemesterList,
         addSemester,
         changeOwnEmail,
+        changeOwnEmailAsync,
         changeOwnPassword,
+        changeOwnPasswordAsync,
         generateDeanProgramPeerAssignments,
         generateCoordinatorProgramPeerAssignments,
         listDeanProgramPeerAssignmentsCurrent,
@@ -3569,6 +5160,8 @@ const SharedData = (() => {
         removeDeanPeerRoomMember,
         dismantleDeanPeerRoom,
         getFacultyPapers,
+        getFacultyPaperListMeta,
+        refreshFacultyPapers,
         listFacultyPapers,
         upsertFacultyPaperDraft,
         archiveFacultyPaper,

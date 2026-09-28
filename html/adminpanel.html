@@ -9,8 +9,8 @@
     <link rel="apple-touch-icon" href="../design/apple-touch-icon.png">
     <title>Admin Panel - National Aviation Academy of the Philippines</title>
     <link rel="stylesheet" href="../css/hrpanel.css?v=20260904c">
-    <link rel="stylesheet" href="../css/panel-theme.css?v=20260904c">
-    <link rel="stylesheet" href="../css/adminpanel.css?v=20260906e">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260907a">
+    <link rel="stylesheet" href="../css/adminpanel.css?v=20260926a">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -441,6 +441,22 @@
                                         placeholder="Search by full name or student/employee number">
                                 </div>
                             </div>
+                            <div class="filter-group">
+                                <label for="user-role-filter">Role</label>
+                                <select id="user-role-filter"></select>
+                            </div>
+                            <div class="filter-group">
+                                <label for="user-department-filter">Department</label>
+                                <select id="user-department-filter"></select>
+                            </div>
+                            <div class="filter-group">
+                                <label for="user-status-filter">Status</label>
+                                <select id="user-status-filter"></select>
+                            </div>
+                            <div class="filter-group">
+                                <label for="user-program-filter">Program</label>
+                                <select id="user-program-filter"></select>
+                            </div>
                             <button class="btn-user-search" id="user-search-btn">
                                 <i class="fas fa-magnifying-glass"></i>
                                 Search
@@ -458,7 +474,7 @@
                                             <th>Campus</th>
                                             <th>Institute</th>
                                             <th>Program</th>
-                                            <th>Regular/Temporary</th>
+                                            <th>Employment Type</th>
                                             <th>Position</th>
                                             <th>Status</th>
                                         </tr>
@@ -467,6 +483,8 @@
                                 </table>
                             </div>
                         </div>
+
+                        <div class="user-pagination" id="admin-user-pagination"></div>
 
                         <!-- Department and Role Structure -->
                         <div class="organization-structure">
@@ -744,25 +762,37 @@
                     </header>
 
                     <div class="system-settings-content">
-                        <div class="settings-group">
+                        <div class="settings-group" id="general-settings-group">
                             <h3>General Settings</h3>
                             <div class="setting-item">
-                                <label>Institution Name</label>
-                                <input type="text" value="National Aviation Academy of the Philippines">
+                                <label for="general-institution-name">Institution Name</label>
+                                <input type="text" id="general-institution-name" maxlength="190"
+                                    value="National Aviation Academy of the Philippines">
                             </div>
                             <div class="setting-item">
-                                <label>System Email</label>
-                                <input type="email" value="admin@naap.edu.ph">
+                                <label for="general-system-email">System Email</label>
+                                <input type="email" id="general-system-email" value="" readonly
+                                    placeholder="Configure SMTP From Email below"
+                                    title="This value is synchronized with the active SMTP From Email.">
                             </div>
                             <div class="setting-item">
-                                <label>Main Campus</label>
-                                <select>
+                                <label for="general-main-campus">Main Campus</label>
+                                <select id="general-main-campus">
                                     <option value="villamor" selected>Villamor</option>
                                     <option value="basa">Basa</option>
                                     <option value="medelin">Medelin</option>
                                     <option value="mactan">Mactan</option>
                                     <option value="fernando">Fernando</option>
                                 </select>
+                            </div>
+                            <p class="general-settings-help">
+                                System Email is synchronized with the active SMTP <strong>From Email</strong> configuration below.
+                            </p>
+                            <div class="general-settings-actions">
+                                <button class="btn-save" id="general-settings-save-btn" type="button">
+                                    <i class="fas fa-save"></i> Save General Settings
+                                </button>
+                                <span class="credential-config-status" id="general-settings-status" aria-live="polite"></span>
                             </div>
                         </div>
                         <div class="settings-group">
@@ -774,17 +804,75 @@
                                     <span class="slider"></span>
                                 </label>
                             </div>
-                            <div class="setting-item">
-                                <label>Automatic Backup (last 24 hours)</label>
-                                <button class="btn-save" id="backup-last-24-btn">
-                                    Run Backup
+                        </div>
+                        <div class="settings-group backup-management-group" id="backup-management-group">
+                            <div class="backup-management-header">
+                                <div>
+                                    <h3><i class="fas fa-database"></i> Encrypted Backup &amp; Restoration Testing</h3>
+                                    <p class="backup-management-description">Create verified full backups of MySQL data and persistent faculty documents. Production restoration is CLI-only.</p>
+                                </div>
+                                <span class="system-health-status-badge not-run" id="backup-latest-status">Not Run</span>
+                            </div>
+                            <div class="system-health-summary-grid backup-summary-grid">
+                                <div class="system-health-summary-item">
+                                    <span>Schedule</span>
+                                    <strong id="backup-schedule-label">Daily at 02:00 Asia/Manila</strong>
+                                </div>
+                                <div class="system-health-summary-item">
+                                    <span>Retention</span>
+                                    <strong id="backup-retention-label">Newest 30 artifacts</strong>
+                                </div>
+                                <div class="system-health-summary-item">
+                                    <span>Last Backup</span>
+                                    <strong id="backup-last-run">No backup yet</strong>
+                                </div>
+                                <div class="system-health-summary-item">
+                                    <span>Last Size</span>
+                                    <strong id="backup-last-size">-</strong>
+                                </div>
+                                <div class="system-health-summary-item">
+                                    <span>Integrity</span>
+                                    <strong id="backup-last-integrity">Not tested</strong>
+                                </div>
+                                <div class="system-health-summary-item">
+                                    <span>Restore Test</span>
+                                    <strong id="backup-last-restore-test">Not run</strong>
+                                </div>
+                            </div>
+                            <div class="backup-readiness" id="backup-readiness" aria-live="polite"></div>
+                            <div class="system-health-actions">
+                                <button class="btn-save" id="backup-last-24-btn" type="button">
+                                    <i class="fas fa-lock"></i> Run Encrypted Backup
                                 </button>
+                                <div class="system-health-feedback" id="backup-feedback" aria-live="polite"></div>
+                            </div>
+                            <div class="system-health-table-wrap backup-history-wrap">
+                                <h4>Backup History</h4>
+                                <table class="system-health-table backup-history-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Backup</th>
+                                            <th>Created</th>
+                                            <th>Source</th>
+                                            <th>Status</th>
+                                            <th>Size</th>
+                                            <th>Integrity</th>
+                                            <th>Restore Test</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="backup-history-body">
+                                        <tr>
+                                            <td colspan="8">Loading backup history...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                         <div class="settings-group credential-distributor-group">
                             <h3><i class="fas fa-envelope"></i> Bulk Credential Distributor</h3>
                             <p class="credential-distributor-description">
-                                Configure the SMTP server used for OTP, credential delivery, reminders, and test mail. Environment variables override the saved database fallback when present.
+                                Configure the SMTP server used for OTP, credential delivery, reminders, and test mail. Environment variables override the encrypted database fallback when present. Leave the password blank to preserve the configured value.
                             </p>
                             <div class="credential-distributor-grid">
                                 <div class="credential-distributor-field">
@@ -828,7 +916,7 @@
                                 </div>
                                 <div class="credential-distributor-field">
                                     <label for="credential-smtp-password">SMTP Password</label>
-                                    <input type="password" id="credential-smtp-password" placeholder="Enter SMTP password">
+                                    <input type="password" id="credential-smtp-password" autocomplete="new-password" placeholder="Enter a replacement SMTP password">
                                 </div>
                             </div>
                             <div class="credential-distributor-actions">
@@ -895,7 +983,7 @@
                         <div class="settings-group credential-distributor-group">
                             <h3><i class="fas fa-robot"></i> OpenAI Configuration</h3>
                             <p class="credential-distributor-description">
-                                Configure the OpenAI API fallback used by bias detection, explainability insights, and faculty Section C recommendations. Environment variables still override saved database values when present.
+                                Configure the OpenAI API fallback used by bias detection, explainability insights, and faculty Section C recommendations. Environment variables override the encrypted database fallback. Leave the key blank to preserve the configured value.
                             </p>
                             <div class="credential-distributor-grid">
                                 <div class="credential-distributor-field">
@@ -908,7 +996,7 @@
                                 </div>
                                 <div class="credential-distributor-field" style="grid-column: 1 / -1;">
                                     <label for="gemini-api-key">OpenAI API Key</label>
-                                    <input type="password" id="gemini-api-key" placeholder="Enter OpenAI API key">
+                                    <input type="password" id="gemini-api-key" autocomplete="new-password" placeholder="Enter a replacement OpenAI API key">
                                 </div>
                             </div>
                             <div class="openai-panel-access" aria-label="OpenAI panel access controls">
@@ -1004,6 +1092,74 @@
                                 <button class="btn-save" id="open-activity-log">
                                     View Activity Log
                                 </button>
+                            </div>
+                        </div>
+                        <div class="settings-group system-health-group">
+                            <div class="system-health-header">
+                                <div>
+                                    <h3><i class="fas fa-stethoscope"></i> System Health &amp; Update Verification</h3>
+                                    <p class="system-health-description">Run read-only checks after updates or corrections and save the result as verification evidence.</p>
+                                </div>
+                                <span class="system-health-status-badge not-run" id="system-health-status-badge">Not Run</span>
+                            </div>
+                            <div class="system-health-summary-grid">
+                                <div class="system-health-summary-item">
+                                    <span>Last Run</span>
+                                    <strong id="system-health-last-run">No verification yet</strong>
+                                </div>
+                                <div class="system-health-summary-item">
+                                    <span>Checked By</span>
+                                    <strong id="system-health-checked-by">-</strong>
+                                </div>
+                                <div class="system-health-summary-item">
+                                    <span>Result</span>
+                                    <strong id="system-health-summary">0 passed, 0 warning, 0 failed</strong>
+                                </div>
+                            </div>
+                            <div class="system-health-actions">
+                                <button class="btn-save" id="system-health-run-btn" type="button">
+                                    <i class="fas fa-play"></i> Run Verification
+                                </button>
+                                <div class="system-health-feedback" id="system-health-feedback" aria-live="polite"></div>
+                            </div>
+                            <div class="system-health-table-wrap">
+                                <h4>Check Results</h4>
+                                <table class="system-health-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Status</th>
+                                            <th>Check</th>
+                                            <th>Details</th>
+                                            <th>Checked At</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="system-health-checks-body">
+                                        <tr>
+                                            <td colspan="4">Run verification to show check results.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="system-health-table-wrap">
+                                <h4>Recent Verification History</h4>
+                                <table class="system-health-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Run ID</th>
+                                            <th>Status</th>
+                                            <th>Passed</th>
+                                            <th>Warnings</th>
+                                            <th>Failed</th>
+                                            <th>Checked By</th>
+                                            <th>Run At</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="system-health-history-body">
+                                        <tr>
+                                            <td colspan="7">No verification history found.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                         <div class="settings-actions">
@@ -1226,7 +1382,7 @@
                                         <p>Send email reminders for pending evaluations</p>
                                     </div>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" checked>
+                                        <input type="checkbox" id="student-eval-reminder-enabled">
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
@@ -1248,25 +1404,56 @@
                                     </div>
                                     <div class="setting-content">
                                         <h3>Reminder Frequency</h3>
-                                        <p>How often to send reminders</p>
+                                        <p>Send at most once per student within this interval</p>
                                     </div>
-                                    <select id="reminder-freq"
-                                        style="padding: 10px 16px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; min-width: 150px;">
-                                        <option value="daily">Daily</option>
-                                        <option value="weekly" selected>Weekly</option>
-                                        <option value="biweekly">Bi-weekly</option>
-                                    </select>
+                                    <div class="reminder-frequency-control">
+                                        <input id="reminder-freq" class="reminder-frequency-input" type="number"
+                                            min="1" max="365" step="1" inputmode="numeric" value="7"
+                                            aria-label="Reminder frequency in days">
+                                        <span>day(s)</span>
+                                    </div>
+                                </div>
+
+                                <div class="setting-item reminder-template-item">
+                                    <div class="setting-icon">
+                                        <i class="fas fa-heading"></i>
+                                    </div>
+                                    <div class="setting-content">
+                                        <h3>Email Subject</h3>
+                                        <p>Subject used for student evaluation reminders</p>
+                                    </div>
+                                    <input id="student-eval-reminder-subject"
+                                        class="reminder-template-control" type="text" maxlength="200"
+                                        aria-label="Student evaluation reminder email subject">
+                                </div>
+
+                                <div class="setting-item reminder-template-item reminder-template-item--body">
+                                    <div class="setting-icon">
+                                        <i class="fas fa-align-left"></i>
+                                    </div>
+                                    <div class="setting-content">
+                                        <h3>Email Message</h3>
+                                        <p>Available placeholders: <code>{{student_name}}</code>,
+                                            <code>{{evaluation_end_date}}</code>, <code>{{academic_year}}</code>,
+                                            <code>{{semester}}</code></p>
+                                    </div>
+                                    <textarea id="student-eval-reminder-body" class="reminder-template-control"
+                                        rows="6" maxlength="6000"
+                                        aria-label="Student evaluation reminder email message"></textarea>
                                 </div>
                             </div>
                         </section>
 
                         <!-- Save Button -->
+                        <p id="student-eval-reminder-status" class="reminder-settings-status" role="status"
+                            aria-live="polite"></p>
                         <div
                             style="display: flex; gap: 16px; justify-content: flex-end; margin-top: 24px; padding-top: 24px; border-top: 1px solid #e2e8f0;">
-                            <button class="btn-setting"
+                            <button class="btn-setting" id="student-eval-reminder-reset-btn" type="button"
                                 style="background: transparent; color: #64748b; border: 2px solid #e2e8f0;">Reset to
                                 Default</button>
-                            <button class="btn-setting purple" style="padding: 12px 32px;">Save All Settings</button>
+                            <button class="btn-setting purple" id="student-eval-reminder-save-btn" type="button"
+                                style="padding: 12px 32px;">Save Reminder Settings</button>
                         </div>
                     </div>
                 </div>
@@ -1301,6 +1488,8 @@
                                 <select id="professor-campus-filter" class="professor-campus-filter" aria-label="Filter professors by campus">
                                     <option value="all">All Campuses</option>
                                 </select>
+                                <select id="professor-status-filter" class="professor-campus-filter" aria-label="Filter professors by status"></select>
+                                <select id="professor-program-filter" class="professor-campus-filter" aria-label="Filter professors by program"></select>
                                 <button type="button" class="btn-professor-search" id="professor-search-btn">
                                     <i class="fas fa-search"></i>
                                     Search
@@ -1348,6 +1537,7 @@
                                 <!-- Professors will be dynamically loaded here -->
                             </div>
                         </div>
+                        <div class="user-pagination" id="admin-professor-pagination"></div>
                     </div>
                 </div>
 
@@ -1764,6 +1954,14 @@
                     <label for="new-user-employee-id">Employee ID</label>
                     <input type="text" id="new-user-employee-id" name="employeeId" placeholder="e.g., EMP-2024-001">
                 </div>
+                <div class="form-group" id="new-user-employment-type-group" style="display:none;">
+                    <label for="new-user-employment-type">Employment Type</label>
+                    <select id="new-user-employment-type" name="employmentType">
+                        <option value="Regular">Regular</option>
+                        <option value="Temporary">Temporary</option>
+                        <option value="COS">COS</option>
+                    </select>
+                </div>
                 <!-- Department field (shows for all except HR) -->
                 <div class="form-group dept-field" id="dept-field">
                     <label for="new-user-department">Department</label>
@@ -1842,11 +2040,11 @@
                     <input type="text" id="edit-user-year-section" name="yearSection" placeholder="e.g., 3-1">
                 </div>
                 <div class="form-group" id="edit-user-employment-type-group">
-                    <label for="edit-user-employment-type">Regular/Temporary</label>
+                    <label for="edit-user-employment-type">Employment Type</label>
                     <select id="edit-user-employment-type" name="employmentType">
                         <option value="Regular">Regular</option>
                         <option value="Temporary">Temporary</option>
-                        <option value="Student">Student</option>
+                        <option value="COS">COS</option>
                     </select>
                 </div>
                 <div class="form-group" id="edit-user-position-group">
@@ -2002,6 +2200,7 @@
                     <select id="professor-employment-type" name="employmentType" required>
                         <option value="Regular">Regular</option>
                         <option value="Temporary">Temporary</option>
+                        <option value="COS">COS</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -2181,10 +2380,11 @@
     </div>
 
 
-    <script src="../JsScrip/db-data.js?v=20260904c"></script>
+    <script src="../JsScrip/db-data.js?v=20260925a"></script>
+    <script src="../JsScrip/system-report.js?v=20260907a"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
-    <script src="../JsScrip/vendor/xlsx.full.min.js?v=20260701a"></script>
-    <script src="../JsScrip/adminpanel.js?v=20260906a"></script>
+    <script src="../JsScrip/vendor/xlsx.full.min.js?v=0.20.3"></script>
+    <script src="../JsScrip/adminpanel.js?v=20260928b"></script>
 </body>
 
 </html>

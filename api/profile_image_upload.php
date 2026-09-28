@@ -8,6 +8,13 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/state_helpers.php';
 
+set_exception_handler(function (Throwable $error): void {
+    if (function_exists('isNaapSchemaMigrationRequiredException') && isNaapSchemaMigrationRequiredException($error)) {
+        sendNaapSchemaMigrationRequiredJson($error);
+    }
+    sendNaapServerErrorJson($error, 'profile_image_upload.unhandled');
+});
+
 function resolveAuthenticatedProfileImageUser(PDO $pdo) {
     $session = requireNaapAuthenticatedSession($pdo);
     $user = buildUserSnapshotById($pdo, $session['userId'], false);
@@ -40,7 +47,6 @@ if ($requestMethod !== 'POST') {
 
 $user = resolveAuthenticatedProfileImageUser($pdo);
 requireNaapCsrfToken();
-runProfileImageMigrationsIfNeeded($pdo);
 $uploadedFile = is_array($_FILES['profile_image'] ?? null) ? $_FILES['profile_image'] : null;
 if (!$uploadedFile) {
     sendJson([
@@ -53,15 +59,21 @@ try {
     $savedImage = saveUploadedUserProfileImage($pdo, $user['id'], $uploadedFile);
     $updatedUser = buildUserSnapshotById($pdo, $user['id'], false);
 } catch (RuntimeException $error) {
+    if (function_exists('isNaapSchemaMigrationRequiredException') && isNaapSchemaMigrationRequiredException($error)) {
+        sendNaapSchemaMigrationRequiredJson($error);
+    }
+    if (naapExceptionContainsDatabaseFailure($error)) {
+        sendNaapServerErrorJson($error, 'profile_image_upload.database');
+    }
     sendJson([
         'success' => false,
         'error' => $error->getMessage(),
     ], 400);
 } catch (Throwable $error) {
-    sendJson([
-        'success' => false,
-        'error' => 'Unable to upload the profile image right now.',
-    ], 500);
+    if (function_exists('isNaapSchemaMigrationRequiredException') && isNaapSchemaMigrationRequiredException($error)) {
+        sendNaapSchemaMigrationRequiredJson($error);
+    }
+    sendNaapServerErrorJson($error, 'profile_image_upload.save');
 }
 
 sendJson([

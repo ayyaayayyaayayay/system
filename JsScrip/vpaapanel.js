@@ -22,6 +22,14 @@ let latestVpaaAnalyticsSnapshot = null;
 let currentVpaaAnalyticsSemester = "all";
 let currentVpaaAnalyticsEvaluationType = "student";
 let currentVpaaAnalyticsProfessorId = null;
+const VPAA_PROFESSOR_PAGE_SIZE = 100;
+let vpaaProfessorPage = 1;
+let vpaaProfessorPageMeta = { total: 0, limit: VPAA_PROFESSOR_PAGE_SIZE, offset: 0, page: 1, hasMore: false };
+let vpaaProfessorRefreshPromise = null;
+let vpaaProfessorRefreshKey = "";
+let vpaaDashboardBaseUsers = [];
+let vpaaDashboardDataRefreshPromise = null;
+let vpaaDashboardDataRefreshKey = "";
 
 const VPAA_EVALUATION_TYPE_OPTIONS = [
     {
@@ -201,13 +209,17 @@ function collectEvaluationComments(evaluation) {
     return output;
 }
 
-function buildVpaaDatabaseContext() {
-    const users = (SharedData.getUsers && SharedData.getUsers()) || [];
-    const evaluations = (SharedData.getEvaluations && SharedData.getEvaluations()) || [];
+function buildVpaaDatabaseContext(sourceUsers) {
+    const users = mergeVpaaDashboardUsers(sourceUsers);
+    const evaluations = SharedData.getCachedEvaluations
+        ? SharedData.getCachedEvaluations()
+        : ((SharedData.getEvaluations && SharedData.getEvaluations()) || []);
     const semesterList = (SharedData.getSemesterList && SharedData.getSemesterList()) || [];
-    const subjectManagement = SharedData.getSubjectManagement
-        ? SharedData.getSubjectManagement()
-        : { offerings: [], enrollments: [] };
+    const subjectManagement = SharedData.getCachedSubjectManagement
+        ? SharedData.getCachedSubjectManagement()
+        : (SharedData.getSubjectManagement
+            ? SharedData.getSubjectManagement()
+            : { offerings: [], enrollments: [] });
 
     const professors = users.filter(function (user) {
         return normalizeVpaaToken(user && user.role) === "professor";
@@ -425,8 +437,8 @@ function buildVpaaChartDataForType(typeKey, semesterLabel, context) {
     return result;
 }
 
-function buildProfessorDataFromSharedData() {
-    const context = buildVpaaDatabaseContext();
+function buildProfessorDataFromSharedData(sourceUsers) {
+    const context = buildVpaaDatabaseContext(sourceUsers);
     const currentSemester = context.currentSemester || currentSemesterLabel || "Current Semester";
     currentSemesterLabel = currentSemester;
 
@@ -568,8 +580,8 @@ function buildProfessorDataFromSharedData() {
     };
 }
 
-function loadDashboardDataFromDb() {
-    const payload = buildProfessorDataFromSharedData();
+function loadDashboardDataFromDb(sourceUsers) {
+    const payload = buildProfessorDataFromSharedData(sourceUsers);
     allProfessorData = Array.isArray(payload.professorData) ? payload.professorData : [];
     currentSemesterLabel = payload.currentSemester || currentSemesterLabel || "";
     availableSemesterLabels = Array.isArray(payload.semesters) ? payload.semesters : [];
@@ -635,6 +647,139 @@ const dashboardCharts = {
     supervisor: { bar: null, pie: null }
 };
 
+function normalizeVpaaUserListResult(result) {
+    if (result && Array.isArray(result.users)) {
+        return result.users;
+    }
+    return Array.isArray(result) ? result : [];
+}
+
+function mergeVpaaDashboardUsers(sourceUsers) {
+    const hasSourceUsers = Array.isArray(sourceUsers);
+    const cachedUsers = SharedData.getCachedUsers
+        ? SharedData.getCachedUsers()
+        : ((SharedData.getUsers && SharedData.getUsers()) || []);
+    const groups = hasSourceUsers
+        ? [
+            vpaaDashboardBaseUsers.filter(function (user) {
+                return normalizeVpaaToken(user && user.role) !== "professor";
+            }),
+            sourceUsers
+        ]
+        : [cachedUsers, vpaaDashboardBaseUsers];
+    const byId = new Map();
+    const merged = [];
+
+    groups.forEach(function (group) {
+        (Array.isArray(group) ? group : []).forEach(function (user) {
+            if (!user || typeof user !== "object") return;
+            const id = normalizeVpaaUserId(user.id || user.userId);
+            const key = id || [
+                normalizeVpaaToken(user.role),
+                normalizeVpaaToken(user.email),
+                normalizeVpaaToken(user.employeeId || user.studentNumber),
+                normalizeVpaaToken(user.name)
+            ].join("|");
+            if (!key) return;
+
+            if (!byId.has(key)) {
+                byId.set(key, merged.length);
+                merged.push(user);
+                return;
+            }
+
+            merged[byId.get(key)] = Object.assign({}, merged[byId.get(key)], user);
+        });
+    });
+
+    return merged;
+}
+
+function getVpaaDashboardSemesterValue(value) {
+    const raw = String(value || "").trim();
+    if (raw && raw !== "all") return raw;
+    return String(
+        currentSemesterLabel ||
+        (SharedData.getCurrentSemester && SharedData.getCurrentSemester()) ||
+        ""
+    ).trim();
+}
+
+function rebuildVpaaDashboardState(sourceUsers) {
+    const previousSemester = elements.semesterFilter ? elements.semesterFilter.value : "";
+    const previousCampus = elements.campusFilter ? elements.campusFilter.value : "";
+    const previousDepartment = elements.departmentFilter ? elements.departmentFilter.value : "";
+    const previousSort = elements.sortFilter ? elements.sortFilter.value : "";
+
+    loadDashboardDataFromDb(sourceUsers);
+    populateDepartments();
+    populateSemesters();
+    populateCampuses();
+
+    restoreSelectValue(elements.semesterFilter, previousSemester);
+    restoreSelectValue(elements.campusFilter, previousCampus);
+    restoreSelectValue(elements.departmentFilter, previousDepartment);
+    restoreSelectValue(elements.sortFilter, previousSort);
+
+    applyFilters();
+    refreshVpaaDescriptiveAnalytics();
+    if (currentVpaaAnalyticsProfessorId && isReportModalOpen()) {
+        viewVpaaProfessorAnalytics(currentVpaaAnalyticsProfessorId);
+    }
+}
+
+function refreshVpaaDashboardDataForSemester(semesterValue, sourceUsers) {
+    const semesterId = getVpaaDashboardSemesterValue(semesterValue);
+    if (!semesterId) {
+        return Promise.resolve(null);
+    }
+
+    const refreshKey = JSON.stringify({
+        semesterId: semesterId,
+        source: Array.isArray(sourceUsers)
+            ? sourceUsers.map(function (user) { return normalizeVpaaUserId(user && (user.id || user.userId)); }).join(",")
+            : ""
+    });
+    if (vpaaDashboardDataRefreshPromise && vpaaDashboardDataRefreshKey === refreshKey) {
+        return vpaaDashboardDataRefreshPromise;
+    }
+
+    const tasks = [];
+    if (SharedData.refreshUsers) {
+        tasks.push(
+            SharedData.refreshUsers({
+                roles: ["student", "professor", "dean", "procoor", "supervisor"],
+                status: "active",
+                includeAll: true
+            }).then(function (result) {
+                vpaaDashboardBaseUsers = normalizeVpaaUserListResult(result);
+                return vpaaDashboardBaseUsers;
+            })
+        );
+    }
+    if (SharedData.refreshSubjectManagement) {
+        tasks.push(SharedData.refreshSubjectManagement({ semesterId: semesterId }));
+    }
+    if (SharedData.refreshEvaluations) {
+        tasks.push(SharedData.refreshEvaluations({ semesterId: semesterId }));
+    }
+
+    vpaaDashboardDataRefreshKey = refreshKey;
+    vpaaDashboardDataRefreshPromise = Promise.all(tasks)
+        .then(function () {
+            rebuildVpaaDashboardState(sourceUsers);
+        })
+        .catch(function (error) {
+            console.warn("[VPAA] Failed to refresh dashboard data.", error);
+        })
+        .finally(function () {
+            vpaaDashboardDataRefreshPromise = null;
+            vpaaDashboardDataRefreshKey = "";
+        });
+
+    return vpaaDashboardDataRefreshPromise;
+}
+
 function init() {
     if (!checkAuthentication()) {
         window.location.href = 'mainpage.html';
@@ -654,6 +799,7 @@ function init() {
     refreshVpaaDescriptiveAnalytics();
     setupDataSubscriptions();
     bindEvents();
+    refreshVpaaDashboardDataForSemester(currentSemesterLabel);
     setupProfilePhotoUpload();
     setupProfileActions();
     setupChangeEmailForm();
@@ -719,6 +865,11 @@ function setupDataSubscriptions() {
             key === SharedData.KEYS.QUESTIONNAIRES ||
             key === SharedData.KEYS.FACULTY_PAPERS
         ) {
+            if (key === SharedData.KEYS.USERS && hasSubmittedSearch && elements.searchInput && String(elements.searchInput.value || "").trim()) {
+                refreshVpaaProfessorReportPage({ page: vpaaProfessorPage });
+                return;
+            }
+
             const previousSemester = elements.semesterFilter ? elements.semesterFilter.value : "";
             const previousCampus = elements.campusFilter ? elements.campusFilter.value : "";
             const previousDepartment = elements.departmentFilter ? elements.departmentFilter.value : "";
@@ -836,8 +987,18 @@ function setupDashboardHeroActions() {
 
 function populateDepartments() {
     elements.departmentFilter.innerHTML = '<option value="all">All departments</option>';
-    const departments = [...new Set(allProfessorData.map((prof) => prof.department))].sort();
-    departments.forEach((dept) => {
+    const departments = new Set();
+    if (SharedData.getAllDepartments) {
+        SharedData.getAllDepartments().forEach((dept) => {
+            const value = String(dept || "").trim().toUpperCase();
+            if (value) departments.add(value);
+        });
+    }
+    allProfessorData.forEach((prof) => {
+        const value = String(prof && prof.department || "").trim().toUpperCase();
+        if (value) departments.add(value);
+    });
+    Array.from(departments).sort().forEach((dept) => {
         const option = document.createElement("option");
         option.value = dept;
         option.textContent = dept;
@@ -909,28 +1070,162 @@ function populateCampuses() {
     elements.campusFilter.value = "all";
 }
 
+function resetVpaaProfessorPageMeta() {
+    vpaaProfessorPageMeta = {
+        total: 0,
+        limit: VPAA_PROFESSOR_PAGE_SIZE,
+        offset: 0,
+        page: 1,
+        hasMore: false
+    };
+}
+
+function buildVpaaProfessorUserFilters(page) {
+    const filters = {
+        role: "professor",
+        status: "all",
+        limit: VPAA_PROFESSOR_PAGE_SIZE,
+        page: Math.max(1, Number(page) || 1)
+    };
+    const search = String(elements.searchInput && elements.searchInput.value || "").trim();
+    const campus = normalizeVpaaToken(elements.campusFilter && elements.campusFilter.value || "all");
+    const department = String(elements.departmentFilter && elements.departmentFilter.value || "all").trim().toUpperCase();
+
+    if (search) filters.search = search;
+    if (campus && campus !== "all") filters.campus = campus;
+    if (department && department !== "ALL") filters.department = department;
+
+    return filters;
+}
+
+function normalizeVpaaProfessorPageResult(result, fallbackFilters) {
+    if (result && Array.isArray(result.users)) {
+        return result;
+    }
+    const users = Array.isArray(result)
+        ? result
+        : (SharedData.listUsers ? SharedData.listUsers(fallbackFilters) : []);
+    const meta = SharedData.getLastUsersPageMeta
+        ? SharedData.getLastUsersPageMeta()
+        : (SharedData.getUserListMeta ? SharedData.getUserListMeta() : {});
+    return {
+        users: Array.isArray(users) ? users : [],
+        total: Number(meta.total) || (Array.isArray(users) ? users.length : 0),
+        limit: Number(meta.limit) || VPAA_PROFESSOR_PAGE_SIZE,
+        offset: Number(meta.offset) || 0,
+        page: Number(meta.page) || Number(fallbackFilters && fallbackFilters.page) || 1,
+        hasMore: meta.hasMore === true
+    };
+}
+
+function applyVpaaProfessorPageResult(pageResult, filters) {
+    const users = Array.isArray(pageResult && pageResult.users) ? pageResult.users : [];
+    vpaaProfessorPageMeta = {
+        total: Number(pageResult && pageResult.total) || users.length,
+        limit: Number(pageResult && pageResult.limit) || VPAA_PROFESSOR_PAGE_SIZE,
+        offset: Number(pageResult && pageResult.offset) || 0,
+        page: Number(pageResult && pageResult.page) || Number(filters && filters.page) || 1,
+        hasMore: pageResult && pageResult.hasMore === true
+    };
+    vpaaProfessorPage = vpaaProfessorPageMeta.page;
+    loadDashboardDataFromDb(users);
+}
+
+function refreshVpaaProfessorReportPage(options = {}) {
+    const rawTerm = String(elements.searchInput && elements.searchInput.value || "").trim();
+    if (!hasSubmittedSearch || !rawTerm) {
+        resetVpaaProfessorPageMeta();
+        allProfessorData = [];
+        renderProfessors([], "Enter a professor name or employee ID, then click Search to view reports.");
+        return Promise.resolve([]);
+    }
+
+    const requestedPage = Math.max(1, Number(options.page) || vpaaProfessorPage || 1);
+    const filters = buildVpaaProfessorUserFilters(requestedPage);
+    const refreshKey = JSON.stringify(filters);
+    if (vpaaProfessorRefreshPromise && vpaaProfessorRefreshKey === refreshKey) {
+        return vpaaProfessorRefreshPromise;
+    }
+
+    renderProfessors([], "Loading professor reports...");
+    vpaaProfessorRefreshKey = refreshKey;
+    const loadUsers = SharedData.refreshUsers
+        ? SharedData.refreshUsers(filters)
+        : Promise.resolve(SharedData.listUsers ? SharedData.listUsers(filters) : []);
+
+    vpaaProfessorRefreshPromise = loadUsers
+        .then((result) => {
+            const pageResult = normalizeVpaaProfessorPageResult(result, filters);
+            applyVpaaProfessorPageResult(pageResult, filters);
+            applyFilters();
+            return pageResult.users || [];
+        })
+        .catch((error) => {
+            console.warn("[VPAA] Falling back to cached professor report users.", error);
+            const fallbackUsers = SharedData.listUsers ? SharedData.listUsers(filters) : [];
+            applyVpaaProfessorPageResult({
+                users: fallbackUsers,
+                total: Array.isArray(fallbackUsers) ? fallbackUsers.length : 0,
+                limit: VPAA_PROFESSOR_PAGE_SIZE,
+                offset: (Math.max(1, Number(filters.page) || 1) - 1) * VPAA_PROFESSOR_PAGE_SIZE,
+                page: Math.max(1, Number(filters.page) || 1),
+                hasMore: false
+            }, filters);
+            applyFilters();
+            return fallbackUsers;
+        })
+        .finally(() => {
+            vpaaProfessorRefreshPromise = null;
+            vpaaProfessorRefreshKey = "";
+        });
+
+    return vpaaProfessorRefreshPromise;
+}
+
 function bindEvents() {
     elements.searchBtn.addEventListener("click", () => {
         hasSubmittedSearch = true;
-        applyFilters();
+        vpaaProfessorPage = 1;
+        refreshVpaaProfessorReportPage({ page: 1 });
     });
     elements.searchInput.addEventListener("input", () => {
         hasSubmittedSearch = false;
         closeReportModal();
+        resetVpaaProfessorPageMeta();
+        allProfessorData = [];
         renderProfessors([], "Enter a professor name or employee ID, then click Search to view reports.");
     });
     elements.searchInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
             event.preventDefault();
             hasSubmittedSearch = true;
+            vpaaProfessorPage = 1;
+            refreshVpaaProfessorReportPage({ page: 1 });
+        }
+    });
+    elements.semesterFilter.addEventListener("change", () => {
+        const selectedSemester = getVpaaDashboardSemesterValue(elements.semesterFilter.value);
+        refreshVpaaDashboardDataForSemester(selectedSemester);
+        applyFilters();
+    });
+    if (elements.campusFilter) {
+        elements.campusFilter.addEventListener("change", () => {
+            vpaaProfessorPage = 1;
+            if (hasSubmittedSearch && String(elements.searchInput.value || "").trim()) {
+                refreshVpaaProfessorReportPage({ page: 1 });
+            } else {
+                applyFilters();
+            }
+        });
+    }
+    elements.departmentFilter.addEventListener("change", () => {
+        vpaaProfessorPage = 1;
+        if (hasSubmittedSearch && String(elements.searchInput.value || "").trim()) {
+            refreshVpaaProfessorReportPage({ page: 1 });
+        } else {
             applyFilters();
         }
     });
-    elements.semesterFilter.addEventListener("change", applyFilters);
-    if (elements.campusFilter) {
-        elements.campusFilter.addEventListener("change", applyFilters);
-    }
-    elements.departmentFilter.addEventListener("change", applyFilters);
     elements.sortFilter.addEventListener("change", applyFilters);
     elements.resetFilters.addEventListener("click", resetFilters);
     if (elements.overallSasrBtn) {
@@ -940,6 +1235,9 @@ function bindEvents() {
 
 function resetFilters() {
     hasSubmittedSearch = false;
+    vpaaProfessorPage = 1;
+    resetVpaaProfessorPageMeta();
+    allProfessorData = [];
     elements.searchInput.value = "";
     elements.semesterFilter.value = currentSemesterLabel || "all";
     if (elements.campusFilter) {
@@ -1154,7 +1452,7 @@ function isVpaaSubmittedEvaluation(record) {
 }
 
 function buildVpaaStudentDirectory() {
-    const users = (SharedData.getUsers && SharedData.getUsers()) || [];
+    const users = mergeVpaaDashboardUsers();
     const directoryByUserId = new Map();
     const userIdByStudentNumber = new Map();
 
@@ -1189,12 +1487,16 @@ function buildVpaaStudentAnalyticsRows() {
     const directory = buildVpaaStudentDirectory();
     const directoryByUserId = directory.directoryByUserId;
     const userIdByStudentNumber = directory.userIdByStudentNumber;
-    const subjectManagement = SharedData.getSubjectManagement
-        ? SharedData.getSubjectManagement()
-        : { offerings: [], enrollments: [] };
+    const subjectManagement = SharedData.getCachedSubjectManagement
+        ? SharedData.getCachedSubjectManagement()
+        : (SharedData.getSubjectManagement
+            ? SharedData.getSubjectManagement()
+            : { offerings: [], enrollments: [] });
     const offerings = Array.isArray(subjectManagement.offerings) ? subjectManagement.offerings : [];
     const enrollments = Array.isArray(subjectManagement.enrollments) ? subjectManagement.enrollments : [];
-    const evaluations = SharedData.getEvaluations ? SharedData.getEvaluations() : [];
+    const evaluations = SharedData.getCachedEvaluations
+        ? SharedData.getCachedEvaluations()
+        : (SharedData.getEvaluations ? SharedData.getEvaluations() : []);
 
     const activeOfferingsById = new Map(
         offerings
@@ -1534,7 +1836,7 @@ function setupVpaaAnalyticsInteractions() {
 }
 
 function getVpaaActiveStudentCount() {
-    const users = (SharedData.getUsers && SharedData.getUsers()) || [];
+    const users = mergeVpaaDashboardUsers();
     return users.filter((user) => {
         const role = normalizeVpaaToken(user && user.role);
         if (role !== "student") return false;
@@ -2426,7 +2728,9 @@ function getVpaaProfessorById(professorId, semesterId) {
         });
     }
 
-    const users = SharedData.getUsers ? SharedData.getUsers() : [];
+    const users = SharedData.getCachedUsers
+        ? SharedData.getCachedUsers()
+        : (SharedData.getUsers ? SharedData.getUsers() : []);
     const sourceUser = (Array.isArray(users) ? users : []).find(function (user) {
         return normalizeVpaaToken(user && user.role) === "professor"
             && normalizeVpaaProfessorUserId(user && user.id) === baseId;
@@ -2583,12 +2887,29 @@ function setupProfilePhotoUpload() {
     const fullName = getProfileFullName();
     placeholder.textContent = buildInitials(fullName) || "VP";
 
-    const storedPhoto = SharedData.getProfilePhoto('vpaa');
-    if (storedPhoto) {
-        preview.src = storedPhoto;
-        preview.classList.add("active");
-        placeholder.style.display = "none";
+    function applyProfilePhotoPreview(photo) {
+        const resolvedPhoto = String(photo || "").trim();
+        if (resolvedPhoto) {
+            preview.src = resolvedPhoto;
+            preview.classList.add("active");
+            placeholder.style.display = "none";
+            return true;
+        }
+
+        preview.removeAttribute("src");
+        preview.classList.remove("active");
+        placeholder.style.display = "";
+        return false;
     }
+
+    const storedPhoto = SharedData.getProfilePhoto('vpaa');
+    applyProfilePhotoPreview(storedPhoto);
+
+    window.addEventListener("shareddata:change", function (event) {
+        if (event && event.detail && event.detail.key === "profilePhoto") {
+            applyProfilePhotoPreview(event.detail.value);
+        }
+    });
 
     input.addEventListener("change", function () {
         const file = input.files && input.files[0];
@@ -2626,29 +2947,33 @@ function setupProfilePhotoUpload() {
             return;
         }
 
-        try {
-            const savedPhoto = SharedData.uploadProfilePhoto(file);
-            if (savedPhoto) {
-                preview.src = savedPhoto;
-            }
-            preview.classList.add("active");
-            placeholder.style.display = "none";
-        } catch (error) {
+        function handleUploadError(error) {
             alert(error && error.message ? error.message : "Failed to upload the profile image.");
             const storedPhoto = SharedData.getProfilePhoto('vpaa');
-            if (storedPhoto) {
-                preview.src = storedPhoto;
-                preview.classList.add("active");
-                placeholder.style.display = "none";
-            } else {
-                preview.removeAttribute("src");
-                preview.classList.remove("active");
-                placeholder.style.display = "";
-            }
-        } finally {
+            applyProfilePhotoPreview(storedPhoto);
+        }
+
+        let uploadPromise;
+        try {
+            uploadPromise = typeof SharedData.uploadProfilePhotoAsync === "function"
+                ? SharedData.uploadProfilePhotoAsync(file, { message: "Uploading profile photo..." })
+                : Promise.resolve(SharedData.uploadProfilePhoto(file));
+        } catch (error) {
+            handleUploadError(error);
             URL.revokeObjectURL(localPreviewUrl);
             input.value = "";
+            return;
         }
+
+        Promise.resolve(uploadPromise)
+            .then(function (savedPhoto) {
+                applyProfilePhotoPreview(savedPhoto);
+            })
+            .catch(handleUploadError)
+            .finally(function () {
+                URL.revokeObjectURL(localPreviewUrl);
+                input.value = "";
+            });
     });
 }
 
@@ -2863,6 +3188,76 @@ function setupPasswordToggles() {
     });
 }
 
+function getVpaaProfessorPaginationContainer() {
+    let container = document.getElementById("vpaa-professor-pagination");
+    if (!container && elements.professorGrid) {
+        container = document.createElement("div");
+        container.id = "vpaa-professor-pagination";
+        container.className = "user-pagination vpaa-professor-pagination";
+        const wrapper = elements.professorGrid.closest(".professors-list-container") || elements.professorGrid.parentElement;
+        if (wrapper && wrapper.parentNode) {
+            wrapper.parentNode.insertBefore(container, wrapper.nextSibling);
+        }
+    }
+    return container;
+}
+
+function renderVpaaProfessorPagination() {
+    const container = getVpaaProfessorPaginationContainer();
+    if (!container) return;
+    const rawTerm = String(elements.searchInput && elements.searchInput.value || "").trim();
+    if (!hasSubmittedSearch || !rawTerm) {
+        container.innerHTML = "";
+        return;
+    }
+
+    const meta = vpaaProfessorPageMeta || {};
+    const total = Math.max(0, Number(meta.total) || 0);
+    const limit = Math.max(1, Number(meta.limit) || VPAA_PROFESSOR_PAGE_SIZE);
+    const page = Math.max(1, Number(meta.page) || vpaaProfessorPage || 1);
+    const offset = Math.max(0, Number(meta.offset) || ((page - 1) * limit));
+    const rowCount = Array.isArray(allProfessorData) && allProfessorData.length
+        ? new Set(allProfessorData.map((prof) => normalizeVpaaProfessorUserId(prof.userId || prof.id)).filter(Boolean)).size
+        : 0;
+    const from = rowCount > 0 ? offset + 1 : 0;
+    const to = rowCount > 0 ? offset + rowCount : 0;
+    const hasPrevious = page > 1;
+    const hasNext = meta.hasMore === true;
+
+    container.innerHTML = `
+        <div class="pagination-summary">
+            Showing ${from}-${to} of ${total} professors | Page ${page}
+        </div>
+        <div class="pagination-actions">
+            <button type="button" class="pagination-btn" id="vpaa-professor-prev-page" ${hasPrevious ? "" : "disabled"}>
+                <i class="fas fa-chevron-left"></i>
+                Previous
+            </button>
+            <button type="button" class="pagination-btn" id="vpaa-professor-next-page" ${hasNext ? "" : "disabled"}>
+                Next
+                <i class="fas fa-chevron-right"></i>
+            </button>
+        </div>
+    `;
+
+    const prev = document.getElementById("vpaa-professor-prev-page");
+    const next = document.getElementById("vpaa-professor-next-page");
+    if (prev) {
+        prev.addEventListener("click", () => {
+            if (!hasPrevious) return;
+            vpaaProfessorPage = page - 1;
+            refreshVpaaProfessorReportPage({ page: vpaaProfessorPage });
+        });
+    }
+    if (next) {
+        next.addEventListener("click", () => {
+            if (!hasNext) return;
+            vpaaProfessorPage = page + 1;
+            refreshVpaaProfessorReportPage({ page: vpaaProfessorPage });
+        });
+    }
+}
+
 function renderProfessors(list, emptyMessage) {
     elements.professorGrid.innerHTML = "";
     if (list.length === 0) {
@@ -2872,12 +3267,14 @@ function renderProfessors(list, emptyMessage) {
         message.textContent = emptyMessage || "No professors match the current filters.";
         emptyState.appendChild(message);
         elements.professorGrid.appendChild(emptyState);
+        renderVpaaProfessorPagination();
         return;
     }
 
     list.forEach((prof) => {
         elements.professorGrid.appendChild(createProfessorCard(prof));
     });
+    renderVpaaProfessorPagination();
 }
 
 function createProfessorCard(prof) {
@@ -3724,7 +4121,9 @@ function getVpaaOverallSasrDepartments(campusId) {
         });
     }
 
-    const users = SharedData.getUsers ? SharedData.getUsers() : [];
+    const users = SharedData.getCachedUsers
+        ? SharedData.getCachedUsers()
+        : (SharedData.getUsers ? SharedData.getUsers() : []);
     (Array.isArray(users) ? users : []).forEach(function (user) {
         if (!user || normalizeVpaaToken(user.role) !== "professor") return;
         if (campusToken !== "all" && normalizeVpaaToken(user.campus || user.campusSlug) !== campusToken) return;

@@ -25,7 +25,13 @@ let evaluationDraftState = {
     autosaveTimer: null,
     suppressAutosave: false,
     lastSavedAt: '',
-    lastDraftKey: ''
+    lastDraftKey: '',
+    localVersion: 0,
+    pendingPromise: null,
+    pendingVersion: 0,
+    queuedWhilePending: false,
+    queuedShowToast: false,
+    clearRequested: false
 };
 let evaluationBehaviorCapture = {
     captureKey: '',
@@ -33,6 +39,7 @@ let evaluationBehaviorCapture = {
 };
 let studentHeaderPanelsBound = false;
 let studentProofModalBound = false;
+let studentChangePasswordBound = false;
 let studentMobileDrawerBound = false;
 let studentMobileHeaderScrollBound = false;
 let studentLastHeaderScrollY = 0;
@@ -90,21 +97,24 @@ function enforceActiveStudentAccount(options) {
     }
 
     clearUserSession();
-    redirectToLogin();
+    redirectToLogin({ loggedOut: true });
     return false;
 }
 
 /**
  * Redirect to login page if not authenticated
  */
-function redirectToLogin() {
-    window.location.href = 'mainpage.html';
+function redirectToLogin(options) {
+    const cfg = options || {};
+    window.location.href = cfg.loggedOut ? 'mainpage.html?logged_out=1' : 'mainpage.html';
 }
 
 /**
  * Initialize the dashboard
  */
 function initializeDashboard() {
+    setupChangePasswordForm();
+    setupPasswordToggles();
     loadUserInfo();
     setupMobileDrawer();
     setupHeaderPanels();
@@ -123,19 +133,30 @@ function initializeDashboard() {
     setupEvaluationForm();
     updateEvaluationTargetIndicator();
     setupProfileActions();
-    setupChangePasswordForm();
-    setupPasswordToggles();
     setupHistoryView();
     setupStudentProofModal();
     refreshStudentProofRequirement();
+    renderStudentClearance();
     setupStudentHeroActions();
+    if (SharedData.refreshBootstrap) {
+        SharedData.refreshBootstrap(false)
+            .then(loadUserInfo)
+            .catch(function (error) {
+                console.warn('[StudentPanel] Unable to refresh profile data after bootstrap.', error);
+            });
+    }
 
     SharedData.onDataChange(function (key) {
         if (key === SharedData.KEYS.USERS) {
+            loadUserInfo();
             if (!enforceActiveStudentAccount({ inline: false })) {
                 return;
             }
             renderStudentAnnouncements();
+        }
+
+        if (key === SharedData.KEYS.SETTINGS || key === 'profileData') {
+            loadUserInfo();
         }
 
         if (
@@ -144,7 +165,8 @@ function initializeDashboard() {
             key === SharedData.KEYS.CURRENT_SEMESTER ||
             key === SharedData.KEYS.EVAL_PERIODS ||
             key === SharedData.KEYS.STUDENT_DATA_PRIVACY_CONSENTS ||
-            key === SharedData.KEYS.STUDENT_EVAL_PROOF_REQUESTS
+            key === SharedData.KEYS.STUDENT_EVAL_PROOF_REQUESTS ||
+            key === SharedData.KEYS.OSA_STUDENT_CLEARANCES
         ) {
             renderAssignedEvaluationList();
             refreshEvaluationStatuses();
@@ -153,6 +175,7 @@ function initializeDashboard() {
             updateStudentDataPrivacyGateUi();
             renderStudentAnnouncements();
             refreshStudentProofRequirement();
+            renderStudentClearance();
         }
 
         if (key === SharedData.KEYS.ANNOUNCEMENTS) {
@@ -207,8 +230,28 @@ function normalizeCompact(value) {
     return normalizeLookup(value).replace(/[^a-z0-9]/g, '');
 }
 
+function normalizeStudentUserIdToken(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^u\d+$/i.test(raw)) return 'u' + raw.replace(/^u/i, '');
+    if (/^\d+$/.test(raw)) return 'u' + String(parseInt(raw, 10));
+    return normalizeLookup(raw);
+}
+
+function firstNonEmptyValue() {
+    for (let index = 0; index < arguments.length; index += 1) {
+        const value = arguments[index];
+        if (value == null) continue;
+        const text = String(value).trim();
+        if (text) return text;
+    }
+    return '';
+}
+
 function resolveCurrentStudentUser(session) {
-    const users = SharedData.getUsers() || [];
+    const users = (SharedData.getCachedUsers && SharedData.getCachedUsers())
+        || (SharedData.getUsers && SharedData.getUsers())
+        || [];
     const students = users.filter(function (u) { return normalizeLookup(u && u.role) === 'student'; });
     if (!students.length) return null;
 
@@ -219,7 +262,7 @@ function resolveCurrentStudentUser(session) {
 
     if (sessionUserId) {
         const byId = students.find(function (u) {
-            return String(u && u.id || '').trim() === sessionUserId;
+            return normalizeStudentUserIdToken(u && u.id) === normalizeStudentUserIdToken(sessionUserId);
         });
         if (byId) return byId;
     }
@@ -880,18 +923,58 @@ function loadUserInfo() {
     if (session) {
         try {
             const studentUser = resolveCurrentStudentUser(session);
-            const displayName = studentUser && studentUser.name
-                ? studentUser.name
-                : (session.username || 'Student');
+            const profileData = SharedData.getProfileData && SharedData.getProfileData();
+            const displayName = firstNonEmptyValue(
+                studentUser && studentUser.name,
+                session.fullName,
+                session.username,
+                'Student'
+            );
             const academicYear = (SharedData.getSettings && SharedData.getSettings().academicYear) || '2025-2026';
-            const yearSection = studentUser ? (studentUser.yearSection || '') : '';
+            const yearSection = firstNonEmptyValue(
+                studentUser && studentUser.yearSection,
+                profileData && profileData.yearSection
+            );
             const yearLevel = parseYearLevel(yearSection);
-            const campus = toTitleWords(studentUser ? studentUser.campus : '');
-            const departmentRaw = studentUser ? (studentUser.department || studentUser.institute || '') : '';
+            const campus = toTitleWords(firstNonEmptyValue(
+                studentUser && studentUser.campus,
+                session.campus,
+                session.campusSlug
+            ));
+            const departmentRaw = firstNonEmptyValue(
+                studentUser && studentUser.department,
+                studentUser && studentUser.institute,
+                session.department,
+                session.institute
+            );
             const department = String(departmentRaw || '').trim().toUpperCase();
-            const program = department || 'N/A';
-            const studentId = studentUser ? (studentUser.studentNumber || session.username || '') : (session.username || '');
-            const status = toTitleWords(studentUser ? (studentUser.status || 'active') : '');
+            const programCode = firstNonEmptyValue(
+                studentUser && studentUser.programCode,
+                studentUser && studentUser.program,
+                session.programCode,
+                session.program
+            ).toUpperCase();
+            const programName = firstNonEmptyValue(
+                studentUser && studentUser.programName,
+                session.programName
+            );
+            const program = programCode && programName
+                ? `${programCode} - ${programName}`
+                : firstNonEmptyValue(programCode, programName, department);
+            const studentId = firstNonEmptyValue(
+                studentUser && studentUser.studentNumber,
+                session.studentNumber,
+                session.username
+            );
+            const email = firstNonEmptyValue(
+                studentUser && studentUser.email,
+                session.email
+            );
+            const status = toTitleWords(firstNonEmptyValue(
+                studentUser && studentUser.status,
+                session.status,
+                'active'
+            ));
 
             // Top-right profile button
             const userProfileSpan = document.querySelector('.user-profile span');
@@ -907,7 +990,7 @@ function loadUserInfo() {
             setTextById('profileStudentName', displayName);
             setTextById('profileStudentId', studentId);
             setTextById('profileStudentProgram', program);
-            setTextById('profileStudentEmail', studentUser ? studentUser.email : '');
+            setTextById('profileStudentEmail', email);
             setTextById('profileStudentCampus', campus);
             setTextById('profileStudentDepartment', department);
             setTextById('profileStudentYearSection', yearSection);
@@ -1039,6 +1122,60 @@ function normalizeProofUserId(value) {
     const numeric = raw.match(/^\d+$/);
     if (numeric) return `u${String(parseInt(raw, 10))}`;
     return raw.toLowerCase();
+}
+
+function findCurrentStudentClearance() {
+    const session = getUserSession() || {};
+    const currentStudent = resolveCurrentStudentUser(session);
+    const currentUserId = normalizeProofUserId(currentStudent && currentStudent.id);
+    const currentStudentNumber = normalizeValue(currentStudent && currentStudent.studentNumber);
+    const currentSemester = normalizeValue(getActiveSemesterId());
+    const rows = SharedData.getOsaStudentClearances
+        ? SharedData.getOsaStudentClearances()
+        : [];
+
+    return (Array.isArray(rows) ? rows : []).find(function (row) {
+        if (!row || normalizeValue(row.semesterId) !== currentSemester) return false;
+        const rowUserId = normalizeProofUserId(row.studentUserId);
+        const rowStudentNumber = normalizeValue(row.studentNumber);
+        return (currentUserId && rowUserId === currentUserId)
+            || (currentStudentNumber && rowStudentNumber === currentStudentNumber);
+    }) || null;
+}
+
+function renderStudentClearance() {
+    const statusEl = document.getElementById('studentClearanceStatus');
+    const referenceEl = document.getElementById('studentClearanceReference');
+    const generatedAtEl = document.getElementById('studentClearanceGeneratedAt');
+    const methodEl = document.getElementById('studentClearanceMethod');
+    const noteEl = document.getElementById('studentClearanceNote');
+    if (!statusEl || !referenceEl || !generatedAtEl || !methodEl || !noteEl) return;
+
+    const clearance = findCurrentStudentClearance();
+    if (!clearance || normalizeValue(clearance.status || 'cleared') !== 'cleared') {
+        statusEl.textContent = 'Pending';
+        statusEl.classList.remove('cleared');
+        statusEl.classList.add('pending');
+        referenceEl.textContent = 'Not generated';
+        generatedAtEl.textContent = 'Not available';
+        methodEl.textContent = 'Not available';
+        noteEl.textContent = 'Complete all assigned evaluations to receive an automatic clearance reference.';
+        return;
+    }
+
+    const method = normalizeValue(clearance.generationMethod) === 'automatic' ? 'Automatic' : 'Manual';
+    const generatedAt = String(clearance.generatedAt || clearance.notedAt || '').trim();
+    statusEl.textContent = 'Cleared';
+    statusEl.classList.remove('pending');
+    statusEl.classList.add('cleared');
+    referenceEl.textContent = String(clearance.clearanceReference || 'Unavailable');
+    generatedAtEl.textContent = generatedAt
+        ? (SharedData.formatDateTimeInPhilippines(generatedAt) || generatedAt)
+        : 'Unavailable';
+    methodEl.textContent = method;
+    noteEl.textContent = method === 'Automatic'
+        ? 'Generated automatically after all assigned evaluations were submitted.'
+        : 'Approved manually by an authorized OSA user.';
 }
 
 function getStudentEvaluationPeriodStateForProof() {
@@ -1349,6 +1486,19 @@ function refreshStudentProofRequirement() {
         return;
     }
 
+    if (
+        SharedData.isStudentEvaluationProofRequestsReady
+        && !SharedData.isStudentEvaluationProofRequestsReady()
+    ) {
+        closeStudentProofModal();
+        if (SharedData.refreshStudentEvaluationProofRequests) {
+            SharedData.refreshStudentEvaluationProofRequests().catch(function (error) {
+                console.warn('[StudentPanel] Unable to load evaluation proof status.', error);
+            });
+        }
+        return;
+    }
+
     const periodState = getStudentEvaluationPeriodStateForProof();
     const completion = buildCurrentStudentCompletionSnapshotForProof();
     if (!completion.ready || !periodState.isClosed || !completion.hasIncomplete) {
@@ -1622,23 +1772,34 @@ function setupLogout() {
  * Handle logout process
  */
 function handleLogout() {
-    // Clear session data
-    clearUserSession();
-
-    // Show logout message
     showLogoutMessage();
+    let redirected = false;
+    const redirect = function () {
+        if (redirected) return;
+        redirected = true;
+        window.location.replace('mainpage.html?logged_out=1');
+    };
 
-    // Redirect to login page after short delay
-    setTimeout(() => {
-        window.location.href = 'mainpage.html';
-    }, 500);
+    try {
+        const result = clearUserSession();
+        if (result && typeof result.finally === 'function') {
+            result.finally(redirect);
+        } else {
+            redirect();
+        }
+    } catch (error) {
+        console.warn('[StudentPanel] Logout cleanup failed; redirecting to login.', error);
+        redirect();
+    }
+
+    setTimeout(redirect, 1200);
 }
 
 /**
  * Clear user session from localStorage
  */
 function clearUserSession() {
-    SharedData.clearSession();
+    return SharedData.clearSession();
 }
 
 /**
@@ -2412,6 +2573,11 @@ function updateDraftStatusIndicator(options) {
         return;
     }
 
+    if (state === 'saving') {
+        statusEl.textContent = 'Saving draft...';
+        return;
+    }
+
     if (state === 'error') {
         statusEl.textContent = String(cfg.message || 'Unable to save draft.');
         statusEl.classList.add('is-error');
@@ -2477,6 +2643,7 @@ function collectDraftPayload() {
         qualitative: qualitative,
         comments: comments,
         updatedAt: SharedData.getNowIsoString(),
+        clientDraftVersion: evaluationDraftState.localVersion,
         status: 'draft'
     };
 }
@@ -2486,45 +2653,92 @@ function persistEvaluationDraft(options) {
     const silent = cfg.silent === true;
 
     if (!enforceActiveStudentAccount({ inline: !silent })) {
-        return { success: false, error: new Error('Account is inactive') };
+        return Promise.resolve({ success: false, error: new Error('Account is inactive') });
     }
 
     const payload = collectDraftPayload();
 
     if (!payload) {
-        return { success: false, skipped: true };
+        return Promise.resolve({ success: false, skipped: true });
     }
 
-    try {
+    if (evaluationDraftState.localVersion <= 0 || cfg.source !== 'autosave') {
+        evaluationDraftState.localVersion += 1;
+    }
+
+    const saveVersion = evaluationDraftState.localVersion;
+    payload.clientDraftVersion = saveVersion;
+
+    if (evaluationDraftState.pendingPromise) {
+        evaluationDraftState.queuedWhilePending = true;
+        if (!silent) {
+            evaluationDraftState.queuedShowToast = true;
+        }
+        updateDraftStatusIndicator({ state: 'pending' });
+        return evaluationDraftState.pendingPromise.then(function () {
+            return { success: true, queued: true };
+        });
+    }
+
+    updateDraftStatusIndicator({ state: 'saving' });
+
+    const savePromise = Promise.resolve().then(function () {
         const response = SharedData.upsertStudentEvaluationDraft
             ? SharedData.upsertStudentEvaluationDraft(payload)
             : { success: false, error: 'Draft persistence is unavailable.' };
+        return Promise.resolve(response);
+    }).then(function (response) {
 
         if (!response || response.success !== true) {
             throw new Error(response && response.error ? response.error : 'Failed to save draft.');
         }
 
         const savedDraft = response.draft || payload;
-        evaluationDraftState.lastSavedAt = String(savedDraft.updatedAt || payload.updatedAt || '').trim();
-        evaluationDraftState.lastDraftKey = payload.draftKey;
-        updateDraftStatusIndicator({ state: 'saved', updatedAt: evaluationDraftState.lastSavedAt });
+        const isLatest = evaluationDraftState.localVersion <= saveVersion
+            && evaluationDraftState.lastDraftKey === payload.draftKey;
+        if (isLatest) {
+            evaluationDraftState.lastSavedAt = String(savedDraft.updatedAt || payload.updatedAt || '').trim();
+            updateDraftStatusIndicator({ state: 'saved', updatedAt: evaluationDraftState.lastSavedAt });
+        } else {
+            updateDraftStatusIndicator({ state: 'pending' });
+        }
 
-        if (!silent) {
+        if (!silent && isLatest) {
             showSuccessMessage('Draft saved.');
         }
 
         return { success: true, draft: savedDraft };
-    } catch (error) {
+    }).catch(function (error) {
         console.error('[StudentDraft] Failed to save draft.', error);
-        updateDraftStatusIndicator({
-            state: 'error',
-            message: 'Draft save failed. Try again.'
-        });
+        if (evaluationDraftState.localVersion <= saveVersion) {
+            updateDraftStatusIndicator({
+                state: 'error',
+                message: 'Draft save failed. Try again.'
+            });
+        }
         if (!silent) {
             showErrorMessage(error && error.message ? error.message : 'Failed to save draft. Please try again.');
         }
         return { success: false, error: error };
-    }
+    }).finally(function () {
+        const shouldSaveQueued = evaluationDraftState.queuedWhilePending
+            || evaluationDraftState.localVersion > saveVersion;
+        const showQueuedToast = evaluationDraftState.queuedShowToast;
+        evaluationDraftState.pendingPromise = null;
+        evaluationDraftState.pendingVersion = 0;
+        evaluationDraftState.queuedWhilePending = false;
+        evaluationDraftState.queuedShowToast = false;
+        if (shouldSaveQueued && !evaluationDraftState.clearRequested) {
+            setTimeout(function () {
+                persistEvaluationDraft({ silent: !showQueuedToast, source: 'queued' });
+            }, 0);
+        }
+    });
+
+    evaluationDraftState.lastDraftKey = payload.draftKey;
+    evaluationDraftState.pendingVersion = saveVersion;
+    evaluationDraftState.pendingPromise = savePromise;
+    return savePromise;
 }
 
 function removeAutosaveTimer() {
@@ -2541,6 +2755,8 @@ function queueDraftAutosave() {
     if (!context.valid) return;
 
     removeAutosaveTimer();
+    evaluationDraftState.localVersion += 1;
+    evaluationDraftState.lastDraftKey = context.draftKey;
     updateDraftStatusIndicator({ state: 'pending' });
     evaluationDraftState.autosaveTimer = setTimeout(() => {
         evaluationDraftState.autosaveTimer = null;
@@ -2552,26 +2768,40 @@ function clearCurrentEvaluationDraft(options) {
     const cfg = options || {};
     const silent = cfg.silent === true;
     removeAutosaveTimer();
+    evaluationDraftState.clearRequested = true;
+    evaluationDraftState.queuedWhilePending = false;
+    evaluationDraftState.queuedShowToast = false;
 
     if (!enforceActiveStudentAccount({ inline: !silent })) {
-        return { success: false, error: new Error('Account is inactive') };
+        evaluationDraftState.clearRequested = false;
+        return Promise.resolve({ success: false, error: new Error('Account is inactive') });
     }
 
     const context = buildEvaluationDraftContext();
     if (!context.valid || !context.draftKey) {
         evaluationDraftState.lastSavedAt = '';
         evaluationDraftState.lastDraftKey = '';
+        evaluationDraftState.clearRequested = false;
         updateDraftStatusIndicator({ state: 'idle' });
-        return { success: true, skipped: true };
+        return Promise.resolve({ success: true, skipped: true });
     }
 
-    try {
+    return Promise.resolve().then(function () {
+        if (evaluationDraftState.pendingPromise) {
+            return evaluationDraftState.pendingPromise.catch(function () {
+                return null;
+            });
+        }
+        return null;
+    }).then(function () {
         const response = SharedData.removeStudentEvaluationDraft
             ? SharedData.removeStudentEvaluationDraft(context.draftKey, {
                 studentUserId: context.studentUserId,
                 studentId: context.studentId
             })
             : { success: true };
+        return Promise.resolve(response);
+    }).then(function (response) {
 
         if (response && response.success === false) {
             throw new Error(response.error || 'Failed to clear draft.');
@@ -2579,9 +2809,15 @@ function clearCurrentEvaluationDraft(options) {
 
         evaluationDraftState.lastSavedAt = '';
         evaluationDraftState.lastDraftKey = '';
+        evaluationDraftState.localVersion = 0;
+        evaluationDraftState.pendingVersion = 0;
+        evaluationDraftState.queuedWhilePending = false;
+        evaluationDraftState.queuedShowToast = false;
+        evaluationDraftState.clearRequested = false;
         updateDraftStatusIndicator({ state: 'idle' });
         return { success: true };
-    } catch (error) {
+    }).catch(function (error) {
+        evaluationDraftState.clearRequested = false;
         console.error('[StudentDraft] Failed to clear draft.', error);
         updateDraftStatusIndicator({
             state: 'error',
@@ -2591,7 +2827,7 @@ function clearCurrentEvaluationDraft(options) {
             showErrorMessage(error && error.message ? error.message : 'Failed to clear draft.');
         }
         return { success: false, error: error };
-    }
+    });
 }
 
 function restoreDraftForCurrentTarget() {
@@ -3123,49 +3359,108 @@ function hideAccountActionCards() {
  * Setup change password form functionality
  */
 function setupChangePasswordForm() {
+    if (studentChangePasswordBound) return;
     const form = document.getElementById('changePasswordForm');
     if (!form) return;
 
     form.addEventListener('submit', function (e) {
         e.preventDefault();
-        handleChangePassword();
+        handleChangePassword().catch(function (error) {
+            console.error('[StudentPanel] Unexpected password update failure.', error);
+            setChangePasswordFeedback('Failed to update password. Please try again.', 'error');
+        });
     });
+    form.addEventListener('reset', function () {
+        setChangePasswordFeedback('', '');
+    });
+    studentChangePasswordBound = true;
+}
+
+function setChangePasswordFeedback(message, tone) {
+    const feedback = document.getElementById('changePasswordFeedback');
+    if (!feedback) return;
+
+    const text = String(message || '').trim();
+    feedback.textContent = text;
+    feedback.className = 'change-password-feedback ui-message';
+    feedback.hidden = text === '';
+    if (!text) return;
+
+    feedback.classList.add(tone === 'success' ? 'ui-message--success' : 'ui-message--error');
 }
 
 /**
- * Placeholder change password handler (SQL-ready)
+ * Change the authenticated student's password through the application API.
  */
-function handleChangePassword() {
-    const currentPassword = document.getElementById('currentPassword').value.trim();
-    const newPassword = document.getElementById('newPassword').value.trim();
-    const confirmPassword = document.getElementById('confirmPassword').value.trim();
+async function handleChangePassword() {
+    const form = document.getElementById('changePasswordForm');
+    const currentPasswordInput = document.getElementById('currentPassword');
+    const newPasswordInput = document.getElementById('newPassword');
+    const confirmPasswordInput = document.getElementById('confirmPassword');
+    const submitButton = document.getElementById('changePasswordSubmitBtn');
+    if (!form || !currentPasswordInput || !newPasswordInput || !confirmPasswordInput || !submitButton) {
+        setChangePasswordFeedback('Password update form is unavailable. Please refresh the page.', 'error');
+        return;
+    }
+
+    const currentPassword = currentPasswordInput.value.trim();
+    const newPassword = newPasswordInput.value.trim();
+    const confirmPassword = confirmPasswordInput.value.trim();
+    setChangePasswordFeedback('', '');
 
     if (!currentPassword || !newPassword || !confirmPassword) {
-        showErrorMessage('Please fill out all password fields.');
+        setChangePasswordFeedback('Please fill out all password fields.', 'error');
         return;
     }
 
     if (newPassword !== confirmPassword) {
-        showErrorMessage('New password and confirmation do not match.');
+        setChangePasswordFeedback('New password and confirmation do not match.', 'error');
         return;
     }
 
-    if (!SharedData.changeOwnPassword) {
-        showErrorMessage('Password update service is unavailable.');
+    if (newPassword.length < 8) {
+        setChangePasswordFeedback('New password must be at least 8 characters.', 'error');
         return;
     }
+
+    if (newPassword.length > 255) {
+        setChangePasswordFeedback('New password must not exceed 255 characters.', 'error');
+        return;
+    }
+
+    if (newPassword === currentPassword) {
+        setChangePasswordFeedback('New password must be different from current password.', 'error');
+        return;
+    }
+
+    if (!SharedData.changeOwnPasswordAsync && !SharedData.changeOwnPassword) {
+        setChangePasswordFeedback('Password update service is unavailable.', 'error');
+        return;
+    }
+
+    const originalButtonText = submitButton.textContent;
+    submitButton.disabled = true;
+    submitButton.textContent = 'Updating...';
 
     try {
-        SharedData.changeOwnPassword(currentPassword, newPassword);
-        showSuccessMessage('Password updated successfully.');
+        const result = SharedData.changeOwnPasswordAsync
+            ? await SharedData.changeOwnPasswordAsync(currentPassword, newPassword)
+            : SharedData.changeOwnPassword(currentPassword, newPassword);
+        if (!result || result.success !== true || result.updated !== true) {
+            throw new Error('The password was not updated. Please try again.');
+        }
+        form.reset();
+        setChangePasswordFeedback('Password updated successfully. You can use it on your next sign-in.', 'success');
     } catch (error) {
         console.error('[StudentPanel] Failed to update password.', error);
-        showErrorMessage(error && error.message ? error.message : 'Failed to update password.');
-        return;
+        setChangePasswordFeedback(
+            error && error.message ? error.message : 'Failed to update password.',
+            'error'
+        );
+    } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = originalButtonText;
     }
-
-    const form = document.getElementById('changePasswordForm');
-    if (form) form.reset();
 }
 
 /**
@@ -3511,8 +3806,8 @@ function handleFormSubmission() {
             .then(response => {
                 showSuccessMessage('Evaluation submitted successfully!');
                 // Reset form after short delay
-                setTimeout(() => {
-                    clearCurrentEvaluationDraft({ silent: true });
+                setTimeout(async () => {
+                    await clearCurrentEvaluationDraft({ silent: true });
                     form.reset();
                     clearSelectedEvaluationTarget();
                     updateEvaluationTargetIndicator();
@@ -3618,36 +3913,39 @@ function collectFormData() {
  * @returns {Promise} - API response
  */
 function submitEvaluation(data) {
-    return new Promise((resolve, reject) => {
-        try {
-            // Get user session metadata
-            const session = SharedData.getSession() || {};
-            const evaluatorData = {
-                evaluatorRole: 'student',
-                evaluatorName: session.fullName || 'Anonymous Student',
-                evaluatorUsername: session.username || 'unknown',
-                evaluationType: 'student',
-                ...data
-            };
+    const session = SharedData.getSession() || {};
+    const evaluatorData = {
+        evaluatorRole: 'student',
+        evaluatorName: session.fullName || 'Anonymous Student',
+        evaluatorUsername: session.username || 'unknown',
+        evaluationType: 'student',
+        ...data
+    };
 
-            // Save via centralized API
-            SharedData.addEvaluation(evaluatorData);
+    const saveEvaluation = SharedData.addEvaluationAsync
+        ? SharedData.addEvaluationAsync(evaluatorData)
+        : Promise.reject(new Error('Asynchronous evaluation submission is unavailable.'));
 
-            // Add to activity log
-            SharedData.addActivityLogEntry({
-                type: 'evaluation_submitted',
-                title: 'Evaluation Submitted',
-                user: evaluatorData.evaluatorName,
-                role: 'student',
-                date: SharedData.getNowIsoString()
-            });
-
-            setTimeout(() => {
+    return saveEvaluation.then(function () {
+        const logEntry = {
+            type: 'evaluation_submitted',
+            title: 'Evaluation Submitted',
+            user: evaluatorData.evaluatorName,
+            role: 'student',
+            date: SharedData.getNowIsoString()
+        };
+        const saveLog = SharedData.addActivityLogEntryAsync
+            ? SharedData.addActivityLogEntryAsync(logEntry)
+            : Promise.reject(new Error('Asynchronous activity logging is unavailable.'));
+        return saveLog.catch(function () {
+            return null;
+        });
+    }).then(function () {
+        return new Promise(function (resolve) {
+            setTimeout(function () {
                 resolve({ success: true, message: 'Evaluation submitted successfully to local database' });
-            }, 600); // UI feedback delay
-        } catch (error) {
-            reject(error);
-        }
+            }, 600);
+        });
     });
 }
 

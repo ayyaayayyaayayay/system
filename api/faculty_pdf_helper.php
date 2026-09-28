@@ -5,6 +5,7 @@ declare(strict_types=1);
 use setasign\Fpdi\Fpdi;
 
 require_once __DIR__ . '/time_helper.php';
+require_once __DIR__ . '/faculty_paper_storage.php';
 
 function facultyPdfEnsureAutoload(): void
 {
@@ -754,17 +755,7 @@ function facultyPdfSanitizePathPart(string $value): string
 
 function facultyPdfGetStorageRoot(): string
 {
-    $root = __DIR__ . '/../files/faculty_papers';
-    if (!is_dir($root)) {
-        if (!mkdir($root, 0775, true) && !is_dir($root)) {
-            throw new RuntimeException('Unable to create PDF storage root directory.');
-        }
-    }
-    $realRoot = realpath($root);
-    if ($realRoot === false) {
-        throw new RuntimeException('Unable to resolve PDF storage root path.');
-    }
-    return str_replace('\\', '/', $realRoot);
+    return naapFacultyPaperGetStorageRoot(true);
 }
 
 function facultyPdfPersistPaperVersion(
@@ -791,45 +782,15 @@ function facultyPdfPersistPaperVersion(
     $timestamp = getAuthoritativePhilippineFormatted('Ymd_His');
     $filename = sprintf('%s_%s_v%d_%s_%s.pdf', $safePaperId, $safeLoadType, $nextVersion, $safeStatus, $timestamp);
 
-    $root = facultyPdfGetStorageRoot();
-    $paperDir = $root . '/' . $safePaperId;
-    if (!is_dir($paperDir)) {
-        if (!mkdir($paperDir, 0775, true) && !is_dir($paperDir)) {
-            throw new RuntimeException('Unable to create paper PDF directory.');
-        }
-    }
-
-    $realPaperDir = realpath($paperDir);
-    if ($realPaperDir === false) {
-        throw new RuntimeException('Unable to resolve paper PDF directory.');
-    }
-    $realPaperDir = str_replace('\\', '/', $realPaperDir);
-    if (strpos($realPaperDir, $root) !== 0) {
-        throw new RuntimeException('Invalid paper PDF directory.');
-    }
-
-    $absolutePath = $realPaperDir . '/' . $filename;
     $relativePath = 'files/faculty_papers/' . $safePaperId . '/' . $filename;
 
     $paperData = facultyPdfBuildPaperDataFromRecord($paper);
     $binary = facultyPdfGenerateBinary($paperData);
-    $bytesWritten = @file_put_contents($absolutePath, $binary, LOCK_EX);
-    if ($bytesWritten === false) {
-        throw new RuntimeException('Failed to write generated PDF file.');
-    }
-
-    $realFile = realpath($absolutePath);
-    if ($realFile === false) {
-        throw new RuntimeException('Unable to resolve saved PDF file path.');
-    }
-    $realFile = str_replace('\\', '/', $realFile);
-    if (strpos($realFile, $root) !== 0) {
-        throw new RuntimeException('Saved PDF file path is outside storage root.');
-    }
+    $realFile = naapFacultyPaperAtomicWrite($relativePath, $binary);
 
     $sizeBytes = @filesize($realFile);
     if (!is_int($sizeBytes) || $sizeBytes < 0) {
-        $sizeBytes = (int)$bytesWritten;
+        $sizeBytes = strlen($binary);
     }
 
     $version = [
@@ -890,10 +851,10 @@ function facultyPdfResolveStoredFile(array $paper, ?int $versionNo = null): arra
         throw new RuntimeException('Stored PDF path is invalid.');
     }
 
-    $root = facultyPdfGetStorageRoot();
-    $absPath = str_replace('\\', '/', realpath(__DIR__ . '/../' . $relativePath) ?: '');
-    if ($absPath === '' || !is_file($absPath) || strpos($absPath, $root) !== 0) {
-        throw new RuntimeException('Stored PDF file is missing.');
+    try {
+        $absPath = naapFacultyPaperResolvePrivateFile($relativePath);
+    } catch (Throwable $error) {
+        throw new RuntimeException('Stored PDF file is unavailable.');
     }
 
     $fileName = trim((string)($chosen['file_name'] ?? ''));
@@ -945,7 +906,7 @@ function facultyPdfCanAccessStoredFile(array $paper, string $actorRole, string $
             && ($status === 'sent' || $status === 'completed');
     }
 
-    if ($role === 'hr' || $role === 'vpaa') {
+    if ($role === 'hr' || $role === 'vpaa' || $role === 'admin') {
         return true;
     }
 

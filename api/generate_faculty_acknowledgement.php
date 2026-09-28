@@ -27,6 +27,19 @@ function sendJsonError(string $message, int $statusCode = 400): void
     exit();
 }
 
+set_exception_handler(function (Throwable $error): void {
+    if ($error instanceof CampusAccessDeniedException) {
+        sendJsonError('Campus access denied.', 403);
+    }
+    if ($error instanceof CampusNotFoundException) {
+        sendJsonError('Invalid campus selected.', 404);
+    }
+    if (isNaapSchemaMigrationRequiredException($error)) {
+        sendNaapSchemaMigrationRequiredJson($error);
+    }
+    sendNaapServerErrorJson($error, 'faculty_acknowledgement.unhandled');
+});
+
 function sanitizeFilenamePart(string $value): string
 {
     $slug = strtolower(trim($value));
@@ -101,6 +114,46 @@ if (!is_array($payload)) {
     sendJsonError('Invalid JSON payload.', 400);
 }
 
+$campusContext = buildCampusAuthorizationContext($pdo, $sessionUser);
+campusAuthorizationValidatePayloadCampuses($pdo, $campusContext, $payload, 'faculty-acknowledgement-preview');
+
+if ($actorRole === 'professor') {
+    $payload['faculty_name'] = trim((string)($sessionUser['name'] ?? ''));
+    $payload['department'] = trim((string)($sessionUser['department'] ?? $sessionUser['institute'] ?? ''));
+    $payload['rank'] = trim((string)($sessionUser['position'] ?? $sessionUser['rank'] ?? ''));
+} else {
+    $paperId = trim((string)($payload['paper_id'] ?? ''));
+    if ($paperId === '') {
+        sendJsonError('paper_id is required.', 400);
+    }
+    $paper = findFacultyAcknowledgementPaperSnapshotByCode($pdo, $paperId);
+    if (!$paper) {
+        sendJsonError('Paper not found.', 404);
+    }
+    campusAuthorizationAssertResourceAccess(
+        $pdo,
+        $campusContext,
+        'faculty_paper',
+        $paperId,
+        'faculty-acknowledgement-preview'
+    );
+    if (!facultyPdfCanAccessStoredFile(
+        $paper,
+        $actorRole,
+        (string)($sessionUser['id'] ?? ''),
+        $sessionUser
+    )) {
+        sendJsonError('Permission denied.', 403);
+    }
+    $payload['faculty_name'] = (string)($paper['professor_name'] ?? '');
+    $payload['department'] = (string)($paper['department'] ?? '');
+    $payload['rank'] = (string)($paper['rank'] ?? '');
+    $payload['semester_label'] = (string)($paper['semester_label'] ?? '');
+    $payload['load_type'] = (string)($paper['load_type'] ?? 'main');
+    $payload['set_rating'] = $paper['set_rating'] ?? 'N/A';
+    $payload['saf_rating'] = $paper['saf_rating'] ?? 'N/A';
+}
+
 $loadType = facultyPdfNormalizeLoadType($payload['load_type'] ?? 'main');
 $semesterLabel = normalizeRequiredString($payload, 'semester_label');
 $legacyApprovalAutoFill = facultyPdfNormalizeApprovalAutoFillValue($payload['approval_auto_fill'] ?? false);
@@ -154,5 +207,5 @@ try {
     echo $pdfBinary;
     exit();
 } catch (Throwable $exception) {
-    sendJsonError('Failed to generate PDF: ' . $exception->getMessage(), 500);
+    sendNaapServerErrorJson($exception, 'faculty_acknowledgement.generate');
 }

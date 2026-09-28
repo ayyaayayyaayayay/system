@@ -17,6 +17,7 @@ let adminUsers = [];
 let hrNotificationHandlersBound = false;
 let hrAnnouncementComposerReady = false;
 let hrUsersRefreshPromise = null;
+let hrUsersRefreshKey = '';
 let hrUsersLastRefreshAt = 0;
 let hrEvaluationOverviewChartInstance = null;
 let hrSemestralPerformanceChartInstance = null;
@@ -27,8 +28,25 @@ let hrMobileDrawerBound = false;
 let hrProfessorViewportBound = false;
 let hrProfessorMobileMode = null;
 const HR_USERS_REFRESH_INTERVAL_MS = 30000;
+const HR_PROFESSORS_PAGE_SIZE = 100;
+const HR_DASHBOARD_PROFESSOR_RANKING_PAGE_SIZE = 500;
 const HR_DRAWER_BREAKPOINT = 1000;
 const HR_PHONE_BREAKPOINT = 640;
+const HR_EMPLOYMENT_TYPE_OPTIONS = [
+    { value: 'Permanent', label: 'Permanent' },
+    { value: 'COS', label: 'COS' },
+    { value: 'Temporary', label: 'Temporary' },
+];
+let hrProfessorPage = 1;
+let hrProfessorPageMeta = { total: 0, limit: HR_PROFESSORS_PAGE_SIZE, offset: 0, page: 1, hasMore: false };
+let hrDashboardSummary = null;
+let hrDashboardSummaryPromise = null;
+let hrDashboardSummaryTimer = null;
+let hrDashboardCountFallbackPromise = null;
+let hrDashboardLastStats = null;
+let hrDashboardProfessorRankingData = [];
+let hrDashboardProfessorRankingPromise = null;
+let hrDashboardProfessorRankingLoaded = false;
 
 function escapeHtml(value) {
     return String(value == null ? '' : value)
@@ -96,51 +114,134 @@ const HR_VIEW_META = {
 /**
  * Fetch users from PHP API, with SharedData fallback
  */
-function fetchUsersFromApi(campus = 'all', search = '') {
-    return Promise.resolve().then(() => {
-        adminUsers = SharedData.listUsers({ campus, search });
+function getHrProfessorFilterValue(id) {
+    const el = document.getElementById(id);
+    return el ? String(el.value || '').trim() : 'all';
+}
+
+function buildHrProfessorFilters(campus = 'all', search = '', page = hrProfessorPage) {
+    const filters = {
+        role: 'professor',
+        limit: HR_PROFESSORS_PAGE_SIZE,
+        page: Math.max(1, Number(page) || 1),
+    };
+    const normalizedCampus = String(campus || '').trim().toLowerCase();
+    const normalizedSearch = String(search || '').trim();
+    const department = String(currentDepartmentFilter || '').trim().toUpperCase();
+    const status = getHrProfessorFilterValue('professor-status-filter').toLowerCase();
+    const program = normalizeHrProgramCode(getHrProfessorFilterValue('professor-program-filter'));
+
+    if (normalizedCampus && normalizedCampus !== 'all') filters.campus = normalizedCampus;
+    if (normalizedSearch) filters.search = normalizedSearch;
+    if (department && department !== 'ALL') filters.department = department;
+    filters.status = status || 'active';
+    if (program && program !== 'ALL') filters.program = program;
+
+    return filters;
+}
+
+function hasActiveHrProfessorFilters() {
+    const campus = normalizeHrToken(currentProfessorCampusFilter);
+    const department = String(currentDepartmentFilter || '').trim().toUpperCase();
+    const status = getHrProfessorFilterValue('professor-status-filter').toLowerCase();
+    const program = normalizeHrProgramCode(getHrProfessorFilterValue('professor-program-filter'));
+
+    return (campus && campus !== 'all')
+        || (department && department !== 'ALL')
+        || (status && status !== 'all')
+        || (program && program !== 'ALL');
+}
+
+function shouldLoadHrProfessorList() {
+    return hasProfessorSearchRun || hasActiveHrProfessorFilters();
+}
+
+function refreshHrProfessorListForCurrentFilters(force = true) {
+    if (!shouldLoadHrProfessorList()) {
+        hrProfessorPageMeta = { total: 0, limit: HR_PROFESSORS_PAGE_SIZE, offset: 0, page: 1, hasMore: false };
+        loadProfessorsData([]);
+        renderProfessors();
+        return Promise.resolve([]);
+    }
+    return refreshHrUsersInBackground(force);
+}
+
+function normalizeHrProfessorPageResult(result, fallbackFilters) {
+    if (result && Array.isArray(result.users)) {
+        return result;
+    }
+    const users = Array.isArray(result)
+        ? result
+        : (SharedData.listUsers ? SharedData.listUsers(fallbackFilters) : []);
+    const meta = SharedData.getLastUsersPageMeta
+        ? SharedData.getLastUsersPageMeta()
+        : (SharedData.getUserListMeta ? SharedData.getUserListMeta() : {});
+    return {
+        users: Array.isArray(users) ? users : [],
+        total: Number(meta.total) || (Array.isArray(users) ? users.length : 0),
+        limit: Number(meta.limit) || HR_PROFESSORS_PAGE_SIZE,
+        offset: Number(meta.offset) || 0,
+        page: Number(meta.page) || Number(fallbackFilters && fallbackFilters.page) || 1,
+        hasMore: meta.hasMore === true,
+    };
+}
+
+function fetchUsersFromApi(campus = 'all', search = '', options = {}) {
+    const page = options && options.page ? options.page : hrProfessorPage;
+    const filters = buildHrProfessorFilters(campus, search, page);
+    const fetchUsers = SharedData.refreshUsers
+        ? SharedData.refreshUsers(filters)
+        : Promise.resolve(SharedData.listUsers(filters));
+    return fetchUsers.then(result => {
+        const pageResult = normalizeHrProfessorPageResult(result, filters);
+        adminUsers = Array.isArray(pageResult.users) ? pageResult.users : [];
+        hrProfessorPageMeta = {
+            total: Number(pageResult.total) || adminUsers.length,
+            limit: Number(pageResult.limit) || HR_PROFESSORS_PAGE_SIZE,
+            offset: Number(pageResult.offset) || 0,
+            page: Number(pageResult.page) || page,
+            hasMore: pageResult.hasMore === true,
+        };
+        hrProfessorPage = hrProfessorPageMeta.page;
         return adminUsers;
     }).catch(error => {
         console.warn('[HRPanel] Falling back to cached SharedData users:', error);
-        adminUsers = SharedData.getUsers();
-
-        let filtered = [...adminUsers];
-        if (campus && campus !== 'all') {
-            filtered = filtered.filter(u => u.campus === campus);
-        }
-        if (search) {
-            const query = search.toLowerCase();
-            filtered = filtered.filter(u =>
-                (u.name && u.name.toLowerCase().includes(query)) ||
-                (u.email && u.email.toLowerCase().includes(query)) ||
-                (u.department && u.department.toLowerCase().includes(query))
-            );
-        }
-
-        adminUsers = filtered;
+        const fallbackUsers = SharedData.listUsers ? SharedData.listUsers(filters) : [];
+        adminUsers = Array.isArray(fallbackUsers) ? fallbackUsers : [];
+        hrProfessorPageMeta = {
+            total: adminUsers.length,
+            limit: HR_PROFESSORS_PAGE_SIZE,
+            offset: (Math.max(1, Number(filters.page) || 1) - 1) * HR_PROFESSORS_PAGE_SIZE,
+            page: Math.max(1, Number(filters.page) || 1),
+            hasMore: false,
+        };
         return adminUsers;
     });
 }
 
 function refreshHrUsersInBackground(force = false) {
     const now = Date.now();
+    const refreshFilters = buildHrProfessorFilters(currentProfessorCampusFilter, lastProfessorSearchTerm, hrProfessorPage);
+    const refreshKey = JSON.stringify(refreshFilters);
     if (!force && now - hrUsersLastRefreshAt < HR_USERS_REFRESH_INTERVAL_MS) {
         return Promise.resolve(adminUsers);
     }
-    if (hrUsersRefreshPromise) {
+    if (hrUsersRefreshPromise && hrUsersRefreshKey === refreshKey) {
         return hrUsersRefreshPromise;
     }
 
-    hrUsersRefreshPromise = fetchUsersFromApi('all', '')
+    hrUsersRefreshKey = refreshKey;
+    hrUsersRefreshPromise = fetchUsersFromApi(currentProfessorCampusFilter, lastProfessorSearchTerm, { page: hrProfessorPage })
         .then(() => {
             hrUsersLastRefreshAt = Date.now();
-            loadProfessorsData();
+            loadProfessorsData(adminUsers);
             renderProfessors();
             return adminUsers;
         })
         .catch(() => adminUsers)
         .finally(() => {
             hrUsersRefreshPromise = null;
+            hrUsersRefreshKey = '';
         });
 
     return hrUsersRefreshPromise;
@@ -198,6 +299,9 @@ function initializeDashboard() {
     setupProfileActions();
     setupSemesterSettings();
     setupEvalPeriods();
+    if (window.StudentEvaluationReminderSettings) {
+        window.StudentEvaluationReminderSettings.setup();
+    }
     setupProfessorManagement();
     setupProfessorRanking();
     renderProfessorDepartmentOptions();
@@ -235,6 +339,8 @@ function initializeDashboard() {
     updateOverviewCards();
     renderHrDashboardTopCharts();
     loadReports();
+    scheduleHrDashboardSummaryRefresh(0);
+    refreshHrDashboardProfessorRanking(true);
     setupChangeEmailForm();
     setupChangePasswordForm();
     setupPasswordToggles();
@@ -340,8 +446,8 @@ function renderProfessorDepartmentTabs() {
             e.currentTarget.classList.add('active');
 
             currentDepartmentFilter = e.currentTarget.getAttribute('data-department');
-            // Calling renderProfessors to refresh the list
-            renderProfessors();
+            hrProfessorPage = 1;
+            refreshHrProfessorListForCurrentFilters(true);
         });
     });
 }
@@ -353,11 +459,23 @@ function loadUserInfo() {
     const session = SharedData.getSession();
     if (session) {
         try {
-            const username = session.username;
+            const username = String(session.username || '').trim();
+            const accountEmail = String(session.email || '').trim();
+
+            const profileEmail = document.getElementById('profileEmail');
+            if (profileEmail) {
+                profileEmail.textContent = accountEmail || 'N/A';
+            }
+
+            const currentEmailInput = document.getElementById('currentEmail');
+            if (currentEmailInput) {
+                currentEmailInput.value = accountEmail;
+                currentEmailInput.defaultValue = accountEmail;
+            }
 
             // Update user profile name
             const userProfileSpan = document.querySelector('.user-profile span');
-            if (userProfileSpan) {
+            if (userProfileSpan && username) {
                 // Format username: capitalize first letter
                 const formattedName = username.charAt(0).toUpperCase() + username.slice(1) + ' User';
                 userProfileSpan.textContent = formattedName;
@@ -2678,8 +2796,12 @@ function loadHrActivitySummary() {
 }
 
 function buildHrActivitySummary() {
-    const users = SharedData.getUsers ? SharedData.getUsers() : [];
-    const evaluations = SharedData.getEvaluations ? SharedData.getEvaluations() : [];
+    const users = SharedData.getCachedUsers
+        ? SharedData.getCachedUsers()
+        : (SharedData.getUsers ? SharedData.getUsers() : []);
+    const evaluations = SharedData.getCachedEvaluations
+        ? SharedData.getCachedEvaluations()
+        : (SharedData.getEvaluations ? SharedData.getEvaluations() : []);
     const activityLog = SharedData.getActivityLog ? SharedData.getActivityLog() : [];
     const now = SharedData.getNowDate ? SharedData.getNowDate() : new Date();
     const oneHourAgoMs = now.getTime() - (60 * 60 * 1000);
@@ -3422,12 +3544,29 @@ function setupProfilePhotoUpload() {
     const fullName = getProfileFullName();
     placeholder.textContent = buildInitials(fullName) || 'HR';
 
-    const storedPhoto = SharedData.getProfilePhoto('hr');
-    if (storedPhoto) {
-        preview.src = storedPhoto;
-        preview.classList.add('active');
-        placeholder.style.display = 'none';
+    function applyProfilePhotoPreview(photo) {
+        const resolvedPhoto = String(photo || '').trim();
+        if (resolvedPhoto) {
+            preview.src = resolvedPhoto;
+            preview.classList.add('active');
+            placeholder.style.display = 'none';
+            return true;
+        }
+
+        preview.removeAttribute('src');
+        preview.classList.remove('active');
+        placeholder.style.display = '';
+        return false;
     }
+
+    const storedPhoto = SharedData.getProfilePhoto('hr');
+    applyProfilePhotoPreview(storedPhoto);
+
+    window.addEventListener('shareddata:change', function (event) {
+        if (event && event.detail && event.detail.key === 'profilePhoto') {
+            applyProfilePhotoPreview(event.detail.value);
+        }
+    });
 
     input.addEventListener('change', function () {
         const file = input.files && input.files[0];
@@ -3465,29 +3604,33 @@ function setupProfilePhotoUpload() {
             return;
         }
 
-        try {
-            const savedPhoto = SharedData.uploadProfilePhoto(file);
-            if (savedPhoto) {
-                preview.src = savedPhoto;
-            }
-            preview.classList.add('active');
-            placeholder.style.display = 'none';
-        } catch (error) {
+        function handleUploadError(error) {
             alert(error && error.message ? error.message : 'Failed to upload the profile image.');
             const storedPhoto = SharedData.getProfilePhoto('hr');
-            if (storedPhoto) {
-                preview.src = storedPhoto;
-                preview.classList.add('active');
-                placeholder.style.display = 'none';
-            } else {
-                preview.removeAttribute('src');
-                preview.classList.remove('active');
-                placeholder.style.display = '';
-            }
-        } finally {
+            applyProfilePhotoPreview(storedPhoto);
+        }
+
+        let uploadPromise;
+        try {
+            uploadPromise = typeof SharedData.uploadProfilePhotoAsync === 'function'
+                ? SharedData.uploadProfilePhotoAsync(file, { message: 'Uploading profile photo...' })
+                : Promise.resolve(SharedData.uploadProfilePhoto(file));
+        } catch (error) {
+            handleUploadError(error);
             URL.revokeObjectURL(localPreviewUrl);
             input.value = '';
+            return;
         }
+
+        Promise.resolve(uploadPromise)
+            .then(function (savedPhoto) {
+                applyProfilePhotoPreview(savedPhoto);
+            })
+            .catch(handleUploadError)
+            .finally(function () {
+                URL.revokeObjectURL(localPreviewUrl);
+                input.value = '';
+            });
     });
 }
 
@@ -3604,18 +3747,28 @@ function setupChangeEmailForm() {
 
     form.addEventListener('submit', function (e) {
         e.preventDefault();
-        handleChangeEmail();
+        void handleChangeEmail();
     });
 }
 
 /**
- * Placeholder change email handler (SQL-ready)
+ * Change the authenticated HR account email.
  */
-function handleChangeEmail() {
+async function handleChangeEmail() {
     const form = document.getElementById('changeEmailForm');
-    const currentEmail = document.getElementById('currentEmail').value.trim();
-    const newEmail = document.getElementById('newEmail').value.trim();
-    const confirmEmail = document.getElementById('confirmEmail').value.trim();
+    if (!form) return;
+
+    const session = SharedData.getSession ? SharedData.getSession() : null;
+    const sessionEmail = String(session && session.email || '').trim();
+    const currentEmailInput = document.getElementById('currentEmail');
+    const currentEmail = sessionEmail || String(currentEmailInput && currentEmailInput.value || '').trim();
+    const newEmail = String((document.getElementById('newEmail') || {}).value || '').trim();
+    const confirmEmail = String((document.getElementById('confirmEmail') || {}).value || '').trim();
+
+    if (currentEmailInput && sessionEmail) {
+        currentEmailInput.value = sessionEmail;
+        currentEmailInput.defaultValue = sessionEmail;
+    }
 
     if (!newEmail || !confirmEmail) {
         showFormMessage(form, 'Please fill out all email fields.', 'error');
@@ -3632,31 +3785,45 @@ function handleChangeEmail() {
         return;
     }
 
-    if (!SharedData.changeOwnEmail) {
+    const changeOwnEmail = SharedData.changeOwnEmailAsync || SharedData.changeOwnEmail;
+    if (!changeOwnEmail) {
         showFormMessage(form, 'Email update service is unavailable.', 'error');
         return;
     }
 
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    const submitButton = document.getElementById('changeEmailSubmitBtn') || form.querySelector('button[type="submit"]');
+    const originalButtonText = submitButton ? submitButton.textContent : '';
+    if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = 'Updating...';
+    }
+
     try {
-        const result = SharedData.changeOwnEmail(currentEmail, newEmail);
+        const result = await Promise.resolve(changeOwnEmail(currentEmail, newEmail));
         const nextEmail = String(result && result.email || newEmail).trim();
 
         const profileEmail = document.getElementById('profileEmail');
         if (profileEmail) profileEmail.textContent = nextEmail;
-        const currentEmailInput = document.getElementById('currentEmail');
         if (currentEmailInput) {
             currentEmailInput.value = nextEmail;
             currentEmailInput.defaultValue = nextEmail;
         }
+
+        form.reset();
+        showFormMessage(form, 'Email updated successfully.', 'success');
     } catch (error) {
         console.error('[HRPanel] Failed to update email.', error);
         showFormMessage(form, error && error.message ? error.message : 'Failed to update email.', 'error');
-        return;
-    }
-
-    if (form) {
-        form.reset();
-        showFormMessage(form, 'Email updated successfully.', 'success');
+    } finally {
+        if (submitButton) {
+            submitButton.disabled = false;
+            submitButton.textContent = originalButtonText || 'Update Gmail';
+        }
     }
 }
 
@@ -3885,7 +4052,7 @@ function handleEditUser(userName) {
  */
 function handleDeleteUser(userName, userItem) {
     // Confirm deletion
-    if (confirm(`Are you sure you want to delete user "${userName}"?\n\nThis action cannot be undone.`)) {
+    if (confirm(`Deactivate user "${userName}"? Historical records will be retained.`)) {
         // Placeholder for actual deletion logic
         console.log(`Deleting user: ${userName}`);
 
@@ -3940,7 +4107,79 @@ function handleSettingAction(settingTitle) {
 /**
  * Update overview cards with dynamic data
  */
-function updateOverviewCards() {
+function readHrSummaryNumber(value, fallback = 0) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function getCurrentHrDashboardSummary() {
+    if (hrDashboardSummary && typeof hrDashboardSummary === 'object') {
+        return hrDashboardSummary;
+    }
+    return SharedData.getAdminDashboardSummary ? SharedData.getAdminDashboardSummary() : null;
+}
+
+function hasHrDashboardSummaryData(summary) {
+    const users = summary && summary.users && typeof summary.users === 'object' ? summary.users : null;
+    const registration = summary && summary.studentRegistration && typeof summary.studentRegistration === 'object'
+        ? summary.studentRegistration
+        : null;
+    return Boolean(
+        users
+        && registration
+        && (
+            (Number(users.students) || 0) > 0
+            || (Number(users.professors) || 0) > 0
+            || (Number(registration.total) || 0) > 0
+            || (Number(registration.pending) || 0) > 0
+        )
+    );
+}
+
+function normalizeHrDashboardStats(stats) {
+    const source = stats && typeof stats === 'object' ? stats : {};
+    return {
+        students: Math.max(0, Math.round(readHrSummaryNumber(source.students, 0))),
+        completionRate: Math.max(0, Math.min(100, readHrSummaryNumber(source.completionRate, 0))),
+        completedEvaluations: Math.max(0, Math.round(readHrSummaryNumber(source.completedEvaluations, 0))),
+        pendingEvaluations: Math.max(0, Math.round(readHrSummaryNumber(source.pendingEvaluations, 0))),
+        activeProfessors: Math.max(0, Math.round(readHrSummaryNumber(source.activeProfessors, 0))),
+    };
+}
+
+function applyHrDashboardStats(stats) {
+    const normalized = normalizeHrDashboardStats(stats);
+    hrDashboardLastStats = normalized;
+
+    const studentsCard = document.querySelector('.overview-card.users .card-number');
+    const completionCard = document.querySelector('.overview-card.evaluations .card-number');
+    const completedCard = document.querySelector('.overview-card.completed .card-number');
+    const pendingCard = document.querySelector('.overview-card.professors .card-number');
+    const activeProfessorsCard = document.querySelector('.overview-card.status .card-number');
+
+    if (studentsCard) studentsCard.textContent = normalized.students.toLocaleString();
+    if (completionCard) completionCard.textContent = `${Number(normalized.completionRate).toFixed(1).replace(/\.0$/, '')}%`;
+    if (completedCard) completedCard.textContent = normalized.completedEvaluations.toLocaleString();
+    if (pendingCard) pendingCard.textContent = normalized.pendingEvaluations.toLocaleString();
+    if (activeProfessorsCard) activeProfessorsCard.textContent = normalized.activeProfessors.toLocaleString();
+}
+
+function buildHrDashboardStatsFromSummary(summary) {
+    const users = summary && summary.users && typeof summary.users === 'object' ? summary.users : {};
+    const registration = summary && summary.studentRegistration && typeof summary.studentRegistration === 'object'
+        ? summary.studentRegistration
+        : {};
+
+    return normalizeHrDashboardStats({
+        students: readHrSummaryNumber(users.students, 0),
+        completionRate: readHrSummaryNumber(registration.completionRate, 0),
+        completedEvaluations: readHrSummaryNumber(registration.completed, 0),
+        pendingEvaluations: readHrSummaryNumber(registration.pending, 0),
+        activeProfessors: readHrSummaryNumber(users.professors, 0),
+    });
+}
+
+function buildHrDashboardStatsFromLocalContext() {
     const context = buildHrEvaluationContext();
     const semesterId = context.currentSemester || 'all';
     const registration = buildHrStudentRegistrationStats(context, semesterId);
@@ -3950,21 +4189,100 @@ function updateOverviewCards() {
     const pendingEvaluations = registration.pending;
     const completedStudents = population.completedStudents;
     const completionRate = totalStudents > 0
-        ? `${((completedStudents / totalStudents) * 100).toFixed(1)}%`
-        : '0%';
+        ? ((completedStudents / totalStudents) * 100)
+        : 0;
     const activeProfessors = context.professorUsers.filter(professor => normalizeHrToken(professor.status) !== 'inactive').length;
 
-    const studentsCard = document.querySelector('.overview-card.users .card-number');
-    const completionCard = document.querySelector('.overview-card.evaluations .card-number');
-    const completedCard = document.querySelector('.overview-card.completed .card-number');
-    const pendingCard = document.querySelector('.overview-card.professors .card-number');
-    const activeProfessorsCard = document.querySelector('.overview-card.status .card-number');
+    return normalizeHrDashboardStats({
+        students: totalStudents,
+        completionRate,
+        completedEvaluations,
+        pendingEvaluations,
+        activeProfessors,
+    });
+}
 
-    if (studentsCard) studentsCard.textContent = totalStudents;
-    if (completionCard) completionCard.textContent = completionRate;
-    if (completedCard) completedCard.textContent = completedEvaluations;
-    if (pendingCard) pendingCard.textContent = pendingEvaluations;
-    if (activeProfessorsCard) activeProfessorsCard.textContent = activeProfessors;
+function refreshHrDashboardCountFallback() {
+    if (!SharedData.refreshUserCount || hrDashboardCountFallbackPromise) {
+        return hrDashboardCountFallbackPromise || Promise.resolve(null);
+    }
+
+    hrDashboardCountFallbackPromise = Promise.all([
+        SharedData.refreshUserCount({ role: 'student', status: 'active' }),
+        SharedData.refreshUserCount({ role: 'professor', status: 'active' }),
+    ])
+        .then(function (counts) {
+            const base = hrDashboardLastStats || buildHrDashboardStatsFromLocalContext();
+            const stats = normalizeHrDashboardStats(Object.assign({}, base, {
+                students: Number(counts && counts[0]) || 0,
+                activeProfessors: Number(counts && counts[1]) || 0,
+            }));
+            applyHrDashboardStats(stats);
+            return stats;
+        })
+        .catch(function (error) {
+            console.warn('[HRPanel] Failed to refresh dashboard user counts.', error);
+            return null;
+        })
+        .finally(function () {
+            hrDashboardCountFallbackPromise = null;
+        });
+    return hrDashboardCountFallbackPromise;
+}
+
+function refreshHrDashboardSummary() {
+    if (!SharedData.refreshAdminDashboardSummary || hrDashboardSummaryPromise) {
+        return hrDashboardSummaryPromise || Promise.resolve(null);
+    }
+
+    hrDashboardSummaryPromise = SharedData.refreshAdminDashboardSummary({ panel: 'hr' })
+        .then(function (summary) {
+            if (summary && typeof summary === 'object') {
+                hrDashboardSummary = summary;
+                applyHrDashboardStats(buildHrDashboardStatsFromSummary(summary));
+                renderHrDashboardTopCharts();
+                loadReports();
+                return summary;
+            }
+            return null;
+        })
+        .catch(function (error) {
+            console.warn('[HRPanel] Failed to refresh dashboard summary.', error);
+            refreshHrDashboardCountFallback();
+            return null;
+        })
+        .finally(function () {
+            hrDashboardSummaryPromise = null;
+        });
+    return hrDashboardSummaryPromise;
+}
+
+function scheduleHrDashboardSummaryRefresh(delayMs = 250) {
+    if (hrDashboardSummaryTimer || hrDashboardSummaryPromise) {
+        return;
+    }
+
+    hrDashboardSummaryTimer = setTimeout(function () {
+        hrDashboardSummaryTimer = null;
+        refreshHrDashboardSummary();
+    }, Math.max(0, Number(delayMs) || 0));
+}
+
+function updateOverviewCards() {
+    const summary = getCurrentHrDashboardSummary();
+    if (hasHrDashboardSummaryData(summary)) {
+        hrDashboardSummary = summary;
+        applyHrDashboardStats(buildHrDashboardStatsFromSummary(summary));
+        return;
+    }
+
+    if (hrDashboardLastStats) {
+        applyHrDashboardStats(hrDashboardLastStats);
+    } else {
+        applyHrDashboardStats(buildHrDashboardStatsFromLocalContext());
+    }
+    scheduleHrDashboardSummaryRefresh(0);
+    refreshHrDashboardCountFallback();
 }
 
 /**
@@ -4012,27 +4330,27 @@ function refreshUserList() {
  * Professors are stored in sharedUsersData with role='professor'
  */
 
-// Working cache — loaded from SharedData.getUsers() filtered by role='professor'
+// Working cache loaded from the current paged professor result.
 let professorsData = [];
 
 /**
  * Load professors from centralized sharedUsersData
  */
 function getProfessorsFromSharedData() {
-    return SharedData.getUsers().filter(function (u) {
-        return u.role === 'professor';
-    });
+    return SharedData.listUsers
+        ? SharedData.listUsers({ role: 'professor', limit: HR_PROFESSORS_PAGE_SIZE, page: hrProfessorPage })
+        : [];
 }
 
 /**
  * Save professors back to centralized sharedUsersData
  * Merges professor records with non-professor users
  */
-function saveProfessorsToSharedData() {
+async function saveProfessorsToSharedData() {
     const professorsWithRole = professorsData.map(function (p) {
         return Object.assign({}, p, { role: 'professor', status: p.isActive !== false ? 'active' : 'inactive' });
     });
-    SharedData.bulkUpsertUsers(professorsWithRole);
+    return SharedData.bulkUpsertUsers(professorsWithRole);
 }
 let currentEditingProfessorId = null;
 let currentDepartmentFilter = 'all';
@@ -4151,10 +4469,16 @@ function isHrEvaluationInSemester(evaluation, semesterId) {
 }
 
 function buildHrEvaluationContext() {
-    const users = SharedData.getUsers ? SharedData.getUsers() : [];
-    const evaluations = SharedData.getEvaluations ? SharedData.getEvaluations() : [];
+    const users = SharedData.getCachedUsers
+        ? SharedData.getCachedUsers()
+        : (SharedData.getUsers ? SharedData.getUsers() : []);
+    const evaluations = SharedData.getCachedEvaluations
+        ? SharedData.getCachedEvaluations()
+        : (SharedData.getEvaluations ? SharedData.getEvaluations() : []);
     const studentEvaluationDrafts = SharedData.getStudentEvaluationDrafts ? SharedData.getStudentEvaluationDrafts() : [];
-    const subjectManagement = SharedData.getSubjectManagement ? SharedData.getSubjectManagement() : { offerings: [], enrollments: [] };
+    const subjectManagement = SharedData.getCachedSubjectManagement
+        ? SharedData.getCachedSubjectManagement()
+        : (SharedData.getSubjectManagement ? SharedData.getSubjectManagement() : { offerings: [], enrollments: [] });
     const questionnaires = SharedData.getQuestionnaires ? SharedData.getQuestionnaires() : {};
     const semesterList = SharedData.getSemesterList ? SharedData.getSemesterList() : [];
     const currentSemester = String(SharedData.getCurrentSemester ? SharedData.getCurrentSemester() : '').trim();
@@ -4732,6 +5056,77 @@ function buildHrDashboardEvaluationOverview(context) {
     };
 }
 
+function normalizeHrDashboardReportSummary(report) {
+    const source = report && typeof report === 'object' ? report : {};
+    const distribution = source.ratingDistribution && typeof source.ratingDistribution === 'object'
+        ? source.ratingDistribution
+        : {};
+    return {
+        categoryScores: Array.isArray(source.categoryScores) ? source.categoryScores : [],
+        ratingDistribution: {
+            5: readHrSummaryNumber(distribution[5] ?? distribution['5'], 0),
+            4: readHrSummaryNumber(distribution[4] ?? distribution['4'], 0),
+            3: readHrSummaryNumber(distribution[3] ?? distribution['3'], 0),
+            2: readHrSummaryNumber(distribution[2] ?? distribution['2'], 0),
+            1: readHrSummaryNumber(distribution[1] ?? distribution['1'], 0),
+        },
+        averageRating: readHrSummaryNumber(source.averageRating, 0),
+        totalEvaluations: readHrSummaryNumber(source.totalEvaluations, 0),
+        evaluatedCount: readHrSummaryNumber(source.evaluatedCount, 0),
+    };
+}
+
+function buildHrEvaluationDataFromDashboardSummary(summary) {
+    const registration = summary && summary.studentRegistration && typeof summary.studentRegistration === 'object'
+        ? summary.studentRegistration
+        : {};
+    const overview = summary && summary.dashboardEvaluationOverview && typeof summary.dashboardEvaluationOverview === 'object'
+        ? summary.dashboardEvaluationOverview
+        : {};
+    const semestral = summary && summary.semestralPerformance && typeof summary.semestralPerformance === 'object'
+        ? summary.semestralPerformance
+        : {};
+    const reports = summary && summary.evaluationReports && typeof summary.evaluationReports === 'object'
+        ? summary.evaluationReports
+        : {};
+    const total = readHrSummaryNumber(registration.total, 0);
+    const completed = readHrSummaryNumber(registration.completed, 0);
+    const inProgress = readHrSummaryNumber(registration.inProgress, 0);
+    const pending = readHrSummaryNumber(registration.pending, Math.max(0, total - completed));
+    const notStarted = readHrSummaryNumber(registration.notStarted, Math.max(0, total - completed - inProgress));
+
+    return {
+        overall: {
+            total,
+            completed,
+            pending,
+            completionRate: readHrSummaryNumber(
+                registration.completionRate,
+                total > 0 ? Math.round((completed / total) * 100) : 0
+            ),
+        },
+        dashboardOverview: {
+            labels: Array.isArray(overview.labels) && overview.labels.length
+                ? overview.labels
+                : ['Completed', 'Pending', 'Not Started'],
+            values: Array.isArray(overview.values)
+                ? overview.values.map(value => readHrSummaryNumber(value, 0))
+                : [completed, inProgress, notStarted],
+        },
+        semestralPerformance: {
+            labels: Array.isArray(semestral.labels) && semestral.labels.length
+                ? semestral.labels
+                : ['No Semester Data'],
+            values: Array.isArray(semestral.values) && semestral.values.length
+                ? semestral.values.map(value => readHrSummaryNumber(value, 0))
+                : [0],
+        },
+        studentToProfessor: normalizeHrDashboardReportSummary(reports.studentToProfessor),
+        professorToProfessor: normalizeHrDashboardReportSummary(reports.professorToProfessor),
+        supervisorToProfessor: normalizeHrDashboardReportSummary(reports.supervisorToProfessor),
+    };
+}
+
 function getHrLatestSemestersForTrend(context, limit = 4) {
     const desired = Number(limit) > 0 ? Number(limit) : 4;
     const orderedSemesters = [];
@@ -4834,6 +5229,14 @@ function renderHrSemestralPerformanceChart(data) {
 }
 
 function renderHrDashboardTopCharts() {
+    const summary = getCurrentHrDashboardSummary();
+    if (hasHrDashboardSummaryData(summary)) {
+        const data = buildHrEvaluationDataFromDashboardSummary(summary);
+        renderHrEvaluationOverviewChart(data.dashboardOverview);
+        renderHrSemestralPerformanceChart(data.semestralPerformance);
+        return;
+    }
+
     const context = buildHrEvaluationContext();
     const overview = buildHrDashboardEvaluationOverview(context);
     const semestral = buildHrSemestralPerformanceData(context);
@@ -5067,6 +5470,19 @@ function setupHrSharedDataBindings() {
     SharedData.onDataChange(function (key) {
         const keys = SharedData.KEYS;
 
+        if (key === keys.ADMIN_DASHBOARD_SUMMARY) {
+            hrDashboardSummary = SharedData.getAdminDashboardSummary ? SharedData.getAdminDashboardSummary() : null;
+            if (isContentViewVisible('dashboard-view')) {
+                updateOverviewCards();
+                renderHrDashboardTopCharts();
+                loadReports();
+            }
+            if (isContentViewVisible('reports-view')) {
+                loadReports();
+            }
+            return;
+        }
+
         if (key === keys.QUESTIONNAIRES || key === keys.CURRENT_SEMESTER || key === keys.SEMESTER_LIST) {
             loadQuestionsData();
             setupSemesterPicker();
@@ -5095,6 +5511,7 @@ function setupHrSharedDataBindings() {
 
         if (key === keys.USERS) {
             loadProfessorsData();
+            hrDashboardProfessorRankingLoaded = false;
             populateProfessorCampusFilter();
             renderProfessorDepartmentOptions();
             renderProfessorDepartmentTabs();
@@ -5104,6 +5521,7 @@ function setupHrSharedDataBindings() {
             if (isContentViewVisible('dashboard-view')) {
                 updateOverviewCards();
                 renderProfessorRanking();
+                refreshHrDashboardProfessorRanking(true);
                 renderHrDashboardTopCharts();
                 loadReports();
             }
@@ -5302,48 +5720,166 @@ function getProfessorAnalyticsSnapshot(professor, semesterId) {
 /**
  * Load professors data from localStorage or generate new
  */
-function loadProfessorsData() {
-    // Always load from the canonical shared user snapshot.
-    // Using filtered adminUsers can drop professors when later persisted.
-    const sourceUsers = SharedData.getUsers();
+function loadProfessorsData(sourceUsersOverride) {
+    const sourceUsers = Array.isArray(sourceUsersOverride)
+        ? sourceUsersOverride
+        : (Array.isArray(adminUsers) ? adminUsers : []);
     const context = buildHrEvaluationContext();
 
     professorsData = sourceUsers.filter(function (u) {
         return String(u.role || '').toLowerCase() === 'professor';
+    }).map(professor => normalizeHrProfessorRecord(professor, context));
+}
+
+function normalizeHrProfessorRecord(professor, contextInput) {
+    const context = contextInput || buildHrEvaluationContext();
+    const updated = { ...(professor || {}) };
+    if (!updated.employeeId) {
+        updated.employeeId = deriveEmployeeIdFallback(updated.id);
+    }
+    updated.employmentType = formatEmploymentType(updated.employmentType);
+    if (!updated.department && updated.institute) {
+        updated.department = updated.institute;
+    }
+    if (updated.department) {
+        updated.department = String(updated.department).toUpperCase();
+    }
+    if (typeof updated.isActive !== 'boolean') {
+        const normalizedStatus = String(updated.status || '').toLowerCase();
+        updated.isActive = normalizedStatus === 'inactive' ? false : true;
+    }
+    if (!updated.status) {
+        updated.status = updated.isActive ? 'active' : 'inactive';
+    }
+    ensureProfessorSemesterData(updated);
+    const studentSnapshot = getHrProfessorEvaluationSnapshot(updated.id, 'all', 'student', context);
+    updated.evaluatedCount = Number(studentSnapshot && studentSnapshot.evaluatedCount) || 0;
+    updated.evaluationsCount = updated.evaluatedCount;
+    updated.totalStudents = Number(studentSnapshot && studentSnapshot.totalRaters) || 0;
+    updated.notEvaluatedCount = Number(studentSnapshot && studentSnapshot.notEvaluatedCount)
+        || Math.max(updated.totalStudents - updated.evaluatedCount, 0);
+
+    return updated;
+}
+
+function mergeHrProfessorUsersIntoContext(context, professors) {
+    const target = context && typeof context === 'object' ? context : buildHrEvaluationContext();
+    const professorList = Array.isArray(professors) ? professors : [];
+    const mergedUsers = Array.isArray(target.professorUsers) ? target.professorUsers.slice() : [];
+    const byId = new Set(mergedUsers.map(user => normalizeHrUserIdToken(user && user.id)).filter(Boolean));
+
+    if (!(target.professorIdSet instanceof Set)) {
+        target.professorIdSet = new Set(Array.from(byId));
+    }
+    if (!target.professorNameMap || typeof target.professorNameMap !== 'object') {
+        target.professorNameMap = {};
+    }
+    if (!target.professorEmployeeIdMap || typeof target.professorEmployeeIdMap !== 'object') {
+        target.professorEmployeeIdMap = {};
+    }
+
+    professorList.forEach(professor => {
+        const normalizedId = normalizeHrUserIdToken(professor && professor.id);
+        if (!normalizedId) return;
+        if (!byId.has(normalizedId)) {
+            mergedUsers.push(professor);
+            byId.add(normalizedId);
+        }
+        target.professorIdSet.add(normalizedId);
+
+        const nameToken = normalizeHrToken(professor && professor.name);
+        if (nameToken && !target.professorNameMap[nameToken]) {
+            target.professorNameMap[nameToken] = normalizedId;
+        }
+
+        const employeeToken = normalizeHrToken(professor && professor.employeeId);
+        if (employeeToken && !target.professorEmployeeIdMap[employeeToken]) {
+            target.professorEmployeeIdMap[employeeToken] = normalizedId;
+        }
     });
 
-    professorsData = professorsData.map(professor => {
-        const updated = { ...professor };
-        if (!updated.employeeId) {
-            updated.employeeId = deriveEmployeeIdFallback(updated.id);
-        }
-        if (!updated.employmentType) {
-            updated.employmentType = 'Regular';
-        }
-        if (!updated.department && updated.institute) {
-            updated.department = updated.institute;
-        }
-        if (updated.department) {
-            const normalizedDepartment = String(updated.department).toUpperCase();
-            updated.department = normalizedDepartment;
-        }
-        if (typeof updated.isActive !== 'boolean') {
-            const normalizedStatus = String(updated.status || '').toLowerCase();
-            updated.isActive = normalizedStatus === 'inactive' ? false : true;
-        }
-        if (!updated.status) {
-            updated.status = updated.isActive ? 'active' : 'inactive';
-        }
-        ensureProfessorSemesterData(updated);
-        const studentSnapshot = getHrProfessorEvaluationSnapshot(updated.id, 'all', 'student', context);
-        updated.evaluatedCount = Number(studentSnapshot && studentSnapshot.evaluatedCount) || 0;
-        updated.evaluationsCount = updated.evaluatedCount;
-        updated.totalStudents = Number(studentSnapshot && studentSnapshot.totalRaters) || 0;
-        updated.notEvaluatedCount = Number(studentSnapshot && studentSnapshot.notEvaluatedCount)
-            || Math.max(updated.totalStudents - updated.evaluatedCount, 0);
+    target.professorUsers = mergedUsers;
+    return target;
+}
 
-        return updated;
-    });
+function waitForHrRankingPageYield() {
+    return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+function refreshHrDashboardProfessorRanking(force = false) {
+    if (!force && hrDashboardProfessorRankingLoaded) {
+        return Promise.resolve(hrDashboardProfessorRankingData);
+    }
+    if (hrDashboardProfessorRankingPromise) {
+        return hrDashboardProfessorRankingPromise;
+    }
+    if (!SharedData.fetchUsersPage) {
+        hrDashboardProfessorRankingLoaded = true;
+        hrDashboardProfessorRankingData = professorsData.slice();
+        renderProfessorRanking();
+        return Promise.resolve(hrDashboardProfessorRankingData);
+    }
+
+    hrDashboardProfessorRankingPromise = (async function () {
+        const loaded = [];
+        const rawRows = [];
+        const seen = new Set();
+        let page = 1;
+
+        while (true) {
+            const result = await SharedData.fetchUsersPage({
+                role: 'professor',
+                status: 'active',
+                limit: HR_DASHBOARD_PROFESSOR_RANKING_PAGE_SIZE,
+                page,
+            });
+            const rows = Array.isArray(result && result.users) ? result.users : [];
+            rows.forEach(row => {
+                const normalizedId = normalizeHrUserIdToken(row && row.id);
+                if (!normalizedId || seen.has(normalizedId)) return;
+                seen.add(normalizedId);
+                rawRows.push(row);
+            });
+
+            const total = Math.max(0, Number(result && result.total) || loaded.length);
+            const limit = Math.max(1, Number(result && result.limit) || HR_DASHBOARD_PROFESSOR_RANKING_PAGE_SIZE);
+            const hasMore = (result && result.hasMore === true) || (page * limit < total && rows.length > 0);
+            if (!hasMore) {
+                break;
+            }
+
+            page += 1;
+            await waitForHrRankingPageYield();
+        }
+
+        const context = mergeHrProfessorUsersIntoContext(buildHrEvaluationContext(), rawRows);
+        rawRows.forEach(row => {
+            loaded.push(normalizeHrProfessorRecord(row, context));
+        });
+
+        hrDashboardProfessorRankingLoaded = true;
+        hrDashboardProfessorRankingData = loaded;
+        if (isContentViewVisible('dashboard-view')) {
+            renderProfessorRanking();
+        }
+        return loaded;
+    })()
+        .catch(function (error) {
+            console.warn('[HRPanel] Failed to refresh dashboard professor ranking.', error);
+            hrDashboardProfessorRankingLoaded = true;
+            if (!hrDashboardProfessorRankingData.length) {
+                hrDashboardProfessorRankingData = professorsData.filter(professor => professor && professor.isActive !== false);
+            }
+            if (isContentViewVisible('dashboard-view')) {
+                renderProfessorRanking();
+            }
+            return hrDashboardProfessorRankingData;
+        })
+        .finally(function () {
+            hrDashboardProfessorRankingPromise = null;
+        });
+
+    return hrDashboardProfessorRankingPromise;
 }
 
 /**
@@ -5377,7 +5913,9 @@ function limitProfessorsPerDepartment() {
     } else if (limitedData.length > 0) {
         // Update data if we limited it
         professorsData = limitedData;
-        saveProfessorsToSharedData();
+        saveProfessorsToSharedData().catch(function (error) {
+            console.error('[HRPanel] Failed to persist limited professor list.', error);
+        });
     }
 }
 
@@ -5405,6 +5943,7 @@ function setupProfessorRanking() {
     }
 
     renderProfessorRanking();
+    refreshHrDashboardProfessorRanking(false);
 }
 
 /**
@@ -5413,6 +5952,9 @@ function setupProfessorRanking() {
 function populateRankingFilters() {
     const deptSelect = document.getElementById('ranking-dept-filter');
     const employmentSelect = document.getElementById('ranking-employment-filter');
+    const rankingSource = hrDashboardProfessorRankingData.length
+        ? hrDashboardProfessorRankingData
+        : professorsData;
 
     if (deptSelect) {
         const campuses = SharedData.getCampuses();
@@ -5420,7 +5962,7 @@ function populateRankingFilters() {
         campuses.filter(function (c) { return c.id !== 'all'; }).forEach(function (c) { c.departments.forEach(function (d) { campusDepts.add(d); }); });
         const departments = Array.from(new Set([
             ...campusDepts,
-            ...professorsData.map(p => p.department).filter(Boolean)
+            ...rankingSource.map(p => p.department).filter(Boolean)
         ]));
 
         deptSelect.innerHTML = [
@@ -5438,7 +5980,14 @@ function populateRankingFilters() {
     }
 
     if (employmentSelect) {
-        employmentSelect.value = rankingEmploymentFilter || 'all';
+        employmentSelect.innerHTML = [
+            '<option value="all">All Employment Types</option>',
+            ...HR_EMPLOYMENT_TYPE_OPTIONS.map(option => `<option value="${escapeHrAttr(option.value)}">${escapeHrHtml(option.label)}</option>`),
+        ].join('');
+        employmentSelect.value = HR_EMPLOYMENT_TYPE_OPTIONS.some(option => option.value === rankingEmploymentFilter)
+            ? rankingEmploymentFilter
+            : 'all';
+        rankingEmploymentFilter = employmentSelect.value || 'all';
     }
 }
 
@@ -5450,8 +5999,24 @@ function renderProfessorRanking() {
     if (!rankingList) return;
 
     populateRankingFilters();
+    const rankingSource = hrDashboardProfessorRankingData.length
+        ? hrDashboardProfessorRankingData
+        : professorsData;
 
-    if (!professorsData || professorsData.length === 0) {
+    if (!rankingSource || rankingSource.length === 0) {
+        if (!hrDashboardProfessorRankingLoaded && SharedData.fetchUsersPage) {
+            if (!hrDashboardProfessorRankingPromise) {
+                refreshHrDashboardProfessorRanking(false);
+            }
+            rankingList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <p>Loading professor rankings...</p>
+                </div>
+            `;
+            return;
+        }
+
         rankingList.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-user-slash"></i>
@@ -5461,18 +6026,17 @@ function renderProfessorRanking() {
         return;
     }
 
-    let filtered = professorsData.filter(p => p.isActive !== false);
+    let filtered = rankingSource.filter(p => p && p.isActive !== false);
 
     if (rankingDepartmentFilter !== 'all') {
         filtered = filtered.filter(p => p.department === rankingDepartmentFilter);
     }
 
     if (rankingEmploymentFilter !== 'all') {
-        const employmentFilter = String(rankingEmploymentFilter).toLowerCase();
-        filtered = filtered.filter(p => formatEmploymentType(p.employmentType).toLowerCase() === employmentFilter);
+        filtered = filtered.filter(p => isEmploymentTypeMatch(p.employmentType, rankingEmploymentFilter));
     }
 
-    const context = buildHrEvaluationContext();
+    const context = mergeHrProfessorUsersIntoContext(buildHrEvaluationContext(), filtered);
     const ranked = filtered
         .map(prof => {
             const snapshot = getHrProfessorEvaluationSnapshot(prof.id, 'all', 'student', context);
@@ -5501,7 +6065,7 @@ function renderProfessorRanking() {
 
     rankingList.innerHTML = topProfessors.map((prof, index) => {
         const employmentType = formatEmploymentType(prof.employmentType);
-        const employmentClass = employmentType.toLowerCase() === 'temporary' ? 'temporary' : 'regular';
+        const employmentClass = getEmploymentTypeClass(employmentType);
         return `
             <div class="user-item">
                 <div class="user-info">
@@ -5549,6 +6113,7 @@ function renderProfessorSearchPrompt(message, iconClass) {
             <p>${escapeHrHtml(message || 'Search by name or employee ID to show professors.')}</p>
         </div>
     `;
+    renderHrProfessorPagination();
 }
 
 function syncProfessorDepartmentTabsToFilter() {
@@ -5556,6 +6121,56 @@ function syncProfessorDepartmentTabsToFilter() {
     tabs.forEach(tab => {
         const department = String(tab.getAttribute('data-department') || 'all').trim() || 'all';
         tab.classList.toggle('active', department === currentDepartmentFilter);
+    });
+}
+
+function setHrSelectOptions(select, options, selectedValue) {
+    if (!select) return;
+    const selected = String(selectedValue == null ? select.value : selectedValue);
+    select.innerHTML = options.map(option => {
+        const value = String(option.value == null ? '' : option.value);
+        return `<option value="${escapeHrAttr(value)}">${escapeHrHtml(option.label || value)}</option>`;
+    }).join('');
+    if (options.some(option => String(option.value) === selected)) {
+        select.value = selected;
+    }
+}
+
+function populateHrProfessorProgramFilter() {
+    const select = document.getElementById('professor-program-filter');
+    if (!select) return;
+    const current = select.value || 'all';
+    const campus = normalizeHrToken(currentProfessorCampusFilter);
+    const programs = SharedData.getPrograms ? SharedData.getPrograms() : [];
+    const options = [
+        { value: 'all', label: 'All Programs' },
+        ...(Array.isArray(programs) ? programs : []).filter(program => {
+            const programCampus = normalizeHrToken(program && program.campusSlug);
+            return !campus || campus === 'all' || !programCampus || programCampus === campus;
+        }).map(program => {
+            const code = normalizeHrProgramCode(program && program.programCode);
+            const name = String(program && program.programName || '').trim();
+            return { value: code, label: name ? `${code} - ${name}` : code };
+        }).filter(option => option.value),
+    ];
+    setHrSelectOptions(select, options, current);
+}
+
+function setupHrProfessorFilters() {
+    setHrSelectOptions(document.getElementById('professor-status-filter'), [
+        { value: 'active', label: 'Active' },
+        { value: 'inactive', label: 'Inactive' },
+        { value: 'all', label: 'All Statuses' },
+    ]);
+    populateHrProfessorProgramFilter();
+
+    ['professor-status-filter', 'professor-program-filter'].forEach(id => {
+        const select = document.getElementById(id);
+        if (!select) return;
+        select.addEventListener('change', function () {
+            hrProfessorPage = 1;
+            refreshHrProfessorListForCurrentFilters(true);
+        });
     });
 }
 
@@ -5567,7 +6182,8 @@ function runProfessorSearch() {
     currentProfessorCampusFilter = normalizeHrToken(campusSelect ? campusSelect.value : 'all') || 'all';
     lastProfessorSearchTerm = submittedTerm.toLowerCase();
     hasProfessorSearchRun = submittedTerm !== '';
-    renderProfessors();
+    hrProfessorPage = 1;
+    refreshHrProfessorListForCurrentFilters(true);
 }
 
 function clearProfessorSearchFilters() {
@@ -5580,6 +6196,8 @@ function clearProfessorSearchFilters() {
     currentDepartmentFilter = 'all';
     lastProfessorSearchTerm = '';
     hasProfessorSearchRun = false;
+    hrProfessorPage = 1;
+    loadProfessorsData([]);
     syncProfessorDepartmentTabsToFilter();
     renderProfessors();
 }
@@ -5589,6 +6207,7 @@ function setupProfessorManagement() {
     loadProfessorsData();
     hrProfessorMobileMode = isHrPhoneViewport();
     populateProfessorCampusFilter();
+    setupHrProfessorFilters();
 
     // Department tabs
     const deptTabs = document.querySelectorAll('.dept-tab');
@@ -5597,7 +6216,8 @@ function setupProfessorManagement() {
             deptTabs.forEach(t => t.classList.remove('active'));
             this.classList.add('active');
             currentDepartmentFilter = this.getAttribute('data-department');
-            renderProfessors();
+            hrProfessorPage = 1;
+            refreshHrProfessorListForCurrentFilters(true);
         });
     });
 
@@ -5627,7 +6247,9 @@ function setupProfessorManagement() {
     if (campusSelect) {
         campusSelect.addEventListener('change', function () {
             currentProfessorCampusFilter = normalizeHrToken(this.value) || 'all';
-            renderProfessors();
+            hrProfessorPage = 1;
+            populateHrProfessorProgramFilter();
+            refreshHrProfessorListForCurrentFilters(true);
         });
     }
 
@@ -5712,11 +6334,66 @@ function setupProfessorManagement() {
  */
 function loadUserManagement() {
     // Render immediately from current SharedData cache.
-    loadProfessorsData();
+    loadProfessorsData(shouldLoadHrProfessorList() ? adminUsers : []);
     renderProfessors();
 
-    // Refresh from API in the background and re-render when new data arrives.
-    setTimeout(() => refreshHrUsersInBackground(false), 0);
+    if (shouldLoadHrProfessorList()) {
+        // Refresh from API in the background and re-render when new data arrives.
+        setTimeout(() => refreshHrUsersInBackground(false), 0);
+    }
+}
+
+function renderHrProfessorPagination() {
+    const container = document.getElementById('hr-professor-pagination');
+    if (!container) return;
+    if (!shouldLoadHrProfessorList()) {
+        container.innerHTML = '';
+        return;
+    }
+
+    const meta = hrProfessorPageMeta || {};
+    const total = Math.max(0, Number(meta.total) || 0);
+    const limit = Math.max(1, Number(meta.limit) || HR_PROFESSORS_PAGE_SIZE);
+    const page = Math.max(1, Number(meta.page) || hrProfessorPage || 1);
+    const offset = Math.max(0, Number(meta.offset) || ((page - 1) * limit));
+    const shown = Array.isArray(professorsData) ? professorsData.length : 0;
+    const from = shown > 0 ? offset + 1 : 0;
+    const to = shown > 0 ? offset + shown : 0;
+    const hasPrevious = page > 1;
+    const hasNext = meta.hasMore === true;
+
+    container.innerHTML = `
+        <div class="pagination-summary">
+            Showing ${from}-${to} of ${total} professors · Page ${page}
+        </div>
+        <div class="pagination-actions">
+            <button type="button" class="pagination-btn" id="hr-professor-prev-page" ${hasPrevious ? '' : 'disabled'}>
+                <i class="fas fa-chevron-left"></i>
+                Previous
+            </button>
+            <button type="button" class="pagination-btn" id="hr-professor-next-page" ${hasNext ? '' : 'disabled'}>
+                Next
+                <i class="fas fa-chevron-right"></i>
+            </button>
+        </div>
+    `;
+
+    const prev = document.getElementById('hr-professor-prev-page');
+    const next = document.getElementById('hr-professor-next-page');
+    if (prev) {
+        prev.addEventListener('click', () => {
+            if (!hasPrevious) return;
+            hrProfessorPage = page - 1;
+            refreshHrUsersInBackground(true);
+        });
+    }
+    if (next) {
+        next.addEventListener('click', () => {
+            if (!hasNext) return;
+            hrProfessorPage = page + 1;
+            refreshHrUsersInBackground(true);
+        });
+    }
 }
 
 /**
@@ -5727,7 +6404,7 @@ function renderProfessors() {
     if (!professorsList) return;
 
     const searchTerm = String(lastProfessorSearchTerm || '').trim().toLowerCase();
-    if (!hasProfessorSearchRun || !searchTerm) {
+    if (!shouldLoadHrProfessorList()) {
         renderProfessorSearchPrompt('Search by name or employee ID to show professors.', 'fa-search');
         return;
     }
@@ -5771,6 +6448,7 @@ function renderProfessors() {
                 <p>No professors match your search</p>
             </div>
         `;
+        renderHrProfessorPagination();
         return;
     }
 
@@ -5781,6 +6459,7 @@ function renderProfessors() {
         : buildProfessorTableMarkup(filteredProfessors, studentsEvaluatedCountMap);
 
     bindProfessorActionButtons(professorsList);
+    renderHrProfessorPagination();
 }
 
 function getProfessorStudentsEvaluated(professor, studentsEvaluatedCountMap) {
@@ -5860,7 +6539,7 @@ function buildProfessorCardsMarkup(filteredProfessors, studentsEvaluatedCountMap
     return filteredProfessors.map(professor => {
         const studentsEvaluated = getProfessorStudentsEvaluated(professor, studentsEvaluatedCountMap);
         const employmentType = formatEmploymentType(professor.employmentType);
-        const employmentClass = String(employmentType || '').toLowerCase().includes('temp') ? 'temporary' : 'regular';
+        const employmentClass = getEmploymentTypeClass(employmentType);
 
         return `
             <article class="professor-card ${professor.isActive === false ? 'inactive' : ''}" data-id="${professor.id}">
@@ -5973,7 +6652,9 @@ function getHrProfessorById(professorId) {
     const localMatch = professorsData.find(professor => String(professor && professor.id || '').trim() === targetId);
     if (localMatch) return localMatch;
 
-    const sourceUsers = SharedData.getUsers ? SharedData.getUsers() : [];
+    const sourceUsers = SharedData.listUsers
+        ? SharedData.listUsers({ role: 'professor', userId: targetId, limit: 1, page: 1 })
+        : [];
     return sourceUsers.find(user =>
         String(user && user.id || '').trim() === targetId
         && normalizeHrToken(user && user.role) === 'professor'
@@ -6392,7 +7073,9 @@ function getHrOverallSasrDepartments(campusId) {
         });
     }
 
-    const users = SharedData.getUsers ? SharedData.getUsers() : [];
+    const users = SharedData.getCachedUsers
+        ? SharedData.getCachedUsers()
+        : (SharedData.getUsers ? SharedData.getUsers() : []);
     users.forEach(user => {
         if (!user || normalizeHrToken(user.role) !== 'professor') return;
         if (campusToken !== 'all' && normalizeHrToken(user.campus || user.campusSlug) !== campusToken) return;
@@ -7234,7 +7917,7 @@ function openAddProfessorModal() {
         const activeCheckbox = document.getElementById('professor-active');
         const employmentTypeSelect = document.getElementById('professor-employment-type');
         if (activeCheckbox) activeCheckbox.checked = true;
-        if (employmentTypeSelect) employmentTypeSelect.value = 'Regular';
+        if (employmentTypeSelect) employmentTypeSelect.value = 'Permanent';
         currentEditingProfessorId = null;
         modal.style.display = 'flex';
     }
@@ -7254,7 +7937,7 @@ function closeProfessorModal() {
 /**
  * Handle professor form submission
  */
-function handleProfessorFormSubmit(e) {
+async function handleProfessorFormSubmit(e) {
     e.preventDefault();
 
     const employeeIdInput = document.getElementById('professor-employee-id');
@@ -7301,13 +7984,20 @@ function handleProfessorFormSubmit(e) {
     }
 
     // Save to localStorage
-    saveProfessorsToSharedData();
+    try {
+        await saveProfessorsToSharedData();
+    } catch (error) {
+        console.error('[HRPanel] Failed to save professor data.', error);
+        alert('Failed to save professor data: ' + (error.message || 'Unknown error'));
+        return;
+    }
 
-    // Re-render and close modal
-    renderProfessors();
+    await refreshHrUsersInBackground(true);
+    refreshHrDashboardProfessorRanking(true);
     renderProfessorRanking();
     closeProfessorModal();
     updateOverviewCards();
+    scheduleHrDashboardSummaryRefresh(0);
 }
 
 /**
@@ -7327,7 +8017,7 @@ function editProfessor(professorId) {
         document.getElementById('professor-employee-id').value = professor.employeeId || '';
         document.getElementById('professor-department').value = professor.department;
         document.getElementById('professor-position').value = professor.position;
-        document.getElementById('professor-employment-type').value = professor.employmentType || 'Regular';
+        document.getElementById('professor-employment-type').value = formatEmploymentType(professor.employmentType);
         document.getElementById('professor-active').checked = professor.isActive !== false;
         currentEditingProfessorId = professorId;
         modal.style.display = 'flex';
@@ -7337,16 +8027,27 @@ function editProfessor(professorId) {
 /**
  * Delete professor
  */
-function deleteProfessor(professorId) {
+async function deleteProfessor(professorId) {
     const professor = professorsData.find(t => String(t.id) === String(professorId));
     if (!professor) return;
 
-    if (confirm(`Are you sure you want to delete ${professor.name}?\n\nThis action cannot be undone.`)) {
-        professorsData = professorsData.filter(t => t.id !== professorId);
-        saveProfessorsToSharedData();
-        renderProfessors();
+    if (confirm(`Deactivate ${professor.name}? The account will no longer be able to sign in, while historical evaluations and reports remain available.`)) {
+        try {
+            if (!SharedData.deleteUser) {
+                throw new Error('Delete service is unavailable.');
+            }
+            await SharedData.deleteUser(professorId);
+            professorsData = professorsData.filter(t => String(t.id) !== String(professorId));
+        } catch (error) {
+            console.error('[HRPanel] Failed to deactivate professor.', error);
+            alert('Failed to deactivate professor: ' + (error.message || 'Unknown error'));
+            return;
+        }
+        await refreshHrProfessorListForCurrentFilters(true);
+        refreshHrDashboardProfessorRanking(true);
         renderProfessorRanking();
         updateOverviewCards();
+        scheduleHrDashboardSummaryRefresh(0);
     }
 }
 
@@ -7431,7 +8132,7 @@ function viewProfessorDetails(professorId) {
                     </div>
                     <div class="info-row">
                         <label><i class="fas fa-user-tag"></i> Employment Type:</label>
-                        <span>${professor.employmentType || 'Regular'}</span>
+                        <span>${formatEmploymentType(professor.employmentType)}</span>
                     </div>
                     <div class="info-row">
                         <label><i class="fas fa-building"></i> Department:</label>
@@ -8689,9 +9390,24 @@ function deriveEmployeeIdFallback(userId) {
 }
 
 function formatEmploymentType(type) {
-    if (!type) return 'Regular';
-    const normalized = String(type).toLowerCase();
+    const normalized = String(type || '').trim().toLowerCase();
+    if (!normalized || normalized === 'regular' || normalized === 'permanent') return 'Permanent';
+    if (normalized === 'cos' || normalized === 'ocs' || normalized === 'contract-of-service' || normalized === 'contract of service') return 'COS';
+    if (normalized === 'temporary' || normalized === 'temp') return 'Temporary';
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function getEmploymentTypeClass(type) {
+    const normalized = formatEmploymentType(type).toLowerCase();
+    if (normalized === 'cos') return 'cos';
+    if (normalized === 'temporary') return 'temporary';
+    return 'permanent';
+}
+
+function isEmploymentTypeMatch(value, filterValue) {
+    const filter = String(filterValue || 'all').trim().toLowerCase();
+    if (!filter || filter === 'all') return true;
+    return formatEmploymentType(value).toLowerCase() === filter;
 }
 
 /**
@@ -8714,6 +9430,11 @@ function loadReports() {
  * Generate evaluation data
  */
 function generateEvaluationData() {
+    const summary = getCurrentHrDashboardSummary();
+    if (hasHrDashboardSummaryData(summary)) {
+        return buildHrEvaluationDataFromDashboardSummary(summary);
+    }
+
     const context = buildHrEvaluationContext();
     const semesterId = context.currentSemester || 'all';
     const registration = buildHrStudentRegistrationStats(context, semesterId);
@@ -10555,7 +11276,7 @@ function deleteQuestion(questionId) {
     const question = currentQuestions.find(q => q.id === questionId);
     if (!question) return;
 
-    if (confirm(`Are you sure you want to delete this question?\n\n"${question.text}"\n\nThis action cannot be undone.`)) {
+    if (confirm(`Archive this question?\n\n"${question.text}"\n\nIt will leave active questionnaires, but historical evaluation responses will be retained.`)) {
         const updatedQuestions = currentQuestions.filter(q => q.id !== questionId);
         // Reorder remaining questions in the same section
         if (question.sectionId) {
@@ -10777,11 +11498,11 @@ function deleteSection(sectionId) {
     // Check if section has questions
     const sectionQuestions = currentQuestions.filter(q => q.sectionId === sectionId);
     if (sectionQuestions.length > 0) {
-        if (!confirm(`This section has ${sectionQuestions.length} question(s). Deleting it will also delete all questions in this section.\n\nAre you sure you want to delete section "${section.letter}. ${section.title}"?\n\nThis action cannot be undone.`)) {
+        if (!confirm(`This section has ${sectionQuestions.length} question(s). Archiving it will also remove those questions from active questionnaires.\n\nArchive section "${section.letter}. ${section.title}"? Historical responses will be retained.`)) {
             return;
         }
     } else {
-        if (!confirm(`Are you sure you want to delete section "${section.letter}. ${section.title}"?\n\nThis action cannot be undone.`)) {
+        if (!confirm(`Archive section "${section.letter}. ${section.title}"? Historical records will be retained.`)) {
             return;
         }
     }

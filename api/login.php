@@ -5,6 +5,8 @@
  * POST /api/login.php
  */
 
+require_once __DIR__ . '/error_helper.php';
+
 ob_start();
 $GLOBALS['naapLoginOutputBufferLevel'] = ob_get_level();
 $GLOBALS['naapLoginErrorReference'] = '';
@@ -22,40 +24,16 @@ function naapLoginBuildErrorReference(): string {
         return $reference;
     }
 
-    try {
-        $suffix = bin2hex(random_bytes(3));
-    } catch (Throwable $error) {
-        $suffix = substr(str_replace('.', '', uniqid('', true)), -6);
-    }
-
-    $reference = gmdate('Ymd-His') . '-' . $suffix;
+    $reference = naapGenerateErrorReference();
     $GLOBALS['naapLoginErrorReference'] = $reference;
     return $reference;
 }
 
 function naapLoginWriteDiagnosticLog(string $reference, string $logMessage): void {
-    $line = sprintf(
-        "[%s] [%s] %s %s %s\n",
-        gmdate('c'),
-        $reference,
-        $_SERVER['REQUEST_METHOD'] ?? '',
-        $_SERVER['REQUEST_URI'] ?? '',
-        $logMessage
-    );
-
-    error_log('[NAAP Login API] [' . $reference . '] ' . $logMessage);
-
-    $logDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'files' . DIRECTORY_SEPARATOR . 'runtime_logs';
-    if (!is_dir($logDir)) {
-        @mkdir($logDir, 0755, true);
-    }
-
-    if (is_dir($logDir) && is_writable($logDir)) {
-        @file_put_contents($logDir . DIRECTORY_SEPARATOR . 'naap-login-error.log', $line, FILE_APPEND | LOCK_EX);
-    }
+    naapLogServerDiagnostic($reference, 'login', $logMessage);
 }
 
-function naapLoginSendServerErrorJson(string $logMessage): void {
+function naapLoginSendServerErrorJson(string $logMessage, Throwable $error = null): void {
     $reference = naapLoginBuildErrorReference();
     naapLoginWriteDiagnosticLog($reference, $logMessage);
     naapLoginDiscardBufferedOutput();
@@ -68,10 +46,23 @@ function naapLoginSendServerErrorJson(string $logMessage): void {
         header('Expires: 0');
     }
 
-    echo json_encode([
-        'success' => false,
-        'error' => 'Login server error. Reference: ' . $reference . '. Please check the Z.com PHP error log.',
-    ]);
+    $payload = buildNaapServerErrorPayload($reference);
+    if (
+        $error instanceof Throwable
+        && function_exists('isNaapSchemaMigrationRequiredException')
+        && isNaapSchemaMigrationRequiredException($error)
+    ) {
+        $payload = function_exists('buildNaapSchemaMigrationRequiredPayload')
+            ? buildNaapSchemaMigrationRequiredPayload($reference)
+            : [
+                'success' => false,
+                'code' => 'SCHEMA_MIGRATION_REQUIRED',
+                'error' => 'Database schema is not migrated. Run the schema migration command before using the system.',
+                'reference' => $reference,
+            ];
+    }
+
+    echo json_encode($payload);
     exit();
 }
 
@@ -85,7 +76,8 @@ set_error_handler(function (int $severity, string $message, string $file, int $l
 
 set_exception_handler(function (Throwable $error): void {
     naapLoginSendServerErrorJson(
-        get_class($error) . ': ' . $error->getMessage() . ' in ' . $error->getFile() . ':' . $error->getLine()
+        get_class($error) . ': ' . $error->getMessage() . ' in ' . $error->getFile() . ':' . $error->getLine(),
+        $error
     );
 });
 
@@ -109,39 +101,15 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/state_helpers.php';
 require_once __DIR__ . '/mailer_helper.php';
+require_once __DIR__ . '/auth_rate_limit.php';
 
 const LOGIN_PASSWORD_FAILURE_THRESHOLD = 3;
 const LOGIN_OTP_FAILURE_THRESHOLD = 3;
 const LOGIN_OTP_EXPIRY_SECONDS = 600; // 10 minutes
-const LOGIN_LOCK_DURATION_SECONDS = 7200; // 2 hours
 const PASSWORD_RESET_EXPIRY_SECONDS = 1800; // 30 minutes
 
 function normalizeLoginIdentityToken($value) {
     return strtolower(trim((string) $value));
-}
-
-function findLoginUserByIdentifier(array $users, $normalizedIdentifier) {
-    $target = normalizeLoginIdentityToken($normalizedIdentifier);
-    if ($target === '') {
-        return null;
-    }
-
-    foreach ($users as $user) {
-        $email = normalizeLoginIdentityToken($user['email'] ?? '');
-        $employeeId = normalizeLoginIdentityToken($user['employeeId'] ?? '');
-        $studentNumber = normalizeLoginIdentityToken($user['studentNumber'] ?? '');
-
-        $isMatch =
-            $email === $target ||
-            ($employeeId !== '' && $employeeId === $target) ||
-            ($studentNumber !== '' && $studentNumber === $target);
-
-        if ($isMatch) {
-            return $user;
-        }
-    }
-
-    return null;
 }
 
 function resolveLoginUserNumericId($userIdToken) {
@@ -159,13 +127,11 @@ function parseLoginTimestamp($value) {
 
 function buildLoginSecurityRecord(array $record) {
     $failedPasswordCount = max(0, (int) ($record['failed_password_count'] ?? 0));
-    $lockUntil = trim((string) ($record['lock_until'] ?? ''));
     $updatedAt = trim((string) ($record['updated_at'] ?? ''));
     $challenge = is_array($record['otp_challenge'] ?? null) ? $record['otp_challenge'] : null;
 
     return [
         'failed_password_count' => $failedPasswordCount,
-        'lock_until' => $lockUntil,
         'otp_challenge' => $challenge,
         'updated_at' => $updatedAt !== '' ? $updatedAt : getAuthoritativePhilippineIso8601(),
     ];
@@ -182,13 +148,124 @@ function buildOtpRequiredPayload(array $challenge) {
     ];
 }
 
-function sendLockedLoginResponse($lockUntilIso) {
-    sendJson([
-        'success' => false,
-        'error' => 'Account is temporarily locked due to suspicious login activity.',
-        'locked' => true,
-        'lockUntil' => $lockUntilIso,
-    ], 423);
+function sendAuthenticationRateLimitedResponse(): void {
+    header('Retry-After: ' . NAAP_AUTH_RATE_RETRY_AFTER_SECONDS);
+    sendJson(
+        naapAuthRateBuildLimitedPayload('Too many authentication attempts. Please try again later.'),
+        429
+    );
+}
+
+function sendPasswordResetRateLimitedResponse(): void {
+    header('Retry-After: ' . NAAP_AUTH_RATE_RETRY_AFTER_SECONDS);
+    sendJson(
+        naapAuthRateBuildLimitedPayload('Too many password reset requests. Please try again later.'),
+        429
+    );
+}
+
+function buildGenericPasswordResetRequestPayload(int $now): array {
+    return [
+        'success' => true,
+        'message' => 'If the details match an active account, a password reset link will be sent.',
+        'expiresAt' => formatPhilippineUnixTimestampIso($now + PASSWORD_RESET_EXPIRY_SECONDS),
+    ];
+}
+
+function sendGenericPasswordResetRequestResponse(int $now): void {
+    sendJson(buildGenericPasswordResetRequestPayload($now));
+}
+
+function cleanupExpiredPasswordResetTokens(PDO $pdo, int $now): int {
+    $stmt = $pdo->prepare(
+        'DELETE FROM password_reset_tokens
+         WHERE expires_at <= :expires_at
+         LIMIT 500'
+    );
+    $stmt->execute([':expires_at' => formatPasswordResetMysqlDateTime($now)]);
+    return $stmt->rowCount();
+}
+
+function logAuthenticationRateLimitCrossing(PDO $pdo, ?array $user, string $description): void {
+    try {
+        addActivityLogEntrySnapshot($pdo, [
+            'action' => 'Authentication Rate Limit Reached',
+            'description' => $description,
+            'type' => 'login',
+            'role' => trim((string)($user['role'] ?? ($user['role_code'] ?? ''))),
+            'user_id' => trim((string)($user['id'] ?? ($user['user_id'] ?? ''))),
+            'user' => '',
+            'email' => '',
+        ]);
+    } catch (Throwable $error) {
+        // Security logging is best-effort and must not change the response.
+    }
+}
+
+function enforceAuthenticationIpLimit(PDO $pdo, string $ipFingerprint, int $now): void {
+    if (naapAuthRateIsLimited(
+        $pdo,
+        NAAP_AUTH_RATE_ACTION_FAILURE,
+        'ip_hash',
+        $ipFingerprint,
+        NAAP_AUTH_RATE_IP_FAILURE_LIMIT,
+        NAAP_AUTH_RATE_IP_FAILURE_WINDOW_SECONDS,
+        $now
+    )) {
+        sendAuthenticationRateLimitedResponse();
+    }
+}
+
+function recordAuthenticationFailureOrLimit(
+    PDO $pdo,
+    string $ipFingerprint,
+    string $identityFingerprint,
+    int $now,
+    ?array $user = null
+): void {
+    if (naapAuthRateIsLimited(
+        $pdo,
+        NAAP_AUTH_RATE_ACTION_FAILURE,
+        'identity_hash',
+        $identityFingerprint,
+        NAAP_AUTH_RATE_IDENTITY_FAILURE_LIMIT,
+        NAAP_AUTH_RATE_IDENTITY_FAILURE_WINDOW_SECONDS,
+        $now
+    )) {
+        sendAuthenticationRateLimitedResponse();
+    }
+
+    naapAuthRateRecordEvent(
+        $pdo,
+        NAAP_AUTH_RATE_ACTION_FAILURE,
+        $ipFingerprint,
+        $identityFingerprint,
+        $now
+    );
+
+    $ipCount = naapAuthRateCountEvents(
+        $pdo,
+        NAAP_AUTH_RATE_ACTION_FAILURE,
+        'ip_hash',
+        $ipFingerprint,
+        NAAP_AUTH_RATE_IP_FAILURE_WINDOW_SECONDS,
+        $now
+    );
+    $identityCount = naapAuthRateCountEvents(
+        $pdo,
+        NAAP_AUTH_RATE_ACTION_FAILURE,
+        'identity_hash',
+        $identityFingerprint,
+        NAAP_AUTH_RATE_IDENTITY_FAILURE_WINDOW_SECONDS,
+        $now
+    );
+
+    if ($ipCount === NAAP_AUTH_RATE_IP_FAILURE_LIMIT) {
+        logAuthenticationRateLimitCrossing($pdo, null, 'The authentication failure limit was reached for a request source.');
+    }
+    if ($identityCount === NAAP_AUTH_RATE_IDENTITY_FAILURE_LIMIT) {
+        logAuthenticationRateLimitCrossing($pdo, $user, 'The authentication failure limit was reached for an account identity.');
+    }
 }
 
 function logSuspiciousLoginEvent(PDO $pdo, array $user, $action, $description) {
@@ -267,27 +344,6 @@ function buildSuccessfulAuthPayload(PDO $pdo, array $user, array $extra = []) {
         ['success' => true],
         $extra,
         buildNaapSessionPayload($user, $csrfToken)
-    );
-}
-
-function ensurePasswordResetTokensTable(PDO $pdo) {
-    $pdo->exec(
-        "CREATE TABLE IF NOT EXISTS password_reset_tokens (
-            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-            user_id BIGINT UNSIGNED NOT NULL,
-            token_hash CHAR(64) NOT NULL,
-            expires_at DATETIME NOT NULL,
-            used_at DATETIME DEFAULT NULL,
-            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            UNIQUE KEY uq_password_reset_tokens_hash (token_hash),
-            KEY idx_password_reset_tokens_user (user_id),
-            KEY idx_password_reset_tokens_expires (expires_at),
-            CONSTRAINT fk_password_reset_tokens_user
-                FOREIGN KEY (user_id) REFERENCES users (id)
-                ON UPDATE CASCADE
-                ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
 }
 
@@ -382,39 +438,120 @@ function handlePasswordResetRequest(PDO $pdo, array $body) {
         sendJson(['success' => false, 'error' => 'Student Number / Employee ID is required.'], 400);
     }
     if (strlen($email) > 190 || strlen($identifier) > 100) {
-        sendJson(['success' => false, 'error' => 'Email and ID do not match an active account.'], 400);
-    }
-
-    ensurePasswordResetTokensTable($pdo);
-    $user = findPasswordResetAccount($pdo, $email, $identifier);
-    if (!$user) {
-        sendJson(['success' => false, 'error' => 'Email and ID do not match an active account.'], 404);
-    }
-
-    try {
-        $smtpConfig = getCredentialDistributorSmtpConfigSnapshot($pdo);
-    } catch (Throwable $e) {
-        sendJson([
-            'success' => false,
-            'error' => 'Password reset email service is unavailable. Ask the administrator to configure SMTP settings.',
-        ], 503);
+        sendJson(['success' => false, 'error' => 'Invalid password reset request.'], 400);
     }
 
     $now = getAuthoritativePhilippineUnixTimestamp();
-    $token = bin2hex(random_bytes(32));
-    $tokenHash = hash('sha256', $token);
-    $expiresAt = formatPasswordResetMysqlDateTime($now + PASSWORD_RESET_EXPIRY_SECONDS);
-    $resetUrl = buildPasswordResetUrl($token);
+    $ipFingerprint = naapAuthRateIpFingerprint();
+    $requestedIdentityFingerprint = naapAuthRateResetIdentityFingerprint($email, $identifier);
+    naapAuthRateCleanupEvents($pdo, $now);
+    cleanupExpiredPasswordResetTokens($pdo, $now);
 
-    $insert = $pdo->prepare(
-        'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
-         VALUES (:user_id, :token_hash, :expires_at)'
+    if (naapAuthRateIsLimited(
+        $pdo,
+        NAAP_AUTH_RATE_ACTION_RESET_REQUEST,
+        'ip_hash',
+        $ipFingerprint,
+        NAAP_AUTH_RATE_RESET_IP_LIMIT,
+        NAAP_AUTH_RATE_RESET_IP_WINDOW_SECONDS,
+        $now
+    )) {
+        sendPasswordResetRateLimitedResponse();
+    }
+
+    if (naapAuthRateIsLimited(
+        $pdo,
+        NAAP_AUTH_RATE_ACTION_RESET_REQUEST,
+        'identity_hash',
+        $requestedIdentityFingerprint,
+        NAAP_AUTH_RATE_RESET_IDENTITY_LIMIT,
+        NAAP_AUTH_RATE_RESET_IDENTITY_WINDOW_SECONDS,
+        $now
+    )) {
+        sendGenericPasswordResetRequestResponse($now);
+    }
+
+    naapAuthRateRecordEvent(
+        $pdo,
+        NAAP_AUTH_RATE_ACTION_RESET_REQUEST,
+        $ipFingerprint,
+        $requestedIdentityFingerprint,
+        $now
     );
-    $insert->execute([
-        ':user_id' => (int) $user['id'],
-        ':token_hash' => $tokenHash,
-        ':expires_at' => $expiresAt,
-    ]);
+
+    $user = findPasswordResetAccount($pdo, $email, $identifier);
+    if (!$user) {
+        sendGenericPasswordResetRequestResponse($now);
+    }
+
+    $userIdentityFingerprint = naapAuthRateUserIdentityFingerprint($user['id'] ?? 0);
+    try {
+        $smtpConfig = getCredentialDistributorSmtpConfigSnapshot($pdo);
+    } catch (Throwable $e) {
+        naapLoginWriteDiagnosticLog(naapLoginBuildErrorReference(), 'Password reset mail configuration is unavailable.');
+        sendGenericPasswordResetRequestResponse($now);
+    }
+
+    try {
+        $token = bin2hex(random_bytes(32));
+        $tokenHash = hash('sha256', $token);
+        $expiresAt = formatPasswordResetMysqlDateTime($now + PASSWORD_RESET_EXPIRY_SECONDS);
+        $resetUrl = buildPasswordResetUrl($token);
+    } catch (Throwable $error) {
+        naapLoginWriteDiagnosticLog(naapLoginBuildErrorReference(), 'Password reset token generation failed.');
+        sendGenericPasswordResetRequestResponse($now);
+    }
+    $tokenId = 0;
+    $reservationEventId = 0;
+
+    try {
+        $pdo->beginTransaction();
+        $lockUser = $pdo->prepare('SELECT id, status FROM users WHERE id = :id FOR UPDATE');
+        $lockUser->execute([':id' => (int)$user['id']]);
+        $lockedUser = $lockUser->fetch();
+        if (!$lockedUser || normalizeLoginIdentityToken($lockedUser['status'] ?? '') !== 'active') {
+            $pdo->rollBack();
+            sendGenericPasswordResetRequestResponse($now);
+        }
+
+        if (naapAuthRateIsLimited(
+            $pdo,
+            NAAP_AUTH_RATE_ACTION_RESET_SENT,
+            'identity_hash',
+            $userIdentityFingerprint,
+            1,
+            NAAP_AUTH_RATE_RESET_COOLDOWN_SECONDS,
+            $now
+        )) {
+            $pdo->rollBack();
+            sendGenericPasswordResetRequestResponse($now);
+        }
+
+        $insert = $pdo->prepare(
+            'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+             VALUES (:user_id, :token_hash, :expires_at)'
+        );
+        $insert->execute([
+            ':user_id' => (int)$user['id'],
+            ':token_hash' => $tokenHash,
+            ':expires_at' => $expiresAt,
+        ]);
+        $tokenId = (int)$pdo->lastInsertId();
+        $reservationEventId = naapAuthRateRecordEvent(
+            $pdo,
+            NAAP_AUTH_RATE_ACTION_RESET_SENT,
+            $ipFingerprint,
+            $userIdentityFingerprint,
+            $now
+        );
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        naapLoginWriteDiagnosticLog(naapLoginBuildErrorReference(), 'Password reset token issuance failed.');
+        sendGenericPasswordResetRequestResponse($now);
+    }
 
     try {
         credentialMailerSendPasswordReset($smtpConfig, [
@@ -423,13 +560,38 @@ function handlePasswordResetRequest(PDO $pdo, array $body) {
             'resetUrl' => $resetUrl,
             'expiresMinutes' => (int) (PASSWORD_RESET_EXPIRY_SECONDS / 60),
         ]);
-    } catch (Throwable $e) {
-        $delete = $pdo->prepare('DELETE FROM password_reset_tokens WHERE token_hash = :token_hash LIMIT 1');
-        $delete->execute([':token_hash' => $tokenHash]);
-        sendJson([
-            'success' => false,
-            'error' => 'Password reset email could not be sent. Please try again later.',
-        ], 503);
+    } catch (Throwable $error) {
+        try {
+            $pdo->beginTransaction();
+            $delete = $pdo->prepare('DELETE FROM password_reset_tokens WHERE id = :id');
+            $delete->execute([':id' => $tokenId]);
+            naapAuthRateDeleteEvent($pdo, $reservationEventId);
+            $pdo->commit();
+        } catch (Throwable $cleanupError) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+        }
+        naapLoginWriteDiagnosticLog(naapLoginBuildErrorReference(), 'Password reset email delivery failed.');
+        sendGenericPasswordResetRequestResponse($now);
+    }
+
+    try {
+        $usedAt = formatPasswordResetMysqlDateTime($now);
+        $invalidateOlder = $pdo->prepare(
+            'UPDATE password_reset_tokens
+             SET used_at = :used_at
+             WHERE user_id = :user_id
+               AND id <> :current_id
+               AND used_at IS NULL'
+        );
+        $invalidateOlder->execute([
+            ':used_at' => $usedAt,
+            ':user_id' => (int)$user['id'],
+            ':current_id' => $tokenId,
+        ]);
+    } catch (Throwable $error) {
+        naapLoginWriteDiagnosticLog(naapLoginBuildErrorReference(), 'Older password reset tokens could not be invalidated.');
     }
 
     logPasswordResetEvent(
@@ -439,71 +601,78 @@ function handlePasswordResetRequest(PDO $pdo, array $body) {
         'A password reset link was sent to the verified account email.'
     );
 
-    sendJson([
-        'success' => true,
-        'message' => 'A password reset link has been sent to your account email.',
-        'expiresAt' => formatPhilippineUnixTimestampIso($now + PASSWORD_RESET_EXPIRY_SECONDS),
-    ]);
+    sendGenericPasswordResetRequestResponse($now);
 }
 
 function handlePasswordResetConsume(PDO $pdo, array $body) {
+    cleanupExpiredPasswordResetTokens($pdo, getAuthoritativePhilippineUnixTimestamp());
     $token = trim((string) ($body['token'] ?? ''));
-    $newPassword = (string) ($body['newPassword'] ?? '');
     if ($token === '' || !preg_match('/^[a-f0-9]{64}$/i', $token)) {
         sendJson(['success' => false, 'error' => 'Password reset link is invalid.'], 400);
     }
-    if (strlen($newPassword) < 8) {
-        sendJson(['success' => false, 'error' => 'New password must be at least 8 characters.'], 400);
-    }
-    if (strlen($newPassword) > 255) {
-        sendJson(['success' => false, 'error' => 'New password is too long.'], 400);
+    try {
+        $newPassword = normalizeUserPasswordValue($body['newPassword'] ?? null);
+    } catch (RuntimeException $error) {
+        sendJson(['success' => false, 'error' => $error->getMessage()], 400);
     }
 
-    ensurePasswordResetTokensTable($pdo);
     $tokenHash = hash('sha256', strtolower($token));
-    $stmt = $pdo->prepare(
-        'SELECT
-            prt.id,
-            prt.user_id,
-            prt.expires_at,
-            prt.used_at,
-            u.name,
-            u.email,
-            u.status,
-            r.code AS role_code
-         FROM password_reset_tokens prt
-         JOIN users u ON u.id = prt.user_id
-         JOIN roles r ON r.id = u.role_id
-         WHERE prt.token_hash = :token_hash
-         LIMIT 1'
-    );
-    $stmt->execute([':token_hash' => $tokenHash]);
-    $record = $stmt->fetch();
-    if (!$record) {
-        sendJson(['success' => false, 'error' => 'Password reset link is invalid.'], 400);
-    }
-
-    if (trim((string) ($record['used_at'] ?? '')) !== '') {
-        sendJson(['success' => false, 'error' => 'Password reset link has already been used.'], 400);
-    }
-    if (normalizeLoginIdentityToken($record['status'] ?? 'active') !== 'active') {
-        sendJson(['success' => false, 'error' => 'Account is inactive.'], 403);
-    }
-
     $now = getAuthoritativePhilippineUnixTimestamp();
     $nowMysql = formatPasswordResetMysqlDateTime($now);
-    $expiresAt = trim((string) ($record['expires_at'] ?? ''));
-    if ($expiresAt === '' || strcmp($expiresAt, $nowMysql) <= 0) {
-        sendJson(['success' => false, 'error' => 'Password reset link has expired.'], 400);
-    }
-
-    $hashedPassword = normalizePasswordForStorage($newPassword);
+    $hashedPassword = normalizeUserPasswordForStorage($newPassword);
     $usedAt = formatPasswordResetMysqlDateTime($now);
+    $record = null;
 
     try {
         $pdo->beginTransaction();
 
-        $updatePassword = $pdo->prepare('UPDATE users SET password = :password WHERE id = :user_id LIMIT 1');
+        $stmt = $pdo->prepare(
+            'SELECT
+                prt.id,
+                prt.user_id,
+                prt.expires_at,
+                prt.used_at,
+                u.name,
+                u.email,
+                u.status,
+                r.code AS role_code
+             FROM password_reset_tokens prt
+             JOIN users u ON u.id = prt.user_id
+             JOIN roles r ON r.id = u.role_id
+             WHERE prt.token_hash = :token_hash
+             LIMIT 1
+             FOR UPDATE'
+        );
+        $stmt->execute([':token_hash' => $tokenHash]);
+        $record = $stmt->fetch();
+        if (!$record) {
+            $pdo->rollBack();
+            sendJson(['success' => false, 'error' => 'Password reset link is invalid.'], 400);
+        }
+        if (trim((string) ($record['used_at'] ?? '')) !== '') {
+            $pdo->rollBack();
+            sendJson(['success' => false, 'error' => 'Password reset link has already been used.'], 400);
+        }
+        if (normalizeLoginIdentityToken($record['status'] ?? 'active') !== 'active') {
+            $pdo->rollBack();
+            sendJson(['success' => false, 'error' => 'Account is inactive.'], 403);
+        }
+
+        $expiresAt = trim((string) ($record['expires_at'] ?? ''));
+        if ($expiresAt === '' || strcmp($expiresAt, $nowMysql) <= 0) {
+            $pdo->rollBack();
+            sendJson(['success' => false, 'error' => 'Password reset link has expired.'], 400);
+        }
+
+        $updatePassword = $pdo->prepare(
+            'UPDATE users
+             SET password = :password,
+                 active_session_token_hash = NULL,
+                 active_session_started_at = NULL,
+                 active_session_last_seen_at = NULL
+             WHERE id = :user_id
+             LIMIT 1'
+        );
         $updatePassword->execute([
             ':password' => $hashedPassword,
             ':user_id' => (int) $record['user_id'],
@@ -519,12 +688,20 @@ function handlePasswordResetConsume(PDO $pdo, array $body) {
             ':user_id' => (int) $record['user_id'],
         ]);
 
+        persistLoginSecurityRecordSnapshot($pdo, $record['user_id'], []);
+
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
-        sendJson(['success' => false, 'error' => 'Unable to reset password. Please try again.'], 500);
+        if (function_exists('isNaapSchemaMigrationRequiredException') && isNaapSchemaMigrationRequiredException($e)) {
+            sendNaapSchemaMigrationRequiredJson($e);
+        }
+        naapLoginSendServerErrorJson(
+            get_class($e) . ': ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine(),
+            $e
+        );
     }
 
     logPasswordResetEvent(
@@ -568,9 +745,6 @@ if ($action === '') {
 }
 
 if ($action === 'logout') {
-    if (isNaapAuthenticatedSession($pdo)) {
-        requireNaapCsrfToken();
-    }
     destroyNaapSession($pdo);
     sendJson([
         'success' => true,
@@ -602,42 +776,46 @@ if ($action !== 'login' && $action !== 'verifyotp') {
 }
 
 $username = trim((string) ($body['username'] ?? ''));
+$normalizedUsername = normalizeLoginIdentityToken(strip_tags($username));
+$submittedIdentityFingerprint = naapAuthRateSubmittedIdentityFingerprint($normalizedUsername);
+$ipFingerprint = naapAuthRateIpFingerprint();
+$now = getAuthoritativePhilippineUnixTimestamp();
+naapAuthRateCleanupEvents($pdo, $now);
+enforceAuthenticationIpLimit($pdo, $ipFingerprint, $now);
+
 if ($username === '') {
+    recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $submittedIdentityFingerprint, $now);
     sendJson(['success' => false, 'error' => 'Username is required'], 400);
 }
 if (strlen($username) > 100) {
+    recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $submittedIdentityFingerprint, $now);
     sendJson(['success' => false, 'error' => 'Invalid credentials'], 400);
 }
 
 $username = strip_tags($username);
 $normalizedUsername = normalizeLoginIdentityToken($username);
-$users = buildAuthUsersSnapshot($pdo);
-$user = findLoginUserByIdentifier($users, $normalizedUsername);
+$user = buildAuthUserSnapshotByLoginIdentifier($pdo, $normalizedUsername);
 
 if (!$user) {
+    recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $submittedIdentityFingerprint, $now);
     sendJson(['success' => false, 'error' => 'Invalid username or password'], 401);
 }
 
+$identityFingerprint = naapAuthRateUserIdentityFingerprint($user['id'] ?? 0);
+
 $status = normalizeLoginIdentityToken($user['status'] ?? 'active');
 if ($status !== 'active') {
+    recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
     sendJson(['success' => false, 'error' => 'Account is inactive'], 403);
 }
 
 $userKey = normalizeLoginSecurityUserKey($user['id'] ?? '');
 if ($userKey === '') {
+    recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $submittedIdentityFingerprint, $now);
     sendJson(['success' => false, 'error' => 'Invalid credentials'], 401);
 }
 
 $record = buildLoginSecurityRecord(getLoginSecurityRecordSnapshot($pdo, $userKey));
-$now = getAuthoritativePhilippineUnixTimestamp();
-
-$lockUntilTs = parseLoginTimestamp($record['lock_until']);
-if ($lockUntilTs > $now) {
-    sendLockedLoginResponse(formatPhilippineUnixTimestampIso($lockUntilTs));
-}
-if ($lockUntilTs > 0 && $lockUntilTs <= $now) {
-    $record['lock_until'] = '';
-}
 
 $challenge = is_array($record['otp_challenge'] ?? null) ? $record['otp_challenge'] : null;
 if ($challenge) {
@@ -653,12 +831,14 @@ if ($action === 'verifyotp') {
     $otpChallengeId = trim((string) ($body['otpChallengeId'] ?? ''));
     $otpCode = trim((string) ($body['otpCode'] ?? ''));
     if (strlen($otpChallengeId) > 120 || strlen($otpCode) > 40) {
+        recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
         sendJson(['success' => false, 'error' => 'Invalid OTP request.'], 400);
     }
 
     if (!$challenge) {
         $record['updated_at'] = getAuthoritativePhilippineIso8601();
         persistLoginSecurityRecordSnapshot($pdo, $userKey, $record);
+        recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
         sendJson([
             'success' => false,
             'error' => 'OTP challenge has expired. Please log in again.',
@@ -667,6 +847,7 @@ if ($action === 'verifyotp') {
 
     $challengeId = trim((string) ($challenge['challenge_id'] ?? ''));
     if ($challengeId === '' || $otpChallengeId === '' || !hash_equals($challengeId, $otpChallengeId)) {
+        recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
         sendJson(array_merge(buildOtpRequiredPayload($challenge), [
             'error' => 'Invalid OTP challenge. Please use the latest code sent to your email.',
         ]), 401);
@@ -685,26 +866,18 @@ if ($action === 'verifyotp') {
         ]));
     }
 
+    recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
     $failedOtpCount = max(0, (int) ($challenge['failed_otp_count'] ?? 0)) + 1;
-    if ($failedOtpCount >= LOGIN_OTP_FAILURE_THRESHOLD) {
-        $lockUntilIso = formatPhilippineUnixTimestampIso($now + LOGIN_LOCK_DURATION_SECONDS);
-        $record['failed_password_count'] = 0;
-        $record['otp_challenge'] = null;
-        $record['lock_until'] = $lockUntilIso;
-        $record['updated_at'] = getAuthoritativePhilippineIso8601();
-        persistLoginSecurityRecordSnapshot($pdo, $userKey, $record);
-
+    if ($failedOtpCount === LOGIN_OTP_FAILURE_THRESHOLD) {
         logSuspiciousLoginEvent(
             $pdo,
             $user,
-            'Suspicious Login Lockout',
-            'Account was locked for 2 hours after multiple invalid OTP submissions.'
+            'Suspicious OTP Attempts',
+            'Multiple invalid OTP submissions reached the account warning threshold.'
         );
-
-        sendLockedLoginResponse($lockUntilIso);
     }
 
-    $challenge['failed_otp_count'] = $failedOtpCount;
+    $challenge['failed_otp_count'] = min($failedOtpCount, LOGIN_OTP_FAILURE_THRESHOLD);
     $record['otp_challenge'] = $challenge;
     $record['updated_at'] = getAuthoritativePhilippineIso8601();
     persistLoginSecurityRecordSnapshot($pdo, $userKey, $record);
@@ -714,22 +887,28 @@ if ($action === 'verifyotp') {
     ]), 401);
 }
 
-$password = trim((string) ($body['password'] ?? ''));
+$passwordInput = $body['password'] ?? null;
+$password = is_string($passwordInput) ? trim($passwordInput) : '';
 if (strlen($password) > 255) {
+    recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
     sendJson(['success' => false, 'error' => 'Invalid credentials'], 400);
 }
 $password = strip_tags($password);
 
+$storedPassword = (string) ($user['password'] ?? '');
+$passwordCheck = verifyPasswordForLogin($password, $storedPassword);
+
 if ($challenge) {
+    if (empty($passwordCheck['matched'])) {
+        recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
+    }
     $record['updated_at'] = getAuthoritativePhilippineIso8601();
     persistLoginSecurityRecordSnapshot($pdo, $userKey, $record);
     sendJson(buildOtpRequiredPayload($challenge), 401);
 }
 
-$storedPassword = (string) ($user['password'] ?? '');
-$passwordCheck = verifyPasswordForLogin($password, $storedPassword);
-
 if (empty($passwordCheck['matched'])) {
+    recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
     $record['failed_password_count'] = max(0, (int) ($record['failed_password_count'] ?? 0)) + 1;
     $record['updated_at'] = getAuthoritativePhilippineIso8601();
 
@@ -747,6 +926,9 @@ if (empty($passwordCheck['matched'])) {
         try {
             $smtpConfig = getCredentialDistributorSmtpConfigSnapshot($pdo);
         } catch (Throwable $e) {
+            if (function_exists('isNaapSchemaMigrationRequiredException') && isNaapSchemaMigrationRequiredException($e)) {
+                sendNaapSchemaMigrationRequiredJson($e);
+            }
             persistLoginSecurityRecordSnapshot($pdo, $userKey, $record);
             sendJson([
                 'success' => false,

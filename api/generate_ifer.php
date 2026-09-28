@@ -27,6 +27,16 @@ function sendIferJsonError(string $message, int $statusCode = 400): void
     exit();
 }
 
+set_exception_handler(function (Throwable $error): void {
+    if ($error instanceof CampusAccessDeniedException) {
+        sendIferJsonError('Campus access denied.', 403);
+    }
+    if (isNaapSchemaMigrationRequiredException($error)) {
+        sendNaapSchemaMigrationRequiredJson($error);
+    }
+    sendNaapServerErrorJson($error, 'ifer.unhandled');
+});
+
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     sendIferJsonError('Method not allowed', 405);
 }
@@ -52,5 +62,5 @@ try {
     echo $docxBinary;
     exit();
 } catch (Throwable $exception) {
-    sendIferJsonError('Failed to generate IFER Word file: ' . $exception->getMessage(), 500);
+    sendNaapServerErrorJson($exception, 'ifer.generate');
 }

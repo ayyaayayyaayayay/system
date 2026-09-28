@@ -107,6 +107,70 @@ function clearFeedbackMessage(targetId) {
   setFeedbackMessage(targetId, "", "info");
 }
 
+function showAuthLoading(message) {
+  const overlay = window.AppLoadingOverlay;
+  if (!overlay || typeof overlay.show !== "function" || typeof overlay.hide !== "function") {
+    return function () {};
+  }
+
+  overlay.show(message || "Signing in...");
+  let hidden = false;
+  return function () {
+    if (hidden) return;
+    hidden = true;
+    overlay.hide();
+  };
+}
+
+function setAuthButtonLoading(button, loadingText) {
+  if (!button) {
+    return function () {};
+  }
+
+  const textEl = button.querySelector("span");
+  let iconEl = button.querySelector("i");
+  let insertedIcon = false;
+  if (!iconEl) {
+    iconEl = document.createElement("i");
+    iconEl.setAttribute("aria-hidden", "true");
+    button.insertBefore(iconEl, textEl || button.firstChild);
+    insertedIcon = true;
+  }
+
+  const previous = {
+    disabled: button.disabled,
+    text: textEl ? textEl.textContent : "",
+    iconClass: iconEl.className,
+    ariaBusy: button.getAttribute("aria-busy"),
+  };
+
+  button.disabled = true;
+  button.classList.add("is-loading");
+  button.setAttribute("aria-busy", "true");
+  iconEl.className = "fas fa-circle-notch fa-spin";
+  if (textEl) {
+    textEl.textContent = loadingText || "Loading...";
+  }
+
+  return function (keepDisabled) {
+    button.classList.remove("is-loading");
+    if (previous.ariaBusy === null) {
+      button.removeAttribute("aria-busy");
+    } else {
+      button.setAttribute("aria-busy", previous.ariaBusy);
+    }
+    button.disabled = keepDisabled === true ? true : previous.disabled;
+    if (textEl) {
+      textEl.textContent = previous.text;
+    }
+    if (insertedIcon) {
+      iconEl.remove();
+    } else {
+      iconEl.className = previous.iconClass;
+    }
+  };
+}
+
 /**
  * Setup login form submission
  */
@@ -262,9 +326,9 @@ function handleLogin() {
   const sanitizedPassword = password.replace(/<[^>]*>/g, "");
 
   const loginBtn = document.getElementById("loginBtn");
-  const originalText = loginBtn.querySelector("span").textContent;
-  loginBtn.querySelector("span").textContent = "Logging in...";
-  loginBtn.disabled = true;
+  const restoreLoginButton = setAuthButtonLoading(loginBtn, "Signing in...");
+  const hideLoginLoading = showAuthLoading("Signing in...");
+  let keepLoadingForRedirect = false;
 
   fetch("../api/login.php", {
     method: "POST",
@@ -285,6 +349,7 @@ function handleLogin() {
       if (data.success) {
         loginFlowState.pendingOtp = null;
         storeUserSession(data);
+        keepLoadingForRedirect = true;
         redirectToDashboard(data.role);
         return;
       }
@@ -326,8 +391,10 @@ function handleLogin() {
       showError(error.message || "Login service is unavailable. Please try again.");
     })
     .finally(() => {
-      loginBtn.querySelector("span").textContent = originalText;
-      loginBtn.disabled = false;
+      if (!keepLoadingForRedirect) {
+        hideLoginLoading();
+        restoreLoginButton();
+      }
     });
 }
 
@@ -349,9 +416,9 @@ function handleOtpVerification() {
     return;
   }
 
-  const originalText = verifyBtn.querySelector("span").textContent;
-  verifyBtn.querySelector("span").textContent = "Verifying...";
-  verifyBtn.disabled = true;
+  const restoreVerifyButton = setAuthButtonLoading(verifyBtn, "Verifying...");
+  const hideOtpLoading = showAuthLoading("Verifying code...");
+  let keepLoadingForRedirect = false;
 
   fetch("../api/login.php", {
     method: "POST",
@@ -376,6 +443,7 @@ function handleOtpVerification() {
         input.value = "";
         if (data.role) {
           storeUserSession(data);
+          keepLoadingForRedirect = true;
           redirectToDashboard(data.role);
           return;
         }
@@ -429,8 +497,10 @@ function handleOtpVerification() {
       );
     })
     .finally(() => {
-      verifyBtn.querySelector("span").textContent = originalText;
-      verifyBtn.disabled = false;
+      if (!keepLoadingForRedirect) {
+        hideOtpLoading();
+        restoreVerifyButton();
+      }
     });
 }
 
@@ -492,6 +562,15 @@ function storeUserSession(authData) {
   const email = String((payload && payload.email) || "").trim();
   const studentNumber = String((payload && payload.studentNumber) || "").trim();
   const employeeId = String((payload && payload.employeeId) || "").trim();
+  const campus = String((payload && payload.campus) || "").trim();
+  const department = String((payload && payload.department) || "").trim();
+  const institute = String((payload && payload.institute) || department).trim();
+  const programCode = String((payload && payload.programCode) || "").trim();
+  const programName = String((payload && payload.programName) || "").trim();
+  const position = String((payload && payload.position) || "").trim();
+  const profileImageUrl = String(
+    (payload && (payload.profileImageUrl || payload.profilePhoto || payload.photoData)) || "",
+  ).trim();
   const status = String((payload && payload.status) || "active")
     .trim()
     .toLowerCase();
@@ -503,6 +582,13 @@ function storeUserSession(authData) {
     email: email,
     studentNumber: studentNumber,
     employeeId: employeeId,
+    campus: campus,
+    department: department,
+    institute: institute,
+    programCode: programCode,
+    programName: programName,
+    position: position,
+    profileImageUrl: profileImageUrl,
     status: status === "inactive" ? "inactive" : "active",
     csrfToken: csrfToken,
   });
@@ -557,6 +643,27 @@ function showError(message) {
  * Check if user is already logged in
  */
 function checkExistingSession() {
+  const params = new URLSearchParams(window.location.search || "");
+  if (params.get("logged_out") === "1") {
+    SharedData.clearSession({ localOnly: true });
+    params.delete("logged_out");
+    const nextQuery = params.toString();
+    const nextUrl =
+      window.location.pathname +
+      (nextQuery ? "?" + nextQuery : "") +
+      window.location.hash;
+    window.history.replaceState({}, document.title, nextUrl);
+    return;
+  }
+
+  if (
+    SharedData.consumeLogoutPendingMarker &&
+    SharedData.consumeLogoutPendingMarker()
+  ) {
+    SharedData.clearSession({ localOnly: true });
+    return;
+  }
+
   try {
     const session = SharedData.refreshSession(true);
     if (session && session.role) {
@@ -751,7 +858,8 @@ function handlePasswordResetRequest() {
     .then(function (data) {
       setFeedbackMessage(
         "forgotPasswordFeedback",
-        data.message || "A password reset link has been sent to your account email.",
+        data.message ||
+          "If the details match an active account, a password reset link will be sent.",
         "success",
       );
       resetEmailInput.value = "";
@@ -773,8 +881,8 @@ function handlePasswordResetSubmit() {
   if (!resetPasswordBtn || !newPasswordInput || !confirmPasswordInput) return;
 
   const token = getPasswordResetTokenFromUrl();
-  const newPassword = newPasswordInput.value;
-  const confirmPassword = confirmPasswordInput.value;
+  const newPassword = newPasswordInput.value.trim();
+  const confirmPassword = confirmPasswordInput.value.trim();
 
   clearFeedbackMessage("forgotPasswordFeedback");
 
@@ -785,6 +893,11 @@ function handlePasswordResetSubmit() {
 
   if (newPassword.length < 8) {
     showErrorInModal("New password must be at least 8 characters.");
+    return;
+  }
+
+  if (newPassword.length > 255) {
+    showErrorInModal("New password must not exceed 255 characters.");
     return;
   }
 

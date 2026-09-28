@@ -27,6 +27,16 @@ function sendOverallSasrJsonError(string $message, int $statusCode = 400): void
     exit();
 }
 
+set_exception_handler(function (Throwable $error): void {
+    if ($error instanceof CampusAccessDeniedException) {
+        sendOverallSasrJsonError('Campus access denied.', 403);
+    }
+    if (isNaapSchemaMigrationRequiredException($error)) {
+        sendNaapSchemaMigrationRequiredJson($error);
+    }
+    sendNaapServerErrorJson($error, 'overall_sasr.unhandled');
+});
+
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     sendOverallSasrJsonError('Method not allowed', 405);
 }
@@ -51,5 +61,5 @@ try {
     echo $xlsxBinary;
     exit();
 } catch (Throwable $exception) {
-    sendOverallSasrJsonError('Failed to generate Overall SASR Excel file: ' . $exception->getMessage(), 500);
+    sendNaapServerErrorJson($exception, 'overall_sasr.generate');
 }

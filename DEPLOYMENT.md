@@ -10,7 +10,7 @@ The best practical deployment target for the current codebase is:
 - PHP 8.1+ with `pdo_mysql`
 - MySQL or MariaDB
 - Cron job support
-- Writable filesystem access for `files/faculty_papers/`
+- Writable private filesystem access outside the public web root for generated faculty papers
 - Outbound HTTPS for OpenAI API calls
 - Outbound SMTP for production mail delivery
 
@@ -26,8 +26,7 @@ Use a VPS instead only if you want full server control, custom monitoring, or hi
 - Database schema: [`database/datacode.txt`](database/datacode.txt)
 - Seed data: [`database/datauser.txt`](database/datauser.txt)
 - Composer dependencies in `vendor/`
-- Writable directories:
-  - `files/faculty_papers`
+- Writable private directory: `/home/USERNAME/naap-private/faculty_papers` or the absolute path configured by `NAAP_FACULTY_PAPER_STORAGE_DIR`
 
 ## Recommended Publish Structure
 
@@ -37,7 +36,7 @@ Result:
 
 - `https://yourdomain.com/` -> redirects to `html/mainpage.html`
 - `https://yourdomain.com/api/...` stays reachable
-- generated PDFs stay inside the same app directory
+- generated faculty PDFs stay outside `public_html` and are streamed only through the authenticated API
 
 ## Production Configuration
 
@@ -62,6 +61,15 @@ Set these environment variables in hosting if available:
 - `NAAP_OPENAI_TIMEOUT_MS`
 - `NAAP_OPENAI_REASONING_EFFORT`
 - `NAAP_OPENAI_MAX_ATTEMPTS`
+- `NAAP_SECRET_ENCRYPTION_KEY`
+- `NAAP_SECRET_ENCRYPTION_KEY_FILE`
+- `NAAP_FACULTY_PAPER_STORAGE_DIR`
+- `NAAP_BACKUP_ENCRYPTION_KEY`
+- `NAAP_BACKUP_ENCRYPTION_KEY_FILE`
+- `NAAP_BACKUP_STORAGE_DIR`
+- `NAAP_BACKUP_RETENTION_COUNT`
+- `NAAP_MYSQLDUMP_PATH`
+- `NAAP_MYSQL_CLIENT_PATH`
 
 Standard OpenAI env names are also accepted for the AI provider:
 
@@ -77,24 +85,119 @@ Legacy Gmail-oriented env vars are still supported for backward compatibility:
 - `NAAP_SMTP_NAME`
 - `NAAP_SMTP_APP_PASSWORD`
 
-Environment SMTP values take precedence over the saved `credentialDistributorConfig` value in `system_settings`. The admin UI now acts as the database fallback for shared hosting setups where env vars are not available.
-Environment OpenAI values take precedence over the saved `openAiConfig` value in `system_settings`. The admin UI now acts as the database fallback for shared hosting setups where env vars are not available.
+Environment SMTP values take precedence over the saved `credentialDistributorConfig` value in `system_settings`. The admin UI acts as an encrypted database fallback for shared hosting setups where service-secret environment variables are not available.
+Environment OpenAI values take precedence over the saved `openAiConfig` value in `system_settings`. The admin UI acts as an encrypted database fallback for shared hosting setups where service-secret environment variables are not available.
 Blank OpenAI env vars are ignored so a saved admin-panel API key can still be used. Defaults: `gpt-5.6-luna`, `30000` ms timeout, `low` reasoning effort, and `2` max attempts for transient cURL/429/5xx failures.
+
+`NAAP_SECRET_ENCRYPTION_KEY` must be the base64 encoding of exactly 32 random bytes. This master key is required only when SMTP or OpenAI secrets are stored in the database. It must never be stored in MySQL, inside `public_html`, or in Git. If direct environment variables are unavailable, set `NAAP_SECRET_ENCRYPTION_KEY_FILE` to an absolute private path. The conventional private paths are `/home/USERNAME/naap-private/secret.key` for a `public_html` deployment and `C:\xampp\naap-private\APP_NAME\secret.key` for an application beneath XAMPP's `htdocs`.
+
+`NAAP_FACULTY_PAPER_STORAGE_DIR` must be an absolute directory outside the application and public document root. When the application is beneath `public_html`, the conventional fallback is `/home/USERNAME/naap-private/faculty_papers`. The application rejects private-paper paths inside `public_html`, including paths reached through symlinks.
+
+## Encrypted Backup Configuration
+
+The backup system archives the complete MySQL/MariaDB database, every private or legacy faculty-paper PDF, and any referenced legacy profile-upload file. Database-backed profile photos are already included in the SQL export. Runtime logs, caches, temporary work files, backup artifacts, source-controlled templates/assets, and secret keys are deliberately excluded.
+
+Backups are stored outside the web root. The defaults are:
+
+- XAMPP: `C:\xampp\naap-private\system\backups`
+- `public_html` hosting: `/home/USERNAME/naap-private/backups`
+
+Override the default with an absolute `NAAP_BACKUP_STORAGE_DIR`. The application rejects paths within the application or a detected public web root and rejects unsafe symlinks. The PHP/Apache user and cron user must have exclusive read/write access to this directory.
+
+Configure one dedicated backup key source:
+
+- `NAAP_BACKUP_ENCRYPTION_KEY`: Base64 encoding of exactly 32 random bytes; or
+- `NAAP_BACKUP_ENCRYPTION_KEY_FILE`: absolute path to a private file containing that Base64 value.
+
+If neither variable is set, the conventional private file is `C:\xampp\naap-private\system\backup.key` on this XAMPP layout or `/home/USERNAME/naap-private/backup.key` for `public_html`. Generate it outside the application and web roots:
+
+```bash
+php -r 'echo base64_encode(random_bytes(32)), PHP_EOL;' > /home/USERNAME/naap-private/backup.key
+chmod 600 /home/USERNAME/naap-private/backup.key
+mkdir -m 700 /home/USERNAME/naap-private/backups
+```
+
+The key is never stored in the database, JavaScript, HTML, manifest, artifact, or audit log. Only its SHA-256 fingerprint is recorded. Retain old backup keys separately after rotation; a new key cannot decrypt artifacts created with an old key.
+
+Artifacts use a versioned, streaming AES-256-GCM format with a unique nonce prefix, authenticated chunk positions and lengths, and an authenticated archive digest. Each artifact is fully reopened, decrypted, and checked against its manifest before the history row can be marked successful. A partial or unverifiable artifact is deleted and recorded as failed.
+
+Native `mysqldump`/`mysql` is preferred when both executables and `proc_open` are available. Credentials are passed through a private temporary client-options file, never command arguments. Set `NAAP_MYSQLDUMP_PATH` and `NAAP_MYSQL_CLIENT_PATH` if discovery is unavailable. The PHP/PDO fallback exports schema, binary-safe rows, views, triggers, routines, and events inside a repeatable-read consistent snapshot. It fails closed if a non-InnoDB table would make that snapshot inconsistent; such a deployment must provide compatible native tools or convert the application tables to InnoDB. `NAAP_BACKUP_RETENTION_COUNT` defaults to `30` and is restricted to 1-365 artifacts; pruned history remains in MySQL.
+
+New native dumps use one row per `INSERT` and a 256 MB client packet allowance. During an isolated or production import, the service temporarily raises the server's global `max_allowed_packet` to 256 MB when the database account permits it, opens the import connection after that change, and restores the original global value in cleanup. If the account cannot change global variables and a row exceeds the host limit, configure `max_allowed_packet=256M` under `[mysqld]` and restart MySQL before retrying the restoration test.
+
+## Shared Hosting / cPanel Secret Setup
+
+1. Open **cPanel > Terminal** and create a private directory outside `public_html`:
+
+   ```bash
+   mkdir -m 700 /home/USERNAME/naap-private
+   mkdir -m 700 /home/USERNAME/naap-private/faculty_papers
+   ```
+
+2. Generate the application encryption key without displaying or copying it through the browser:
+
+   ```bash
+   php -r 'echo base64_encode(random_bytes(32)), PHP_EOL;' > /home/USERNAME/naap-private/secret.key
+   chmod 600 /home/USERNAME/naap-private/secret.key
+   ```
+
+3. If the application is not installed directly in `public_html`, configure `NAAP_SECRET_ENCRYPTION_KEY_FILE` through the hosting provider's environment-variable interface with the absolute path above. Do not put the key or key-file contents in `.htaccess`.
+4. Prefer configuring `NAAP_SMTP_PASSWORD` and `NAAP_OPENAI_API_KEY` through the same environment-variable interface. If the host does not provide one, configure the master key file first and then enter the service credentials in the admin panel; those database values will be encrypted.
+5. Keep a protected backup of the master key separate from the database backup. Losing or replacing the key makes encrypted database credentials unrecoverable.
+
+For XAMPP, the conventional private paths are `C:\xampp\naap-private\system\secret.key` and `C:\xampp\naap-private\system\faculty_papers`. You may override them with `NAAP_SECRET_ENCRYPTION_KEY_FILE` and `NAAP_FACULTY_PAPER_STORAGE_DIR`, using absolute paths outside `C:\xampp\htdocs`. Never point either setting back into the application.
+
+OpenSSL with AES-256-GCM support is required for encrypted database fallback. The application fails closed if the key is missing, invalid, or unable to authenticate stored ciphertext.
+
+## Authentication Rate Limits
+
+Authentication throttling is stored in the database so it remains effective across PHP workers and server restarts. The application uses the following campus-balanced limits:
+
+- 60 failed login or OTP submissions per source IP in 10 minutes.
+- 10 failed submissions per account identity in 15 minutes. A correct password or OTP is still accepted after this account threshold.
+- 20 password-reset requests per source IP in 15 minutes.
+- 5 password-reset requests per email/identifier pair in one hour, with one delivered reset email per resolved account every 10 minutes.
+
+The limiter intentionally uses only `REMOTE_ADDR` and ignores forwarding headers. This is correct for the documented direct Apache/LiteSpeed deployment. If a trusted reverse proxy is introduced later, do not enable forwarded client addresses until the application has explicit trusted-proxy CIDR validation.
+
+An optional hosting-provider or WAF rule may apply a coarser POST limit to `api/login.php`, but it must be looser than the application limits above to avoid blocking a campus network that shares one public IP. The application limiter remains authoritative.
 
 ## Publish Steps
 
-1. Upload the project files to hosting.
-2. Run `composer install --no-dev --optimize-autoloader` if the host supports Composer.
-3. Create a MySQL database.
-4. Import [`database/datacode.txt`](database/datacode.txt).
-5. Import [`database/datauser.txt`](database/datauser.txt).
-6. Set database and SMTP configuration.
+1. Back up the database and the existing `files/faculty_papers/` directory to restricted storage before upgrading.
+2. Upload the project files to hosting. Deploy the root and directory-level `.htaccess` deny rules before making the upgraded application public.
+3. Run `composer install --no-dev --optimize-autoloader` if the host supports Composer.
+4. Create a MySQL database.
+5. Import [`database/datacode.txt`](database/datacode.txt).
+6. Import [`database/datauser.txt`](database/datauser.txt).
+7. Configure the private application encryption key, dedicated backup key, backup storage directory, and faculty-paper storage directory as described above.
+8. Set database and SMTP configuration.
    - Preferred: set SMTP through environment variables.
-   - Shared-hosting fallback: save SMTP settings from the admin panel System Settings screen.
-   - If you use AI insights on shared hosting, save the OpenAI API key from the admin panel System Settings screen.
-7. Ensure `files/faculty_papers/` is writable.
-8. Enable SSL for the domain.
-9. Visit `/` and test login, profile photo uploads, PDF generation, and mail sending.
+   - Shared-hosting fallback: save SMTP settings from the admin panel System Settings screen after the master key is configured.
+   - If you use AI insights on shared hosting, save the OpenAI API key from the admin panel after the master key is configured.
+9. Before serving the upgraded application, run the explicit secret/data migrations from cPanel Terminal or SSH:
+
+   ```bash
+   cd /home/USERNAME/public_html
+   php api/migrate_schema.php --check
+   php api/migrate_schema.php --apply
+   php api/migrate_schema.php --check
+   ```
+
+   The final check must report no pending or failed `application_secrets_encryption_v1`, `faculty_paper_private_storage_v1`, `authentication_rate_limits_v1`, `student_evaluation_reminders_v1`, or `encrypted_backup_system_v1` migration. The faculty-paper migration copies and verifies every PDF, including unreferenced files, before removing public copies. Correct configuration or destination conflicts and rerun safely; do not move or delete individual files manually.
+10. Confirm the private faculty-paper directory is writable by PHP and contains the migrated files with restrictive permissions.
+11. Enable SSL for the domain.
+12. Visit `/` and test login, profile photo uploads, PDF generation, SMTP test mail, and each enabled OpenAI feature.
+
+## Required Credential Rotation After Upgrade
+
+Any SMTP password or OpenAI API key previously stored in plaintext must be treated as exposed, including values retained in old SQL exports or hosting backups.
+
+1. Configure a newly issued SMTP password and OpenAI API key through environment variables or the encrypted admin fallback.
+2. Verify SMTP and OpenAI functionality with the new credentials.
+3. Revoke the old SMTP password and old OpenAI API key at their providers.
+4. Restrict and encrypt old database backups, then expire them according to the organization's retention policy.
+5. Never print database setting values, the master key, or service credentials while verifying deployment.
 
 ## Cron Job
 
@@ -102,17 +205,99 @@ This app has a CLI reminder job:
 
 - [`api/scheduled_student_eval_reminder.php`](api/scheduled_student_eval_reminder.php)
 
-On Linux hosting, the cron command should look like:
+On Linux hosting, add this daily entry to the application user's crontab (adjust the paths):
 
 ```bash
-/usr/bin/php /home/USERNAME/public_html/api/scheduled_student_eval_reminder.php
+CRON_TZ=Asia/Manila
+0 7 * * * /usr/bin/php /home/USERNAME/public_html/api/scheduled_student_eval_reminder.php
 ```
 
 Run it daily at `07:00` Asia/Manila if you want automated reminder emails.
 
+For Windows Task Scheduler/XAMPP, use:
+
+```text
+C:\xampp\php\php.exe -f C:\xampp\htdocs\system\api\scheduled_student_eval_reminder.php
+```
+
+Schedule the Windows task daily at `07:00` and set the server time zone to `(UTC+08:00) Kuala Lumpur, Singapore` (Manila time).
+
+Keep the scheduler daily even when HR selects a longer interval. The PHP job reads the active
+`studentEvaluationReminderConfig` record, checks the current evaluation period, and uses delivery
+history to decide which incomplete students are due. Before enabling the task after this upgrade,
+apply and verify the `student_evaluation_reminders_v1` migration:
+
+```bash
+php api/migrate_schema.php --apply
+php api/migrate_schema.php --check
+```
+
+### Daily encrypted backup
+
+The encrypted backup scheduler is CLI-only:
+
+- [`api/scheduled_backup.php`](api/scheduled_backup.php)
+
+Linux cron (adjust paths):
+
+```cron
+CRON_TZ=Asia/Manila
+0 2 * * * /usr/bin/php /home/USERNAME/public_html/api/scheduled_backup.php
+```
+
+Windows Task Scheduler/XAMPP action:
+
+```text
+C:\xampp\php\php.exe -f C:\xampp\htdocs\system\api\scheduled_backup.php
+```
+
+Schedule it daily at `02:00` Manila time. The job emits machine-readable JSON and exits nonzero if either backup creation or its automatic restoration test fails. It skips a duplicate successful scheduled run on the same Manila calendar day; use `--force` only for deliberate testing. Cron/Task Scheduler must be configured outside the application—the Admin UI cannot create operating-system jobs.
+
+Every restoration test decrypts to a new private temporary directory and never points at production. If the database account has `CREATE`/`DROP` database privileges, the service restores to a random `naap_restore_test_*` database, verifies the complete table inventory, required application tables, readable tables, and recorded row counts, and drops the database in `finally` cleanup. Without those privileges it clearly records `integrity_only`: full AES-GCM authentication, TAR and manifest validation, SQL presence/schema inventory, per-file SHA-256 checks, and PDF header checks. This fallback is useful but is not equivalent to an actual SQL import.
+
+Production restore has no browser or scheduled endpoint. It is available only through the guarded CLI command and requires a successful isolated-database preflight, a fresh safety backup, a private maintenance lock, and exact confirmation:
+
+```text
+C:\xampp\php\php.exe api\restore_backup.php --backup=BKP-... --production --confirm=RESTORE-PRODUCTION:BKP-...
+```
+
+If the safety backup fails, restoration stops. The exceptional override additionally requires both `--allow-no-safety-backup` and `--confirm-no-safety=RESTORE-WITHOUT-SAFETY:BKP-...`. Treat that override as a last-resort disaster-recovery procedure. The faculty-paper directory is staged and checksum-verified before activation, and the previous directory is preserved with a `.pre-restore-*` suffix for rollback. The selected artifact and fresh safety-backup history are preserved after the database import. If restoration fails after production has been touched, the private maintenance lock intentionally remains active; use the reported safety backup for recovery before removing the lock.
+
+Same-server retention is not offsite disaster protection. Regularly use the Admin-only one-use download to copy encrypted `.naapbak` artifacts to controlled offsite storage, and protect the corresponding key independently.
+
+## Security Verification Checklist
+
+- [ ] `composer show setasign/fpdi` reports version `v2.6.8` and `php tests/fpdi_pdf_test.php` passes for both PDF templates.
+- [ ] `composer audit --locked` reports no known dependency vulnerabilities.
+- [ ] `authentication_rate_limits_v1` is applied and `php tests/auth_rate_limit_test.php` passes.
+- [ ] Login and reset throttling returns generic HTTP 429 responses without exposing the triggering IP/account bucket, and reset requests use the same HTTP 200 response for matched and unmatched identities.
+- [ ] `php api/migrate_schema.php --check` reports no pending or failed application-secret migration.
+- [ ] `faculty_paper_private_storage_v1` is applied and `php tests/faculty_paper_storage_test.php` passes.
+- [ ] A known direct `/files/faculty_papers/...pdf` request returns 403 or 404, while an authorized user can open the same paper through `api/faculty_paper_file.php`.
+- [ ] No generated PDFs remain below `files/faculty_papers/`, and no generated faculty PDFs are tracked by Git.
+- [ ] `php tests/secret_storage_test.php` passes without printing any credential value.
+- [ ] The SMTP and OpenAI secret fields are blank after reloading the admin settings page and show only configuration status.
+- [ ] Saving unrelated SMTP/OpenAI settings with a blank secret field preserves the configured credential.
+- [ ] The explicit clear buttons remove only the database fallback credential.
+- [ ] SMTP test mail succeeds with the active environment or encrypted database credential.
+- [ ] Each enabled OpenAI feature succeeds with the active environment or encrypted database credential.
+- [ ] Temporarily removing access to the master key makes database-backed SMTP/OpenAI operations fail with a generic configuration error and does not alter stored ciphertext.
+- [ ] A fresh SQL export contains no readable SMTP password, OpenAI API key, or master encryption key.
+- [ ] Old SMTP/OpenAI credentials have been revoked after their replacements were verified.
+- [ ] Runtime logs, `.env` files, private key files, and database exports are not tracked by Git or served by the web server.
+- [ ] `encrypted_backup_system_v1` is applied and `php tests/backup_system_test.php`, `php tests/backup_api_security_test.php`, `php tests/backup_pdo_fallback_integration_test.php`, `php tests/backup_packet_limit_integration_test.php`, plus `php tests/backup_http_api_test.php` pass (`NAAP_TEST_BASE_URL` overrides its default `http://127.0.0.1/system`).
+- [ ] The backup key and backup storage are outside the web root, readable only by the service account, and absent from Git/database exports.
+- [ ] A manual Admin backup shows `completed` and `passed`, downloads only through a one-use Admin ticket, and does not contain recognizable plaintext SQL/PDF content.
+- [ ] `php api/scheduled_backup.php --force` creates a scheduled history row and a passed isolated-database or explicitly labeled integrity-only restoration-test row.
+- [ ] A copied/corrupted artifact fails authentication while its original stored artifact remains intact.
+- [ ] The operating-system scheduler runs daily at 02:00 Asia/Manila and reports failures to monitoring.
+- [ ] Encrypted artifacts and all historical backup keys are copied to controlled offsite storage.
+
 ## Important Notes
 
-- Do not publish old SMTP secrets in SQL dumps or source files.
+- Do not publish SMTP passwords, OpenAI API keys, master keys, or old SQL exports in source files or Git.
+- Secret inputs remain blank when configuration screens are loaded. A blank save preserves the configured credential; use the explicit clear button to remove the database fallback.
+- Database exports contain authenticated ciphertext after migration, but they must still be protected because they contain other sensitive application data.
 - Verify SMTP using the admin panel single-recipient test email before enabling OTP or bulk mail operations.
 - Keep HTTPS enabled so session cookies are marked secure.
 - The app already uses relative API paths, so it can run from the domain root without hardcoded localhost URLs.

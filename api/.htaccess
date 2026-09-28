@@ -2,5 +2,5 @@
 RewriteEngine On
 
 # Only callable endpoints should stay public.
-RewriteRule ^(?:auth|db|state_helpers|time_helper|mailer_helper|setup_db|scheduled_student_eval_reminder|faculty_(?:report|pdf|docx|xlsx)_helper)\.php$ - [F,L,NC]
+RewriteRule ^(?:auth|auth_rate_limit|backup_maintenance|backup_service|campus_authorization|db|error_helper|state_helpers|time_helper|mailer_helper|setup_db|scheduled_(?:student_eval_reminder|backup)|restore_backup|faculty_(?:report|pdf|docx|xlsx)_helper|faculty_paper_storage)\.php$ - [F,L,NC]
 </IfModule>

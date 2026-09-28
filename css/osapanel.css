@@ -297,6 +297,100 @@ body {
     background: var(--danger-color);
 }
 
+.clearance-verification {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) minmax(320px, 1.25fr);
+    gap: 14px 20px;
+    align-items: center;
+    margin: 18px 0;
+    padding: 16px;
+    border: 1px solid var(--border-color, #dce3ec);
+    border-radius: 12px;
+    background: var(--card-bg, #fff);
+}
+
+.clearance-verification-copy,
+.clearance-verification-result,
+.clearance-details {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.clearance-verification-copy span,
+.clearance-details span {
+    color: var(--text-muted, #64748b);
+    font-size: 0.82rem;
+    line-height: 1.35;
+}
+
+.clearance-verification-controls {
+    display: flex;
+    gap: 10px;
+}
+
+.clearance-verification-controls input {
+    min-width: 0;
+    flex: 1;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color, #dce3ec);
+    border-radius: 8px;
+    font: inherit;
+    text-transform: uppercase;
+}
+
+.clearance-verification-controls button {
+    border: 0;
+    border-radius: 8px;
+    padding: 10px 15px;
+    background: var(--primary-color, #1f4b99);
+    color: #fff;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.clearance-verification-controls button:disabled {
+    cursor: wait;
+    opacity: 0.7;
+}
+
+.clearance-verification-result {
+    grid-column: 1 / -1;
+    min-height: 20px;
+    font-size: 0.86rem;
+}
+
+.clearance-verification-result.success {
+    color: #166534;
+}
+
+.clearance-verification-result.error {
+    color: #b91c1c;
+}
+
+.clearance-details {
+    min-width: 190px;
+    font-size: 0.84rem;
+}
+
+.clearance-details.is-cleared strong {
+    color: #166534;
+}
+
+@media (max-width: 760px) {
+    .clearance-verification {
+        grid-template-columns: 1fr;
+    }
+
+    .clearance-verification-controls {
+        flex-direction: column;
+    }
+
+    .clearance-verification-result {
+        grid-column: 1;
+    }
+}
+
 .legend-dot.cleared {
     background: #0f766e;
 }

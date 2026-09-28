@@ -70,71 +70,6 @@ function resolveNaapAuthUserIdNumber($value) {
     return 0;
 }
 
-function naapAuthColumnExists(PDO $pdo, $tableName, $columnName) {
-    $stmt = $pdo->prepare(
-        'SELECT COUNT(*) AS total
-         FROM information_schema.columns
-         WHERE table_schema = DATABASE()
-           AND table_name = :table_name
-           AND column_name = :column_name'
-    );
-    $stmt->execute([
-        ':table_name' => (string) $tableName,
-        ':column_name' => (string) $columnName,
-    ]);
-    $row = $stmt->fetch();
-    return ((int) ($row['total'] ?? 0)) > 0;
-}
-
-function naapAuthIndexExists(PDO $pdo, $tableName, $indexName) {
-    $stmt = $pdo->prepare(
-        'SELECT COUNT(*) AS total
-         FROM information_schema.statistics
-         WHERE table_schema = DATABASE()
-           AND table_name = :table_name
-           AND index_name = :index_name'
-    );
-    $stmt->execute([
-        ':table_name' => (string) $tableName,
-        ':index_name' => (string) $indexName,
-    ]);
-    $row = $stmt->fetch();
-    return ((int) ($row['total'] ?? 0)) > 0;
-}
-
-function ensureNaapActiveSessionColumns(PDO $pdo) {
-    if (!naapAuthColumnExists($pdo, 'users', 'active_session_token_hash')) {
-        $pdo->exec(
-            'ALTER TABLE users
-             ADD COLUMN active_session_token_hash CHAR(64) DEFAULT NULL
-             AFTER updated_at'
-        );
-    }
-
-    if (!naapAuthColumnExists($pdo, 'users', 'active_session_started_at')) {
-        $pdo->exec(
-            'ALTER TABLE users
-             ADD COLUMN active_session_started_at DATETIME DEFAULT NULL
-             AFTER active_session_token_hash'
-        );
-    }
-
-    if (!naapAuthColumnExists($pdo, 'users', 'active_session_last_seen_at')) {
-        $pdo->exec(
-            'ALTER TABLE users
-             ADD COLUMN active_session_last_seen_at DATETIME DEFAULT NULL
-             AFTER active_session_started_at'
-        );
-    }
-
-    if (!naapAuthIndexExists($pdo, 'users', 'idx_users_active_session_token_hash')) {
-        $pdo->exec(
-            'ALTER TABLE users
-             ADD KEY idx_users_active_session_token_hash (active_session_token_hash)'
-        );
-    }
-}
-
 function getNaapActiveSessionToken() {
     startNaapSession();
     return trim((string) ($_SESSION[NAAP_ACTIVE_SESSION_TOKEN_KEY] ?? ''));
@@ -166,7 +101,6 @@ function getNaapActiveSessionRecord(PDO $pdo, $userId, $forUpdate = false) {
         return null;
     }
 
-    ensureNaapActiveSessionColumns($pdo);
     $lockClause = $forUpdate ? ' FOR UPDATE' : '';
     $stmt = $pdo->prepare(
         'SELECT
@@ -210,7 +144,6 @@ function setNaapUserActiveSession(PDO $pdo, $userId, $sessionToken, DateTimeImmu
         throw new RuntimeException('Unable to register authenticated session.');
     }
 
-    ensureNaapActiveSessionColumns($pdo);
     $stmt = $pdo->prepare(
         'UPDATE users
          SET active_session_token_hash = :token_hash,
@@ -247,7 +180,6 @@ function touchNaapActiveSession(PDO $pdo, $userId, $sessionToken, DateTimeImmuta
         return;
     }
 
-    ensureNaapActiveSessionColumns($pdo);
     $stmt = $pdo->prepare(
         'UPDATE users
          SET active_session_last_seen_at = :last_seen_at
@@ -285,7 +217,6 @@ function clearNaapUserActiveSession(PDO $pdo, $userId, $sessionToken) {
         return;
     }
 
-    ensureNaapActiveSessionColumns($pdo);
     $stmt = $pdo->prepare(
         'UPDATE users
          SET active_session_token_hash = NULL,
@@ -307,7 +238,6 @@ function clearNaapUserActiveSessionByUserId(PDO $pdo, $userId) {
         return;
     }
 
-    ensureNaapActiveSessionColumns($pdo);
     $stmt = $pdo->prepare(
         'UPDATE users
          SET active_session_token_hash = NULL,
@@ -521,6 +451,12 @@ function buildNaapSessionPayload(array $user, $csrfToken = '') {
         'email' => (string) ($user['email'] ?? ''),
         'studentNumber' => (string) ($user['studentNumber'] ?? ''),
         'employeeId' => (string) ($user['employeeId'] ?? ''),
+        'campus' => (string) ($user['campus'] ?? ''),
+        'department' => (string) ($user['department'] ?? ''),
+        'institute' => (string) ($user['institute'] ?? ($user['department'] ?? '')),
+        'programCode' => (string) ($user['programCode'] ?? ''),
+        'programName' => (string) ($user['programName'] ?? ''),
+        'position' => (string) ($user['position'] ?? ''),
         'status' => (string) ($user['status'] ?? 'active'),
         'profileImage' => (string) ($user['profileImage'] ?? ''),
         'profileImageUrl' => (string) ($user['profileImageUrl'] ?? ($user['photoData'] ?? '')),

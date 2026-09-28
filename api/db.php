@@ -3,12 +3,28 @@
  * Database connection for XAMPP / MySQL
  */
 
+require_once __DIR__ . '/error_helper.php';
+require_once __DIR__ . '/backup_maintenance.php';
+
+if (PHP_SAPI !== 'cli' && naapBackupMaintenanceIsActive()) {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    http_response_code(503);
+    echo json_encode([
+        'success' => false,
+        'maintenance' => true,
+        'error' => 'The system is temporarily unavailable while a deliberate restoration is in progress.',
+    ]);
+    exit();
+}
+
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('Pragma: no-cache');
 header('Expires: 0');
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+$requestMethod = $_SERVER['REQUEST_METHOD'] ?? '';
+if ($requestMethod === 'OPTIONS') {
     http_response_code(200);
     exit();
 }
@@ -36,12 +52,13 @@ try {
         PDO::ATTR_EMULATE_PREPARES => false,
     ]);
 } catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode([
-        'success' => false,
-        'error' => 'Database connection failed: ' . $e->getMessage(),
-    ]);
-    exit();
+    if (PHP_SAPI === 'cli') {
+        $reference = naapLogServerException($e, 'database.connection');
+        fwrite(STDERR, 'Database connection failed. Reference: ' . $reference . '. ' . $e->getMessage() . PHP_EOL);
+        echo json_encode(buildNaapServerErrorPayload($reference)) . PHP_EOL;
+        exit(1);
+    }
+    sendNaapServerErrorJson($e, 'database.connection');
 }
 
 function sendJson($data, $statusCode = 200) {
@@ -50,60 +67,140 @@ function sendJson($data, $statusCode = 200) {
     exit();
 }
 
+function isNaapSchemaMigrationRequiredException(Throwable $error) {
+    if ($error instanceof NaapSchemaMigrationRequiredException) {
+        return true;
+    }
+
+    if ($error instanceof PDOException) {
+        $sqlState = (string) $error->getCode();
+        $driverCode = (int) ($error->errorInfo[1] ?? 0);
+        if (in_array($sqlState, ['42S02', '42S22'], true) || in_array($driverCode, [1054, 1072, 1091, 1146, 1176], true)) {
+            return true;
+        }
+
+        $message = strtolower($error->getMessage());
+        foreach ([
+            'base table or view not found',
+            'unknown column',
+            'key column',
+            'doesn\'t exist',
+            'check that column/key exists',
+        ] as $needle) {
+            if (strpos($message, $needle) !== false) {
+                return true;
+            }
+        }
+    }
+
+    $previous = $error->getPrevious();
+    return $previous instanceof Throwable && isNaapSchemaMigrationRequiredException($previous);
+}
+
+function buildNaapSchemaMigrationRequiredPayload($reference = '') {
+    $payload = [
+        'success' => false,
+        'code' => 'SCHEMA_MIGRATION_REQUIRED',
+        'error' => 'Database schema is not migrated. Run the schema migration command before using the system.',
+    ];
+
+    $reference = trim((string) $reference);
+    if ($reference !== '') {
+        $payload['reference'] = $reference;
+    }
+
+    return $payload;
+}
+
+function sendNaapSchemaMigrationRequiredJson(Throwable $error = null, $reference = '') {
+    sendJson(buildNaapSchemaMigrationRequiredPayload($reference), 500);
+}
+
+class NaapSchemaMigrationRequiredException extends RuntimeException {}
+
 function isStoredPasswordHash($value) {
-    $text = trim((string) $value);
-    if ($text === '') {
+    if (!is_string($value) || $value === '' || trim($value) === '') {
         return false;
     }
 
-    $info = password_get_info($text);
+    $info = password_get_info($value);
     return isset($info['algo']) && (int) $info['algo'] !== 0;
 }
 
-function normalizePasswordForStorage($value) {
-    $password = (string) $value;
-    if ($password === '') {
-        return '';
+function normalizeCredentialForStorage($value) {
+    if (!is_string($value)) {
+        throw new RuntimeException('Credential value is required.');
     }
 
-    if (isStoredPasswordHash($password)) {
-        return $password;
+    $credential = trim($value);
+    if ($credential === '') {
+        throw new RuntimeException('Credential value is required.');
     }
 
-    $hash = password_hash($password, PASSWORD_BCRYPT);
+    try {
+        $hash = password_hash($credential, PASSWORD_BCRYPT);
+    } catch (Throwable $error) {
+        throw new RuntimeException('Failed to hash credential.', 0, $error);
+    }
     if ($hash === false) {
-        throw new RuntimeException('Failed to hash password.');
+        throw new RuntimeException('Failed to hash credential.');
     }
 
     return $hash;
 }
 
+function normalizePasswordForStorage($value) {
+    return normalizeCredentialForStorage($value);
+}
+
+function normalizeUserPasswordValue($value) {
+    if (!is_string($value)) {
+        throw new RuntimeException('Password is required.');
+    }
+
+    $password = trim($value);
+    if ($password === '') {
+        throw new RuntimeException('Password is required.');
+    }
+    if (strlen($password) < 8) {
+        throw new RuntimeException('Password must be at least 8 characters.');
+    }
+    if (strlen($password) > 255) {
+        throw new RuntimeException('Password is too long.');
+    }
+
+    return $password;
+}
+
+function normalizeUserPasswordForStorage($value) {
+    return normalizeCredentialForStorage(normalizeUserPasswordValue($value));
+}
+
 function verifyPasswordForLogin($inputPassword, $storedPassword) {
-    $input = (string) $inputPassword;
-    $stored = (string) $storedPassword;
+    $result = [
+        'matched' => false,
+        'needs_migration' => false,
+        'needs_rehash' => false,
+    ];
 
-    if ($stored === '') {
-        return [
-            'matched' => ($input === ''),
-            'needs_migration' => false,
-            'needs_rehash' => false,
-        ];
+    if (!is_string($inputPassword) || !is_string($storedPassword)) {
+        return $result;
     }
 
-    if (isStoredPasswordHash($stored)) {
-        $matched = password_verify($input, $stored);
-        return [
-            'matched' => $matched,
-            'needs_migration' => false,
-            'needs_rehash' => $matched && password_needs_rehash($stored, PASSWORD_BCRYPT),
-        ];
+    $input = trim($inputPassword);
+    if ($input === '' || $storedPassword === '' || trim($storedPassword) === '') {
+        return $result;
     }
 
-    $matched = hash_equals($stored, $input);
+    if (!isStoredPasswordHash($storedPassword)) {
+        return $result;
+    }
+
+    $matched = password_verify($input, $storedPassword);
     return [
         'matched' => $matched,
-        'needs_migration' => $matched,
-        'needs_rehash' => false,
+        'needs_migration' => false,
+        'needs_rehash' => $matched && password_needs_rehash($storedPassword, PASSWORD_BCRYPT),
     ];
 }
 

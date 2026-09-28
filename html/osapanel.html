@@ -8,8 +8,8 @@
     <link rel="icon" type="image/png" sizes="32x32" href="../design/favicon-32x32.png">
     <link rel="apple-touch-icon" href="../design/apple-touch-icon.png">
     <title>OSA Dashboard - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/panel-theme.css?v=20260904c">
-    <link rel="stylesheet" href="../css/osapanel.css?v=20260820a">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20260907a">
+    <link rel="stylesheet" href="../css/osapanel.css?v=20260925c">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 
@@ -207,12 +207,12 @@
                     <div class="section-header">
                         <div class="section-title">
                             <h2>Student Evaluation Status</h2>
-                            <p>Search by full name or student number.</p>
+                            <p>Search by full name, student number, or clearance reference.</p>
                         </div>
                         <div class="search-wrap">
                             <i class="fas fa-search"></i>
                             <input type="text" id="studentSearch" class="search-input"
-                                placeholder="Search full name or student number">
+                                placeholder="Search name, number, or reference">
                         </div>
                     </div>
 
@@ -235,8 +235,21 @@
 
                     <div class="api-info-box">
                         <i class="fas fa-database"></i>
-                        <span>Automatic completion is based on submitted evaluations; after period close, OSA reviews student proof requests and approves/rejects them.</span>
+                        <span>Automatic clearance references are generated after all assigned evaluations are submitted; manual clearance remains available after period close.</span>
                     </div>
+
+                    <form class="clearance-verification" id="clearanceVerificationForm" novalidate>
+                        <div class="clearance-verification-copy">
+                            <strong>Verify Clearance Reference</strong>
+                            <span>Enter an exact stored reference to verify it with the server.</span>
+                        </div>
+                        <div class="clearance-verification-controls">
+                            <input type="text" id="clearanceReferenceVerifyInput" maxlength="40"
+                                placeholder="CLR-2026-000001" autocomplete="off" aria-label="Clearance reference">
+                            <button type="submit" id="clearanceReferenceVerifyBtn">Verify Reference</button>
+                        </div>
+                        <div class="clearance-verification-result" id="clearanceVerificationResult" aria-live="polite"></div>
+                    </form>
 
                     <div class="table-container">
                         <table class="status-table">
@@ -249,6 +262,7 @@
                                     <th>Year/Section</th>
                                     <th>Progress</th>
                                     <th>Status</th>
+                                    <th>Clearance</th>
                                     <th id="statusActionHeader">Review</th>
                                 </tr>
                             </thead>
@@ -490,9 +504,10 @@
         </div>
     </div>
 
-    <script src="../JsScrip/db-data.js?v=20260904c"></script>
+    <script src="../JsScrip/db-data.js?v=20260925c"></script>
+    <script src="../JsScrip/system-report.js?v=20260907a"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
-    <script src="../JsScrip/osapanel.js?v=20260904c"></script>
+    <script src="../JsScrip/osapanel.js?v=20260925c"></script>
 </body>
 
 </html>
