@@ -3830,7 +3830,7 @@ try {
             break;
 
         case 'getAdminDashboardSummary':
-            if ($authenticatedRole !== 'admin' && $authenticatedRole !== 'hr') {
+            if ($authenticatedRole !== 'admin' && $authenticatedRole !== 'hr' && $authenticatedRole !== 'vpaa') {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
             sendJson([
@@ -4756,6 +4756,17 @@ try {
             $filters = is_array($body['filters'] ?? null) ? $body['filters'] : $body;
             $page = listEvaluationsSnapshotPage($pdo, is_array($filters) ? $filters : [], $authenticatedUser);
             sendJson(array_merge(['success' => true], $page));
+            break;
+
+        case 'getVpaaPeerAssignmentCounts':
+            if ($authenticatedRole !== 'vpaa') {
+                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
+            }
+            $semesterValue = trim((string) ($body['semesterId'] ?? ($body['semester'] ?? '')));
+            sendJson(array_merge(
+                ['success' => true],
+                buildVpaaPeerAssignmentCountsSnapshot($pdo, $semesterValue)
+            ));
             break;
 
         case 'addEvaluation':

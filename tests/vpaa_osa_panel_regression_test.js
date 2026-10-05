@@ -88,6 +88,10 @@ function buildVpaaContext(enrollmentStatus = 'enrolled') {
         fetchEvaluationsSnapshot: ({ semesterId }) => Promise.resolve([{
             id: `evaluation-${semesterId}`, semesterId, evaluatorRole: 'student', status: 'submitted',
         }]),
+        fetchVpaaPeerAssignmentCounts: ({ semesterId }) => Promise.resolve({
+            semesterId,
+            professors: [{ professorUserId: 'p1', required: 2, submitted: 1 }],
+        }),
     };
     const context = {
         SharedData,
@@ -168,9 +172,61 @@ function buildVpaaContext(enrollmentStatus = 'enrolled') {
     await vm.runInContext('refreshVpaaSemesterDataSelection("all", true)', allSemesterContext);
     const historicalCounts = JSON.parse(vm.runInContext(`JSON.stringify({
         offerings: vpaaSubjectManagementSnapshot.offerings.length,
-        evaluations: vpaaEvaluationsSnapshot.length
+        evaluations: vpaaEvaluationsSnapshot.length,
+        peerAssignments: vpaaPeerAssignmentCountsSnapshot.length
     })`, allSemesterContext));
-    assert.deepEqual(historicalCounts, { offerings: 2, evaluations: 2 });
+    assert.deepEqual(historicalCounts, { offerings: 2, evaluations: 2, peerAssignments: 2 });
+
+    const peerCounts = JSON.parse(vm.runInContext(`
+        JSON.stringify((() => {
+            const context = buildVpaaDatabaseContext();
+            return context.peerAssignmentCountsByProfessorSemester['sem-1|p1'];
+        })())
+    `, allSemesterContext));
+    assert.deepEqual(peerCounts, { required: 2, submitted: 1 });
+
+    const canonicalSummary = JSON.parse(vm.runInContext(`
+        vpaaInstitutionDashboardSummary = {
+            semesterId: 'sem-1',
+            users: { students: 1013, professors: 80 },
+            studentRegistration: { total: 2139, completed: 50, pending: 2089, completionRate: 2 },
+            evaluationReports: {
+                studentToProfessor: { totalEvaluations: 50, evaluatedCount: 12, averageRating: 4.2, ratingDistribution: { 5: 30, 4: 20 } },
+                professorToProfessor: { totalEvaluations: 8, evaluatedCount: 6, averageRating: 4.1, ratingDistribution: { 4: 8 } },
+                supervisorToProfessor: { totalEvaluations: 5, evaluatedCount: 5, averageRating: 4.0, ratingDistribution: { 4: 5 } }
+            }
+        };
+        elements.semesterFilter.value = 'sem-1';
+        elements.campusFilter.value = 'all';
+        elements.departmentFilter.value = 'all';
+        elements.searchInput.value = '';
+        updateSummary([], { campus: 'all', department: 'all' });
+        refreshDashboardChartsForSemester('sem-1');
+        JSON.stringify({
+            students: elements.totalStudents.textContent,
+            rate: elements.completionRate.textContent,
+            pending: elements.pendingEvaluations.textContent,
+            professors: elements.activeProfessors.textContent,
+            studentEvaluations: vpaaChartDataByType.student.totalEvaluations,
+            peerEvaluations: vpaaChartDataByType.professor.totalEvaluations,
+            supervisorEvaluations: vpaaChartDataByType.supervisor.totalEvaluations
+        });
+    `, allSemesterContext));
+    assert.deepEqual(canonicalSummary, {
+        students: '1,013',
+        rate: '2%',
+        pending: '2,089',
+        professors: '80',
+        studentEvaluations: 50,
+        peerEvaluations: 8,
+        supervisorEvaluations: 5,
+    });
+
+    assert.equal(
+        vpaaSource.includes('Math.max(activeProfessorCount - 1, 0)'),
+        false,
+        'VPAA pending totals must not assume every professor evaluates every other professor.'
+    );
 
     console.log('VPAA and OSA panel regression tests passed.');
 })().catch((error) => {

@@ -35,6 +35,8 @@ let vpaaDashboardDataRefreshKey = "";
 let vpaaDashboardDataRefreshId = 0;
 let vpaaSubjectManagementSnapshot = null;
 let vpaaEvaluationsSnapshot = null;
+let vpaaPeerAssignmentCountsSnapshot = [];
+let vpaaInstitutionDashboardSummary = null;
 const vpaaSemesterDataCache = new Map();
 const vpaaSemesterDataPromises = new Map();
 
@@ -277,6 +279,17 @@ function buildVpaaDatabaseContext(sourceUsers) {
         if (offeringId) offeringsById[offeringId] = offering;
     });
 
+    const peerAssignmentCountsByProfessorSemester = {};
+    (Array.isArray(vpaaPeerAssignmentCountsSnapshot) ? vpaaPeerAssignmentCountsSnapshot : []).forEach(function (row) {
+        const professorId = normalizeVpaaProfessorUserId(row && row.professorUserId);
+        const semesterId = normalizeSemesterLabel(row && row.semesterId);
+        if (!professorId || !semesterId) return;
+        peerAssignmentCountsByProfessorSemester[semesterId + "|" + professorId] = {
+            required: Math.max(0, Number(row.required) || 0),
+            submitted: Math.max(0, Number(row.submitted) || 0)
+        };
+    });
+
     return {
         users: Array.isArray(users) ? users : [],
         evaluations: Array.isArray(evaluations) ? evaluations : [],
@@ -288,7 +301,8 @@ function buildVpaaDatabaseContext(sourceUsers) {
         professorByName: professorByName,
         offerings: offerings,
         offeringsById: offeringsById,
-        enrollments: enrollments
+        enrollments: enrollments,
+        peerAssignmentCountsByProfessorSemester: peerAssignmentCountsByProfessorSemester
     };
 }
 
@@ -530,10 +544,6 @@ function buildProfessorDataFromSharedData(sourceUsers) {
         });
     }
 
-    const activeProfessorCount = context.professors.filter(function (prof) {
-        return normalizeVpaaToken(prof && prof.status || "active") !== "inactive";
-    }).length;
-
     const resultRows = [];
 
     context.professors.forEach(function (professor, index) {
@@ -596,9 +606,12 @@ function buildProfessorDataFromSharedData(sourceUsers) {
             analyticsByType.student.scorableClassCount = professorSetMetrics.scorableClassCount;
             analyticsByType.student.excludedClassCount = professorSetMetrics.excludedClassCount;
 
+            const peerAssignmentCounts = context.peerAssignmentCountsByProfessorSemester[
+                semesterToken + "|" + professorId
+            ] || { required: 0, submitted: 0 };
             const supervisorCount = getVpaaApplicableSupervisorUsersForProfessor(context, professorId).length || 1;
-            const totalRequired = requiredStudentRaters + Math.max(activeProfessorCount - 1, 0) + supervisorCount;
-            const totalReceived = professorSetMetrics.completed + peerEvals.length + supervisorEvals.length;
+            const totalRequired = requiredStudentRaters + peerAssignmentCounts.required + supervisorCount;
+            const totalReceived = professorSetMetrics.completed + peerAssignmentCounts.submitted + supervisorEvals.length;
             const responseRate = totalRequired > 0 ? Math.round((totalReceived / totalRequired) * 100) : 0;
 
             resultRows.push({
@@ -619,6 +632,8 @@ function buildProfessorDataFromSharedData(sourceUsers) {
                 responseRate: responseRate,
                 evaluations: totalReceived,
                 requiredEvaluations: totalRequired,
+                studentCompletedEvaluations: professorSetMetrics.completed,
+                studentRequiredEvaluations: requiredStudentRaters,
                 pendingEvaluations: Math.max(totalRequired - totalReceived, 0),
                 students: requiredStudentRaters,
                 subjects: semesterOfferings.map(function (offering) {
@@ -661,6 +676,54 @@ function loadDashboardDataFromDb(sourceUsers) {
         student: createEmptyChartData(),
         professor: createEmptyChartData(),
         supervisor: createEmptyChartData()
+    };
+}
+
+function getVpaaInstitutionDashboardSummary() {
+    if (vpaaInstitutionDashboardSummary && typeof vpaaInstitutionDashboardSummary === "object") {
+        return vpaaInstitutionDashboardSummary;
+    }
+    const cached = SharedData.getAdminDashboardSummary ? SharedData.getAdminDashboardSummary() : null;
+    return cached && typeof cached === "object" ? cached : null;
+}
+
+function normalizeVpaaCanonicalReport(report) {
+    const source = report && typeof report === "object" ? report : {};
+    const distribution = source.ratingDistribution && typeof source.ratingDistribution === "object"
+        ? source.ratingDistribution
+        : {};
+    return {
+        categoryScores: Array.isArray(source.categoryScores) ? source.categoryScores : [],
+        ratingDistribution: {
+            5: Math.max(0, Number(distribution[5] ?? distribution["5"]) || 0),
+            4: Math.max(0, Number(distribution[4] ?? distribution["4"]) || 0),
+            3: Math.max(0, Number(distribution[3] ?? distribution["3"]) || 0),
+            2: Math.max(0, Number(distribution[2] ?? distribution["2"]) || 0),
+            1: Math.max(0, Number(distribution[1] ?? distribution["1"]) || 0)
+        },
+        averageRating: source.averageRating === null ? null : (Number(source.averageRating) || 0),
+        totalEvaluations: Math.max(0, Number(source.totalEvaluations) || 0),
+        evaluatedCount: Math.max(0, Number(source.evaluatedCount) || 0),
+        partial: source.partial === true,
+        registeredClassCount: Math.max(0, Number(source.registeredClassCount) || 0),
+        scorableClassCount: Math.max(0, Number(source.scorableClassCount) || 0),
+        excludedClassCount: Math.max(0, Number(source.excludedClassCount) || 0)
+    };
+}
+
+function getVpaaCanonicalChartDataForSemester(semesterLabel) {
+    const summary = getVpaaInstitutionDashboardSummary();
+    if (!summary) return null;
+    const requested = normalizeSemesterLabel(semesterLabel);
+    const summarySemester = normalizeSemesterLabel(summary.semesterId);
+    if (!requested || requested === "all" || !summarySemester || requested !== summarySemester) return null;
+    const reports = summary.evaluationReports && typeof summary.evaluationReports === "object"
+        ? summary.evaluationReports
+        : {};
+    return {
+        student: normalizeVpaaCanonicalReport(reports.studentToProfessor),
+        professor: normalizeVpaaCanonicalReport(reports.professorToProfessor),
+        supervisor: normalizeVpaaCanonicalReport(reports.supervisorToProfessor)
     };
 }
 const exampleWordFrequency = [];
@@ -810,6 +873,19 @@ function normalizeVpaaEvaluationSnapshot(value) {
     return Array.isArray(value) ? value : [];
 }
 
+function normalizeVpaaPeerAssignmentCountsSnapshot(value, semesterId) {
+    const resolvedSemester = String(value && value.semesterId || semesterId || "").trim();
+    const professors = Array.isArray(value && value.professors) ? value.professors : [];
+    return professors.map(function (row) {
+        return {
+            semesterId: resolvedSemester,
+            professorUserId: row && row.professorUserId,
+            required: Math.max(0, Number(row && row.required) || 0),
+            submitted: Math.max(0, Number(row && row.submitted) || 0)
+        };
+    });
+}
+
 function mergeVpaaSnapshotRows(snapshots, propertyName, identityResolver) {
     const rows = [];
     const indexesByIdentity = new Map();
@@ -863,6 +939,9 @@ function applyVpaaSemesterDataSelection(semesterIds) {
             index
         ].join("|");
     });
+    vpaaPeerAssignmentCountsSnapshot = mergeVpaaSnapshotRows(snapshots, "peerAssignmentCounts", function (row, index) {
+        return row && [row.semesterId, row.professorUserId].join("|") || `peer-assignment-${index}`;
+    });
 }
 
 function fetchVpaaSemesterData(semesterId, forceRefresh) {
@@ -885,12 +964,16 @@ function fetchVpaaSemesterData(semesterId, forceRefresh) {
         : (SharedData.refreshEvaluations
             ? SharedData.refreshEvaluations({ semesterId: token })
             : Promise.resolve([]));
+    const peerAssignmentPromise = SharedData.fetchVpaaPeerAssignmentCounts
+        ? SharedData.fetchVpaaPeerAssignmentCounts({ semesterId: token })
+        : Promise.resolve({ semesterId: token, professors: [] });
 
-    const request = Promise.all([subjectPromise, evaluationPromise])
+    const request = Promise.all([subjectPromise, evaluationPromise, peerAssignmentPromise])
         .then(function (results) {
             const snapshot = {
                 subjectManagement: normalizeVpaaSubjectManagementSnapshot(results[0]),
-                evaluations: normalizeVpaaEvaluationSnapshot(results[1])
+                evaluations: normalizeVpaaEvaluationSnapshot(results[1]),
+                peerAssignmentCounts: normalizeVpaaPeerAssignmentCountsSnapshot(results[2], token)
             };
             vpaaSemesterDataCache.set(token, snapshot);
             return snapshot;
@@ -920,6 +1003,7 @@ function invalidateVpaaSemesterDataCache() {
     vpaaSemesterDataPromises.clear();
     vpaaSubjectManagementSnapshot = null;
     vpaaEvaluationsSnapshot = null;
+    vpaaPeerAssignmentCountsSnapshot = [];
 }
 
 function rebuildVpaaDashboardState(sourceUsers) {
@@ -978,6 +1062,14 @@ function refreshVpaaDashboardDataForSemester(semesterValue, sourceUsers) {
             })
         );
     }
+    if (SharedData.refreshAdminDashboardSummary) {
+        tasks.push(
+            SharedData.refreshAdminDashboardSummary({ panel: "vpaa" }).then(function (summary) {
+                vpaaInstitutionDashboardSummary = summary && typeof summary === "object" ? summary : null;
+                return vpaaInstitutionDashboardSummary;
+            })
+        );
+    }
     tasks.push(refreshVpaaSemesterDataSelection(selectedSemester, true));
 
     const refreshId = ++vpaaDashboardDataRefreshId;
@@ -1006,6 +1098,9 @@ function init() {
         window.location.href = 'mainpage.html';
         return;
     }
+    vpaaInstitutionDashboardSummary = SharedData.getAdminDashboardSummary
+        ? SharedData.getAdminDashboardSummary()
+        : null;
     loadDashboardDataFromDb();
     setupNavigation();
     setupLogout();
@@ -1076,6 +1171,13 @@ function setupDataSubscriptions() {
     if (!SharedData.onDataChange || !SharedData.KEYS) return;
 
     SharedData.onDataChange(function (key) {
+        if (key === SharedData.KEYS.ADMIN_DASHBOARD_SUMMARY) {
+            vpaaInstitutionDashboardSummary = SharedData.getAdminDashboardSummary
+                ? SharedData.getAdminDashboardSummary()
+                : null;
+            applyFilters();
+            return;
+        }
         if (
             key === SharedData.KEYS.EVALUATIONS ||
             key === SharedData.KEYS.SUBJECT_MANAGEMENT ||
@@ -1487,6 +1589,11 @@ function resetFilters() {
 
 function refreshDashboardChartsForSemester(semesterLabel) {
     const label = semesterLabel || currentSemesterLabel || "";
+    const canonical = getVpaaCanonicalChartDataForSemester(label);
+    if (canonical) {
+        vpaaChartDataByType = canonical;
+        return;
+    }
     const context = buildVpaaDatabaseContext();
     vpaaChartDataByType = {
         student: buildVpaaChartDataForType("student", label, context),
@@ -2100,6 +2207,34 @@ function getVpaaActiveStudentCount(scope) {
 
 function updateSummary(list, scope) {
     const activeStudentCount = getVpaaActiveStudentCount(scope);
+    const selectedSemester = normalizeSemesterLabel(elements.semesterFilter && elements.semesterFilter.value);
+    const selectedCampus = normalizeVpaaToken(scope && scope.campus || "all");
+    const selectedDepartment = normalizeVpaaToken(scope && scope.department || "all");
+    const searchTerm = normalizeVpaaToken(elements.searchInput && elements.searchInput.value);
+    const canonicalSummary = getVpaaInstitutionDashboardSummary();
+    const canonicalSemester = normalizeSemesterLabel(canonicalSummary && canonicalSummary.semesterId);
+    const isInstitutionCurrentScope = Boolean(
+        canonicalSummary
+        && selectedSemester !== "all"
+        && selectedSemester === canonicalSemester
+        && (!selectedCampus || selectedCampus === "all")
+        && (!selectedDepartment || selectedDepartment === "all")
+        && !searchTerm
+    );
+
+    if (isInstitutionCurrentScope) {
+        const users = canonicalSummary.users && typeof canonicalSummary.users === "object"
+            ? canonicalSummary.users
+            : {};
+        const registration = canonicalSummary.studentRegistration && typeof canonicalSummary.studentRegistration === "object"
+            ? canonicalSummary.studentRegistration
+            : {};
+        elements.totalStudents.textContent = Math.max(0, Number(users.students) || 0).toLocaleString();
+        elements.completionRate.textContent = `${Math.max(0, Math.min(100, Math.round(Number(registration.completionRate) || 0)))}%`;
+        elements.pendingEvaluations.textContent = Math.max(0, Number(registration.pending) || 0).toLocaleString();
+        elements.activeProfessors.textContent = Math.max(0, Number(users.professors) || 0).toLocaleString();
+        return;
+    }
 
     if (list.length === 0) {
         elements.totalStudents.textContent = activeStudentCount.toString();
@@ -2110,12 +2245,15 @@ function updateSummary(list, scope) {
     }
 
     const expectedEvaluations = list.reduce(function (sum, prof) {
-        const required = Number(prof && prof.requiredEvaluations);
+        const studentRequired = Number(prof && prof.studentRequiredEvaluations);
+        const required = Number.isFinite(studentRequired) ? studentRequired : Number(prof && prof.requiredEvaluations);
         return sum + (Number.isFinite(required) ? Math.max(0, required) : Math.max(0, Number(prof && prof.students) || 0));
     }, 0);
     const completedEvaluations = list.reduce(function (sum, prof) {
-        const required = Number(prof && prof.requiredEvaluations);
-        const completed = Math.max(0, Number(prof && prof.evaluations) || 0);
+        const studentRequired = Number(prof && prof.studentRequiredEvaluations);
+        const required = Number.isFinite(studentRequired) ? studentRequired : Number(prof && prof.requiredEvaluations);
+        const studentCompleted = Number(prof && prof.studentCompletedEvaluations);
+        const completed = Math.max(0, Number.isFinite(studentCompleted) ? studentCompleted : (Number(prof && prof.evaluations) || 0));
         return sum + (Number.isFinite(required) && required >= 0 ? Math.min(completed, required) : completed);
     }, 0);
     const completionRate = expectedEvaluations === 0

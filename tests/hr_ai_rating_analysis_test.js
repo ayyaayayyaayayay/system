@@ -235,8 +235,8 @@ assert.equal(legacyRecord.fastFlag, false, 'Missing historical timing was treate
 assert.ok(source.includes('Analyzing professor ratings and comments with AI...'));
 assert.ok(source.includes('Professor Rating Review'));
 assert.ok(source.includes('escapeHrHtml(ratingReview)'), 'The model-generated rating review must be HTML-escaped.');
-assert.ok(html.includes('hrpanel.css?v=20260930c'), 'The HR stylesheet cache version was not updated.');
+assert.ok(html.includes('hrpanel.css?v=20261005a'), 'The HR stylesheet cache version was not updated.');
 assert.ok(html.includes('db-data.js?v=20261004a'), 'The shared data cache version was not updated.');
-assert.ok(html.includes('hrpanel.js?v=20261004a'), 'The HR analytics script cache version was not updated.');
+assert.ok(html.includes('hrpanel.js?v=20261005a'), 'The HR analytics script cache version was not updated.');
 
 console.log('HR AI rating analysis tests passed.');

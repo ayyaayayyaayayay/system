@@ -4910,6 +4910,11 @@ const SharedData = (() => {
         return syncRequest('POST', 'listProfessorPeerAssignmentsCurrent', buildActorPayload(actor || {}));
     }
 
+    function fetchVpaaPeerAssignmentCounts(filters) {
+        startBootstrap(false);
+        return requestJson('POST', 'getVpaaPeerAssignmentCounts', Object.assign({}, filters || {}), { background: true });
+    }
+
     function listDeanPeerRoomMembersCurrent(actor, roomId) {
         startBootstrap(false);
         const body = Object.assign({ roomId: roomId }, buildActorPayload(actor || {}));
@@ -5268,6 +5273,7 @@ const SharedData = (() => {
         autoGeneratePeerRoom,
         listDeanPeerRoomsCurrent,
         listProfessorPeerAssignmentsCurrent,
+        fetchVpaaPeerAssignmentCounts,
         listDeanPeerRoomMembersCurrent,
         listDeanPeerRoomEligibleProfessorsCurrent,
         addDeanPeerRoomMembers,

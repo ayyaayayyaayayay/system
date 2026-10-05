@@ -12560,6 +12560,56 @@ function buildProfessorPeerAssignmentsCurrentSnapshot(PDO $pdo, $professorUserId
     ];
 }
 
+function buildVpaaPeerAssignmentCountsSnapshot(PDO $pdo, $semesterValue = '') {
+    ensurePeerEvaluationSchema($pdo);
+    $semester = resolvePeerAssignmentSemesterRowSnapshot($pdo, $semesterValue);
+    if (!$semester) {
+        return [
+            'semesterId' => '',
+            'professors' => [],
+            'stats' => ['total' => 0, 'pending' => 0, 'submitted' => 0],
+        ];
+    }
+
+    $stmt = $pdo->prepare(
+        "SELECT
+            evaluatee_user_id,
+            COUNT(*) AS total_count,
+            SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) AS submitted_count
+         FROM peer_evaluation_assignments
+         WHERE semester_id = :semester_id
+         GROUP BY evaluatee_user_id
+         ORDER BY evaluatee_user_id"
+    );
+    $stmt->execute([':semester_id' => (int) $semester['id']]);
+
+    $professors = [];
+    $total = 0;
+    $submitted = 0;
+    foreach ($stmt->fetchAll() as $row) {
+        $requiredCount = max(0, (int) ($row['total_count'] ?? 0));
+        $submittedCount = min($requiredCount, max(0, (int) ($row['submitted_count'] ?? 0)));
+        $total += $requiredCount;
+        $submitted += $submittedCount;
+        $professors[] = [
+            'professorUserId' => 'u' . (int) ($row['evaluatee_user_id'] ?? 0),
+            'required' => $requiredCount,
+            'submitted' => $submittedCount,
+            'pending' => max(0, $requiredCount - $submittedCount),
+        ];
+    }
+
+    return [
+        'semesterId' => (string) $semester['slug'],
+        'professors' => $professors,
+        'stats' => [
+            'total' => $total,
+            'pending' => max(0, $total - $submitted),
+            'submitted' => $submitted,
+        ],
+    ];
+}
+
 function completeProfessorPeerAssignmentForEvaluation(PDO $pdo, $evaluatorUserId, $evaluateeUserId, $evaluationId, $semesterSlug = '') {
     $submittedEvaluationId = trim((string) $evaluationId);
     if ($submittedEvaluationId === '') {

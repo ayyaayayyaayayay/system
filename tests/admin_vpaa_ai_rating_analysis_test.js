@@ -200,7 +200,7 @@ assert.ok(adminHtml.includes('adminpanel.css?v=20261004a'));
 assert.ok(adminHtml.includes('db-data.js?v=20261004a'));
 assert.ok(adminHtml.includes('adminpanel.js?v=20261003a'));
 assert.ok(vpaaHtml.includes('vpaapanel.css?v=20260930c'));
-assert.ok(vpaaHtml.includes('db-data.js?v=20261004a'));
-assert.ok(vpaaHtml.includes('vpaapanel.js?v=20261001a'));
+assert.ok(vpaaHtml.includes('db-data.js?v=20261006a'));
+assert.ok(vpaaHtml.includes('vpaapanel.js?v=20261006b'));
 
 console.log('Admin and VPAA AI rating analysis tests passed.');
