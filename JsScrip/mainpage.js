@@ -2,6 +2,7 @@
 
 const loginFlowState = {
   pendingOtp: null,
+  otpResendTimer: null,
 };
 const MOBILE_AUTH_BREAKPOINT = 640;
 
@@ -273,9 +274,13 @@ function updateOtpMetaText() {
   }
   const maskedEmail = String(pending.maskedEmail || "").trim();
   const expiresAt = formatDisplayDateTime(pending.expiresAt);
-  let text = "Enter the 6-digit verification code sent to your Gmail.";
+  let text = pending.reason === "failed_login"
+    ? "Security verification is required after multiple incorrect password attempts. Enter the 6-digit code sent to your Gmail."
+    : "Enter the 6-digit verification code sent to your Gmail to trust this device.";
   if (maskedEmail) {
-    text = "Enter the 6-digit verification code sent to " + maskedEmail + ".";
+    text = pending.reason === "failed_login"
+      ? "Security verification is required after multiple incorrect password attempts. Enter the 6-digit code sent to " + maskedEmail + "."
+      : "Enter the 6-digit verification code sent to " + maskedEmail + " to trust this device.";
   }
   if (expiresAt) {
     text += " Code expires at " + expiresAt + ".";
@@ -283,11 +288,31 @@ function updateOtpMetaText() {
   meta.textContent = text;
 }
 
+function syncOtpResendButton() {
+  const button = document.getElementById("resendOtpBtn");
+  if (!button) return;
+  if (loginFlowState.otpResendTimer) {
+    window.clearTimeout(loginFlowState.otpResendTimer);
+    loginFlowState.otpResendTimer = null;
+  }
+  const pending = loginFlowState.pendingOtp;
+  const availableAt = pending ? Date.parse(String(pending.resendAvailableAt || "")) : NaN;
+  const seconds = Number.isFinite(availableAt)
+    ? Math.max(0, Math.ceil((availableAt - Date.now()) / 1000))
+    : 0;
+  button.disabled = !pending || seconds > 0;
+  button.textContent = seconds > 0 ? "Resend code in " + seconds + "s" : "Resend code";
+  if (pending && seconds > 0) {
+    loginFlowState.otpResendTimer = window.setTimeout(syncOtpResendButton, 1000);
+  }
+}
+
 function openOtpModal() {
   const modal = document.getElementById("otpVerificationModal");
   const input = document.getElementById("otpCodeInput");
   if (!modal) return;
   updateOtpMetaText();
+  syncOtpResendButton();
   setOtpInlineMessage("", "error");
   modal.classList.add("show");
   modal.setAttribute("aria-hidden", "false");
@@ -302,6 +327,10 @@ function closeOtpModal() {
   if (!modal) return;
   modal.classList.remove("show");
   modal.setAttribute("aria-hidden", "true");
+  if (loginFlowState.otpResendTimer) {
+    window.clearTimeout(loginFlowState.otpResendTimer);
+    loginFlowState.otpResendTimer = null;
+  }
 }
 
 /**
@@ -377,6 +406,8 @@ function handleLogin() {
           challengeId: String(data.otpChallengeId || "").trim(),
           expiresAt: String(data.otpExpiresAt || "").trim(),
           maskedEmail: String(data.maskedEmail || "").trim(),
+          reason: String(data.otpReason || "device_verification").trim(),
+          resendAvailableAt: String(data.otpResendAvailableAt || "").trim(),
         };
         openOtpModal();
         if (data.error) {
@@ -474,14 +505,24 @@ function handleOtpVerification() {
           challengeId: String(data.otpChallengeId || pending.challengeId || "").trim(),
           expiresAt: String(data.otpExpiresAt || pending.expiresAt || "").trim(),
           maskedEmail: String(data.maskedEmail || pending.maskedEmail || "").trim(),
+          reason: String(data.otpReason || pending.reason || "device_verification").trim(),
+          resendAvailableAt: String(data.otpResendAvailableAt || pending.resendAvailableAt || "").trim(),
         };
         updateOtpMetaText();
+        syncOtpResendButton();
         input.value = "";
         setOtpInlineMessage(
           data.error || "Invalid OTP code. Please try again.",
           "error",
         );
         input.focus();
+        return;
+      }
+
+      if (data && data.otpChallengeEnded) {
+        loginFlowState.pendingOtp = null;
+        closeOtpModal();
+        showError(data.error || "OTP verification ended. Please log in again.");
         return;
       }
 
@@ -504,12 +545,60 @@ function handleOtpVerification() {
     });
 }
 
+function handleOtpResend() {
+  const pending = loginFlowState.pendingOtp;
+  const button = document.getElementById("resendOtpBtn");
+  if (!pending || !button || button.disabled) return;
+
+  button.disabled = true;
+  button.textContent = "Sending...";
+  fetch("../api/login.php", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "resendOtp",
+      username: pending.username,
+      otpChallengeId: pending.challengeId,
+    }),
+  })
+    .then((response) => readAuthApiPayload(response, "Unable to resend OTP."))
+    .then((data) => {
+      if (data && data.otpRequired) {
+        loginFlowState.pendingOtp = {
+          username: pending.username,
+          challengeId: String(data.otpChallengeId || pending.challengeId || "").trim(),
+          expiresAt: String(data.otpExpiresAt || pending.expiresAt || "").trim(),
+          maskedEmail: String(data.maskedEmail || pending.maskedEmail || "").trim(),
+          reason: String(data.otpReason || pending.reason || "device_verification").trim(),
+          resendAvailableAt: String(data.otpResendAvailableAt || pending.resendAvailableAt || "").trim(),
+        };
+        updateOtpMetaText();
+        syncOtpResendButton();
+        setOtpInlineMessage(data.message || data.error || "A new OTP was sent.", data.otpResent ? "success" : "error");
+        return;
+      }
+      if (data && data.otpChallengeEnded) {
+        loginFlowState.pendingOtp = null;
+        closeOtpModal();
+        showError(data.error || "OTP verification ended. Please log in again.");
+        return;
+      }
+      setOtpInlineMessage((data && data.error) || "Unable to resend OTP.", "error");
+      syncOtpResendButton();
+    })
+    .catch((error) => {
+      setOtpInlineMessage(error.message || "Unable to resend OTP.", "error");
+      syncOtpResendButton();
+    });
+}
+
 function setupOtpVerification() {
   const modal = document.getElementById("otpVerificationModal");
   const closeBtn = document.getElementById("closeOtpModal");
   const verifyBtn = document.getElementById("verifyOtpBtn");
   const input = document.getElementById("otpCodeInput");
-  if (!modal || !closeBtn || !verifyBtn || !input) return;
+  const resendBtn = document.getElementById("resendOtpBtn");
+  if (!modal || !closeBtn || !verifyBtn || !input || !resendBtn) return;
 
   closeBtn.addEventListener("click", function () {
     closeOtpModal();
@@ -518,6 +607,8 @@ function setupOtpVerification() {
   verifyBtn.addEventListener("click", function () {
     handleOtpVerification();
   });
+
+  resendBtn.addEventListener("click", handleOtpResend);
 
   input.addEventListener("input", function () {
     this.value = sanitizeOtpCode(this.value);
@@ -591,15 +682,6 @@ function storeUserSession(authData) {
     profileImageUrl: profileImageUrl,
     status: status === "inactive" ? "inactive" : "active",
     csrfToken: csrfToken,
-  });
-
-  // Log successful login activity
-  SharedData.addActivityLogEntry({
-    action: "Login",
-    description: fullName + " logged in as " + role,
-    role: role,
-    user_id: userId || username,
-    type: "login",
   });
 }
 

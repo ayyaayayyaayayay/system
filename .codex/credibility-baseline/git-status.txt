@@ -1,0 +1,86 @@
+ M DEPLOYMENT.md
+ M JsScrip/adminpanel.js
+ M JsScrip/daenpanel.js
+ M JsScrip/db-data.js
+ M JsScrip/hrpanel.js
+ M JsScrip/mainpage.js
+ M JsScrip/osapanel.js
+ M JsScrip/profesorpanel.js
+ M JsScrip/studentpanel.js
+ M JsScrip/vpaapanel.js
+ M SYSTEM_SECURITY_AND_STRESS_ASSESSMENT.md
+ M api/app_state.php
+ M api/auth.php
+ M api/auth_rate_limit.php
+ M api/backup_service.php
+ M api/campus_authorization.php
+ M api/faculty_docx_helper.php
+ M api/faculty_pdf_helper.php
+ M api/faculty_report_helper.php
+ M api/faculty_xlsx_helper.php
+ M api/login.php
+ M api/schema_migrations.php
+ M api/state_helpers.php
+ M css/adminpanel.css
+ M css/daenpanel.css
+ M css/hrpanel.css
+ M css/mainpage.css
+ M css/profesorpanel.css
+ M css/vpaapanel.css
+ M "database/alexa cabrera.txt"
+ M database/datacode.txt
+ M database/dataweb.txt
+ M database/question.txt
+ D files/Chapter-1-4-V5Short.pdf
+ M html/adminpanel.html
+ M html/daenpanel.html
+ M html/hrpanel.html
+ M html/mainpage.html
+ M html/osapanel.html
+ M html/procoorpanel.html
+ M html/profesorpanel.html
+ M html/studentpanel.html
+ M html/vpaapanel.html
+ M tests/admin_general_settings_test.php
+ M tests/auth_rate_limit_test.php
+ M tests/automated_clearance_reference_test.php
+ M tests/backup_admin_ui_test.js
+ M tests/dean_email_change_test.php
+ M tests/hr_email_change_test.php
+ M tests/multi_campus_authorization_test.php
+ M tests/password_security_test.php
+ M tests/professor_reports_layout_test.php
+ M tests/sheetjs_security_test.js
+ M tests/spreadsheet_import_limits_test.php
+ M tests/student_evaluation_reminder_test.php
+ M tests/student_recovery_workflow_test.php
+?? .codex/credibility-baseline/
+?? .codex/hr-mobile-chrome/
+?? .codex/professor-mobile-charts.png
+?? .codex/professor-mobile-chrome/
+?? .codex/professor-mobile-trend.png
+?? .codex/vpaa-mobile-chrome/
+?? JsScrip/set-calculation.js
+?? api/audit.php
+?? files/Chapter-1-3-V6Short.pdf
+?? scratch_test_report.php
+?? tests/admin_auth_exemptions_test.php
+?? tests/admin_panel_bugfix_test.js
+?? tests/admin_vpaa_ai_rating_analysis_test.js
+?? tests/announcement_once_test.js
+?? tests/audit_trail_test.php
+?? tests/dean_peer_semester_test.php
+?? tests/dean_procoor_panel_regression_test.js
+?? tests/evaluation_behavior_metadata_test.php
+?? tests/faculty_paper_evaluation_lock_test.php
+?? tests/faculty_report_access_test.js
+?? tests/hr_ai_rating_analysis_test.js
+?? tests/hr_ai_rating_analysis_test.php
+?? tests/osa_proof_review_lock_test.php
+?? tests/professor_analytics_ui_regression_test.js
+?? tests/professor_panel_report_state_test.js
+?? tests/set_calculation_test.js
+?? tests/set_calculation_test.php
+?? tests/student_panel_regression_test.php
+?? tests/trusted_device_otp_test.php
+?? tests/vpaa_osa_panel_regression_test.js

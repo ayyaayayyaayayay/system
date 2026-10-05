@@ -354,6 +354,7 @@ window.StudentEvaluationReminderSettings = window.StudentEvaluationReminderSetti
     const DEFAULT_CONFIG = {
         enabled: true,
         frequencyDays: 7,
+        sendTime: '07:00',
         subject: 'NAAP Evaluation Reminder: Please Complete Your Evaluation',
         body: 'Please complete your evaluation while the student evaluation period is open.\n'
             + 'Log in to the NAAP Evaluation System and submit your pending evaluation today.',
@@ -370,6 +371,7 @@ window.StudentEvaluationReminderSettings = window.StudentEvaluationReminderSetti
         return {
             enabled: document.getElementById('student-eval-reminder-enabled'),
             frequency: document.getElementById('reminder-freq'),
+            sendTime: document.getElementById('student-eval-reminder-time'),
             subject: document.getElementById('student-eval-reminder-subject'),
             body: document.getElementById('student-eval-reminder-body'),
             reset: document.getElementById('student-eval-reminder-reset-btn'),
@@ -389,6 +391,7 @@ window.StudentEvaluationReminderSettings = window.StudentEvaluationReminderSetti
         const value = Object.assign({}, DEFAULT_CONFIG, config || {});
         elements.enabled.checked = value.enabled === true;
         elements.frequency.value = String(Number(value.frequencyDays) || DEFAULT_CONFIG.frequencyDays);
+        elements.sendTime.value = String(value.sendTime || DEFAULT_CONFIG.sendTime);
         elements.subject.value = String(value.subject || DEFAULT_CONFIG.subject);
         elements.body.value = String(value.body || DEFAULT_CONFIG.body);
     }
@@ -415,6 +418,11 @@ window.StudentEvaluationReminderSettings = window.StudentEvaluationReminderSetti
             throw new Error('Reminder frequency must be a whole number between 1 and 365 days.');
         }
 
+        const sendTime = String(elements.sendTime.value || '');
+        if (!/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(sendTime)) {
+            throw new Error('Select a valid reminder send time.');
+        }
+
         const subject = String(elements.subject.value || '').trim();
         const body = String(elements.body.value || '').trim();
         if (!subject) throw new Error('Reminder email subject is required.');
@@ -428,6 +436,7 @@ window.StudentEvaluationReminderSettings = window.StudentEvaluationReminderSetti
         return {
             enabled: elements.enabled.checked === true,
             frequencyDays,
+            sendTime,
             subject,
             body,
         };
@@ -436,7 +445,7 @@ window.StudentEvaluationReminderSettings = window.StudentEvaluationReminderSetti
     function setup() {
         if (bound) return;
         const elements = getElements();
-        if (!elements.enabled || !elements.frequency || !elements.subject || !elements.body
+        if (!elements.enabled || !elements.frequency || !elements.sendTime || !elements.subject || !elements.body
             || !elements.reset || !elements.save) {
             return;
         }
@@ -1001,6 +1010,8 @@ const SharedData = (() => {
         SUBJECT_MANAGEMENT: 'subjectManagement',
         PROGRAMS: 'sharedProgramsData',
         FACULTY_PAPERS: 'facultyAcknowledgementPapers',
+        FACULTY_REPORT_ACCESS: 'facultyReportAccess',
+        PROFESSOR_EVALUATION_COUNTS: 'professorEvaluationCounts',
         ADMIN_DASHBOARD_SUMMARY: 'adminDashboardSummary',
         LOGOUT_PENDING: 'naapLogoutPending',
     };
@@ -1049,6 +1060,7 @@ const SharedData = (() => {
         studentEvaluationReminderConfig: {
             enabled: true,
             frequencyDays: 7,
+        sendTime: '07:00',
             subject: 'NAAP Evaluation Reminder: Please Complete Your Evaluation',
             body: 'Please complete your evaluation while the student evaluation period is open. Log in to the NAAP Evaluation System and submit your pending evaluation today.',
             allowedPlaceholders: ['student_name', 'evaluation_end_date', 'academic_year', 'semester'],
@@ -1076,6 +1088,8 @@ const SharedData = (() => {
         adminDashboardSummary: null,
         facultyAcknowledgementPapers: [],
         facultyPaperListMeta: { total: 0, limit: 0, offset: 0, page: 1, hasMore: false },
+        facultyReportAccess: { enabled: true, departmentCode: '', updatedAt: '' },
+        professorEvaluationCounts: { semesterId: '', received: 0, required: 0, responseRate: 0 },
         profileData: null,
         profilePhotos: null,
         bootstrapMeta: {},
@@ -1840,6 +1854,18 @@ const SharedData = (() => {
         state.facultyPaperListMeta = snapshot.facultyAcknowledgementPapersMeta && typeof snapshot.facultyAcknowledgementPapersMeta === 'object'
             ? snapshot.facultyAcknowledgementPapersMeta
             : { total: state.facultyAcknowledgementPapers.length, limit: 0, offset: 0, page: 1, hasMore: false };
+        state.facultyReportAccess = Object.assign(
+            { enabled: true, departmentCode: '', updatedAt: '' },
+            snapshot.facultyReportAccess && typeof snapshot.facultyReportAccess === 'object'
+                ? snapshot.facultyReportAccess
+                : {}
+        );
+        state.professorEvaluationCounts = Object.assign(
+            { semesterId: '', received: 0, required: 0, responseRate: 0 },
+            snapshot.professorEvaluationCounts && typeof snapshot.professorEvaluationCounts === 'object'
+                ? snapshot.professorEvaluationCounts
+                : {}
+        );
         state.profileData = snapshot.currentUserProfileData && typeof snapshot.currentUserProfileData === 'object'
             ? snapshot.currentUserProfileData
             : null;
@@ -1875,6 +1901,8 @@ const SharedData = (() => {
         dispatchChange(KEYS.STUDENT_EVAL_PROOF_REQUESTS, deepClone(state.studentEvaluationProofRequests));
         dispatchChange(KEYS.SUBJECT_MANAGEMENT, deepClone(state.subjectManagement));
         dispatchChange(KEYS.FACULTY_PAPERS, deepClone(state.facultyAcknowledgementPapers));
+        dispatchChange(KEYS.FACULTY_REPORT_ACCESS, deepClone(state.facultyReportAccess));
+        dispatchChange(KEYS.PROFESSOR_EVALUATION_COUNTS, deepClone(state.professorEvaluationCounts));
         dispatchChange('profileData', deepClone(state.profileData));
         dispatchChange('profilePhoto', state.profilePhotos);
     }
@@ -2521,7 +2549,12 @@ const SharedData = (() => {
 
     function getUsers() {
         startBootstrap(false);
-        if (isBootstrapDatasetPartial('users') || (Date.now() - usersLastSyncedAt) >= USERS_CACHE_TTL_MS) {
+        const sessionRole = String((getSession() || {}).role || '').trim().toLowerCase();
+        const canRequestUserDirectory = ['admin', 'hr', 'vpaa', 'osa'].includes(sessionRole);
+        if (
+            canRequestUserDirectory
+            && (isBootstrapDatasetPartial('users') || (Date.now() - usersLastSyncedAt) >= USERS_CACHE_TTL_MS)
+        ) {
             scheduleUsersRefresh({ forceRefresh: true, limit: 100, page: 1 });
         }
         return state.users;
@@ -2867,13 +2900,15 @@ const SharedData = (() => {
 
     function setCampuses(campuses) {
         startBootstrap(false);
-        state.campuses = Array.isArray(campuses) ? campuses : state.campuses;
+        const requestedCampuses = Array.isArray(campuses)
+            ? deepClone(campuses)
+            : deepClone(state.campuses);
+        const response = syncRequest('POST', 'setCampuses', { campuses: requestedCampuses });
+        state.campuses = response && Array.isArray(response.campuses)
+            ? response.campuses
+            : requestedCampuses;
         dispatchChange(KEYS.CAMPUSES, deepClone(state.campuses));
-        try {
-            syncRequest('POST', 'setCampuses', { campuses: state.campuses });
-        } catch (error) {
-            console.error('[DBData] Failed to persist campuses.', error);
-        }
+        return state.campuses;
     }
 
     function upsertProgram(program) {
@@ -3053,6 +3088,16 @@ const SharedData = (() => {
             refreshPromiseKeys.evaluations = '';
         });
         return refreshPromises.evaluations;
+    }
+
+    function fetchEvaluationsSnapshot(filters) {
+        const normalizedFilters = Object.assign({}, filters || {});
+        startBootstrap(false);
+        return requestJson('POST', 'listEvaluations', {
+            filters: normalizedFilters,
+        }, { background: true }).then(function (response) {
+            return deepClone(Array.isArray(response && response.evaluations) ? response.evaluations : []);
+        });
     }
 
     function scheduleEvaluationsRefresh(filters) {
@@ -3485,6 +3530,22 @@ const SharedData = (() => {
         return refreshPromises.subjectManagement;
     }
 
+    function fetchSubjectManagementSnapshot(filters) {
+        const normalizedFilters = Object.assign({}, filters || {});
+        startBootstrap(false);
+        return requestJson('POST', 'listSubjectManagement', normalizedFilters, { background: true })
+            .then(function (response) {
+                const snapshot = response && response.subjectManagement
+                    ? response.subjectManagement
+                    : response;
+                return deepClone({
+                    subjects: Array.isArray(snapshot && snapshot.subjects) ? snapshot.subjects : [],
+                    offerings: Array.isArray(snapshot && snapshot.offerings) ? snapshot.offerings : [],
+                    enrollments: Array.isArray(snapshot && snapshot.enrollments) ? snapshot.enrollments : [],
+                });
+            });
+    }
+
     function scheduleSubjectManagementRefresh(filters) {
         refreshSubjectManagement(filters).catch(function (error) {
             console.warn('[DBData] Failed to refresh subject management data.', error);
@@ -3602,56 +3663,6 @@ const SharedData = (() => {
             filters: Object.assign({}, filters || {}),
         });
         return Array.isArray(response && response.activityLog) ? response.activityLog : [];
-    }
-
-    function addActivityLogEntry(entry) {
-        startBootstrap(false);
-        const payload = Object.assign({}, entry || {});
-
-        let logEntry = null;
-        try {
-            const response = syncRequest('POST', 'addActivityLogEntry', { entry: payload });
-            if (response && response.entry) {
-                logEntry = response.entry;
-            }
-        } catch (error) {
-            console.error('[DBData] Failed to persist activity log entry.', error);
-            return null;
-        }
-
-        if (!logEntry) {
-            return null;
-        }
-
-        state.activityLog.unshift(logEntry);
-        if (state.activityLog.length > 200) {
-            state.activityLog.length = 200;
-        }
-        dispatchChange(KEYS.ACTIVITY_LOG, deepClone(state.activityLog));
-
-        return logEntry;
-    }
-
-    function addActivityLogEntryAsync(entry) {
-        startBootstrap(false);
-        const payload = Object.assign({}, entry || {});
-
-        return asyncRequest('POST', 'addActivityLogEntry', { entry: payload }).then(function (response) {
-            const logEntry = response && response.entry ? response.entry : null;
-            if (!logEntry) {
-                return null;
-            }
-
-            state.activityLog.unshift(logEntry);
-            if (state.activityLog.length > 200) {
-                state.activityLog.length = 200;
-            }
-            dispatchChange(KEYS.ACTIVITY_LOG, deepClone(state.activityLog));
-            return logEntry;
-        }).catch(function (error) {
-            console.error('[DBData] Failed to persist activity log entry.', error);
-            return null;
-        });
     }
 
     function getCredentialDistributorConfig(actor) {
@@ -3773,6 +3784,7 @@ const SharedData = (() => {
         return asyncRequest('POST', 'summarizeFeedbackComments', body).then(function (response) {
             return {
                 success: response && response.success === true,
+                auditId: String(response && response.auditId || ''),
                 disabled: !!(response && response.disabled),
                 source: String(response && response.source || (response && response.summary && response.summary.source) || 'rule'),
                 warning: String(response && response.warning || (response && response.summary && response.summary.warning) || ''),
@@ -3868,9 +3880,47 @@ const SharedData = (() => {
         const response = syncRequest('POST', 'analyzeBiasComments', body);
         return {
             success: response && response.success === true,
+            auditId: String(response && response.auditId || ''),
             summary: response && response.summary ? response.summary : { total: 0, constructive: 0, neutral: 0, biased: 0, source: 'rule' },
             items: Array.isArray(response && response.items) ? response.items : [],
         };
+    }
+
+    function listCredibilityReviews(filters) {
+        return requestJson('POST', 'listCredibilityReviews', { filters: filters || {} }, { background: true });
+    }
+    function getCredibilityReview(evaluationId) {
+        return requestJson('POST', 'getCredibilityReview', { evaluationId }, { background: true });
+    }
+    function reviewCredibilityEvaluations(evaluationIds, decision, note) {
+        return requestJson('POST', 'reviewCredibilityEvaluations', { evaluationIds, decision, note: note || '' });
+    }
+    function getProfessorAnalyticsPayload(payload) {
+        return syncRequest('POST', 'getProfessorAnalyticsPayload', { payload }).payload;
+    }
+    function evaluationTimingKey(type, target, semester) {
+        const session = getSession() || {};
+        return 'evaluationBehavior:' + [session.userId, semester, type, target].join('|');
+    }
+    function startEvaluationTiming(type, target, semester) {
+        if (!target) return;
+        const key = evaluationTimingKey(type, target, semester);
+        const stored = sessionStorage.getItem(key);
+        const age = Date.now() - Date.parse(stored || '');
+        if (!Number.isFinite(age) || age < 0 || age >= 86400000) sessionStorage.setItem(key, getNowIsoString());
+    }
+    function buildEvaluationTiming(payload, questions) {
+        const key = evaluationTimingKey(payload.evaluationType, payload.targetProfessorId, payload.semesterId);
+        const startedAt = sessionStorage.getItem(key);
+        if (!startedAt) throw new Error('Please select the evaluation target again to start timing. Your answers are preserved.');
+        const duration = (Date.parse(payload.submittedAt) - Date.parse(startedAt)) / 1000;
+        const answered = new Set(Object.keys(payload.ratings || {}).concat(Object.keys(payload.qualitative || {}))
+            .filter(id => String((payload.ratings || {})[id] || (payload.qualitative || {})[id] || '').trim()));
+        return { captureVersion: 1, startedAt, submittedAt: payload.submittedAt, durationSeconds: Number(duration.toFixed(3)),
+            questionCount: questions.length, answeredCount: answered.size, secondsPerQuestion: Number((duration / answered.size).toFixed(6)) };
+    }
+    function clearEvaluationTiming(payload) {
+        sessionStorage.removeItem(evaluationTimingKey(payload.evaluationType, payload.targetProfessorId, payload.semesterId));
     }
 
     function analyzeEvaluationExplainability(payload, actor) {
@@ -3880,6 +3930,7 @@ const SharedData = (() => {
         });
         const response = syncRequest('POST', 'analyzeEvaluationExplainability', body);
         const fallbackInsight = {
+            ratingReview: 'No numeric rating review is available.',
             keywords: [],
             clusters: [],
             reasoning: ['No explainability details available.'],
@@ -3891,11 +3942,17 @@ const SharedData = (() => {
             stats: {
                 totalComments: 0,
                 sourceCounts: {},
+                overallRating: null,
+                combinedAverage: null,
+                averagesBySource: { student: null, professor: null, supervisor: null },
+                responseRate: null,
+                totalEvaluations: 0,
             },
         };
 
         return {
             success: response && response.success === true,
+            auditId: String(response && response.auditId || ''),
             source: String(response && response.source || 'rule'),
             insight: response && response.insight && typeof response.insight === 'object'
                 ? response.insight
@@ -3908,6 +3965,7 @@ const SharedData = (() => {
         const response = syncRequest('POST', 'generateFacultyPaperSectionCRecommendations', payload || {});
         return {
             success: response && response.success === true,
+            auditId: String(response && response.auditId || ''),
             source: String(response && response.source || 'rule'),
             weakAreas: Array.isArray(response && response.weakAreas) ? response.weakAreas : [],
             sectionC: response && response.sectionC && typeof response.sectionC === 'object'
@@ -4106,7 +4164,11 @@ const SharedData = (() => {
 
     function decorateAnnouncementForUser(announcement, userKey) {
         const entry = normalizeAnnouncementEntry(announcement, 0);
-        entry.read = isAnnouncementReadForUser(entry, userKey);
+        // Non-admin bootstrap responses intentionally omit the complete readBy map
+        // and expose only the authenticated user's projected `read` state. Preserve
+        // that server-authoritative value while still supporting admin/HR snapshots,
+        // where readBy is available for client-side decoration.
+        entry.read = entry.read || isAnnouncementReadForUser(entry, userKey);
         return entry;
     }
 
@@ -4878,6 +4940,56 @@ const SharedData = (() => {
         return syncRequest('POST', 'dismantleDeanPeerRoom', body);
     }
 
+    function normalizeFacultyReportAccess(value) {
+        const source = value && typeof value === 'object' ? value : {};
+        return {
+            enabled: source.enabled !== false,
+            departmentCode: String(source.departmentCode || '').trim(),
+            updatedAt: String(source.updatedAt || '').trim(),
+        };
+    }
+
+    function normalizeProfessorEvaluationCounts(value) {
+        const source = value && typeof value === 'object' ? value : {};
+        return {
+            semesterId: String(source.semesterId || '').trim(),
+            received: Math.max(0, Number(source.received) || 0),
+            required: Math.max(0, Number(source.required) || 0),
+            responseRate: Math.max(0, Math.min(100, Number(source.responseRate) || 0)),
+        };
+    }
+
+    function applyFacultyReportAccessResponse(response) {
+        const payload = response && typeof response === 'object' ? response : {};
+        state.facultyReportAccess = normalizeFacultyReportAccess(payload.facultyReportAccess);
+        if (payload.professorEvaluationCounts && typeof payload.professorEvaluationCounts === 'object') {
+            state.professorEvaluationCounts = normalizeProfessorEvaluationCounts(payload.professorEvaluationCounts);
+            dispatchChange(KEYS.PROFESSOR_EVALUATION_COUNTS, deepClone(state.professorEvaluationCounts));
+        }
+        dispatchChange(KEYS.FACULTY_REPORT_ACCESS, deepClone(state.facultyReportAccess));
+        return deepClone(state.facultyReportAccess);
+    }
+
+    function getFacultyReportAccess() {
+        startBootstrap(false);
+        return deepClone(state.facultyReportAccess);
+    }
+
+    function getProfessorEvaluationCounts() {
+        startBootstrap(false);
+        return deepClone(state.professorEvaluationCounts);
+    }
+
+    function refreshFacultyReportAccess() {
+        return asyncRequest('POST', 'getFacultyReportAccess', {}, { background: true })
+            .then(applyFacultyReportAccessResponse);
+    }
+
+    function setDepartmentFacultyReportAccess(enabled) {
+        return asyncRequest('POST', 'setDepartmentFacultyReportAccess', { enabled: enabled === true })
+            .then(applyFacultyReportAccessResponse);
+    }
+
     function applyFacultyPapersResponse(response) {
         const payload = response && typeof response === 'object' ? response : {};
         state.facultyAcknowledgementPapers = Array.isArray(payload.papers) ? payload.papers : [];
@@ -5070,6 +5182,7 @@ const SharedData = (() => {
         getCachedEvaluations,
         listEvaluations,
         refreshEvaluations,
+        fetchEvaluationsSnapshot,
         addEvaluation,
         addEvaluationAsync,
         getStudentEvaluationDrafts,
@@ -5093,6 +5206,7 @@ const SharedData = (() => {
         getSubjectManagement,
         getCachedSubjectManagement,
         refreshSubjectManagement,
+        fetchSubjectManagementSnapshot,
         upsertSubject,
         importSubjects,
         upsertCourseOffering,
@@ -5102,8 +5216,6 @@ const SharedData = (() => {
         deactivateCourseOffering,
         getActivityLog,
         searchActivityLog,
-        addActivityLogEntry,
-        addActivityLogEntryAsync,
         getCredentialDistributorConfig,
         saveCredentialDistributorConfig,
         getOpenAiConfig,
@@ -5119,6 +5231,8 @@ const SharedData = (() => {
         listSystemHealthChecks,
         runSystemHealthCheck,
         analyzeBiasComments,
+        listCredibilityReviews, getCredibilityReview, reviewCredibilityEvaluations, getProfessorAnalyticsPayload,
+        startEvaluationTiming, buildEvaluationTiming, clearEvaluationTiming,
         analyzeEvaluationExplainability,
         generateFacultyPaperSectionCRecommendations,
         getAnnouncements,
@@ -5163,6 +5277,10 @@ const SharedData = (() => {
         getFacultyPaperListMeta,
         refreshFacultyPapers,
         listFacultyPapers,
+        getFacultyReportAccess,
+        getProfessorEvaluationCounts,
+        refreshFacultyReportAccess,
+        setDepartmentFacultyReportAccess,
         upsertFacultyPaperDraft,
         archiveFacultyPaper,
         sendFacultyPaper,

@@ -355,9 +355,12 @@ function facultyPdfBuildPaperDataFromRecord(array $paper): array
 
 function facultyPdfFormatIferNumericValue($value, bool $useThousands = false): string
 {
-    $numeric = is_numeric($value) ? (float)$value : 0.0;
+    if (!is_numeric($value)) {
+        return 'N/A';
+    }
+    $numeric = (float)$value;
     if (!is_finite($numeric)) {
-        $numeric = 0.0;
+        return 'N/A';
     }
 
     $rounded = round($numeric);
@@ -370,9 +373,12 @@ function facultyPdfFormatIferNumericValue($value, bool $useThousands = false): s
 
 function facultyPdfFormatIferRatingValue($value): string
 {
-    $numeric = is_numeric($value) ? (float)$value : 0.0;
+    if (!is_numeric($value)) {
+        return 'N/A';
+    }
+    $numeric = (float)$value;
     if (!is_finite($numeric)) {
-        $numeric = 0.0;
+        return 'N/A';
     }
 
     return number_format($numeric, 2, '.', '');
@@ -390,10 +396,10 @@ function facultyPdfNormalizeIferSetSummary($summary): array
         $studentCount = max(0, (int)($row['student_count'] ?? 0));
         $averageSetRating = is_numeric($row['average_set_rating'] ?? null)
             ? max(0.0, min(100.0, (float)$row['average_set_rating']))
-            : 0.0;
+            : null;
         $weightedSetScore = is_numeric($row['weighted_set_score'] ?? null)
             ? max(0.0, (float)$row['weighted_set_score'])
-            : ($studentCount * $averageSetRating);
+            : null;
 
         $courseCode = trim((string)($row['course_code'] ?? ''));
         $yearSection = trim((string)($row['year_section'] ?? ''));
@@ -402,8 +408,11 @@ function facultyPdfNormalizeIferSetSummary($summary): array
             'course_code' => $courseCode !== '' ? $courseCode : 'N/A',
             'year_section' => $yearSection !== '' ? $yearSection : 'N/A',
             'student_count' => $studentCount,
+            'completed_evaluation_count' => max(0, (int)($row['completed_evaluation_count'] ?? 0)),
             'average_set_rating' => $averageSetRating,
             'weighted_set_score' => $weightedSetScore,
+            'calculation_available' => $averageSetRating !== null,
+            'exclusion_reason' => trim((string)($row['exclusion_reason'] ?? '')),
         ];
     }
 
@@ -412,14 +421,49 @@ function facultyPdfNormalizeIferSetSummary($summary): array
     $totalStudents = max(0, (int)($source['total_students'] ?? 0));
     $totalWeightedScore = is_numeric($source['total_weighted_score'] ?? null)
         ? max(0.0, (float)$source['total_weighted_score'])
-        : 0.0;
+        : null;
 
     if (!array_key_exists('total_students', $source)) {
         $totalStudents = array_reduce($rows, fn($sum, $row) => $sum + (int)$row['student_count'], 0);
     }
     if (!array_key_exists('total_weighted_score', $source)) {
-        $totalWeightedScore = array_reduce($rows, fn($sum, $row) => $sum + (float)$row['weighted_set_score'], 0.0);
+        $scorableRows = array_values(array_filter($rows, fn($row) => is_numeric($row['weighted_set_score'])));
+        $totalWeightedScore = count($scorableRows) > 0
+            ? array_reduce($scorableRows, fn($sum, $row) => $sum + (float)$row['weighted_set_score'], 0.0)
+            : null;
     }
+
+    $derivedScorableStudents = array_reduce(
+        $rows,
+        fn($sum, $row) => $sum + (is_numeric($row['weighted_set_score']) ? (int)$row['student_count'] : 0),
+        0
+    );
+    $derivedExcludedStudents = array_reduce(
+        $rows,
+        fn($sum, $row) => $sum + (!is_numeric($row['weighted_set_score']) && (int)$row['student_count'] > 0 ? (int)$row['student_count'] : 0),
+        0
+    );
+    $derivedScorableClasses = count(array_filter($rows, fn($row) => is_numeric($row['weighted_set_score']) && (int)$row['student_count'] > 0));
+    $derivedExcludedClasses = count(array_filter($rows, fn($row) => !is_numeric($row['weighted_set_score']) && (int)$row['student_count'] > 0));
+    $scorableStudents = max(0, (int)($source['scorable_students'] ?? $derivedScorableStudents));
+    $excludedStudents = max(0, (int)($source['excluded_students'] ?? $derivedExcludedStudents));
+    $scorableClassCount = max(0, (int)($source['scorable_class_count'] ?? $derivedScorableClasses));
+    $excludedClassCount = max(0, (int)($source['excluded_class_count'] ?? $derivedExcludedClasses));
+    $partialResult = $scorableStudents > 0 && $excludedClassCount > 0;
+    $calculationNote = trim((string)($source['calculation_note'] ?? ''));
+    if ($calculationNote === '' && $partialResult) {
+        $calculationNote = sprintf(
+            'Available SET excludes %d %s with no valid responses (%d registered %s).',
+            $excludedClassCount,
+            $excludedClassCount === 1 ? 'class' : 'classes',
+            $excludedStudents,
+            $excludedStudents === 1 ? 'student' : 'students'
+        );
+    }
+    $overflowNote = $totalClasses > $displayLimit
+        ? sprintf('ONLY FIRST %d OF %d CLASSES ARE SHOWN. TOTAL INCLUDES ALL CLASSES.', $displayLimit, $totalClasses)
+        : '';
+    $displayNote = trim(implode(' ', array_filter([$overflowNote, $calculationNote])));
 
     return [
         'rows' => $rows,
@@ -427,9 +471,14 @@ function facultyPdfNormalizeIferSetSummary($summary): array
         'total_weighted_score' => $totalWeightedScore,
         'total_classes' => $totalClasses,
         'display_limit' => $displayLimit,
-        'overflow_note' => $totalClasses > $displayLimit
-            ? sprintf('ONLY FIRST %d OF %d CLASSES ARE SHOWN. TOTAL INCLUDES ALL CLASSES.', $displayLimit, $totalClasses)
-            : '',
+        'scorable_students' => $scorableStudents,
+        'excluded_students' => $excludedStudents,
+        'scorable_class_count' => $scorableClassCount,
+        'excluded_class_count' => $excludedClassCount,
+        'partial_result' => $partialResult,
+        'calculation_note' => $calculationNote,
+        'overflow_note' => $overflowNote,
+        'display_note' => $displayNote,
     ];
 }
 
@@ -438,7 +487,7 @@ function facultyPdfNormalizeIferSectionCSummary($summary): array
     $source = is_array($summary) ? $summary : [];
     $setRating = is_numeric($source['set_rating'] ?? null)
         ? max(0.0, min(100.0, (float)$source['set_rating']))
-        : 0.0;
+        : null;
     $sefRating = is_numeric($source['sef_rating'] ?? null)
         ? max(0.0, min(100.0, (float)$source['sef_rating']))
         : 0.0;
@@ -624,8 +673,8 @@ function facultyPdfGenerateIferBinary(array $paperData): string
 
             facultyPdfWriteOverlayFittedText($pdf, 92.8, 197.1, (string)$setSummary['total_students'], 30.5, 'C', 8, 6, 'B');
             facultyPdfWriteOverlayFittedText($pdf, 155.4, 197.1, facultyPdfFormatIferNumericValue($setSummary['total_weighted_score'], true), 28.8, 'C', 8, 6, 'B');
-            if ((string)$setSummary['overflow_note'] !== '') {
-                facultyPdfWriteOverlayFittedText($pdf, 24.0, 204.3, (string)$setSummary['overflow_note'], 160.0, 'L', 6, 5, 'B');
+            if ((string)$setSummary['display_note'] !== '') {
+                facultyPdfWriteOverlayMultilineText($pdf, 24.0, 203.2, 160.0, 10.0, (string)$setSummary['display_note'], 6, 3.2);
             }
 
             $sectionCSummary = facultyPdfNormalizeIferSectionCSummary($paperData['section_c_summary'] ?? []);

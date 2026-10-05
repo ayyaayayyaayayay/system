@@ -142,6 +142,25 @@ ON DUPLICATE KEY UPDATE
     `description` = VALUES(`description`),
     `sort_order` = VALUES(`sort_order`);
 
+-- Correct previously seeded wording before the idempotent question insert below.
+UPDATE `questions` q
+JOIN `questionnaires` qn ON qn.`id` = q.`questionnaire_id`
+JOIN `evaluation_types` et ON et.`id` = qn.`evaluation_type_id`
+SET q.`question_text` = CASE
+    WHEN et.`code` = 'student-professor' AND q.`sort_order` = 1 THEN 'Comes to class on time.'
+    WHEN et.`code` = 'student-professor' AND q.`sort_order` = 2 THEN 'Explains learning outcomes, expectations, grading systems, and various requirements of the subject/course.'
+    WHEN et.`code` = 'student-professor' AND q.`sort_order` = 7 THEN 'Demonstrates extensive and broad knowledge of the subject/course.'
+    WHEN et.`code` = 'student-professor' AND q.`sort_order` = 16 THEN 'Other comments and suggestions (Optional):'
+    WHEN et.`code` = 'supervisor-professor' AND q.`sort_order` = 4 THEN 'Provides appropriate learning activities that facilitate critical thinking and creativity of students.'
+    WHEN et.`code` = 'supervisor-professor' AND q.`sort_order` = 16 THEN 'Other comments and suggestions:'
+    ELSE q.`question_text`
+END
+WHERE qn.`semester_id` = @semester_id
+  AND (
+      (et.`code` = 'student-professor' AND q.`sort_order` IN (1, 2, 7, 16))
+      OR (et.`code` = 'supervisor-professor' AND q.`sort_order` IN (4, 16))
+  );
+
 INSERT INTO `questions` (
     `questionnaire_id`,
     `section_id`,
@@ -162,13 +181,13 @@ SELECT
     src.`is_required`,
     src.`sort_order`
 FROM (
-    SELECT 'student-professor' AS `evaluation_type_code`, 'A' AS `section_code`, 'rating' AS `question_type_code`, 'Come to class on time.' AS `question_text`, 1 AS `is_required`, 1 AS `sort_order`
-    UNION ALL SELECT 'student-professor', 'A', 'rating', 'Explains learning outcomes, expectations, grading systems, and various requirements of the subject/courses.', 1, 2
+    SELECT 'student-professor' AS `evaluation_type_code`, 'A' AS `section_code`, 'rating' AS `question_type_code`, 'Comes to class on time.' AS `question_text`, 1 AS `is_required`, 1 AS `sort_order`
+    UNION ALL SELECT 'student-professor', 'A', 'rating', 'Explains learning outcomes, expectations, grading systems, and various requirements of the subject/course.', 1, 2
     UNION ALL SELECT 'student-professor', 'A', 'rating', 'Maximizes the allocated time/learning hours effectively.', 1, 3
     UNION ALL SELECT 'student-professor', 'A', 'rating', 'Facilitates students to think critically and creatively by providing appropriate learning activities.', 1, 4
     UNION ALL SELECT 'student-professor', 'A', 'rating', 'Guides students to learn on their own, reflect on new ideas and experiences, and make decisions in accomplishing given tasks.', 1, 5
     UNION ALL SELECT 'student-professor', 'A', 'rating', 'Communicates constructive feedback to students for their academic growth.', 1, 6
-    UNION ALL SELECT 'student-professor', 'B', 'rating', 'Demonstrate extensive and broad knowledge of the subject/course.', 1, 7
+    UNION ALL SELECT 'student-professor', 'B', 'rating', 'Demonstrates extensive and broad knowledge of the subject/course.', 1, 7
     UNION ALL SELECT 'student-professor', 'B', 'rating', 'Simplifies complex ideas in the lesson for ease of understanding.', 1, 8
     UNION ALL SELECT 'student-professor', 'B', 'rating', 'Relates the subject matter to contemporary issues and developments in the discipline and/or daily life activities.', 1, 9
     UNION ALL SELECT 'student-professor', 'B', 'rating', 'Promotes active learning and student engagement by using appropriate teaching and learning resources including ICT tools and platforms.', 1, 10
@@ -177,12 +196,12 @@ FROM (
     UNION ALL SELECT 'student-professor', 'C', 'rating', 'Assists students with their learning challenges during consultation hours.', 1, 13
     UNION ALL SELECT 'student-professor', 'C', 'rating', 'Provides immediate feedback on student outputs and performance.', 1, 14
     UNION ALL SELECT 'student-professor', 'C', 'rating', 'Provides transparent and clear criteria in rating student''s performance.', 1, 15
-    UNION ALL SELECT 'student-professor', 'C', 'qualitative', 'Other comments and suggestions:', 0, 16
+    UNION ALL SELECT 'student-professor', 'C', 'qualitative', 'Other comments and suggestions (Optional):', 0, 16
 
     UNION ALL SELECT 'supervisor-professor', 'A', 'rating', 'Comes to class on time.', 1, 1
     UNION ALL SELECT 'supervisor-professor', 'A', 'rating', 'Submits updated syllabus, grade sheets, and other required reports on time.', 1, 2
     UNION ALL SELECT 'supervisor-professor', 'A', 'rating', 'Maximizes the allocated time/learning hours effectively.', 1, 3
-    UNION ALL SELECT 'supervisor-professor', 'A', 'rating', 'Provide appropriate learning activities that facilitate critical thinking and creativity of students.', 1, 4
+    UNION ALL SELECT 'supervisor-professor', 'A', 'rating', 'Provides appropriate learning activities that facilitate critical thinking and creativity of students.', 1, 4
     UNION ALL SELECT 'supervisor-professor', 'A', 'rating', 'Guides students to learn on their own, reflect on new ideas and experiences, and make decisions in accomplishing given tasks.', 1, 5
     UNION ALL SELECT 'supervisor-professor', 'A', 'rating', 'Communicates constructive feedback to students for their academic growth.', 1, 6
     UNION ALL SELECT 'supervisor-professor', 'B', 'rating', 'Demonstrates extensive and broad knowledge of the subject/course.', 1, 7
@@ -194,7 +213,7 @@ FROM (
     UNION ALL SELECT 'supervisor-professor', 'C', 'rating', 'Assists students with their learning challenges during consultation hours.', 1, 13
     UNION ALL SELECT 'supervisor-professor', 'C', 'rating', 'Provides immediate feedback on student outputs and performance.', 1, 14
     UNION ALL SELECT 'supervisor-professor', 'C', 'rating', 'Provides transparent and clear criteria in rating student''s performance.', 1, 15
-    UNION ALL SELECT 'supervisor-professor', 'C', 'qualitative', 'Other comments and suggestions (Optional):', 0, 16
+    UNION ALL SELECT 'supervisor-professor', 'C', 'qualitative', 'Other comments and suggestions:', 0, 16
 
     UNION ALL SELECT 'professor-professor', 'A', 'rating', 'Maintains a courteous and respectful manner when interacting with colleagues.', 1, 1
     UNION ALL SELECT 'professor-professor', 'A', 'rating', 'Demonstrates openness and approachability in professional interactions.', 1, 2
@@ -222,7 +241,7 @@ JOIN `question_types` qt
     ON qt.`code` = src.`question_type_code`
 LEFT JOIN `questions` existing
     ON existing.`questionnaire_id` = qn.`id`
-   AND existing.`question_text` = src.`question_text`
+   AND existing.`sort_order` = src.`sort_order`
 WHERE @semester_id IS NOT NULL
   AND existing.`id` IS NULL;
 

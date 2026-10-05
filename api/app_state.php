@@ -5,6 +5,7 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/state_helpers.php';
 require_once __DIR__ . '/schema_migrations.php';
 require_once __DIR__ . '/faculty_pdf_helper.php';
+require_once __DIR__ . '/faculty_report_helper.php';
 require_once __DIR__ . '/mailer_helper.php';
 
 function normalizeActorRoleToken($role) {
@@ -87,20 +88,6 @@ function getRequiredPayloadString(array $body, $key, $label = null) {
     return $value;
 }
 
-function parseEvalDateYmd($value) {
-    $raw = trim((string) $value);
-    if ($raw === '') {
-        return null;
-    }
-
-    $timezone = new DateTimeZone('Asia/Manila');
-    $date = DateTimeImmutable::createFromFormat('!Y-m-d', $raw, $timezone);
-    if (!$date || $date->format('Y-m-d') !== $raw) {
-        return null;
-    }
-    return $date;
-}
-
 function sendAppStateSchemaMigrationErrorIfNeeded(Throwable $error) {
     if (function_exists('isNaapSchemaMigrationRequiredException') && isNaapSchemaMigrationRequiredException($error)) {
         sendNaapSchemaMigrationRequiredJson($error);
@@ -119,14 +106,10 @@ function isProfessorFacultyPaperLockedByEvaluationPeriod(PDO $pdo) {
         ? $periods['student-professor']
         : ['start' => '', 'end' => ''];
 
-    $startDate = parseEvalDateYmd($studentPeriod['start'] ?? '');
-    $endDate = parseEvalDateYmd($studentPeriod['end'] ?? '');
-    if (!$startDate || !$endDate) {
-        return true;
-    }
-
-    $today = new DateTimeImmutable('today', new DateTimeZone('Asia/Manila'));
-    return $today <= $endDate;
+    return isProfessorFacultyPaperLockedForEvaluationWindow(
+        $studentPeriod['start'] ?? '',
+        $studentPeriod['end'] ?? ''
+    );
 }
 
 function ensureProfessorFacultyPaperUnlocked(PDO $pdo) {
@@ -1110,75 +1093,6 @@ function requireAuthenticatedAppRole(PDO $pdo, array $allowedRoles, $includeSens
     return $user;
 }
 
-function normalizeBiasDetectionText($value) {
-    $text = trim((string) $value);
-    if ($text === '') {
-        return '';
-    }
-    $text = preg_replace('/\s+/', ' ', $text);
-    return trim((string) $text);
-}
-
-function normalizeBiasLabel($value) {
-    $raw = strtolower(trim((string) $value));
-    if ($raw === 'constructive') return 'Constructive';
-    if ($raw === 'biased') return 'Biased';
-    return 'Neutral';
-}
-
-function getBiasLabelSeverity($value) {
-    $label = normalizeBiasLabel($value);
-    if ($label === 'Biased') return 3;
-    if ($label === 'Neutral') return 2;
-    return 1;
-}
-
-function normalizeBiasDetectionLexiconText($value) {
-    $text = strtolower(normalizeBiasDetectionText($value));
-    if ($text === '') {
-        return '';
-    }
-    $text = preg_replace('/[^a-z0-9]+/', ' ', $text);
-    $text = preg_replace('/\s+/', ' ', (string) $text);
-    return trim((string) $text);
-}
-
-function countBiasPhraseHits($haystack, array $phrases) {
-    $count = 0;
-    $text = trim((string) $haystack);
-    if ($text === '') {
-        return 0;
-    }
-
-    foreach ($phrases as $phrase) {
-        $needle = trim((string) $phrase);
-        if ($needle === '') {
-            continue;
-        }
-        if (strpos($text, $needle) !== false) {
-            $count += 1;
-        }
-    }
-
-    return $count;
-}
-
-function countBiasPatternHits($haystack, array $patterns) {
-    $count = 0;
-    $text = trim((string) $haystack);
-    if ($text === '') {
-        return 0;
-    }
-
-    foreach ($patterns as $pattern) {
-        if (preg_match($pattern, $text) === 1) {
-            $count += 1;
-        }
-    }
-
-    return $count;
-}
-
 function mergeBiasClassifications(array $geminiClassification, array $ruleClassification) {
     $geminiLabel = normalizeBiasLabel($geminiClassification['label'] ?? '');
     $geminiReason = normalizeBiasDetectionText($geminiClassification['reason'] ?? '');
@@ -1405,6 +1319,7 @@ function buildOpenAiExplainabilitySchema(): array
                 ],
             ],
             'reasoning' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'ratingReview' => ['type' => 'string'],
             'judgment' => [
                 'type' => 'object',
                 'properties' => [
@@ -1416,7 +1331,7 @@ function buildOpenAiExplainabilitySchema(): array
                 'additionalProperties' => false,
             ],
         ],
-        'required' => ['keywords', 'clusters', 'reasoning', 'judgment'],
+        'required' => ['keywords', 'clusters', 'reasoning', 'ratingReview', 'judgment'],
         'additionalProperties' => false,
     ];
 }
@@ -1733,191 +1648,6 @@ function classifyBiasCommentsWithGeminiBatch(array $batch, $apiKey, $model, $tim
         'status' => (int) ($request['status'] ?? 0),
         'error' => '',
         'model' => (string) ($request['model'] ?? ''),
-    ];
-}
-
-function classifyBiasCommentByRules($text) {
-    $value = normalizeBiasDetectionText($text);
-    if ($value === '') {
-        return [
-            'label' => 'Neutral',
-            'reason' => 'Empty or missing feedback.',
-            'source' => 'rule',
-        ];
-    }
-
-    $lower = strtolower($value);
-    $lexiconText = normalizeBiasDetectionLexiconText($value);
-    $words = preg_split('/\s+/', $lower);
-    $wordCount = is_array($words) ? count(array_filter($words, function ($w) { return trim((string) $w) !== ''; })) : 0;
-
-    $hostilePhrases = [
-        'sucks', 'hate', 'worst', 'stupid', 'dumb', 'useless', 'bobo', 'idiot', 'trash', 'garbage', 'awful',
-        'terrible', 'pangit', 'bwisit', 'gago', 'walang kwenta', 'lazy', 'waste of time', 'no effort',
-        'zero effort', 'bobo prof', 'i hate', 'we hate', 'doesn t teach anything', 'does not teach anything',
-        'doesn t teach at all', 'does not teach at all', 'never teaches', 'barely teaches',
-    ];
-    $hostilePatterns = [
-        '/\b(this|that|the)\s+(professor|teacher|instructor)\s+(sucks|is\s+(useless|lazy|terrible|awful|the worst))\b/',
-        '/\b(doesn t|does not)\s+teach\s+(anything|at all)\b/',
-        '/\b(never|barely)\s+teaches?\b/',
-        '/\b(waste of time|no effort|zero effort)\b/',
-        '/\b(useless|lazy|terrible|awful|worst|trash|garbage)\b/',
-    ];
-    $blanketAttackPhrases = [
-        'doesn t really teach anything', 'does not really teach anything',
-        'without proper guidance', 'with no proper guidance',
-        'left to report the lessons', 'left to report lessons',
-        'left to report on our own', 'report the lessons on our own',
-        'on our own', 'not learning what we re supposed to', 'not learning what we are supposed to',
-        'we re not learning', 'we are not learning',
-    ];
-    $blanketAttackPatterns = [
-        '/\b(doesn t|does not)\s+(really\s+|even\s+|just\s+)?teach(es)?\s+(anything|at all)\b/',
-        '/\b(left|forced)\s+to\s+(report|teach|learn)\b/',
-        '/\b(without|with no)\s+(proper\s+)?guidance\b/',
-        '/\bon\s+our\s+own\b/',
-        '/\b(we re|we are|students are)\s+not\s+learning\b/',
-        '/\bnot\s+learning\s+what\s+we\s+(re|are)\s+supposed\s+to\b/',
-    ];
-    $accusatoryPhrases = [
-        'relies too much on chatgpt', 'rely too much on chatgpt',
-        'uses chatgpt instead of explaining', 'using chatgpt instead of explaining',
-        'instead of explaining the lessons', 'instead of explaining lessons',
-        'students are the ones reporting', 'students are the one reporting',
-        'students are the ones teaching', 'students are the one teaching',
-        'without clear instruction', 'without clear instructions',
-        'no clear instruction', 'no clear instructions',
-        'basically teaching ourselves', 'basically teach ourselves',
-        'teaching ourselves', 'teach ourselves',
-        'we re basically teaching ourselves', 'we are basically teaching ourselves',
-        'we re teaching ourselves', 'we are teaching ourselves',
-        'most of the time students are the ones reporting',
-    ];
-    $accusatoryPatterns = [
-        '/\b(rel(y|ies)\s+too\s+much\s+on\s+chatgpt)\b/',
-        '/\b(chatgpt)\s+instead\s+of\s+(explaining|teaching)\b/',
-        '/\bstudents?\s+are\s+the\s+ones?\s+(reporting|teaching)\b/',
-        '/\bwithout\s+clear\s+instruction(s)?\b/',
-        '/\bno\s+clear\s+instruction(s)?\b/',
-        '/\b(basically\s+)?teach(ing)?\s+ourselves\b/',
-    ];
-    $negativeEmotionPhrases = [
-        'frustrating', 'frustrated', 'disappointing', 'annoying', 'fed up', 'tired of',
-    ];
-    $teachingIssuePhrases = [
-        'teach', 'teaches', 'teaching', 'lesson', 'lessons', 'class', 'classes', 'grading', 'grade', 'grades',
-        'attendance', 'feedback', 'examples', 'example', 'explain', 'explains', 'explanation', 'report',
-        'reports', 'reporting', 'slides', 'chatgpt', 'activity', 'activities', 'rubric', 'instructions',
-        'discussion', 'discussions', 'late', 'prepared', 'unprepared',
-    ];
-    $constructivePhrases = [
-        'should', 'should be', 'should provide', 'should explain',
-        'need to', 'needs to', 'could', 'please', 'would help',
-        'more examples', 'more guidance', 'clearer instruction', 'clearer instructions',
-        'better pacing', 'provide guidance', 'provide feedback', 'clarify',
-        'improve', 'improvement', 'be more organized', 'be more prepared',
-        'less workload', 'more structured', 'more interactive',
-    ];
-    $neutralKeywords = ['ok', 'okay', 'fine', 'good', 'nice', 'average', 'pwede'];
-
-    $hostileScore = (countBiasPhraseHits($lexiconText, $hostilePhrases) * 2)
-        + (countBiasPatternHits($lexiconText, $hostilePatterns) * 2);
-    $blanketAttackScore = countBiasPhraseHits($lexiconText, $blanketAttackPhrases)
-        + countBiasPatternHits($lexiconText, $blanketAttackPatterns);
-    $accusatoryScore = countBiasPhraseHits($lexiconText, $accusatoryPhrases)
-        + countBiasPatternHits($lexiconText, $accusatoryPatterns);
-    $negativeEmotionScore = countBiasPhraseHits($lexiconText, $negativeEmotionPhrases);
-    $hasTeachingSignal = countBiasPhraseHits($lexiconText, $teachingIssuePhrases) > 0;
-    $constructiveScore = countBiasPhraseHits($lexiconText, $constructivePhrases);
-
-    if ($hostileScore >= 2) {
-        return [
-            'label' => 'Biased',
-            'reason' => 'Contains insulting, hostile, or blanket attack language.',
-            'source' => 'rule',
-        ];
-    }
-
-    if ($blanketAttackScore >= 2 && $constructiveScore === 0) {
-        return [
-            'label' => 'Biased',
-            'reason' => 'Contains blanket or absolute accusations rather than improvement-focused feedback.',
-            'source' => 'rule',
-        ];
-    }
-
-    if (
-        (($accusatoryScore >= 2) || ($accusatoryScore >= 1 && $negativeEmotionScore >= 1))
-        && $constructiveScore === 0
-    ) {
-        return [
-            'label' => 'Biased',
-            'reason' => 'Contains strong accusatory wording without a concrete improvement suggestion.',
-            'source' => 'rule',
-        ];
-    }
-
-    if (
-        $constructiveScore > 0
-        && $wordCount >= 4
-        && $hostileScore === 0
-        && $blanketAttackScore === 0
-        && $accusatoryScore === 0
-        && $negativeEmotionScore === 0
-    ) {
-        return [
-            'label' => 'Constructive',
-            'reason' => 'Contains respectful feedback with a concrete improvement suggestion.',
-            'source' => 'rule',
-        ];
-    }
-
-    if (
-        $constructiveScore > 0
-        && $wordCount >= 4
-        && $hostileScore === 0
-        && $blanketAttackScore === 0
-        && $accusatoryScore <= 1
-        && $negativeEmotionScore === 0
-    ) {
-        return [
-            'label' => 'Constructive',
-            'reason' => 'Includes an improvement suggestion and avoids strong attack language.',
-            'source' => 'rule',
-        ];
-    }
-
-    foreach ($neutralKeywords as $keyword) {
-        if ($lower === $keyword) {
-            return [
-                'label' => 'Neutral',
-                'reason' => 'Short non-actionable feedback without hostile tone.',
-                'source' => 'rule',
-            ];
-        }
-    }
-
-    if ($wordCount <= 3) {
-        return [
-            'label' => 'Neutral',
-            'reason' => 'Brief feedback without clear constructive or biased markers.',
-            'source' => 'rule',
-        ];
-    }
-
-    if ($hasTeachingSignal && ($blanketAttackScore > 0 || $accusatoryScore > 0 || $negativeEmotionScore > 0)) {
-        return [
-            'label' => 'Biased',
-            'reason' => 'Teaching-related complaint is phrased as a one-sided accusation rather than a suggestion.',
-            'source' => 'rule',
-        ];
-    }
-
-    return [
-        'label' => 'Neutral',
-        'reason' => 'No strong hostile markers detected, but feedback remains vague.',
-        'source' => 'rule',
     ];
 }
 
@@ -2573,13 +2303,17 @@ function normalizeExplainabilityPayload(array $payload) {
             $averagesBySource[$key] = clampExplainabilityRange($raw, 0, 5);
         }
     }
-    if (!is_numeric($combinedAverage)) {
-        $values = array_values(array_filter($averagesBySource, function ($value) {
-            return is_numeric($value);
-        }));
-        if (count($values) > 0) {
-            $combinedAverage = array_sum($values) / count($values);
-        }
+    $sourceWeights = ['student' => 0.50, 'professor' => 0.25, 'supervisor' => 0.25];
+    $weightedRatingTotal = 0.0;
+    $availableRatingWeight = 0.0;
+    foreach ($sourceWeights as $sourceKey => $weight) {
+        $value = $averagesBySource[$sourceKey] ?? null;
+        if (!is_numeric($value) || (float) $value <= 0) continue;
+        $weightedRatingTotal += (float) $value * $weight;
+        $availableRatingWeight += $weight;
+    }
+    if ($availableRatingWeight > 0) {
+        $combinedAverage = $weightedRatingTotal / $availableRatingWeight;
     }
 
     $rawCountsBySource = is_array($metricsInput['countsBySource'] ?? null) ? $metricsInput['countsBySource'] : [];
@@ -2874,6 +2608,7 @@ function buildExplainabilityClusterRows(array $comments, $limit = 5) {
 function buildExplainabilityStats(array $payload) {
     $metrics = is_array($payload['metrics'] ?? null) ? $payload['metrics'] : [];
     $counts = is_array($metrics['countsBySource'] ?? null) ? $metrics['countsBySource'] : [];
+    $averages = is_array($metrics['averagesBySource'] ?? null) ? $metrics['averagesBySource'] : [];
 
     return [
         'totalComments' => count(is_array($payload['comments'] ?? null) ? $payload['comments'] : []),
@@ -2882,7 +2617,13 @@ function buildExplainabilityStats(array $payload) {
             'professor' => max(0, (int) ($counts['professor'] ?? 0)),
             'supervisor' => max(0, (int) ($counts['supervisor'] ?? 0)),
         ],
+        'overallRating' => is_numeric($metrics['overallRating'] ?? null) ? round((float) $metrics['overallRating'], 2) : null,
         'combinedAverage' => is_numeric($metrics['combinedAverage'] ?? null) ? round((float) $metrics['combinedAverage'], 2) : null,
+        'averagesBySource' => [
+            'student' => is_numeric($averages['student'] ?? null) ? round((float) $averages['student'], 2) : null,
+            'professor' => is_numeric($averages['professor'] ?? null) ? round((float) $averages['professor'], 2) : null,
+            'supervisor' => is_numeric($averages['supervisor'] ?? null) ? round((float) $averages['supervisor'], 2) : null,
+        ],
         'responseRate' => is_numeric($metrics['responseRate'] ?? null) ? round((float) $metrics['responseRate'], 2) : null,
         'totalEvaluations' => max(0, (int) ($metrics['totalEvaluations'] ?? 0)),
     ];
@@ -2892,7 +2633,10 @@ function buildExplainabilityJudgmentByRules(array $payload, array $keywords) {
     $metrics = is_array($payload['metrics'] ?? null) ? $payload['metrics'] : [];
     $combinedAverage = is_numeric($metrics['combinedAverage'] ?? null) ? (float) $metrics['combinedAverage'] : null;
     $responseRate = is_numeric($metrics['responseRate'] ?? null) ? (float) $metrics['responseRate'] : null;
+    $totalEvaluations = max(0, (int) ($metrics['totalEvaluations'] ?? 0));
     $totalComments = count(is_array($payload['comments'] ?? null) ? $payload['comments'] : []);
+    $hasRatings = is_numeric($combinedAverage) && $combinedAverage > 0;
+    $hasComments = $totalComments > 0;
 
     $positiveWeight = 0;
     $negativeWeight = 0;
@@ -2909,21 +2653,27 @@ function buildExplainabilityJudgmentByRules(array $payload, array $keywords) {
         }
     }
 
-    $toneTotal = max(1, $positiveWeight + $negativeWeight + $neutralWeight);
-    $toneBalance = (($positiveWeight * 1.0) - ($negativeWeight * 1.2)) / $toneTotal;
+    $toneTotal = $positiveWeight + $negativeWeight + $neutralWeight;
+    $toneBalance = $toneTotal > 0
+        ? (($positiveWeight * 1.0) - ($negativeWeight * 1.2)) / $toneTotal
+        : 0.0;
+    $ratingScore = $hasRatings
+        ? (float) clampExplainabilityRange($combinedAverage * 20.0, 0, 100)
+        : null;
+    $commentScore = $hasComments
+        ? (float) clampExplainabilityRange(50.0 + (clampExplainabilityRange($toneBalance, -1, 1) * 50.0), 0, 100)
+        : null;
+    $disagreement = is_numeric($ratingScore)
+        && is_numeric($commentScore)
+        && abs($ratingScore - $commentScore) >= 20.0;
 
     $score = 50.0;
-    if (is_numeric($combinedAverage)) {
-        $score += ((float) $combinedAverage - 3.0) * 18.0;
-    }
-    $score += clampExplainabilityRange($toneBalance * 24.0, -20, 20);
-    if (is_numeric($responseRate)) {
-        $score += (($responseRate - 50.0) / 50.0) * 10.0;
-    }
-    if ($totalComments <= 3) {
-        $score -= 8.0;
-    } elseif ($totalComments >= 20) {
-        $score += 4.0;
+    if ($hasRatings && $hasComments) {
+        $score = ($ratingScore + $commentScore) / 2.0;
+    } elseif ($hasRatings) {
+        $score = $ratingScore;
+    } elseif ($hasComments) {
+        $score = $commentScore;
     }
 
     $finalScore = (int) round(clampExplainabilityRange($score, 0, 100));
@@ -2936,29 +2686,36 @@ function buildExplainabilityJudgmentByRules(array $payload, array $keywords) {
         $label = 'Critical Concern';
     }
 
-    $confidence = 45.0 + min(35.0, $totalComments * 2.0);
+    $confidence = 0.0;
+    if ($hasRatings && $hasComments) {
+        $confidence = 55.0 + min(15.0, $totalEvaluations * 1.5) + min(15.0, $totalComments * 1.5);
+    } elseif ($hasRatings) {
+        $confidence = 45.0 + min(20.0, $totalEvaluations * 2.0);
+    } elseif ($hasComments) {
+        $confidence = 40.0 + min(25.0, $totalComments * 2.0);
+    }
     if (is_numeric($responseRate)) {
-        $confidence += min(10.0, $responseRate / 10.0);
+        $confidence += min(10.0, max(0.0, $responseRate) / 10.0);
     }
-    if (is_numeric($combinedAverage)) {
-        $confidence += 10.0;
-    }
-    if ($totalComments < 3) {
-        $confidence -= 10.0;
-    }
-    $confidence = (int) round(clampExplainabilityRange($confidence, 25, 98));
+    $confidenceCap = $hasRatings && $hasComments ? 95 : ($hasRatings ? 75 : ($hasComments ? 70 : 0));
+    $confidence = (int) round(clampExplainabilityRange($confidence, 0, $confidenceCap));
 
-    $rationale = 'Mixed sentiment and performance indicators suggest improvements are needed.';
+    $rationale = 'Available evidence indicates that performance needs improvement.';
     if ($label === 'Excellent') {
-        $rationale = 'Consistent positive feedback and strong rating indicators across available sources.';
+        $rationale = 'The balanced rating and feedback evidence indicates excellent performance.';
     } elseif ($label === 'Good') {
-        $rationale = 'Feedback is generally positive with limited critical concerns.';
+        $rationale = 'The balanced rating and feedback evidence indicates good performance.';
     } elseif ($label === 'Critical Concern') {
-        $rationale = 'Negative patterns and lower performance indicators suggest urgent review.';
+        $rationale = 'The available rating and feedback evidence indicates a critical concern.';
     }
-
-    if (!is_numeric($combinedAverage)) {
-        $rationale .= ' Overall rating context is limited.';
+    if ($disagreement) {
+        $rationale .= ' Numeric ratings and written feedback differ significantly and should be reviewed together.';
+    }
+    if ($hasRatings && !$hasComments) {
+        $rationale .= ' This is a quantitative-only judgment because no written comments were available.';
+    }
+    if (!$hasRatings && $hasComments) {
+        $rationale .= ' Numeric rating context is unavailable, so this judgment relies on written feedback.';
     }
 
     return [
@@ -2966,7 +2723,48 @@ function buildExplainabilityJudgmentByRules(array $payload, array $keywords) {
         'rationale' => $rationale,
         'confidence' => $confidence,
         'score' => $finalScore,
+        'ratingScore' => $ratingScore,
+        'commentScore' => $commentScore,
+        'disagreement' => $disagreement,
+        'hasRatings' => $hasRatings,
+        'hasComments' => $hasComments,
     ];
+}
+
+function buildExplainabilityRatingReviewByRules(array $payload, array $judgment): string
+{
+    $metrics = is_array($payload['metrics'] ?? null) ? $payload['metrics'] : [];
+    $combinedAverage = is_numeric($metrics['combinedAverage'] ?? null) && (float) $metrics['combinedAverage'] > 0
+        ? (float) $metrics['combinedAverage']
+        : null;
+    $averages = is_array($metrics['averagesBySource'] ?? null) ? $metrics['averagesBySource'] : [];
+
+    if (!is_numeric($combinedAverage)) {
+        return 'No valid numeric rating was available; the judgment is based on written feedback only.';
+    }
+
+    $sourceLabels = ['student' => 'Student', 'professor' => 'Peer', 'supervisor' => 'Supervisor'];
+    $sourceParts = [];
+    foreach ($sourceLabels as $key => $label) {
+        $value = $averages[$key] ?? null;
+        if (is_numeric($value) && (float) $value > 0) {
+            $sourceParts[] = sprintf('%s %.2f/5', $label, (float) $value);
+        }
+    }
+
+    $review = sprintf('The weighted combined rating is %.2f/5', $combinedAverage);
+    if (count($sourceParts) > 0) {
+        $review .= ' (' . implode(', ', $sourceParts) . ')';
+    }
+    $review .= '. Student ratings carry 50% weight, while peer and supervisor ratings carry 25% each; available weights are renormalized when a source is missing.';
+    if (!empty($judgment['disagreement'])) {
+        $review .= ' The numeric rating and comment sentiment differ significantly, so both signals should be reviewed before taking action.';
+    } elseif (!empty($judgment['hasComments'])) {
+        $review .= ' The rating and available comment sentiment are reasonably aligned.';
+    } else {
+        $review .= ' No written comments were available, so this is a quantitative-only review with reduced confidence.';
+    }
+    return $review;
 }
 
 function buildExplainabilityReasoningByRules(array $payload, array $keywords, array $clusters, array $judgment) {
@@ -3020,13 +2818,19 @@ function buildExplainabilityReasoningByRules(array $payload, array $keywords, ar
         );
     }
 
-    $reasoning[] = sprintf(
+    if (!empty($judgment['disagreement'])) {
+        $reasoning[] = 'Numeric ratings and written feedback differ by at least 20 points on the normalized scale, so the final judgment balances both signals.';
+    }
+
+    $finalReasoning = sprintf(
         'Final judgment: %s (confidence %d%%).',
         normalizeExplainabilityJudgmentLabel($judgment['label'] ?? ''),
         (int) clampExplainabilityRange($judgment['confidence'] ?? 0, 0, 100)
     );
 
-    return array_slice($reasoning, 0, 5);
+    $reasoning = array_slice($reasoning, 0, 4);
+    $reasoning[] = $finalReasoning;
+    return $reasoning;
 }
 
 function buildExplainabilityInsightByRules(array $payload) {
@@ -3037,12 +2841,13 @@ function buildExplainabilityInsightByRules(array $payload) {
     $reasoning = buildExplainabilityReasoningByRules($payload, $keywords, $clusters, $judgment);
 
     return [
+        'ratingReview' => sanitizeExplainabilityText(buildExplainabilityRatingReviewByRules($payload, $judgment), 700),
         'keywords' => $keywords,
         'clusters' => $clusters,
         'reasoning' => $reasoning,
         'judgment' => [
             'label' => normalizeExplainabilityJudgmentLabel($judgment['label'] ?? ''),
-            'rationale' => sanitizeExplainabilityText($judgment['rationale'] ?? '', 320),
+            'rationale' => sanitizeExplainabilityText($judgment['rationale'] ?? '', 900),
             'confidence' => (int) clampExplainabilityRange($judgment['confidence'] ?? 0, 0, 100),
         ],
         'stats' => buildExplainabilityStats($payload),
@@ -3125,7 +2930,7 @@ function normalizeExplainabilityReasoningRows($rows) {
 function normalizeExplainabilityJudgmentRow($row) {
     $item = is_array($row) ? $row : [];
     $label = normalizeExplainabilityJudgmentLabel($item['label'] ?? '');
-    $rationale = sanitizeExplainabilityText($item['rationale'] ?? '', 320);
+    $rationale = sanitizeExplainabilityText($item['rationale'] ?? '', 900);
     if ($rationale === '') {
         $rationale = 'Judgment generated from combined rating and comment patterns.';
     }
@@ -3148,11 +2953,16 @@ function buildGeminiEvaluationExplainabilityPrompt(array $payload) {
     $input = buildExplainabilityGeminiInput($payload);
 
     return "You are an AI explainability assistant for faculty evaluation analytics.\n"
-        . "Given professor evaluation comments and numeric context, produce explainable insights.\n"
+        . "Given professor numeric ratings and evaluation comments, produce explainable insights.\n"
         . "Requirements:\n"
-        . "- Use all provided comment sources together.\n"
-        . "- Output detected keywords with tone.\n"
-        . "- Group comments into thematic clusters.\n"
+        . "- Treat numeric ratings and written-comment sentiment as equally important evidence when both are available.\n"
+        . "- Normalize each evidence type to a 0-100 scale and give each 50% influence on the judgment when both exist; a difference of 20 points or more is significant disagreement.\n"
+        . "- Use response rate, evaluation count, and comment count to calibrate confidence only, not to raise or lower the performance judgment.\n"
+        . "- Review the weighted combined rating and each available source average; Student has 50% weight, Peer 25%, and Supervisor 25%, renormalized for missing sources.\n"
+        . "- Explicitly state whether the rating evidence and comment sentiment agree or differ significantly.\n"
+        . "- When ratings exist without comments, provide a quantitative-only review, return empty keywords/clusters, and lower confidence.\n"
+        . "- When comments exist without ratings, clearly state that quantitative context is unavailable.\n"
+        . "- Use all provided comment sources together, output detected keywords with tone, and group comments into thematic clusters.\n"
         . "- Provide concise reasoning points.\n"
         . "- Assign one judgment label: Excellent, Good, Needs Improvement, or Critical Concern.\n"
         . "Return strict JSON only with this exact shape:\n"
@@ -3160,9 +2970,10 @@ function buildGeminiEvaluationExplainabilityPrompt(array $payload) {
         . "\"keywords\":[{\"term\":\"string\",\"count\":1,\"tone\":\"positive|neutral|negative\"}],"
         . "\"clusters\":[{\"theme\":\"string\",\"count\":1,\"sources\":[\"Student to Professor\"],\"sampleComments\":[\"string\"]}],"
         . "\"reasoning\":[\"string\"],"
+        . "\"ratingReview\":\"concise factual review of the numeric ratings and their agreement with comments\","
         . "\"judgment\":{\"label\":\"Excellent|Good|Needs Improvement|Critical Concern\",\"rationale\":\"string\",\"confidence\":75}"
         . "}\n"
-        . "Keep rationale factual and avoid markdown.\n"
+        . "Keep the judgment rationale factual, use no more than three complete sentences or 700 characters, never end mid-sentence, and avoid markdown.\n"
         . "Input:\n"
         . json_encode($input, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
 }
@@ -3192,13 +3003,15 @@ function classifyEvaluationExplainabilityWithGemini(array $payload, $apiKey, $mo
     $keywords = normalizeExplainabilityKeywordRows($parsed['keywords'] ?? []);
     $clusters = normalizeExplainabilityClusterRows($parsed['clusters'] ?? []);
     $reasoning = normalizeExplainabilityReasoningRows($parsed['reasoning'] ?? []);
+    $ratingReview = sanitizeExplainabilityText($parsed['ratingReview'] ?? '', 700);
     $judgment = normalizeExplainabilityJudgmentRow($parsed['judgment'] ?? []);
 
-    if (count($keywords) === 0 && count($clusters) === 0 && count($reasoning) === 0) {
+    if (count($keywords) === 0 && count($clusters) === 0 && count($reasoning) === 0 && $ratingReview === '') {
         return null;
     }
 
     return [
+        'ratingReview' => $ratingReview,
         'keywords' => $keywords,
         'clusters' => $clusters,
         'reasoning' => $reasoning,
@@ -3213,12 +3026,29 @@ function mergeExplainabilityInsightWithFallback(array $geminiInsight, array $rul
     $geminiKeywords = is_array($geminiInsight['keywords'] ?? null) ? $geminiInsight['keywords'] : [];
     $geminiClusters = is_array($geminiInsight['clusters'] ?? null) ? $geminiInsight['clusters'] : [];
     $geminiReasoning = is_array($geminiInsight['reasoning'] ?? null) ? $geminiInsight['reasoning'] : [];
+    $geminiRatingReview = sanitizeExplainabilityText($geminiInsight['ratingReview'] ?? '', 700);
     $geminiJudgment = is_array($geminiInsight['judgment'] ?? null) ? $geminiInsight['judgment'] : [];
 
     $ruleKeywords = is_array($ruleInsight['keywords'] ?? null) ? $ruleInsight['keywords'] : [];
     $ruleClusters = is_array($ruleInsight['clusters'] ?? null) ? $ruleInsight['clusters'] : [];
     $ruleReasoning = is_array($ruleInsight['reasoning'] ?? null) ? $ruleInsight['reasoning'] : [];
+    $ruleRatingReview = sanitizeExplainabilityText($ruleInsight['ratingReview'] ?? '', 700);
     $ruleJudgment = is_array($ruleInsight['judgment'] ?? null) ? $ruleInsight['judgment'] : [];
+
+    $merged['ratingReview'] = $geminiRatingReview !== '' ? $geminiRatingReview : $ruleRatingReview;
+    $usedRule = $usedRule || ($geminiRatingReview === '' && $ruleRatingReview !== '');
+    $ruleReviewLower = strtolower($ruleRatingReview);
+    $mergedReviewLower = strtolower($merged['ratingReview']);
+    if (strpos($ruleReviewLower, 'differ significantly') !== false
+        && strpos($mergedReviewLower, 'differ significantly') === false) {
+        $merged['ratingReview'] .= ' The numeric rating and comment sentiment differ significantly, so both signals should be reviewed before taking action.';
+        $usedRule = true;
+    }
+    if (strpos($ruleReviewLower, 'quantitative-only') !== false
+        && strpos($mergedReviewLower, 'quantitative-only') === false) {
+        $merged['ratingReview'] .= ' No written comments were available, so this is a quantitative-only review with reduced confidence.';
+        $usedRule = true;
+    }
 
     $merged['keywords'] = count($geminiKeywords) > 0 ? $geminiKeywords : $ruleKeywords;
     $usedRule = $usedRule || (count($geminiKeywords) === 0 && count($ruleKeywords) > 0);
@@ -3230,13 +3060,21 @@ function mergeExplainabilityInsightWithFallback(array $geminiInsight, array $rul
     $usedRule = $usedRule || (count($geminiReasoning) === 0 && count($ruleReasoning) > 0);
 
     $judgmentLabel = normalizeExplainabilityJudgmentLabel($geminiJudgment['label'] ?? '');
-    $judgmentRationale = sanitizeExplainabilityText($geminiJudgment['rationale'] ?? '', 320);
+    $ruleJudgmentLabel = normalizeExplainabilityJudgmentLabel($ruleJudgment['label'] ?? '');
+    $judgmentRationale = sanitizeExplainabilityText($geminiJudgment['rationale'] ?? '', 900);
     $judgmentConfidence = (int) clampExplainabilityRange($geminiJudgment['confidence'] ?? -1, 0, 100);
     if ($judgmentRationale === '' || $judgmentConfidence <= 0) {
         $usedRule = true;
         $merged['judgment'] = [
             'label' => normalizeExplainabilityJudgmentLabel($ruleJudgment['label'] ?? ''),
-            'rationale' => sanitizeExplainabilityText($ruleJudgment['rationale'] ?? '', 320),
+            'rationale' => sanitizeExplainabilityText($ruleJudgment['rationale'] ?? '', 900),
+            'confidence' => (int) clampExplainabilityRange($ruleJudgment['confidence'] ?? 0, 0, 100),
+        ];
+    } elseif ($judgmentLabel !== $ruleJudgmentLabel) {
+        $usedRule = true;
+        $merged['judgment'] = [
+            'label' => $ruleJudgmentLabel,
+            'rationale' => sanitizeExplainabilityText($ruleJudgment['rationale'] ?? '', 900),
             'confidence' => (int) clampExplainabilityRange($ruleJudgment['confidence'] ?? 0, 0, 100),
         ];
     } else {
@@ -3252,6 +3090,18 @@ function mergeExplainabilityInsightWithFallback(array $geminiInsight, array $rul
         'sourceCounts' => ['student' => 0, 'professor' => 0, 'supervisor' => 0],
     ];
 
+    $hasRatings = is_numeric($merged['stats']['combinedAverage'] ?? null)
+        && (float) $merged['stats']['combinedAverage'] > 0;
+    $hasComments = (int) ($merged['stats']['totalComments'] ?? 0) > 0;
+    $confidenceCap = $hasRatings && $hasComments ? 95 : ($hasRatings ? 75 : ($hasComments ? 70 : 0));
+    if (is_array($merged['judgment'] ?? null)) {
+        $merged['judgment']['confidence'] = (int) clampExplainabilityRange(
+            $merged['judgment']['confidence'] ?? 0,
+            0,
+            $confidenceCap
+        );
+    }
+
     return [
         'insight' => $merged,
         'usedRule' => $usedRule,
@@ -3262,7 +3112,10 @@ function analyzeEvaluationExplainabilitySnapshot(PDO $pdo, array $payload = [], 
     $normalized = normalizeExplainabilityPayload($payload);
     $ruleInsight = buildExplainabilityInsightByRules($normalized);
 
-    if (count($normalized['comments']) === 0) {
+    $normalizedMetrics = is_array($normalized['metrics'] ?? null) ? $normalized['metrics'] : [];
+    $hasRatingEvidence = is_numeric($normalizedMetrics['combinedAverage'] ?? null)
+        && (float) $normalizedMetrics['combinedAverage'] > 0;
+    if (count($normalized['comments']) === 0 && !$hasRatingEvidence) {
         return [
             'source' => 'rule',
             'insight' => $ruleInsight,
@@ -3730,8 +3583,6 @@ function persistOwnEmailChangeSnapshot(PDO $pdo, array $actorUser, array $body) 
         throw new RuntimeException('Unable to resolve account identity.');
     }
 
-    $beforeUser = buildUserSnapshotById($pdo, $actorUserId, false);
-
     $currentEmail = strtolower(trim((string) ($body['currentEmail'] ?? '')));
     $newEmail = strtolower(trim((string) ($body['newEmail'] ?? '')));
 
@@ -3750,18 +3601,38 @@ function persistOwnEmailChangeSnapshot(PDO $pdo, array $actorUser, array $body) 
         throw new RuntimeException('New email must be different from current email.');
     }
 
-    $updateStmt = $pdo->prepare('UPDATE users SET email = :email WHERE id = :id LIMIT 1');
+    $startedTransaction = false;
     try {
+        if (!$pdo->inTransaction()) {
+            $pdo->beginTransaction();
+            $startedTransaction = true;
+        }
+        $updateStmt = $pdo->prepare('UPDATE users SET email = :email WHERE id = :id LIMIT 1');
         $updateStmt->execute([
             ':email' => $newEmail,
             ':id' => $actorUserId,
         ]);
-    } catch (PDOException $e) {
-        $code = (string) $e->getCode();
-        if ($code === '23000') {
+        naapAuditWrite($pdo, [
+            'eventCode' => 'user.email_changed',
+            'action' => 'Own Email Updated',
+            'description' => 'A user changed the email address for their own account.',
+            'type' => 'user',
+            'actor' => $actorUser,
+            'targetType' => 'user',
+            'targetId' => 'u' . $actorUserId,
+        ]);
+        if ($startedTransaction) {
+            $pdo->commit();
+            $startedTransaction = false;
+        }
+    } catch (Throwable $error) {
+        if ($startedTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        if ($error instanceof PDOException && (string) $error->getCode() === '23000') {
             throw new RuntimeException('Email is already in use by another account.');
         }
-        throw $e;
+        throw $error;
     }
 
     $updatedUsers = buildUsersSnapshot($pdo);
@@ -3769,18 +3640,6 @@ function persistOwnEmailChangeSnapshot(PDO $pdo, array $actorUser, array $body) 
         'userId' => 'u' . $actorUserId,
         'email' => $newEmail,
     ], normalizeActorRoleToken($actorUser['role'] ?? ''));
-
-    if (is_array($updatedUser)) {
-        safeLogAdminFlatStateChangeSnapshot(
-            $pdo,
-            $actorUser,
-            'Own Email Updated',
-            'user',
-            'Own account email',
-            is_array($beforeUser) ? buildUserActivityFlatState($beforeUser, ['userId' => 'u' . $actorUserId]) : [],
-            buildUserActivityFlatState($updatedUser, ['userId' => 'u' . $actorUserId])
-        );
-    }
 
     return [
         'email' => $newEmail,
@@ -3797,8 +3656,6 @@ function persistOwnPasswordChangeSnapshot(PDO $pdo, array $actorUser, array $bod
     if ($actorUserId <= 0) {
         throw new RuntimeException('Unable to resolve account identity.');
     }
-
-    $beforeUser = buildUserSnapshotById($pdo, $actorUserId, false);
 
     $currentPasswordInput = $body['currentPassword'] ?? null;
     if (!is_string($currentPasswordInput) || trim($currentPasswordInput) === '') {
@@ -3818,26 +3675,36 @@ function persistOwnPasswordChangeSnapshot(PDO $pdo, array $actorUser, array $bod
         throw new RuntimeException('New password must be different from current password.');
     }
 
-    $updateStmt = $pdo->prepare('UPDATE users SET password = :password WHERE id = :id LIMIT 1');
-    $updateStmt->execute([
-        ':password' => normalizeUserPasswordForStorage($newPassword),
-        ':id' => $actorUserId,
-    ]);
-
-    $afterUser = buildUserSnapshotById($pdo, $actorUserId, false);
-    safeLogAdminFlatStateChangeSnapshot(
-        $pdo,
-        $actorUser,
-        'Own Password Updated',
-        'user',
-        'Own account password',
-        is_array($beforeUser)
-            ? buildUserActivityFlatState($beforeUser, ['userId' => 'u' . $actorUserId, 'passwordMarker' => '[stored]'])
-            : ['User u' . $actorUserId . ' Password' => '[stored]'],
-        is_array($afterUser)
-            ? buildUserActivityFlatState($afterUser, ['userId' => 'u' . $actorUserId, 'passwordMarker' => '[updated]'])
-            : ['User u' . $actorUserId . ' Password' => '[updated]']
-    );
+    $startedTransaction = false;
+    try {
+        if (!$pdo->inTransaction()) {
+            $pdo->beginTransaction();
+            $startedTransaction = true;
+        }
+        $updateStmt = $pdo->prepare('UPDATE users SET password = :password WHERE id = :id LIMIT 1');
+        $updateStmt->execute([
+            ':password' => normalizeUserPasswordForStorage($newPassword),
+            ':id' => $actorUserId,
+        ]);
+        revokeTrustedDevicesSnapshot($pdo, $actorUserId);
+        naapAuditWrite($pdo, [
+            'eventCode' => 'user.password_changed',
+            'action' => 'Own Password Updated',
+            'description' => 'A user changed the password for their own account.',
+            'type' => 'user',
+            'actor' => $actorUser,
+            'targetType' => 'user',
+            'targetId' => 'u' . $actorUserId,
+        ]);
+        if ($startedTransaction) {
+            $pdo->commit();
+        }
+    } catch (Throwable $error) {
+        if ($startedTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $error;
+    }
 
     return [
         'updated' => true,
@@ -4208,6 +4075,12 @@ try {
                 }
                 $partial['mainCampus'] = $mainCampus;
             }
+            if (array_key_exists('trustedDeviceOtpEnabled', $partial)) {
+                if (!is_bool($partial['trustedDeviceOtpEnabled'])) {
+                    sendJson(['success' => false, 'error' => 'Trusted-device OTP setting must be true or false.'], 400);
+                }
+                $partial['trustedDeviceOtpEnabled'] = (bool) $partial['trustedDeviceOtpEnabled'];
+            }
             unset($partial['systemEmail']);
             $current = buildSettingsSnapshot($pdo);
             $updated = array_merge($current, $partial);
@@ -4270,6 +4143,54 @@ try {
             ]);
             break;
 
+        case 'getFacultyReportAccess':
+            if ($authenticatedRole !== 'dean' && $authenticatedRole !== 'professor') {
+                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
+            }
+            sendJson([
+                'success' => true,
+                'facultyReportAccess' => getFacultyReportAccessSnapshot($pdo, $authenticatedUser),
+                'professorEvaluationCounts' => $authenticatedRole === 'professor'
+                    ? buildProfessorEvaluationCountsSnapshot($pdo, $authenticatedUser)
+                    : null,
+            ]);
+            break;
+
+        case 'setDepartmentFacultyReportAccess':
+            if ($authenticatedRole !== 'dean') {
+                sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
+            }
+            foreach (['departmentId', 'department_id', 'departmentCode', 'department_code'] as $scopeField) {
+                if (array_key_exists($scopeField, $body)) {
+                    sendJson(['success' => false, 'error' => 'Department scope is derived from the authenticated dean.'], 403);
+                }
+            }
+            $authenticatedDeanId = resolveStoredUserIdNumber(
+                $authenticatedUser['id'] ?? ($authenticatedUser['userId'] ?? '')
+            );
+            if ($authenticatedDeanId <= 0 || !resolveActiveDeanScopeRow($pdo, $authenticatedDeanId)) {
+                sendJson(['success' => false, 'error' => 'An active dean department assignment is required.'], 403);
+            }
+            if (!array_key_exists('enabled', $body) || !is_bool($body['enabled'])) {
+                sendJson(['success' => false, 'error' => 'enabled must be a boolean.'], 400);
+            }
+            try {
+                $facultyReportAccess = persistDepartmentFacultyReportAccessSnapshot(
+                    $pdo,
+                    $authenticatedUser,
+                    $body['enabled']
+                );
+            } catch (RuntimeException $e) {
+                sendAppStateSchemaMigrationErrorIfNeeded($e);
+                rethrowUnexpectedAppStateDatabaseError($e);
+                sendJson(['success' => false, 'error' => $e->getMessage()], 400);
+            }
+            sendJson([
+                'success' => true,
+                'facultyReportAccess' => $facultyReportAccess,
+            ]);
+            break;
+
         case 'getCredentialDistributorConfig':
             if ($authenticatedRole !== 'admin') {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
@@ -4285,7 +4206,31 @@ try {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
             $configInput = is_array($body['config'] ?? null) ? $body['config'] : $body;
-            $savedConfig = persistCredentialDistributorConfigSnapshot($pdo, is_array($configInput) ? $configInput : []);
+            $configInput = is_array($configInput) ? $configInput : [];
+            $beforeConfig = buildCredentialDistributorConfigSnapshot($pdo);
+            $pdo->beginTransaction();
+            try {
+                $savedConfig = persistCredentialDistributorConfigSnapshot($pdo, $configInput);
+                $secretState = 'unchanged';
+                if (!empty($configInput['clearPassword']) || !empty($configInput['clearAppPassword'])) {
+                    $secretState = 'cleared';
+                } elseif (trim((string) ($configInput['password'] ?? $configInput['appPassword'] ?? '')) !== '') {
+                    $secretState = !empty($beforeConfig['hasPassword']) ? 'changed' : 'configured';
+                }
+                naapAuditWrite($pdo, [
+                    'eventCode' => 'admin.smtp_config.changed',
+                    'action' => 'SMTP Configuration Updated',
+                    'description' => 'SMTP configuration changed; credential secret ' . $secretState . '.',
+                    'type' => 'system',
+                    'actor' => $authenticatedUser,
+                    'targetType' => 'configuration',
+                    'targetId' => 'smtp',
+                ]);
+                $pdo->commit();
+            } catch (Throwable $error) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                throw $error;
+            }
             sendJson([
                 'success' => true,
                 'config' => $savedConfig,
@@ -4309,7 +4254,32 @@ try {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
             $configInput = is_array($body['config'] ?? null) ? $body['config'] : $body;
-            $savedConfig = persistGeminiConfigSnapshot($pdo, is_array($configInput) ? $configInput : []);
+            $configInput = is_array($configInput) ? $configInput : [];
+            $beforeConfig = buildGeminiConfigSnapshot($pdo);
+            $pdo->beginTransaction();
+            try {
+                $savedConfig = persistGeminiConfigSnapshot($pdo, $configInput);
+                $secretState = 'unchanged';
+                if (!empty($configInput['clearApiKey'])) {
+                    $secretState = 'cleared';
+                } elseif (trim((string) ($configInput['apiKey'] ?? '')) !== '') {
+                    $secretState = !empty($beforeConfig['hasApiKey']) ? 'changed' : 'configured';
+                }
+                naapAuditWrite($pdo, [
+                    'eventCode' => 'admin.openai_config.changed',
+                    'action' => 'OpenAI Configuration Updated',
+                    'description' => 'OpenAI configuration changed; API credential ' . $secretState
+                        . '; model ' . (string) ($savedConfig['model'] ?? 'configured') . '.',
+                    'type' => 'system',
+                    'actor' => $authenticatedUser,
+                    'targetType' => 'configuration',
+                    'targetId' => 'openai',
+                ]);
+                $pdo->commit();
+            } catch (Throwable $error) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                throw $error;
+            }
             sendJson([
                 'success' => true,
                 'config' => $savedConfig,
@@ -4409,11 +4379,46 @@ try {
                 $summary['geminiStatus'] = 0;
                 $summary['aiStatus'] = 0;
             }
+            $audit = naapAuditWrite($pdo, [
+                'eventCode' => 'ai.bias_analysis.generated',
+                'action' => 'AI Bias Analysis Generated',
+                'description' => 'A bias analysis was generated for authorized evaluation feedback.',
+                'type' => 'ai',
+                'actor' => $authenticatedUser,
+                'targetType' => 'evaluation_analysis',
+                'targetId' => trim((string) ($filters['semesterId'] ?? '')),
+            ]);
             sendJson([
                 'success' => true,
+                'auditId' => $audit['id'],
                 'summary' => $summary,
                 'items' => $result['items'] ?? [],
             ]);
+            break;
+
+        case 'listCredibilityReviews':
+            assertEvaluationReviewHr($authenticatedUser);
+            if (isset($body['filters']) && !is_array($body['filters'])) {
+                sendJson(['success'=>false, 'error'=>'Invalid review filters.'], 400);
+            }
+            sendJson(array_merge(['success'=>true], listEvaluationCredibilityReviews($pdo, $authenticatedUser, $body['filters'] ?? [])));
+            break;
+        case 'getCredibilityReview':
+            sendJson(['success'=>true, 'evaluation'=>getEvaluationCredibilityDetail($pdo, $authenticatedUser, $body['evaluationId'] ?? '')]);
+            break;
+        case 'reviewCredibilityEvaluations':
+            assertEvaluationReviewHr($authenticatedUser);
+            if (!is_array($body['evaluationIds'] ?? null) || !is_string($body['decision'] ?? null)
+                || (isset($body['note']) && !is_string($body['note']))) {
+                sendJson(['success'=>false, 'error'=>'Invalid review request.'], 400);
+            }
+            sendJson(array_merge(['success'=>true], reviewEvaluationCredibility($pdo, $authenticatedUser, $body['evaluationIds'] ?? [], (string) ($body['decision'] ?? ''), (string) ($body['note'] ?? ''))));
+            break;
+        case 'getProfessorAnalyticsPayload':
+            if (!is_array($body['payload'] ?? null)) {
+                sendJson(['success'=>false, 'error'=>'Professor analytics scope is required.'], 400);
+            }
+            sendJson(['success'=>true, 'payload'=>buildProfessorAnalyticsAuthoritativePayload($pdo, $authenticatedUser, $body['payload'] ?? [])]);
             break;
 
         case 'analyzeEvaluationExplainability':
@@ -4426,15 +4431,27 @@ try {
                 $payload = is_array($body) ? $body : [];
             }
 
+            $payload = buildProfessorAnalyticsAuthoritativePayload($pdo, $authenticatedUser, $payload);
             $result = analyzeEvaluationExplainabilitySnapshot(
                 $pdo,
                 is_array($payload) ? $payload : [],
                 isOpenAiEnabledForPanelRole($pdo, $authenticatedRole)
             );
+            $audit = naapAuditWrite($pdo, [
+                'eventCode' => 'ai.evaluation_analysis.generated',
+                'action' => 'AI Evaluation Analysis Generated',
+                'description' => 'An explainability analysis was generated for authorized evaluation data.',
+                'type' => 'ai',
+                'actor' => $authenticatedUser,
+                'targetType' => 'evaluation_analysis',
+                'targetId' => trim((string) ($payload['semesterId'] ?? '')),
+            ]);
             sendJson([
                 'success' => true,
+                'auditId' => $audit['id'],
                 'source' => (string) ($result['source'] ?? 'rule'),
                 'insight' => is_array($result['insight'] ?? null) ? $result['insight'] : [
+                    'ratingReview' => 'No numeric rating review is available.',
                     'keywords' => [],
                     'clusters' => [],
                     'reasoning' => ['No explainability details available.'],
@@ -4446,6 +4463,11 @@ try {
                     'stats' => [
                         'totalComments' => 0,
                         'sourceCounts' => ['student' => 0, 'professor' => 0, 'supervisor' => 0],
+                        'overallRating' => null,
+                        'combinedAverage' => null,
+                        'averagesBySource' => ['student' => null, 'professor' => null, 'supervisor' => null],
+                        'responseRate' => null,
+                        'totalEvaluations' => 0,
                     ],
                 ],
             ]);
@@ -4514,8 +4536,19 @@ try {
             $sectionC = normalizeFacultySectionCOutput($result['sectionC'] ?? []);
             $reasoning = normalizeFacultyReasoningOutput($result['reasoning'] ?? []);
 
+            $audit = naapAuditWrite($pdo, [
+                'eventCode' => 'ai.section_c.generated',
+                'action' => 'AI Section C Generated',
+                'description' => 'Section C recommendations were generated for a faculty acknowledgement paper.',
+                'type' => 'ai',
+                'actor' => $authenticatedUser,
+                'targetType' => 'faculty_paper',
+                'targetId' => $paperId,
+            ]);
+
             sendJson([
                 'success' => true,
+                'auditId' => $audit['id'],
                 'source' => (string) ($result['source'] ?? 'rule'),
                 'weakAreas' => $weakAreaNames,
                 'sectionC' => [
@@ -4541,8 +4574,18 @@ try {
                 is_array($payload) ? $payload : [],
                 isOpenAiEnabledForPanelRole($pdo, $authenticatedRole)
             );
+            $audit = naapAuditWrite($pdo, [
+                'eventCode' => 'ai.feedback_summary.generated',
+                'action' => 'AI Feedback Summary Generated',
+                'description' => 'A feedback summary was generated for authorized evaluation comments.',
+                'type' => 'ai',
+                'actor' => $authenticatedUser,
+                'targetType' => 'evaluation_feedback',
+                'targetId' => trim((string) ($payload['semesterId'] ?? '')),
+            ]);
             sendJson([
                 'success' => true,
+                'auditId' => $audit['id'],
                 'summary' => $summary,
                 'source' => (string) ($summary['source'] ?? 'rule'),
                 'warning' => (string) ($summary['warning'] ?? ''),
@@ -4655,7 +4698,8 @@ try {
             }
 
             $programCode = trim((string) ($body['programCode'] ?? ''));
-            $result = listDeanProgramPeerAssignmentDetailsCurrentSnapshot($pdo, $deanUserId, $programCode);
+            $semesterId = trim((string) ($body['semesterId'] ?? ($body['semester'] ?? '')));
+            $result = listDeanProgramPeerAssignmentDetailsCurrentSnapshot($pdo, $deanUserId, $programCode, $semesterId);
             sendJson(array_merge(['success' => true], $result));
             break;
 
@@ -4669,7 +4713,8 @@ try {
             }
 
             $programCode = trim((string) ($body['programCode'] ?? ''));
-            $result = listCoordinatorProgramPeerAssignmentDetailsCurrentSnapshot($pdo, $coordinatorUserId, $programCode);
+            $semesterId = trim((string) ($body['semesterId'] ?? ($body['semester'] ?? '')));
+            $result = listCoordinatorProgramPeerAssignmentDetailsCurrentSnapshot($pdo, $coordinatorUserId, $programCode, $semesterId);
             sendJson(array_merge(['success' => true], $result));
             break;
 
@@ -5289,7 +5334,7 @@ try {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
             $filters = is_array($body['filters'] ?? null) ? $body['filters'] : $body;
-            $log = searchActivityLogSnapshot($pdo, is_array($filters) ? $filters : []);
+            $log = searchActivityLogSnapshot($pdo, is_array($filters) ? $filters : [], $authenticatedRole);
             $limit = normalizeBootstrapListLimit($filters['limit'] ?? 200, 200, 500);
             $offset = normalizeBootstrapListOffset($filters['offset'] ?? 0);
             sendJson([
@@ -5303,16 +5348,7 @@ try {
             break;
 
         case 'addActivityLogEntry':
-            $entry = is_array($body['entry'] ?? null) ? $body['entry'] : [];
-            $entry['userId'] = (string) ($authenticatedUser['id'] ?? '');
-            $entry['email'] = (string) ($authenticatedUser['email'] ?? '');
-            $entry['name'] = (string) ($authenticatedUser['name'] ?? '');
-            $entry['role'] = (string) ($authenticatedUser['role'] ?? '');
-            $savedEntry = addActivityLogEntrySnapshot($pdo, $entry);
-            sendJson([
-                'success' => true,
-                'entry' => $savedEntry,
-            ]);
+            sendJson(['success' => false, 'error' => 'Audit events are recorded by the server only.'], 403);
             break;
 
         case 'submitSystemReport':
@@ -5340,7 +5376,7 @@ try {
             break;
 
         case 'setActivityLog':
-            sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
+            sendJson(['success' => false, 'error' => 'Audit events are recorded by the server only.'], 403);
             break;
 
         case 'setAnnouncements':
@@ -5450,9 +5486,14 @@ try {
                 if ($professorName === '' || $department === '' || $rank === '') {
                     throw new InvalidArgumentException('Professor profile name, department, and rank are required.');
                 }
-                $setRating = normalizePaperRatingValue($payload['set_rating'] ?? 'N/A');
-                $safRating = normalizePaperRatingValue($payload['saf_rating'] ?? 'N/A');
                 $loadType = normalizeCourseOfferingLoadType($payload['load_type'] ?? 'main');
+                $setRating = facultyReportBuildFacultyPaperSetRating(
+                    $pdo,
+                    $actorUserId,
+                    $semesterId,
+                    $loadType
+                );
+                $safRating = normalizePaperRatingValue($payload['saf_rating'] ?? 'N/A');
                 $legacyApprovalAutoFill = facultyPdfNormalizeApprovalAutoFillValue($payload['approval_auto_fill'] ?? false);
                 $approvalNamesAutoFill = array_key_exists('approval_names_auto_fill', $payload)
                     ? facultyPdfNormalizeApprovalAutoFillValue($payload['approval_names_auto_fill'])
@@ -5667,6 +5708,13 @@ try {
                 sendJson(['success' => false, 'error' => getFacultyPaperLoadSubmissionLimitMessage($loadType)], 400);
             }
 
+            $paper['set_rating'] = facultyReportBuildFacultyPaperSetRating(
+                $pdo,
+                $actorUserId,
+                sanitizePaperTextValue($paper['semester_id'] ?? '', 100),
+                $loadType
+            );
+
             $professor = buildUserSnapshotById($pdo, $authenticatedUser['id'] ?? '', false);
             if (!$professor || normalizeActorRoleToken($professor['role'] ?? '') !== 'professor') {
                 sendJson(['success' => false, 'error' => 'Professor account not found.'], 400);
@@ -5718,6 +5766,10 @@ try {
             $actorRole = $authenticatedRole;
             $actorUserId = normalizePaperUserIdToken($authenticatedUser['id'] ?? '');
             $paperId = sanitizePaperTextValue($body['paper_id'] ?? '', 80);
+            $aiGenerationAuditId = sanitizePaperTextValue(
+                $body['aiGenerationAuditId'] ?? ($body['ai_generation_audit_id'] ?? ''),
+                30
+            );
             if ($actorRole !== 'dean' && $actorRole !== 'professor' && $actorRole !== 'procoor') {
                 sendJson(['success' => false, 'error' => 'Permission denied.'], 403);
             }
@@ -5784,8 +5836,27 @@ try {
                 if ($status !== 'draft') {
                     sendJson(['success' => false, 'error' => 'Section C can only be edited while the paper is in draft.'], 400);
                 }
+                $validatedReceipt = findValidatedFacultySectionCAiAuditReceipt(
+                    $pdo,
+                    $aiGenerationAuditId,
+                    $actorUserId,
+                    $paperId
+                );
+                if ($validatedReceipt === null) {
+                    sendJson(['success' => false, 'error' => 'A valid AI generation audit receipt is required.'], 400);
+                }
+                $paper['section_c_ai_audit_code'] = $validatedReceipt;
+                $paper['set_rating'] = facultyReportBuildFacultyPaperSetRating(
+                    $pdo,
+                    $actorUserId,
+                    sanitizePaperTextValue($paper['semester_id'] ?? '', 100),
+                    normalizeCourseOfferingLoadType($paper['load_type'] ?? 'main')
+                );
             }
 
+            $newPdfLogicalPath = '';
+            $pdo->beginTransaction();
+            try {
             $nowIso = getAuthoritativePhilippineIso8601();
             if ($actorRole === 'dean' || $actorRole === 'procoor') {
                 $paper['status'] = 'completed';
@@ -5835,8 +5906,50 @@ try {
             }
             if (normalizePaperStatusValue($paper['status'] ?? '') === 'completed') {
                 $paper = facultyPdfPersistPaperVersion($paper, 'completed', $actorRole, $actorUserId);
+                $newPdfLogicalPath = trim((string) ($paper['latest_file_path'] ?? ''));
             }
             $savedPaper = upsertFacultyAcknowledgementPaperSnapshot($pdo, $paper);
+            $linkedGenerationAuditId = trim((string) ($paper['section_c_ai_audit_code'] ?? ''));
+            if ($actorRole === 'professor') {
+                naapAuditWrite($pdo, [
+                    'eventCode' => 'ai.section_c.published',
+                    'action' => 'AI Section C Published',
+                    'description' => 'A professor saved AI-generated Section C recommendations to a faculty acknowledgement paper.',
+                    'type' => 'ai',
+                    'actor' => $authenticatedUser,
+                    'targetType' => 'faculty_paper',
+                    'targetId' => $paperId,
+                    'relatedAuditId' => $linkedGenerationAuditId,
+                ]);
+            } elseif ($status === 'sent') {
+                naapAuditWrite($pdo, [
+                    'eventCode' => 'ai.section_c.approved',
+                    'action' => 'AI Section C Approved',
+                    'description' => 'A supervisor approved Section C for a faculty acknowledgement paper.',
+                    'type' => 'ai',
+                    'actor' => $authenticatedUser,
+                    'targetType' => 'faculty_paper',
+                    'targetId' => $paperId,
+                    'relatedAuditId' => $linkedGenerationAuditId,
+                ]);
+            }
+            $pdo->commit();
+            } catch (Throwable $error) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                if ($newPdfLogicalPath !== '') {
+                    try {
+                        $newPdfPath = naapFacultyPaperResolvePrivateFile($newPdfLogicalPath);
+                        if (is_file($newPdfPath)) {
+                            @unlink($newPdfPath);
+                        }
+                    } catch (Throwable $cleanupError) {
+                        naapLogServerException($cleanupError, 'faculty_paper.audit_cleanup');
+                    }
+                }
+                throw $error;
+            }
             sendJson(['success' => true, 'paper' => $savedPaper]);
             break;
 
@@ -5844,12 +5957,14 @@ try {
             sendJson(['success' => false, 'error' => 'Unknown action'], 400);
     }
 } catch (Throwable $e) {
+    if ($e instanceof EvaluationReviewConflict) sendJson(['success'=>false, 'error'=>$e->getMessage()], 409);
     if ($e instanceof CampusAccessDeniedException) {
         campusAuthorizationSendJsonError($e);
     }
     if ($e instanceof CampusNotFoundException) {
         sendJson(['success' => false, 'error' => 'Invalid campus selected.'], 404);
     }
+    if ($e instanceof InvalidArgumentException) sendJson(['success'=>false, 'error'=>$e->getMessage()], 400);
     sendAppStateSchemaMigrationErrorIfNeeded($e);
     sendNaapServerErrorJson($e, 'app_state.action');
 }

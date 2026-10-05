@@ -1,0 +1,179 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const root = path.resolve(__dirname, '..');
+const osaSource = fs.readFileSync(path.join(root, 'JsScrip/osapanel.js'), 'utf8');
+const vpaaSource = fs.readFileSync(path.join(root, 'JsScrip/vpaapanel.js'), 'utf8')
+    .replace(/\ninit\(\);\s*$/, '');
+
+function buildOsaRowCount(enrollmentStatus) {
+    const SharedData = {
+        getCurrentSemester: () => 'sem-1',
+        getCachedUsers: () => [{
+            id: 'u1', role: 'student', status: 'active', studentNumber: 'S1', name: 'Student One',
+            department: 'D', programCode: 'P', campus: 'campus-a',
+        }],
+        getCachedSubjectManagement: () => ({
+            offerings: [{ id: 'o1', isActive: true, semesterSlug: 'sem-1' }],
+            enrollments: [{
+                courseOfferingId: 'o1', studentUserId: 'u1', studentNumber: 'S1', status: enrollmentStatus,
+            }],
+        }),
+        getCachedEvaluations: () => [{
+            courseOfferingId: 'o1', studentUserId: 'u1', semesterId: 'sem-1',
+            status: 'submitted', evaluatorRole: 'student',
+        }],
+        getOsaStudentClearances: () => [],
+        getStudentEvaluationProofRequests: () => [],
+        getEvalPeriodDates: () => ({ end: '2026-09-01' }),
+        getCurrentPhilippineDateYmd: () => '2026-10-01',
+    };
+    const context = { SharedData, document: { addEventListener: () => {} }, window: {}, console };
+    vm.createContext(context);
+    vm.runInContext(osaSource, context);
+    return vm.runInContext('buildStatusRows().rows.length', context);
+}
+
+function createNode(id) {
+    return {
+        id,
+        textContent: '',
+        value: id === 'semesterFilter' ? 'sem-1' : 'all',
+        innerHTML: '',
+        options: [],
+        appendChild: () => {},
+        classList: { add: () => {}, remove: () => {}, toggle: () => {}, contains: () => false },
+        setAttribute: () => {},
+        removeAttribute: () => {},
+        querySelector: () => null,
+        querySelectorAll: () => [],
+        closest: () => null,
+    };
+}
+
+function buildVpaaContext(enrollmentStatus = 'enrolled') {
+    const nodes = new Map();
+    const getNode = (id) => {
+        if (!nodes.has(id)) nodes.set(id, createNode(id));
+        return nodes.get(id);
+    };
+    const users = [
+        { id: 's1', role: 'student', status: 'active', campus: 'campus-a', department: 'D' },
+        { id: 's2', role: 'student', status: 'active', campus: 'campus-b', department: 'D' },
+    ];
+    const SharedData = {
+        getCurrentSemester: () => 'sem-1',
+        getSemesterList: () => [{ value: 'sem-1' }, { value: 'sem-2' }],
+        getCachedUsers: () => users,
+        getUsers: () => users,
+        getCachedSubjectManagement: () => ({
+            offerings: [{ id: 'o1', isActive: true, semesterSlug: 'sem-1' }],
+            enrollments: [{ courseOfferingId: 'o1', studentUserId: 's1', status: enrollmentStatus }],
+        }),
+        getCachedEvaluations: () => [{
+            id: 'e1', courseOfferingId: 'o1', studentUserId: 's1', semesterId: 'sem-1',
+            status: 'submitted', evaluatorRole: 'student',
+        }],
+        getQuestionnaires: () => ({}),
+        getCampuses: () => [],
+        fetchSubjectManagementSnapshot: ({ semesterId }) => Promise.resolve({
+            subjects: [],
+            offerings: [{ id: `offering-${semesterId}`, isActive: true, semesterSlug: semesterId }],
+            enrollments: [{ id: `enrollment-${semesterId}`, courseOfferingId: `offering-${semesterId}`, studentUserId: 's1', status: 'enrolled' }],
+        }),
+        fetchEvaluationsSnapshot: ({ semesterId }) => Promise.resolve([{
+            id: `evaluation-${semesterId}`, semesterId, evaluatorRole: 'student', status: 'submitted',
+        }]),
+    };
+    const context = {
+        SharedData,
+        document: {
+            getElementById: getNode,
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            createElement: () => createNode('created'),
+        },
+        window: { SetCalculation: {} },
+        Chart: function Chart() {},
+        console,
+    };
+    vm.createContext(context);
+    vm.runInContext(vpaaSource, context);
+    return context;
+}
+
+(async function run() {
+    assert.equal(buildOsaRowCount('enrolled'), 1);
+    assert.equal(buildOsaRowCount('completed'), 1, 'OSA must retain completed enrollments in clearance monitoring.');
+
+    const completedContext = buildVpaaContext('completed');
+    assert.equal(
+        vm.runInContext('buildVpaaStudentAnalyticsRows().length', completedContext),
+        1,
+        'VPAA descriptive analytics must retain completed enrollments.'
+    );
+
+    const summary = JSON.parse(vm.runInContext(`
+        updateSummary([{
+            userId: 'p1', isActive: true, students: 10,
+            requiredEvaluations: 13, evaluations: 12
+        }], { campus: 'all', department: 'all' });
+        JSON.stringify({
+            rate: elements.completionRate.textContent,
+            pending: elements.pendingEvaluations.textContent
+        });
+    `, completedContext));
+    assert.deepEqual(summary, { rate: '92%', pending: '1' });
+
+    const professorCount = vm.runInContext(`
+        updateSummary([
+            { userId: 'p1', isActive: true, requiredEvaluations: 5, evaluations: 5 },
+            { userId: 'p1', isActive: true, requiredEvaluations: 5, evaluations: 5 },
+            { userId: 'p2', isActive: false, requiredEvaluations: 5, evaluations: 5 }
+        ], { campus: 'all', department: 'all' });
+        elements.activeProfessors.textContent;
+    `, completedContext);
+    assert.equal(professorCount, '1', 'Active professor count must be unique and exclude inactive faculty.');
+
+    const scopedSummary = JSON.parse(vm.runInContext(`
+        elements.searchInput.value = '';
+        elements.semesterFilter.value = 'sem-1';
+        elements.campusFilter.value = 'campus-a';
+        elements.departmentFilter.value = 'all';
+        elements.sortFilter.value = 'name';
+        allProfessorData = [
+            { userId: 'p1', name: 'A', employeeId: '1', subjects: [], semester: 'sem-1', campus: 'campus-a', department: 'D', overall: 4, responseRate: 100, students: 5, requiredEvaluations: 5, evaluations: 5, isActive: true },
+            { userId: 'p2', name: 'B', employeeId: '2', subjects: [], semester: 'sem-1', campus: 'campus-b', department: 'D', overall: 3, responseRate: 0, students: 50, requiredEvaluations: 50, evaluations: 0, isActive: true }
+        ];
+        refreshDashboardChartsForSemester = () => {};
+        renderDashboardCharts = () => {};
+        closeReportModal = () => {};
+        updateWordFrequency = () => {};
+        renderKeyHighlights = () => {};
+        renderProfessors = () => {};
+        applyFilters();
+        JSON.stringify({
+            students: elements.totalStudents.textContent,
+            rate: elements.completionRate.textContent,
+            professors: elements.activeProfessors.textContent
+        });
+    `, completedContext));
+    assert.deepEqual(scopedSummary, { students: '1', rate: '100%', professors: '1' });
+
+    const allSemesterContext = buildVpaaContext();
+    await vm.runInContext('refreshVpaaSemesterDataSelection("all", true)', allSemesterContext);
+    const historicalCounts = JSON.parse(vm.runInContext(`JSON.stringify({
+        offerings: vpaaSubjectManagementSnapshot.offerings.length,
+        evaluations: vpaaEvaluationsSnapshot.length
+    })`, allSemesterContext));
+    assert.deepEqual(historicalCounts, { offerings: 2, evaluations: 2 });
+
+    console.log('VPAA and OSA panel regression tests passed.');
+})().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+});

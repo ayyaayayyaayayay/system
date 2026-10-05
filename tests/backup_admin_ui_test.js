@@ -12,8 +12,8 @@ function assert(condition, message) {
 assert(html.includes('id="backup-management-group"'), 'Backup management card is missing.');
 assert(html.includes('id="backup-history-body"'), 'Backup history table is missing.');
 assert(html.includes('id="backup-last-24-btn"'), 'Manual backup action is missing.');
-assert(html.includes('adminpanel.js?v=20260928b'), 'Admin backup JavaScript cache-buster is stale.');
-assert(html.includes('adminpanel.css?v=20260926a'), 'Admin backup CSS cache-buster is stale.');
+assert(html.includes('adminpanel.js?v=20261003a'), 'Admin backup JavaScript cache-buster is stale.');
+assert(html.includes('adminpanel.css?v=20261004a'), 'Admin backup CSS cache-buster is stale.');
 
 assert(script.includes("requestBackupApi('create'"), 'Manual backup button is not connected to the backend.');
 assert(script.includes("requestBackupApi('test'"), 'Restoration test action is not connected to the backend.');

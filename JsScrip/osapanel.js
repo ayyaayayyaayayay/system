@@ -412,7 +412,8 @@ function buildStatusRows() {
     const studentMetaById = new Map();
 
     enrollments.forEach(function (enrollment) {
-        if (!enrollment || normalizeTextToken(enrollment.status) !== "enrolled") return;
+        const enrollmentStatus = normalizeTextToken(enrollment && enrollment.status);
+        if (!enrollment || (enrollmentStatus !== "enrolled" && enrollmentStatus !== "completed")) return;
 
         const offeringId = String(enrollment.courseOfferingId || "").trim();
         if (!offeringId || !activeOfferingsById.has(offeringId)) return;

@@ -107,6 +107,8 @@ const LOGIN_PASSWORD_FAILURE_THRESHOLD = 3;
 const LOGIN_OTP_FAILURE_THRESHOLD = 3;
 const LOGIN_OTP_EXPIRY_SECONDS = 600; // 10 minutes
 const PASSWORD_RESET_EXPIRY_SECONDS = 1800; // 30 minutes
+const LOGIN_TRUSTED_DEVICE_COOKIE_PREFIX = 'naap_trusted_device_';
+const LOGIN_TRUSTED_DEVICE_TTL_SECONDS = 7776000; // 90 days
 
 function normalizeLoginIdentityToken($value) {
     return strtolower(trim((string) $value));
@@ -121,8 +123,11 @@ function parseLoginTimestamp($value) {
     if ($raw === '') {
         return 0;
     }
-    $timestamp = strtotime($raw);
-    return $timestamp === false ? 0 : (int) $timestamp;
+    try {
+        return (int) (new DateTimeImmutable($raw, getAuthoritativePhilippineTimezone()))->format('U');
+    } catch (Throwable $error) {
+        return 0;
+    }
 }
 
 function buildLoginSecurityRecord(array $record) {
@@ -138,13 +143,263 @@ function buildLoginSecurityRecord(array $record) {
 }
 
 function buildOtpRequiredPayload(array $challenge) {
+    $sentAt = parseLoginTimestamp($challenge['email_sent_at'] ?? ($challenge['created_at'] ?? ''));
+    $expiresAt = parseLoginTimestamp($challenge['expires_at'] ?? '');
     return [
         'success' => false,
         'error' => 'OTP verification is required before you can continue.',
         'otpRequired' => true,
         'otpChallengeId' => trim((string) ($challenge['challenge_id'] ?? '')),
-        'otpExpiresAt' => trim((string) ($challenge['expires_at'] ?? '')),
+        'otpExpiresAt' => $expiresAt > 0 ? formatPhilippineUnixTimestampIso($expiresAt) : '',
         'maskedEmail' => trim((string) ($challenge['masked_email'] ?? '')),
+        'otpReason' => trim((string) ($challenge['purpose'] ?? 'device_verification')),
+        'otpResendAvailableAt' => $sentAt > 0
+            ? formatPhilippineUnixTimestampIso($sentAt + NAAP_AUTH_RATE_OTP_RESEND_COOLDOWN_SECONDS)
+            : '',
+    ];
+}
+
+function loginMysqlDateTime(int $timestamp): string {
+    return (new DateTimeImmutable('@' . $timestamp))
+        ->setTimezone(getAuthoritativePhilippineTimezone())
+        ->format('Y-m-d H:i:s');
+}
+
+function getTrustedDeviceOtpEnabled(PDO $pdo): bool {
+    $stored = getSettingJson($pdo, 'sharedSettings', []);
+    $settings = array_merge(getDefaultSettings(), is_array($stored) ? $stored : []);
+    return ($settings['trustedDeviceOtpEnabled'] ?? true) !== false;
+}
+
+function getLoginDeviceCookieName(int $userId): string {
+    return LOGIN_TRUSTED_DEVICE_COOKIE_PREFIX . max(0, $userId);
+}
+
+function readLoginDeviceToken(int $userId): string {
+    $cookieName = getLoginDeviceCookieName($userId);
+    $token = strtolower(trim((string) ($_COOKIE[$cookieName] ?? '')));
+    return preg_match('/^[a-f0-9]{64}$/', $token) ? $token : '';
+}
+
+function hashLoginDeviceToken(string $token): string {
+    return hash('sha256', "naap-trusted-device-v1\0" . $token);
+}
+
+function setLoginDeviceCookie(int $userId, string $token, int $now): void {
+    $cookieName = getLoginDeviceCookieName($userId);
+    setcookie($cookieName, $token, [
+        'expires' => $now + LOGIN_TRUSTED_DEVICE_TTL_SECONDS,
+        'path' => '/',
+        'domain' => '',
+        'secure' => naapUsesSecureCookies(),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    $_COOKIE[$cookieName] = $token;
+}
+
+function mintLoginDeviceToken(int $userId, int $now): string {
+    $token = bin2hex(random_bytes(32));
+    setLoginDeviceCookie($userId, $token, $now);
+    return $token;
+}
+
+function ensureUserAuthSecurityRow(PDO $pdo, int $userId): void {
+    $stmt = $pdo->prepare('INSERT IGNORE INTO user_auth_security (user_id) VALUES (:user_id)');
+    $stmt->execute([':user_id' => $userId]);
+}
+
+function getUserAuthSecurityRow(PDO $pdo, int $userId, bool $forUpdate = false): array {
+    ensureUserAuthSecurityRow($pdo, $userId);
+    $stmt = $pdo->prepare(
+        'SELECT user_id, first_otp_verified_at, failed_password_count, failed_login_otp_required
+         FROM user_auth_security WHERE user_id = :user_id LIMIT 1' . ($forUpdate ? ' FOR UPDATE' : '')
+    );
+    $stmt->execute([':user_id' => $userId]);
+    return $stmt->fetch() ?: [];
+}
+
+function recordFailedPasswordState(PDO $pdo, int $userId): array {
+    ensureUserAuthSecurityRow($pdo, $userId);
+    $stmt = $pdo->prepare(
+        'UPDATE user_auth_security
+         SET failed_password_count = LEAST(65535, failed_password_count + 1),
+             failed_login_otp_required = IF(failed_password_count + 1 >= :threshold, 1, failed_login_otp_required)
+         WHERE user_id = :user_id'
+    );
+    $stmt->execute([':threshold' => LOGIN_PASSWORD_FAILURE_THRESHOLD, ':user_id' => $userId]);
+    return getUserAuthSecurityRow($pdo, $userId);
+}
+
+function resetFailedPasswordState(PDO $pdo, int $userId): void {
+    ensureUserAuthSecurityRow($pdo, $userId);
+    $stmt = $pdo->prepare(
+        'UPDATE user_auth_security
+         SET failed_password_count = 0, failed_login_otp_required = 0
+         WHERE user_id = :user_id'
+    );
+    $stmt->execute([':user_id' => $userId]);
+}
+
+function isLoginDeviceTrusted(PDO $pdo, int $userId, string $deviceToken, int $now): bool {
+    if ($deviceToken === '') {
+        return false;
+    }
+    $hash = hashLoginDeviceToken($deviceToken);
+    $nowMysql = loginMysqlDateTime($now);
+    $stmt = $pdo->prepare(
+        'SELECT id FROM trusted_devices
+         WHERE user_id = :user_id AND device_token_hash = :token_hash
+           AND revoked_at IS NULL AND expires_at > :now_value
+         LIMIT 1'
+    );
+    $stmt->execute([':user_id' => $userId, ':token_hash' => $hash, ':now_value' => $nowMysql]);
+    $deviceId = (int) $stmt->fetchColumn();
+    if ($deviceId <= 0) {
+        return false;
+    }
+    $touch = $pdo->prepare(
+        'UPDATE trusted_devices SET last_used_at = :last_used_at, expires_at = :expires_at WHERE id = :id'
+    );
+    $touch->execute([
+        ':last_used_at' => $nowMysql,
+        ':expires_at' => loginMysqlDateTime($now + LOGIN_TRUSTED_DEVICE_TTL_SECONDS),
+        ':id' => $deviceId,
+    ]);
+    setLoginDeviceCookie($userId, $deviceToken, $now);
+    return true;
+}
+
+function trustLoginDevice(PDO $pdo, int $userId, string $deviceHash, int $now): void {
+    $stmt = $pdo->prepare(
+        'INSERT INTO trusted_devices (user_id, device_token_hash, last_used_at, expires_at, revoked_at)
+         VALUES (:user_id, :token_hash, :last_used_at, :expires_at, NULL)
+         ON DUPLICATE KEY UPDATE
+            last_used_at = VALUES(last_used_at), expires_at = VALUES(expires_at), revoked_at = NULL'
+    );
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':token_hash' => $deviceHash,
+        ':last_used_at' => loginMysqlDateTime($now),
+        ':expires_at' => loginMysqlDateTime($now + LOGIN_TRUSTED_DEVICE_TTL_SECONDS),
+    ]);
+}
+
+function findActiveOtpChallenge(PDO $pdo, int $userId, string $deviceHash, int $now): ?array {
+    $stmt = $pdo->prepare(
+        'SELECT * FROM login_otp_challenges
+         WHERE user_id = :user_id AND device_token_hash = :device_hash
+           AND consumed_at IS NULL AND invalidated_at IS NULL AND expires_at > :now_value
+         ORDER BY id DESC LIMIT 1'
+    );
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':device_hash' => $deviceHash,
+        ':now_value' => loginMysqlDateTime($now),
+    ]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+function invalidateActiveLoginOtpChallenges(PDO $pdo, int $userId, int $now): void {
+    $stmt = $pdo->prepare(
+        'UPDATE login_otp_challenges SET invalidated_at = :invalidated_at
+         WHERE user_id = :user_id AND consumed_at IS NULL AND invalidated_at IS NULL'
+    );
+    $stmt->execute([':invalidated_at' => loginMysqlDateTime($now), ':user_id' => $userId]);
+}
+
+function sendOtpIssuanceLimitedResponse(): void {
+    header('Retry-After: ' . NAAP_AUTH_RATE_OTP_SEND_WINDOW_SECONDS);
+    sendJson([
+        'success' => false,
+        'error' => 'Too many OTP requests. Please try again later.',
+        'rateLimited' => true,
+        'retryAfterSeconds' => NAAP_AUTH_RATE_OTP_SEND_WINDOW_SECONDS,
+    ], 429);
+}
+
+function issueLoginOtpChallenge(
+    PDO $pdo,
+    array $user,
+    string $purpose,
+    string $deviceToken,
+    string $ipFingerprint,
+    string $identityFingerprint,
+    int $now
+): array {
+    if (naapAuthRateIsLimited($pdo, NAAP_AUTH_RATE_ACTION_OTP_SENT, 'ip_hash', $ipFingerprint, NAAP_AUTH_RATE_OTP_SEND_LIMIT, NAAP_AUTH_RATE_OTP_SEND_WINDOW_SECONDS, $now)
+        || naapAuthRateIsLimited($pdo, NAAP_AUTH_RATE_ACTION_OTP_SENT, 'identity_hash', $identityFingerprint, NAAP_AUTH_RATE_OTP_SEND_LIMIT, NAAP_AUTH_RATE_OTP_SEND_WINDOW_SECONDS, $now)) {
+        sendOtpIssuanceLimitedResponse();
+    }
+
+    $userId = resolveLoginUserNumericId($user['id'] ?? '');
+    $recipientEmail = trim((string) ($user['email'] ?? ''));
+    if ($userId <= 0 || !filter_var($recipientEmail, FILTER_VALIDATE_EMAIL)) {
+        sendJson(['success' => false, 'error' => 'Unable to complete OTP verification setup. Contact the administrator.'], 503);
+    }
+
+    try {
+        $smtpConfig = getCredentialDistributorSmtpConfigSnapshot($pdo);
+        $otpCode = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        $challengeId = bin2hex(random_bytes(32));
+        $otpHash = normalizePasswordForStorage($otpCode);
+    } catch (Throwable $error) {
+        sendJson(['success' => false, 'error' => 'OTP service is unavailable. Contact the administrator.'], 503);
+    }
+
+    $deviceHash = hashLoginDeviceToken($deviceToken);
+    $nowMysql = loginMysqlDateTime($now);
+    $expiresAt = loginMysqlDateTime($now + LOGIN_OTP_EXPIRY_SECONDS);
+    $pdo->beginTransaction();
+    try {
+        $lock = $pdo->prepare('SELECT id FROM users WHERE id = :user_id FOR UPDATE');
+        $lock->execute([':user_id' => $userId]);
+        $invalidate = $pdo->prepare(
+            'UPDATE login_otp_challenges SET invalidated_at = :invalidated_at
+             WHERE user_id = :user_id AND consumed_at IS NULL AND invalidated_at IS NULL'
+        );
+        $invalidate->execute([':invalidated_at' => $nowMysql, ':user_id' => $userId]);
+        $insert = $pdo->prepare(
+            'INSERT INTO login_otp_challenges
+                (challenge_id, user_id, purpose, otp_hash, device_token_hash, expires_at, email_sent_at)
+             VALUES (:challenge_id, :user_id, :purpose, :otp_hash, :device_hash, :expires_at, :email_sent_at)'
+        );
+        $insert->execute([
+            ':challenge_id' => $challengeId,
+            ':user_id' => $userId,
+            ':purpose' => $purpose,
+            ':otp_hash' => $otpHash,
+            ':device_hash' => $deviceHash,
+            ':expires_at' => $expiresAt,
+            ':email_sent_at' => $nowMysql,
+        ]);
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
+
+    try {
+        credentialMailerSendOtp($smtpConfig, [
+            'recipientEmail' => $recipientEmail,
+            'recipientName' => trim((string) ($user['name'] ?? 'User')),
+            'otpCode' => $otpCode,
+            'expiresMinutes' => 10,
+        ]);
+    } catch (Throwable $error) {
+        $invalidate = $pdo->prepare('UPDATE login_otp_challenges SET invalidated_at = :invalidated_at WHERE challenge_id = :challenge_id');
+        $invalidate->execute([':invalidated_at' => loginMysqlDateTime(getAuthoritativePhilippineUnixTimestamp()), ':challenge_id' => $challengeId]);
+        sendJson(['success' => false, 'error' => 'OTP service is unavailable. Please try again later.'], 503);
+    }
+
+    naapAuthRateRecordEvent($pdo, NAAP_AUTH_RATE_ACTION_OTP_SENT, $ipFingerprint, $identityFingerprint, $now);
+    return [
+        'challenge_id' => $challengeId,
+        'expires_at' => $expiresAt,
+        'email_sent_at' => $nowMysql,
+        'masked_email' => maskLoginSecurityEmail($recipientEmail),
+        'purpose' => $purpose,
     ];
 }
 
@@ -187,19 +442,17 @@ function cleanupExpiredPasswordResetTokens(PDO $pdo, int $now): int {
 }
 
 function logAuthenticationRateLimitCrossing(PDO $pdo, ?array $user, string $description): void {
-    try {
-        addActivityLogEntrySnapshot($pdo, [
-            'action' => 'Authentication Rate Limit Reached',
-            'description' => $description,
-            'type' => 'login',
+    naapAuditTryWrite($pdo, [
+        'eventCode' => 'auth.rate_limit.reached',
+        'action' => 'Authentication Rate Limit Reached',
+        'description' => $description,
+        'type' => 'login',
+        'actor' => [
+            'id' => trim((string)($user['id'] ?? ($user['user_id'] ?? ''))),
             'role' => trim((string)($user['role'] ?? ($user['role_code'] ?? ''))),
-            'user_id' => trim((string)($user['id'] ?? ($user['user_id'] ?? ''))),
-            'user' => '',
-            'email' => '',
-        ]);
-    } catch (Throwable $error) {
-        // Security logging is best-effort and must not change the response.
-    }
+        ],
+        'targetType' => $user ? 'user' : 'request_source',
+    ], 'audit.auth.rate_limit');
 }
 
 function enforceAuthenticationIpLimit(PDO $pdo, string $ipFingerprint, int $now): void {
@@ -271,19 +524,17 @@ function recordAuthenticationFailureOrLimit(
 function logSuspiciousLoginEvent(PDO $pdo, array $user, $action, $description) {
     $userIdToken = normalizeLoginSecurityUserKey($user['id'] ?? '');
     $role = trim((string) ($user['role'] ?? ''));
-    try {
-        addActivityLogEntrySnapshot($pdo, [
-            'action' => $action,
-            'description' => $description,
-            'type' => 'login',
-            'role' => $role,
-            'user_id' => $userIdToken,
-            'user' => trim((string) ($user['name'] ?? '')),
-            'email' => trim((string) ($user['email'] ?? '')),
-        ]);
-    } catch (Throwable $e) {
-        // Logging is best-effort only.
-    }
+    naapAuditTryWrite($pdo, [
+        'eventCode' => strtolower(trim((string) $action)) === 'suspicious otp attempts'
+            ? 'auth.otp.attempt_limit'
+            : 'auth.login.password_threshold',
+        'action' => $action,
+        'description' => $description,
+        'type' => 'login',
+        'actor' => ['id' => $userIdToken, 'role' => $role],
+        'targetType' => 'user',
+        'targetId' => $userIdToken,
+    ], 'audit.auth.suspicious');
 }
 
 function resolveSessionUserForResponse(PDO $pdo, $forceTouch = false) {
@@ -319,7 +570,14 @@ function buildSuccessfulAuthPayload(PDO $pdo, array $user, array $extra = []) {
             $startedTransaction = true;
         }
 
-        $canStartSession = requireNaapLoginCanStartActiveSession($pdo, $user['id'] ?? '', true, false);
+        $canStartSession = requireNaapLoginCanStartActiveSession(
+            $pdo,
+            $user['id'] ?? '',
+            true,
+            false,
+            $user['role'] ?? '',
+            true
+        );
         if (!$canStartSession) {
             if ($startedTransaction) {
                 $pdo->rollBack();
@@ -330,6 +588,15 @@ function buildSuccessfulAuthPayload(PDO $pdo, array $user, array $extra = []) {
 
         $csrfToken = establishNaapAuthenticatedSession($pdo, $user);
 
+        naapAuditWrite($pdo, [
+            'eventCode' => 'auth.login.succeeded',
+            'action' => 'Login',
+            'description' => 'A user successfully authenticated.',
+            'type' => 'login',
+            'actor' => ['id' => $user['id'] ?? '', 'role' => $user['role'] ?? ''],
+            'targetType' => 'session',
+        ]);
+
         if ($startedTransaction) {
             $pdo->commit();
         }
@@ -337,6 +604,7 @@ function buildSuccessfulAuthPayload(PDO $pdo, array $user, array $extra = []) {
         if ($startedTransaction && $pdo->inTransaction()) {
             $pdo->rollBack();
         }
+        destroyNaapSession();
         throw $error;
     }
 
@@ -412,20 +680,18 @@ function findPasswordResetAccount(PDO $pdo, $email, $identifier) {
 }
 
 function logPasswordResetEvent(PDO $pdo, array $user, $action, $description) {
-    try {
-        $userId = (int) ($user['user_id'] ?? ($user['id'] ?? 0));
-        addActivityLogEntrySnapshot($pdo, [
-            'action' => $action,
-            'description' => $description,
-            'type' => 'login',
-            'role' => trim((string) ($user['role_code'] ?? '')),
-            'user_id' => 'u' . $userId,
-            'user' => trim((string) ($user['name'] ?? '')),
-            'email' => trim((string) ($user['email'] ?? '')),
-        ]);
-    } catch (Throwable $e) {
-        // Logging is best-effort only.
-    }
+    $userId = (int) ($user['user_id'] ?? ($user['id'] ?? 0));
+    naapAuditTryWrite($pdo, [
+        'eventCode' => strtolower(trim((string) $action)) === 'password reset completed'
+            ? 'auth.password_reset.completed'
+            : 'auth.password_reset.requested',
+        'action' => $action,
+        'description' => $description,
+        'type' => 'login',
+        'actor' => ['id' => $userId, 'role' => trim((string) ($user['role_code'] ?? ''))],
+        'targetType' => 'user',
+        'targetId' => $userId > 0 ? ('u' . $userId) : '',
+    ], 'audit.password_reset');
 }
 
 function handlePasswordResetRequest(PDO $pdo, array $body) {
@@ -689,6 +955,7 @@ function handlePasswordResetConsume(PDO $pdo, array $body) {
         ]);
 
         persistLoginSecurityRecordSnapshot($pdo, $record['user_id'], []);
+        revokeTrustedDevicesSnapshot($pdo, $record['user_id'], $usedAt);
 
         $pdo->commit();
     } catch (Throwable $e) {
@@ -745,11 +1012,34 @@ if ($action === '') {
 }
 
 if ($action === 'logout') {
+    $logoutUserId = getNaapSessionUserId();
+    $logoutRole = getNaapSessionRole();
+    $auditRecorded = false;
+    $auditReference = '';
+    if ($logoutUserId !== '' && $logoutRole !== '') {
+        $auditRecorded = naapAuditTryWrite($pdo, [
+            'eventCode' => 'auth.logout',
+            'action' => 'Logout',
+            'description' => 'A user ended an authenticated session.',
+            'type' => 'login',
+            'actor' => ['id' => $logoutUserId, 'role' => $logoutRole],
+            'targetType' => 'session',
+        ], 'audit.auth.logout') !== null;
+        $auditReference = (string) ($GLOBALS['naap_last_audit_error_reference'] ?? '');
+    }
     destroyNaapSession($pdo);
-    sendJson([
+    $logoutPayload = [
         'success' => true,
         'authenticated' => false,
-    ]);
+        'auditRecorded' => $auditRecorded,
+    ];
+    if (!$auditRecorded && $logoutUserId !== '') {
+        $logoutPayload['warning'] = 'Logout completed, but its audit event could not be recorded.';
+        if ($auditReference !== '') {
+            $logoutPayload['reference'] = $auditReference;
+        }
+    }
+    sendJson($logoutPayload);
 }
 
 if ($action === 'heartbeat') {
@@ -771,7 +1061,7 @@ if ($action === 'resetpassword') {
     handlePasswordResetConsume($pdo, $body);
 }
 
-if ($action !== 'login' && $action !== 'verifyotp') {
+if ($action !== 'login' && $action !== 'verifyotp' && $action !== 'resendotp') {
     sendJson(['success' => false, 'error' => 'Invalid action'], 400);
 }
 
@@ -805,86 +1095,159 @@ $identityFingerprint = naapAuthRateUserIdentityFingerprint($user['id'] ?? 0);
 
 $status = normalizeLoginIdentityToken($user['status'] ?? 'active');
 if ($status !== 'active') {
+    naapAuditTryWrite($pdo, [
+        'eventCode' => 'auth.login.inactive_account',
+        'action' => 'Inactive Account Login Attempt',
+        'description' => 'Authentication was refused because the account is inactive.',
+        'type' => 'login',
+        'actor' => ['id' => $user['id'] ?? '', 'role' => $user['role'] ?? ''],
+        'targetType' => 'user',
+        'targetId' => $user['id'] ?? '',
+    ], 'audit.auth.inactive');
     recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
     sendJson(['success' => false, 'error' => 'Account is inactive'], 403);
 }
 
-$userKey = normalizeLoginSecurityUserKey($user['id'] ?? '');
-if ($userKey === '') {
+$userId = resolveLoginUserNumericId($user['id'] ?? '');
+if ($userId <= 0) {
     recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $submittedIdentityFingerprint, $now);
     sendJson(['success' => false, 'error' => 'Invalid credentials'], 401);
 }
 
-$record = buildLoginSecurityRecord(getLoginSecurityRecordSnapshot($pdo, $userKey));
-
-$challenge = is_array($record['otp_challenge'] ?? null) ? $record['otp_challenge'] : null;
-if ($challenge) {
-    $challengeExpiresTs = parseLoginTimestamp($challenge['expires_at'] ?? '');
-    if ($challengeExpiresTs <= $now) {
-        $record['otp_challenge'] = null;
-        $record['failed_password_count'] = 0;
-        $challenge = null;
-    }
-}
-
 if ($action === 'verifyotp') {
-    $otpChallengeId = trim((string) ($body['otpChallengeId'] ?? ''));
+    $otpChallengeId = strtolower(trim((string) ($body['otpChallengeId'] ?? '')));
     $otpCode = trim((string) ($body['otpCode'] ?? ''));
-    if (strlen($otpChallengeId) > 120 || strlen($otpCode) > 40) {
+    $deviceToken = readLoginDeviceToken($userId);
+    if (!preg_match('/^[a-f0-9]{64}$/', $otpChallengeId) || !preg_match('/^\d{6}$/', $otpCode) || $deviceToken === '') {
         recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
         sendJson(['success' => false, 'error' => 'Invalid OTP request.'], 400);
     }
 
-    if (!$challenge) {
-        $record['updated_at'] = getAuthoritativePhilippineIso8601();
-        persistLoginSecurityRecordSnapshot($pdo, $userKey, $record);
-        recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
+    $deviceHash = hashLoginDeviceToken($deviceToken);
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT * FROM login_otp_challenges
+             WHERE challenge_id = :challenge_id AND user_id = :user_id LIMIT 1 FOR UPDATE'
+        );
+        $stmt->execute([':challenge_id' => $otpChallengeId, ':user_id' => $userId]);
+        $challenge = $stmt->fetch();
+        $active = $challenge
+            && trim((string) ($challenge['consumed_at'] ?? '')) === ''
+            && trim((string) ($challenge['invalidated_at'] ?? '')) === ''
+            && parseLoginTimestamp($challenge['expires_at'] ?? '') > $now
+            && hash_equals((string) ($challenge['device_token_hash'] ?? ''), $deviceHash);
+        if (!$active) {
+            if ($challenge && trim((string) ($challenge['invalidated_at'] ?? '')) === '') {
+                $expire = $pdo->prepare('UPDATE login_otp_challenges SET invalidated_at = :at WHERE id = :id');
+                $expire->execute([':at' => loginMysqlDateTime($now), ':id' => (int) $challenge['id']]);
+            }
+            $pdo->commit();
+            recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
+            sendJson([
+                'success' => false,
+                'otpChallengeEnded' => true,
+                'error' => 'OTP challenge is invalid, expired, or already used. Please log in again.',
+            ], 401);
+        }
+
+        if (!password_verify($otpCode, (string) $challenge['otp_hash'])) {
+            $failedCount = max(0, (int) $challenge['failed_attempt_count']) + 1;
+            $invalidatedAt = $failedCount >= LOGIN_OTP_FAILURE_THRESHOLD ? loginMysqlDateTime($now) : null;
+            $update = $pdo->prepare(
+                'UPDATE login_otp_challenges
+                 SET failed_attempt_count = :failed_count, invalidated_at = :invalidated_at
+                 WHERE id = :id'
+            );
+            $update->bindValue(':failed_count', $failedCount, PDO::PARAM_INT);
+            $update->bindValue(':invalidated_at', $invalidatedAt, $invalidatedAt === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            $update->bindValue(':id', (int) $challenge['id'], PDO::PARAM_INT);
+            $update->execute();
+            $pdo->commit();
+            recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
+            if ($failedCount >= LOGIN_OTP_FAILURE_THRESHOLD) {
+                logSuspiciousLoginEvent($pdo, $user, 'Suspicious OTP Attempts', 'The OTP attempt limit was reached and the challenge was invalidated.');
+                sendJson([
+                    'success' => false,
+                    'otpChallengeEnded' => true,
+                    'error' => 'Too many invalid OTP attempts. Please log in again.',
+                ], 401);
+            }
+            $challenge['failed_attempt_count'] = $failedCount;
+            $challenge['masked_email'] = maskLoginSecurityEmail((string) ($user['email'] ?? ''));
+            sendJson(array_merge(buildOtpRequiredPayload($challenge), ['error' => 'Invalid OTP code.']), 401);
+        }
+
+        $consume = $pdo->prepare('UPDATE login_otp_challenges SET consumed_at = :at WHERE id = :id');
+        $consume->execute([':at' => loginMysqlDateTime($now), ':id' => (int) $challenge['id']]);
+        trustLoginDevice($pdo, $userId, $deviceHash, $now);
+        ensureUserAuthSecurityRow($pdo, $userId);
+        $verified = $pdo->prepare(
+            'UPDATE user_auth_security
+             SET first_otp_verified_at = COALESCE(first_otp_verified_at, :verified_at),
+                 failed_password_count = 0, failed_login_otp_required = 0
+             WHERE user_id = :user_id'
+        );
+        $verified->execute([':verified_at' => loginMysqlDateTime($now), ':user_id' => $userId]);
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
+
+    setLoginDeviceCookie($userId, $deviceToken, $now);
+    sendJson(buildSuccessfulAuthPayload($pdo, $user, [
+        'otpVerified' => true,
+        'message' => 'OTP verified. Logging you in now.',
+    ]));
+}
+
+if ($action === 'resendotp') {
+    $otpChallengeId = strtolower(trim((string) ($body['otpChallengeId'] ?? '')));
+    $deviceToken = readLoginDeviceToken($userId);
+    if (!preg_match('/^[a-f0-9]{64}$/', $otpChallengeId) || $deviceToken === '') {
+        sendJson(['success' => false, 'error' => 'Invalid OTP resend request.'], 400);
+    }
+    $stmt = $pdo->prepare(
+        'SELECT * FROM login_otp_challenges
+         WHERE challenge_id = :challenge_id AND user_id = :user_id
+           AND consumed_at IS NULL AND invalidated_at IS NULL AND expires_at > :now_value
+         LIMIT 1'
+    );
+    $stmt->execute([
+        ':challenge_id' => $otpChallengeId,
+        ':user_id' => $userId,
+        ':now_value' => loginMysqlDateTime($now),
+    ]);
+    $challenge = $stmt->fetch();
+    if (!$challenge || !hash_equals((string) $challenge['device_token_hash'], hashLoginDeviceToken($deviceToken))) {
         sendJson([
             'success' => false,
-            'error' => 'OTP challenge has expired. Please log in again.',
+            'otpChallengeEnded' => true,
+            'error' => 'OTP challenge is invalid or expired. Please log in again.',
         ], 401);
     }
-
-    $challengeId = trim((string) ($challenge['challenge_id'] ?? ''));
-    if ($challengeId === '' || $otpChallengeId === '' || !hash_equals($challengeId, $otpChallengeId)) {
-        recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
+    $sentAt = parseLoginTimestamp($challenge['email_sent_at'] ?? '');
+    if ($sentAt > 0 && ($sentAt + NAAP_AUTH_RATE_OTP_RESEND_COOLDOWN_SECONDS) > $now) {
+        $challenge['masked_email'] = maskLoginSecurityEmail((string) ($user['email'] ?? ''));
+        header('Retry-After: ' . (($sentAt + NAAP_AUTH_RATE_OTP_RESEND_COOLDOWN_SECONDS) - $now));
         sendJson(array_merge(buildOtpRequiredPayload($challenge), [
-            'error' => 'Invalid OTP challenge. Please use the latest code sent to your email.',
-        ]), 401);
+            'error' => 'Please wait before requesting another OTP.',
+        ]), 429);
     }
-
-    $otpHash = trim((string) ($challenge['otp_hash'] ?? ''));
-    $otpCheck = verifyPasswordForLogin($otpCode, $otpHash);
-    if (!empty($otpCheck['matched'])) {
-        $record['failed_password_count'] = 0;
-        $record['otp_challenge'] = null;
-        $record['updated_at'] = getAuthoritativePhilippineIso8601();
-        persistLoginSecurityRecordSnapshot($pdo, $userKey, $record);
-        sendJson(buildSuccessfulAuthPayload($pdo, $user, [
-            'otpVerified' => true,
-            'message' => 'OTP verified. Logging you in now.',
-        ]));
-    }
-
-    recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
-    $failedOtpCount = max(0, (int) ($challenge['failed_otp_count'] ?? 0)) + 1;
-    if ($failedOtpCount === LOGIN_OTP_FAILURE_THRESHOLD) {
-        logSuspiciousLoginEvent(
-            $pdo,
-            $user,
-            'Suspicious OTP Attempts',
-            'Multiple invalid OTP submissions reached the account warning threshold.'
-        );
-    }
-
-    $challenge['failed_otp_count'] = min($failedOtpCount, LOGIN_OTP_FAILURE_THRESHOLD);
-    $record['otp_challenge'] = $challenge;
-    $record['updated_at'] = getAuthoritativePhilippineIso8601();
-    persistLoginSecurityRecordSnapshot($pdo, $userKey, $record);
-
-    sendJson(array_merge(buildOtpRequiredPayload($challenge), [
-        'error' => 'Invalid OTP code.',
-    ]), 401);
+    $replacement = issueLoginOtpChallenge(
+        $pdo,
+        $user,
+        (string) $challenge['purpose'],
+        $deviceToken,
+        $ipFingerprint,
+        $identityFingerprint,
+        $now
+    );
+    sendJson(array_merge(buildOtpRequiredPayload($replacement), [
+        'message' => 'A new OTP was sent. The previous code is no longer valid.',
+        'otpResent' => true,
+    ]));
 }
 
 $passwordInput = $body['password'] ?? null;
@@ -894,107 +1257,69 @@ if (strlen($password) > 255) {
     sendJson(['success' => false, 'error' => 'Invalid credentials'], 400);
 }
 $password = strip_tags($password);
-
-$storedPassword = (string) ($user['password'] ?? '');
-$passwordCheck = verifyPasswordForLogin($password, $storedPassword);
-
-if ($challenge) {
-    if (empty($passwordCheck['matched'])) {
-        recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
-    }
-    $record['updated_at'] = getAuthoritativePhilippineIso8601();
-    persistLoginSecurityRecordSnapshot($pdo, $userKey, $record);
-    sendJson(buildOtpRequiredPayload($challenge), 401);
-}
+$passwordCheck = verifyPasswordForLogin($password, (string) ($user['password'] ?? ''));
 
 if (empty($passwordCheck['matched'])) {
     recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
-    $record['failed_password_count'] = max(0, (int) ($record['failed_password_count'] ?? 0)) + 1;
-    $record['updated_at'] = getAuthoritativePhilippineIso8601();
-
-    if ($record['failed_password_count'] >= LOGIN_PASSWORD_FAILURE_THRESHOLD) {
-        $recipientEmail = trim((string) ($user['email'] ?? ''));
-        $recipientName = trim((string) ($user['name'] ?? 'User'));
-        if ($recipientEmail === '' || !filter_var($recipientEmail, FILTER_VALIDATE_EMAIL)) {
-            persistLoginSecurityRecordSnapshot($pdo, $userKey, $record);
-            sendJson([
-                'success' => false,
-                'error' => 'Unable to complete OTP verification setup. Contact the administrator.',
-            ], 503);
-        }
-
-        try {
-            $smtpConfig = getCredentialDistributorSmtpConfigSnapshot($pdo);
-        } catch (Throwable $e) {
-            if (function_exists('isNaapSchemaMigrationRequiredException') && isNaapSchemaMigrationRequiredException($e)) {
-                sendNaapSchemaMigrationRequiredJson($e);
-            }
-            persistLoginSecurityRecordSnapshot($pdo, $userKey, $record);
-            sendJson([
-                'success' => false,
-                'error' => 'OTP service is unavailable. Contact the administrator.',
-            ], 503);
-        }
-
-        $otpCode = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-        $challenge = [
-            'challenge_id' => bin2hex(random_bytes(16)),
-            'otp_hash' => normalizePasswordForStorage($otpCode),
-            'expires_at' => formatPhilippineUnixTimestampIso($now + LOGIN_OTP_EXPIRY_SECONDS),
-            'failed_otp_count' => 0,
-            'masked_email' => maskLoginSecurityEmail($recipientEmail),
-            'created_at' => getAuthoritativePhilippineIso8601(),
-        ];
-
-        try {
-            credentialMailerSendOtp($smtpConfig, [
-                'recipientEmail' => $recipientEmail,
-                'recipientName' => $recipientName,
-                'otpCode' => $otpCode,
-                'expiresMinutes' => 10,
-            ]);
-        } catch (Throwable $e) {
-            persistLoginSecurityRecordSnapshot($pdo, $userKey, $record);
-            sendJson([
-                'success' => false,
-                'error' => 'OTP service is unavailable. Please try again later.',
-            ], 503);
-        }
-
-        $record['failed_password_count'] = LOGIN_PASSWORD_FAILURE_THRESHOLD;
-        $record['otp_challenge'] = $challenge;
-        $record['updated_at'] = getAuthoritativePhilippineIso8601();
-        persistLoginSecurityRecordSnapshot($pdo, $userKey, $record);
-
+    $security = recordFailedPasswordState($pdo, $userId);
+    if ((int) ($security['failed_password_count'] ?? 0) === LOGIN_PASSWORD_FAILURE_THRESHOLD) {
         logSuspiciousLoginEvent(
             $pdo,
             $user,
             'Suspicious Login Attempt',
-            'Multiple failed password attempts triggered mandatory OTP verification.'
+            'Multiple failed password attempts made OTP mandatory after the next correct password.'
         );
-
-        sendJson(buildOtpRequiredPayload($challenge), 401);
     }
-
-    persistLoginSecurityRecordSnapshot($pdo, $userKey, $record);
     sendJson(['success' => false, 'error' => 'Invalid username or password'], 401);
 }
 
-$needsPasswordUpgrade = !empty($passwordCheck['needs_migration']) || !empty($passwordCheck['needs_rehash']);
-$upgradeUserId = resolveLoginUserNumericId($user['id'] ?? '');
-if ($needsPasswordUpgrade && $upgradeUserId > 0) {
+if (!empty($passwordCheck['needs_migration']) || !empty($passwordCheck['needs_rehash'])) {
     try {
-        $upgradedHash = normalizePasswordForStorage($password);
         $stmtUpgrade = $pdo->prepare('UPDATE users SET password = :password WHERE id = :id');
-        $stmtUpgrade->execute([
-            ':password' => $upgradedHash,
-            ':id' => $upgradeUserId,
-        ]);
-    } catch (Throwable $e) {
+        $stmtUpgrade->execute([':password' => normalizePasswordForStorage($password), ':id' => $userId]);
+    } catch (Throwable $error) {
         // Best-effort lazy migration: do not block successful login.
     }
 }
 
-persistLoginSecurityRecordSnapshot($pdo, $userKey, []);
+$userRole = normalizeLoginIdentityToken($user['role'] ?? '');
+requireNaapLoginCanStartActiveSession($pdo, $userId, false, true, $userRole);
 
-sendJson(buildSuccessfulAuthPayload($pdo, $user));
+$security = getUserAuthSecurityRow($pdo, $userId);
+$failedLoginOtpRequired = !empty($security['failed_login_otp_required']);
+if (!$failedLoginOtpRequired && (int) ($security['failed_password_count'] ?? 0) > 0) {
+    $clearPasswordFailures = $pdo->prepare(
+        'UPDATE user_auth_security SET failed_password_count = 0 WHERE user_id = :user_id'
+    );
+    $clearPasswordFailures->execute([':user_id' => $userId]);
+}
+$deviceToken = readLoginDeviceToken($userId);
+$deviceTrusted = isLoginDeviceTrusted($pdo, $userId, $deviceToken, $now);
+$deviceOtpRequired = $userRole !== 'admin' && getTrustedDeviceOtpEnabled($pdo) && !$deviceTrusted;
+
+if (!$failedLoginOtpRequired && !$deviceOtpRequired) {
+    invalidateActiveLoginOtpChallenges($pdo, $userId, $now);
+    resetFailedPasswordState($pdo, $userId);
+    sendJson(buildSuccessfulAuthPayload($pdo, $user));
+}
+
+if ($deviceToken === '' || !$deviceTrusted) {
+    $deviceToken = mintLoginDeviceToken($userId, $now);
+}
+$deviceHash = hashLoginDeviceToken($deviceToken);
+$purpose = $failedLoginOtpRequired ? 'failed_login' : 'device_verification';
+$existingChallenge = findActiveOtpChallenge($pdo, $userId, $deviceHash, $now);
+if ($existingChallenge && (string) ($existingChallenge['purpose'] ?? '') === $purpose) {
+    $existingChallenge['masked_email'] = maskLoginSecurityEmail((string) ($user['email'] ?? ''));
+    sendJson(buildOtpRequiredPayload($existingChallenge), 401);
+}
+$challenge = issueLoginOtpChallenge(
+    $pdo,
+    $user,
+    $purpose,
+    $deviceToken,
+    $ipFingerprint,
+    $identityFingerprint,
+    $now
+);
+sendJson(buildOtpRequiredPayload($challenge), 401);

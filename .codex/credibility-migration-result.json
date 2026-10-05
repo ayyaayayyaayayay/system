@@ -1,0 +1,17 @@
+{
+    "status": "PASS",
+    "migration": "evaluation_credibility_review_v1",
+    "repeatSafe": true,
+    "originalRowsAndFieldsPreserved": {
+        "users": 1100,
+        "evaluations": 40,
+        "evaluation_responses": 640
+    },
+    "decisions": [
+        {
+            "credibility_status": "AUTO_ACCEPTED",
+            "total": 40
+        }
+    ],
+    "historicalTimingAbsent": 40
+}

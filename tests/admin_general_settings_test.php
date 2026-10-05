@@ -30,6 +30,25 @@ $pdo->exec(
         setting_value TEXT NULL
     )'
 );
+$pdo->exec(
+    'CREATE TABLE activity_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NULL,
+        log_code TEXT NOT NULL UNIQUE,
+        event_code TEXT NOT NULL,
+        actor_role TEXT NOT NULL DEFAULT "",
+        action TEXT NOT NULL,
+        description TEXT NOT NULL,
+        entry_type TEXT NOT NULL,
+        target_type TEXT NOT NULL DEFAULT "",
+        target_id TEXT NOT NULL DEFAULT "",
+        related_log_code TEXT NULL,
+        ip_address TEXT NOT NULL DEFAULT "",
+        request_method TEXT NOT NULL DEFAULT "",
+        request_path TEXT NOT NULL DEFAULT "",
+        happened_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )'
+);
 
 setSettingJson($pdo, 'sharedSettings', [
     'institutionName' => 'Stored Institution',
@@ -63,6 +82,18 @@ generalSettingsAssert(
         && ($settings['mainCampus'] ?? '') === 'basa',
     'Saved non-email general settings must remain intact.'
 );
+generalSettingsAssert(
+    ($settings['trustedDeviceOtpEnabled'] ?? null) === true,
+    'First-login and new-device OTP must default to enabled.'
+);
+$disabledOtpSettings = persistSettingsSnapshot($pdo, array_merge($settings, [
+    'trustedDeviceOtpEnabled' => false,
+]));
+generalSettingsAssert(
+    ($disabledOtpSettings['trustedDeviceOtpEnabled'] ?? true) === false
+        && (buildSettingsSnapshot($pdo)['trustedDeviceOtpEnabled'] ?? true) === false,
+    'The administrator OTP policy toggle did not persist.'
+);
 
 $root = dirname(__DIR__);
 $html = (string) file_get_contents($root . '/html/adminpanel.html');
@@ -92,9 +123,20 @@ generalSettingsAssert(
 );
 generalSettingsAssert(
     str_contains($appState, "unset(\$partial['systemEmail']);")
-        && str_contains($html, 'db-data.js?v=20260925a')
-        && str_contains($html, 'adminpanel.js?v=20260926a'),
+        && str_contains($html, 'db-data.js?v=20261004a')
+        && str_contains($html, 'adminpanel.js?v=20261003a'),
     'Clients must not override SMTP-derived System Email and updated assets must be cache-busted.'
+);
+generalSettingsAssert(
+    str_contains($html, 'id="trusted-device-otp-enabled"')
+        && str_contains($html, 'id="otp-security-save-btn"')
+        && str_contains($panel, 'trustedDeviceOtpEnabled: trustedDeviceOtpInput.checked')
+        && str_contains($appState, "array_key_exists('trustedDeviceOtpEnabled', \$partial)"),
+    'Admin settings must expose and strictly persist the trusted-device OTP toggle.'
+);
+generalSettingsAssert(
+    strpos($html, 'Session Timeout (30 minutes)') < strpos($html, 'id="otp-security-save-btn"'),
+    'The security save action must appear after both security settings.'
 );
 
 echo 'Admin general-settings tests passed (' . $assertions . ' assertions).' . PHP_EOL;

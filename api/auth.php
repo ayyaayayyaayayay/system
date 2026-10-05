@@ -122,7 +122,15 @@ function isNaapActiveSessionRecordForToken(array $record, $sessionToken) {
     return $storedHash !== '' && $tokenHash !== '' && hash_equals($storedHash, $tokenHash);
 }
 
-function isNaapActiveSessionRecordExpired(array $record, DateTimeImmutable $now = null) {
+function isNaapRoleExemptFromIdleTimeout($role) {
+    return strtolower(trim((string) $role)) === 'admin';
+}
+
+function isNaapActiveSessionRecordExpired(array $record, DateTimeImmutable $now = null, $role = '') {
+    if (isNaapRoleExemptFromIdleTimeout($role)) {
+        return false;
+    }
+
     $storedHash = trim((string) ($record['active_session_token_hash'] ?? ''));
     if ($storedHash === '') {
         return true;
@@ -196,13 +204,13 @@ function touchNaapActiveSession(PDO $pdo, $userId, $sessionToken, DateTimeImmuta
     $_SESSION[NAAP_ACTIVE_SESSION_TOUCH_KEY] = $currentUnix;
 }
 
-function isNaapSessionCurrentForUser(PDO $pdo, $userId, $sessionToken) {
+function isNaapSessionCurrentForUser(PDO $pdo, $userId, $sessionToken, $role = '') {
     $record = getNaapActiveSessionRecord($pdo, $userId);
     if (!$record || !isNaapActiveSessionRecordForToken($record, $sessionToken)) {
         return false;
     }
 
-    if (isNaapActiveSessionRecordExpired($record)) {
+    if (isNaapActiveSessionRecordExpired($record, null, $role)) {
         clearNaapUserActiveSession($pdo, $userId, $sessionToken);
         return false;
     }
@@ -258,7 +266,14 @@ function sendNaapActiveSessionConflictResponse() {
     ], 409);
 }
 
-function requireNaapLoginCanStartActiveSession(PDO $pdo, $userId, $forUpdate = false, $sendResponse = true) {
+function requireNaapLoginCanStartActiveSession(
+    PDO $pdo,
+    $userId,
+    $forUpdate = false,
+    $sendResponse = true,
+    $role = '',
+    $replaceAdminSession = false
+) {
     $record = getNaapActiveSessionRecord($pdo, $userId, $forUpdate);
     if (!$record || trim((string) ($record['active_session_token_hash'] ?? '')) === '') {
         return true;
@@ -269,7 +284,14 @@ function requireNaapLoginCanStartActiveSession(PDO $pdo, $userId, $forUpdate = f
         return true;
     }
 
-    if (isNaapActiveSessionRecordExpired($record)) {
+    if (isNaapRoleExemptFromIdleTimeout($role)) {
+        if ($replaceAdminSession) {
+            clearNaapUserActiveSessionByUserId($pdo, $userId);
+        }
+        return true;
+    }
+
+    if (isNaapActiveSessionRecordExpired($record, null, $role)) {
         clearNaapUserActiveSessionByUserId($pdo, $userId);
         return true;
     }
@@ -334,7 +356,7 @@ function isNaapAuthenticatedSession(PDO $pdo = null) {
     }
 
     if ($pdo instanceof PDO) {
-        return isNaapSessionCurrentForUser($pdo, $userId, getNaapActiveSessionToken());
+        return isNaapSessionCurrentForUser($pdo, $userId, getNaapActiveSessionToken(), $role);
     }
 
     return true;
@@ -364,7 +386,7 @@ function requireNaapAuthenticatedSession(PDO $pdo = null, $forceTouch = false) {
             ], 401);
         }
 
-        if (isNaapActiveSessionRecordExpired($record)) {
+        if (isNaapActiveSessionRecordExpired($record, null, $role)) {
             destroyNaapSession($pdo);
             sendJson([
                 'success' => false,

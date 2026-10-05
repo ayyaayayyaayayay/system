@@ -63,10 +63,18 @@ $pdo->exec('CREATE TABLE profile_photos (user_id INTEGER PRIMARY KEY)');
 $pdo->exec('CREATE TABLE activity_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
+    log_code TEXT UNIQUE,
+    event_code TEXT NOT NULL DEFAULT "legacy.activity",
+    actor_role TEXT NOT NULL DEFAULT "",
     action TEXT,
     description TEXT,
     entry_type TEXT,
+    target_type TEXT NOT NULL DEFAULT "",
+    target_id TEXT NOT NULL DEFAULT "",
+    related_log_code TEXT,
     ip_address TEXT,
+    request_method TEXT NOT NULL DEFAULT "",
+    request_path TEXT NOT NULL DEFAULT "",
     happened_at TEXT
 )');
 

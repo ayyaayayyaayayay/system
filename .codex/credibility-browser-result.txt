@@ -1,0 +1,1 @@
+PASS: HR page, automatic queue, Check All/uncheck two/Accept eight, reload, individual reject, filters, anonymous N/A detail, desktop/mobile layout.

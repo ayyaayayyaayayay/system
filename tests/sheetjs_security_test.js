@@ -77,7 +77,7 @@ assert.equal(
     'Vendored SheetJS bytes must match the official distribution.'
 );
 assert(adminHtml.includes('xlsx.full.min.js?v=0.20.3'), 'Admin HTML must cache-bust the approved SheetJS release.');
-assert(adminHtml.includes('adminpanel.js?v=20260928b'), 'Admin HTML must load the hardened import code.');
+assert(adminHtml.includes('adminpanel.js?v=20261003a'), 'Admin HTML must load the hardened import code.');
 assert(adminSource.includes('xlsx.full.min.js?v=${SHEETJS_REQUIRED_VERSION}'), 'Worker must load the versioned local asset.');
 assert(adminSource.includes("kind: 'infrastructure'") && adminSource.includes("kind: 'parse'"), 'Worker failures must distinguish infrastructure from parsing errors.');
 assert(!adminSource.includes('parseExcelRowsOnMainThread'), 'Untrusted workbooks must never be parsed on the main UI thread.');
@@ -108,7 +108,7 @@ function readFixture(name) {
 }
 
 const fixtureExpectations = [
-    ['bulk.xlsx', 200],
+    ['bulk.xlsx', 1100],
     ['subject.xlsx', 18],
     ['subjectassign.xlsx', 54],
     ['excess sample.xlsx', 8]
@@ -167,7 +167,7 @@ function runInlineWorker(arrayBuffer, options = {}) {
 
 const workerSuccess = runInlineWorker(bulkFixtureArrayBuffer);
 assert.equal(workerSuccess.success, true, 'Worker must parse a valid XLSX workbook.');
-assert.equal(workerSuccess.matrix.length, 201, 'Worker matrix must include one header and 200 bulk-user rows.');
+assert.equal(workerSuccess.matrix.length, 1101, 'Worker matrix must include one header and 1,100 bulk-user rows.');
 
 const malformedBytes = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 const malformedArrayBuffer = malformedBytes.buffer.slice(
@@ -301,7 +301,7 @@ assert.deepEqual(
         email: 'admin.alexis.navarro@naap.edu.ph',
         role: 'admin',
         campus: 'villamor',
-        password: '123',
+        password: '12345678',
         department: 'ICS',
         employeeId: 'admin',
         employmentType: 'Regular',
@@ -321,7 +321,7 @@ assert.deepEqual(
         role: 'admin',
         campus: 'villamor',
         employee: '',
-        password: '123'
+        password: '12345678'
     },
     'Credential-distributor fields must retain their canonical mappings.'
 );

@@ -117,10 +117,17 @@ function clearanceFixture(): PDO
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NULL,
             log_code TEXT NULL UNIQUE,
+            event_code TEXT NOT NULL DEFAULT "legacy.activity",
+            actor_role TEXT NOT NULL DEFAULT "",
             action TEXT NOT NULL,
             description TEXT NOT NULL,
             entry_type TEXT NOT NULL DEFAULT "system",
+            target_type TEXT NOT NULL DEFAULT "",
+            target_id TEXT NOT NULL DEFAULT "",
+            related_log_code TEXT NULL,
             ip_address TEXT NOT NULL DEFAULT "",
+            request_method TEXT NOT NULL DEFAULT "",
+            request_path TEXT NOT NULL DEFAULT "",
             happened_at TEXT NOT NULL
         );'
     );

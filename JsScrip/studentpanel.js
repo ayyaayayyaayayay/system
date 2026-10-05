@@ -157,6 +157,7 @@ function initializeDashboard() {
 
         if (key === SharedData.KEYS.SETTINGS || key === 'profileData') {
             loadUserInfo();
+            populateHistoryAcademicYearOptions();
         }
 
         if (
@@ -176,6 +177,12 @@ function initializeDashboard() {
             renderStudentAnnouncements();
             refreshStudentProofRequirement();
             renderStudentClearance();
+            populateHistoryAcademicYearOptions();
+        }
+
+        if (key === SharedData.KEYS.SEMESTER_LIST) {
+            loadUserInfo();
+            populateHistoryAcademicYearOptions();
         }
 
         if (key === SharedData.KEYS.ANNOUNCEMENTS) {
@@ -531,6 +538,7 @@ function getStudentEvaluationAssignmentState() {
     const periodDates = SharedData.getEvalPeriodDates
         ? SharedData.getEvalPeriodDates('student-professor')
         : { start: '', end: '' };
+    const questionnaireAvailable = hasStudentQuestionnaireForSemester(semesterId);
 
     if (!currentStudent || !currentStudent.id) {
         return {
@@ -605,7 +613,10 @@ function getStudentEvaluationAssignmentState() {
     const pendingRows = assignedRows.filter(row => !row.submitted);
     const totalAssigned = assignedRows.length;
     const completedCount = completedRows.length;
-    const canAccessEvaluationForm = periodOpen && totalAssigned > 0 && pendingRows.length > 0;
+    const canAccessEvaluationForm = periodOpen
+        && questionnaireAvailable
+        && totalAssigned > 0
+        && pendingRows.length > 0;
 
     let message = '';
     if (!periodOpen) {
@@ -618,6 +629,8 @@ function getStudentEvaluationAssignmentState() {
         message = 'No assigned evaluations for the current semester yet.';
     } else if (!pendingRows.length) {
         message = 'You have completed all assigned professor evaluations for this semester.';
+    } else if (!questionnaireAvailable) {
+        message = 'No Student to Professor questionnaire is configured for the current semester.';
     } else {
         message = 'Select a pending professor evaluation from the Dashboard.';
     }
@@ -635,7 +648,8 @@ function getStudentEvaluationAssignmentState() {
         message,
         currentStudent,
         studentIdentity,
-        semesterId
+        semesterId,
+        questionnaireAvailable
     };
 }
 
@@ -781,16 +795,31 @@ function getStudentQuestionnaireForSemester(semesterId) {
     const semesterKey = String(semesterId || '').trim();
     const currentSemester = (SharedData.getCurrentSemester && SharedData.getCurrentSemester()) || '';
 
-    let bucket = questionnaires[semesterKey];
-    if (!bucket && currentSemester) {
-        bucket = questionnaires[currentSemester];
-    }
-    if (!bucket) {
-        const latestKey = Object.keys(questionnaires).sort().reverse()[0];
-        if (latestKey) bucket = questionnaires[latestKey];
-    }
+    const bucket = semesterKey
+        ? questionnaires[semesterKey]
+        : (currentSemester ? questionnaires[currentSemester] : null);
 
     return (bucket && bucket['student-to-professor']) || { sections: [], questions: [] };
+}
+
+function hasStudentQuestionnaireForSemester(semesterId) {
+    const questionnaire = getStudentQuestionnaireForSemester(semesterId);
+    return Array.isArray(questionnaire.questions) && questionnaire.questions.length > 0;
+}
+
+function resolveCurrentStudentAcademicYear() {
+    const currentSemester = (SharedData.getCurrentSemester && SharedData.getCurrentSemester()) || '';
+    const semesterList = (SharedData.getSemesterList && SharedData.getSemesterList()) || [];
+    const currentSemesterRow = (Array.isArray(semesterList) ? semesterList : []).find(function (item) {
+        return item && normalizeValue(item.value) === normalizeValue(currentSemester);
+    });
+    const fromCurrentSemester = extractAcademicYear(currentSemester)
+        || extractAcademicYear(currentSemesterRow && currentSemesterRow.label)
+        || extractAcademicYear(currentSemesterRow && currentSemesterRow.value);
+    if (fromCurrentSemester) return fromCurrentSemester;
+
+    const settings = (SharedData.getSettings && SharedData.getSettings()) || {};
+    return String(settings.academicYear || '').trim();
 }
 
 function buildHistoryQuestionMeta(questionnaire) {
@@ -930,7 +959,7 @@ function loadUserInfo() {
                 session.username,
                 'Student'
             );
-            const academicYear = (SharedData.getSettings && SharedData.getSettings().academicYear) || '2025-2026';
+            const academicYear = resolveCurrentStudentAcademicYear() || 'N/A';
             const yearSection = firstNonEmptyValue(
                 studentUser && studentUser.yearSection,
                 profileData && profileData.yearSection
@@ -2160,18 +2189,9 @@ function loadDynamicQuestionnaire() {
 
     console.log('[Student] loadDynamicQuestionnaire — semester:', JSON.stringify(currentSemester), '| available keys:', Object.keys(questionnaires));
 
-    let data = null;
-    if (currentSemester && questionnaires[currentSemester]) {
-        data = questionnaires[currentSemester];
-    } else {
-        // Find latest available semester as fallback
-        const semesters = Object.keys(questionnaires).sort().reverse();
-        if (semesters.length > 0) {
-            data = questionnaires[semesters[0]];
-        } else {
-            data = {};
-        }
-    }
+    const data = currentSemester && questionnaires[currentSemester]
+        ? questionnaires[currentSemester]
+        : {};
 
     const questionnaire = data['student-to-professor'] || { sections: [], questions: [], header: {} };
     updateEvaluationTargetIndicator();
@@ -2199,6 +2219,12 @@ function loadDynamicQuestionnaire() {
                 <p>No evaluation questionnaire available for this semester.</p>
             </div>
         `;
+        evaluationSectionFlow.sections = [];
+        evaluationSectionFlow.activeIndex = 0;
+        const submitBtn = document.querySelector('#evaluationForm .btn-submit');
+        const saveDraftBtn = document.getElementById('saveDraftBtn');
+        if (submitBtn) submitBtn.disabled = true;
+        if (saveDraftBtn) saveDraftBtn.disabled = true;
         return;
     }
 
@@ -2371,7 +2397,12 @@ function startEvaluationBehaviorCapture(force) {
 
     if (shouldReset) {
         evaluationBehaviorCapture.captureKey = captureKey;
-        evaluationBehaviorCapture.startedAt = SharedData.getNowIsoString();
+        let saved = '';
+        try { saved = sessionStorage.getItem('evaluationBehavior:' + captureKey) || ''; } catch (_) {}
+        const age = Date.now() - Date.parse(saved);
+        evaluationBehaviorCapture.startedAt = Number.isFinite(age) && age >= 0 && age < 86400000
+            ? saved : SharedData.getNowIsoString();
+        try { sessionStorage.setItem('evaluationBehavior:' + captureKey, evaluationBehaviorCapture.startedAt); } catch (_) {}
     }
 }
 
@@ -2427,13 +2458,9 @@ function getCurrentQuestionnaireForDraft() {
     const currentSemester = SharedData.getCurrentSemester && SharedData.getCurrentSemester();
     const questionnaires = (SharedData.getQuestionnaires && SharedData.getQuestionnaires()) || {};
 
-    let data = null;
-    if (currentSemester && questionnaires[currentSemester]) {
-        data = questionnaires[currentSemester];
-    } else {
-        const semesters = Object.keys(questionnaires).sort().reverse();
-        data = semesters.length ? questionnaires[semesters[0]] : {};
-    }
+    const data = currentSemester && questionnaires[currentSemester]
+        ? questionnaires[currentSemester]
+        : {};
 
     return data && data['student-to-professor'] ? data['student-to-professor'] : { sections: [], questions: [], header: {} };
 }
@@ -3040,11 +3067,12 @@ function renderQuestionHTML(question, index) {
         const isBaseRequired = !!question.required;
         const hasExceptionReporting = !!question.exceptionReporting;
         const isInitiallyRequired = isBaseRequired;
+        const maxLength = Math.max(1, parseInt(question.maxLength, 10) || 500);
         const requiredMarker = `<span class="question-required-star" style="color:red;${isInitiallyRequired ? '' : ' display:none;'}">*</span>`;
         return `
             <div class="question-group">
                 <label class="question-label" for="${questionIdAttr}">${index}. ${questionText} ${requiredMarker}</label>
-                <textarea id="${questionIdAttr}" name="${questionIdAttr}" class="form-textarea" rows="4" placeholder="Your answer..." ${isInitiallyRequired ? 'required' : ''} data-base-required="${isBaseRequired ? '1' : '0'}" data-exception-reporting="${hasExceptionReporting ? '1' : '0'}"></textarea>
+                <textarea id="${questionIdAttr}" name="${questionIdAttr}" class="form-textarea" rows="4" maxlength="${maxLength}" placeholder="Your answer..." ${isInitiallyRequired ? 'required' : ''} data-base-required="${isBaseRequired ? '1' : '0'}" data-exception-reporting="${hasExceptionReporting ? '1' : '0'}"></textarea>
             </div>
         `;
     }
@@ -3228,6 +3256,7 @@ function setupSectionFlow() {
             if (!validateCurrentStep()) return;
             persistEvaluationDraft({ silent: true, source: 'step-nav' });
             goToSectionStep(evaluationSectionFlow.activeIndex + 1);
+            window.scrollTo(0, 0);
         };
     }
 
@@ -3502,6 +3531,8 @@ function setupHistoryView() {
         return;
     }
 
+    populateHistoryAcademicYearOptions();
+
     const applyFilters = () => {
         const filters = {
             ay: aySelect.value,
@@ -3530,6 +3561,38 @@ function setupHistoryView() {
 
     // Initial load
     applyFilters();
+}
+
+function populateHistoryAcademicYearOptions() {
+    const aySelect = document.getElementById('historyAy');
+    if (!aySelect) return;
+
+    const previousValue = String(aySelect.value || 'all');
+    const years = new Set();
+    const addYear = function (value) {
+        const year = extractAcademicYear(value);
+        if (year) years.add(year);
+    };
+
+    addYear(resolveCurrentStudentAcademicYear());
+    addYear(SharedData.getCurrentSemester && SharedData.getCurrentSemester());
+
+    const semesterList = (SharedData.getSemesterList && SharedData.getSemesterList()) || [];
+    (Array.isArray(semesterList) ? semesterList : []).forEach(function (item) {
+        addYear(item && item.value);
+        addYear(item && item.label);
+    });
+
+    const evaluations = (SharedData.getEvaluations && SharedData.getEvaluations()) || [];
+    (Array.isArray(evaluations) ? evaluations : []).forEach(function (record) {
+        addYear(record && record.semesterId);
+    });
+
+    const sortedYears = Array.from(years).sort().reverse();
+    aySelect.innerHTML = '<option value="all">All</option>' + sortedYears.map(function (year) {
+        return `<option value="${escapeAttr(year)}">${escapeHtml(year)}</option>`;
+    }).join('');
+    aySelect.value = previousValue === 'all' || years.has(previousValue) ? previousValue : 'all';
 }
 
 let cachedHistoryRecords = [];
@@ -3799,47 +3862,41 @@ function handleFormSubmission() {
     submitBtn.disabled = true;
     submitBtn.textContent = 'Submitting...';
 
-    // Simulate API call (replace with actual API call)
-    setTimeout(() => {
-        // Submit to API
-        submitEvaluation(formData)
-            .then(response => {
-                showSuccessMessage('Evaluation submitted successfully!');
-                // Reset form after short delay
-                setTimeout(async () => {
-                    await clearCurrentEvaluationDraft({ silent: true });
-                    form.reset();
-                    clearSelectedEvaluationTarget();
-                    updateEvaluationTargetIndicator();
-                    submitBtn.disabled = false;
-                    submitBtn.textContent = originalText;
-                    const ayEl = document.getElementById('historyAy');
-                    const semEl = document.getElementById('historySem');
-                    const termEl = document.getElementById('historySearch');
-                    loadHistory({
-                        ay: ayEl ? ayEl.value : 'all',
-                        sem: semEl ? semEl.value : 'all',
-                        term: termEl ? termEl.value.trim() : ''
-                    });
-                    // Switch back to dashboard
-                    switchView('dashboard');
-                    updateNavigation('dashboard');
-                    refreshEvaluationStatuses();
-                    updateSummaryCards();
-                    updateEvaluationAvailabilityUi();
-                }, 2000);
-            })
-            .catch(error => {
-                const errorMessage = error && error.message ? String(error.message) : '';
-                if (errorMessage.toLowerCase().includes('inactive')) {
-                    enforceActiveStudentAccount({ inline: true });
-                } else {
-                    showErrorMessage(errorMessage || 'Failed to submit evaluation. Please try again.');
-                }
-                submitBtn.disabled = false;
-                submitBtn.textContent = originalText;
+    // Submit immediately; advance only after the server confirms the save.
+    submitEvaluation(formData)
+        .then(async () => {
+            showSuccessMessage('Evaluation submitted successfully!');
+            await clearCurrentEvaluationDraft({ silent: true });
+            form.reset();
+            clearSelectedEvaluationTarget();
+            updateEvaluationTargetIndicator();
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+            const ayEl = document.getElementById('historyAy');
+            const semEl = document.getElementById('historySem');
+            const termEl = document.getElementById('historySearch');
+            loadHistory({
+                ay: ayEl ? ayEl.value : 'all',
+                sem: semEl ? semEl.value : 'all',
+                term: termEl ? termEl.value.trim() : ''
             });
-    }, 1500);
+            // Switch back to dashboard
+            switchView('dashboard');
+            updateNavigation('dashboard');
+            refreshEvaluationStatuses();
+            updateSummaryCards();
+            updateEvaluationAvailabilityUi();
+        })
+        .catch(error => {
+            const errorMessage = error && error.message ? String(error.message) : '';
+            if (errorMessage.toLowerCase().includes('inactive')) {
+                enforceActiveStudentAccount({ inline: true });
+            } else {
+                showErrorMessage(errorMessage || 'Failed to submit evaluation. Please try again.');
+            }
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+        });
 }
 
 /**
@@ -3927,25 +3984,7 @@ function submitEvaluation(data) {
         : Promise.reject(new Error('Asynchronous evaluation submission is unavailable.'));
 
     return saveEvaluation.then(function () {
-        const logEntry = {
-            type: 'evaluation_submitted',
-            title: 'Evaluation Submitted',
-            user: evaluatorData.evaluatorName,
-            role: 'student',
-            date: SharedData.getNowIsoString()
-        };
-        const saveLog = SharedData.addActivityLogEntryAsync
-            ? SharedData.addActivityLogEntryAsync(logEntry)
-            : Promise.reject(new Error('Asynchronous activity logging is unavailable.'));
-        return saveLog.catch(function () {
-            return null;
-        });
-    }).then(function () {
-        return new Promise(function (resolve) {
-            setTimeout(function () {
-                resolve({ success: true, message: 'Evaluation submitted successfully to local database' });
-            }, 600);
-        });
+        return { success: true, message: 'Evaluation submitted successfully to local database' };
     });
 }
 
@@ -4001,6 +4040,7 @@ function updateEvaluationTargetIndicator() {
         ? isSubmittedEvaluation(studentId, semesterId, targetParts.professorName, studentIdentity, selectedOfferingId, targetParts.subjectCode)
         : false;
     const hasPrivacyConsent = hasCurrentStudentPrivacyConsent();
+    const hasQuestionnaire = hasStudentQuestionnaireForSemester(semesterId);
 
     if (textEl) {
         textEl.textContent = selectedTarget || 'No professor selected yet';
@@ -4009,10 +4049,10 @@ function updateEvaluationTargetIndicator() {
         hiddenEl.value = selectedTarget || '';
     }
     if (submitBtn) {
-        submitBtn.disabled = !selectedTarget || isLocked || !hasPrivacyConsent;
+        submitBtn.disabled = !selectedTarget || isLocked || !hasPrivacyConsent || !hasQuestionnaire;
     }
     if (saveDraftBtn) {
-        saveDraftBtn.disabled = !selectedTarget || isLocked || !hasPrivacyConsent;
+        saveDraftBtn.disabled = !selectedTarget || isLocked || !hasPrivacyConsent || !hasQuestionnaire;
     }
     if (!selectedTarget) {
         updateDraftStatusIndicator({ state: 'idle' });
@@ -4034,6 +4074,7 @@ function clearSelectedEvaluationTarget() {
     sessionStorage.removeItem('selectedProfessor');
     sessionStorage.removeItem('selectedCourse');
     sessionStorage.removeItem('selectedCourseOfferingId');
+    try { sessionStorage.removeItem('evaluationBehavior:' + evaluationBehaviorCapture.captureKey); } catch (_) {}
     resetEvaluationBehaviorCapture();
 }
 

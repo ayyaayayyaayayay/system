@@ -86,6 +86,9 @@ $preservedBlank = resolveManagedUserPasswordForWrite(['password' => ''], $existi
 passwordTestAssert($preservedMissing['storedPassword'] === $firstHash, 'An omitted update password changed the stored hash.');
 passwordTestAssert($preservedBlank['storedPassword'] === $firstHash, 'A blank edit placeholder changed the stored hash.');
 passwordTestAssert(empty($preservedMissing['changed']) && empty($preservedBlank['changed']), 'A preserved password was marked as changed.');
+$preservedMatching = resolveManagedUserPasswordForWrite(['password' => 'ValidPass8'], $existingRecord, false);
+passwordTestAssert($preservedMatching['storedPassword'] === $firstHash, 'An unchanged supplied password was unnecessarily rehashed.');
+passwordTestAssert(empty($preservedMatching['changed']), 'An unchanged supplied password was marked as changed.');
 passwordTestExpectFailure(
     fn () => resolveManagedUserPasswordForWrite(['password' => '   '], $existingRecord, false),
     'whitespace-only replacement password'

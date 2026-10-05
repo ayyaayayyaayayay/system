@@ -87,11 +87,12 @@ const DEAN_EMPTY_SUMMARY = {
     breakdownRows: [],
     subjects: [],
     ratingDistribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
-    ratingDistributionAverage: 0,
+    ratingDistributionAverage: null,
+    averageRating: null,
     comments: [],
     commentBuckets: {},
     detailedRows: [],
-    totals: { required: 0, received: 0, responseRate: 0, averageScore: 0 }
+    totals: { required: 0, received: 0, responseRate: 0, averageScore: null }
 };
 
 function isDeanDashboardViewActive() {
@@ -812,19 +813,26 @@ function buildDeanProfessorSemestralTrendRows(professorUserId, selectedSemesterI
         const peerEvaluations = fetchDeanProfessorEvaluationsByType(context, targetProfessorId, 'professor', semesterId);
         const supervisorEvaluations = fetchDeanProfessorEvaluationsByType(context, targetProfessorId, 'supervisor', semesterId);
 
-        const studentAverage = computeAverageRatingFromEvaluations(studentEvaluations);
+        const studentSetMetrics = window.SetCalculation.calculateProfessorSetMetrics({
+            professorUserId: targetProfessorId,
+            semesterId,
+            offerings: context.offerings,
+            enrollments: context.enrollments,
+            evaluations: context.evaluations,
+        });
+        const studentAverage = studentSetMetrics.averageRating;
         const peerAverage = computeAverageRatingFromEvaluations(peerEvaluations);
         const supervisorAverage = computeAverageRatingFromEvaluations(supervisorEvaluations);
 
-        const studentRatings = countRatingEntriesFromEvaluations(studentEvaluations);
+        const studentRatings = studentAverage === null ? 0 : studentSetMetrics.validRatingCount;
         const peerRatings = countRatingEntriesFromEvaluations(peerEvaluations);
         const supervisorRatings = countRatingEntriesFromEvaluations(supervisorEvaluations);
 
         const totalRatings = studentRatings + peerRatings + supervisorRatings;
-        const weightedSum = (studentAverage * studentRatings)
-            + (peerAverage * peerRatings)
-            + (supervisorAverage * supervisorRatings);
-        const overallAverage = totalRatings ? (weightedSum / totalRatings) : 0;
+        const weightedSum = (Number(studentAverage || 0) * studentRatings)
+            + (Number(peerAverage || 0) * peerRatings)
+            + (Number(supervisorAverage || 0) * supervisorRatings);
+        const overallAverage = totalRatings ? (weightedSum / totalRatings) : null;
 
         return {
             semesterId,
@@ -843,7 +851,12 @@ function renderDeanSemestralTrendChart(rows) {
 
     const chartRows = (Array.isArray(rows) ? rows.slice() : []).reverse();
     const labels = chartRows.length ? chartRows.map(item => item.semesterLabel) : ['No Data'];
-    const values = chartRows.length ? chartRows.map(item => Number((item.overallAverage || 0).toFixed(2))) : [0];
+    const values = chartRows.length ? chartRows.map(item => {
+        const value = Number(item && item.overallAverage);
+        return item && item.overallAverage !== null && Number.isFinite(value)
+            ? Number(value.toFixed(2))
+            : null;
+    }) : [0];
 
     window.deanSemestralTrendChartInstance = window.AppChartDesign.renderLineChart(canvas, {
         labels,
@@ -894,15 +907,26 @@ function renderDeanProfessorSemestralTrend(professorUserId, selectedSemesterId) 
     tableBody.innerHTML = rows.map(item => `
         <tr>
             <td data-label="Semester">${escapeHTML(item.semesterLabel || item.semesterId)}</td>
-            <td data-label="Overall Avg"><span class="avg-score">${Number(item.overallAverage || 0).toFixed(2)}</span></td>
-            <td data-label="Student">${Number(item.studentAverage || 0).toFixed(2)}</td>
-            <td data-label="Peer">${Number(item.peerAverage || 0).toFixed(2)}</td>
-            <td data-label="Supervisor">${Number(item.supervisorAverage || 0).toFixed(2)}</td>
+            <td data-label="Overall Avg"><span class="avg-score">${item.overallAverage === null ? 'N/A' : Number(item.overallAverage).toFixed(2)}</span></td>
+            <td data-label="Student">${item.studentAverage === null ? 'N/A' : Number(item.studentAverage).toFixed(2)}</td>
+            <td data-label="Peer">${item.peerAverage === null ? 'N/A' : Number(item.peerAverage).toFixed(2)}</td>
+            <td data-label="Supervisor">${item.supervisorAverage === null ? 'N/A' : Number(item.supervisorAverage).toFixed(2)}</td>
         </tr>
     `).join('');
 
-    const current = Number(rows[0] && rows[0].overallAverage || 0);
-    const previous = Number(rows[1] && rows[1].overallAverage || 0);
+    const currentRaw = rows[0] && rows[0].overallAverage;
+    const previousRaw = rows[1] && rows[1].overallAverage;
+    const current = currentRaw === null ? NaN : Number(currentRaw);
+    const previous = previousRaw === null ? NaN : Number(previousRaw);
+
+    if (!Number.isFinite(current)) {
+        statusEl.textContent = 'Current semestral average is unavailable.';
+        statusEl.classList.add('stable');
+        deltaEl.textContent = 'At least one required SET class has no valid submitted questionnaire.';
+        deanFacultyFeedbackState.lastTrendRows = rows;
+        renderDeanSemestralTrendChart(rows);
+        return;
+    }
 
     if (rows.length < 2 || !Number.isFinite(previous) || previous <= 0) {
         statusEl.textContent = `Current semestral average: ${current.toFixed(2)}`;
@@ -941,7 +965,7 @@ function computeAverageRatingFromEvaluations(evaluations) {
             count += 1;
         });
     });
-    return count ? (sum / count) : 0;
+    return count ? (sum / count) : null;
 }
 
 function computeDistributionAverage(distribution) {
@@ -954,7 +978,7 @@ function computeDistributionAverage(distribution) {
         weighted += rating * count;
         total += count;
     });
-    return total ? (weighted / total) : 0;
+    return total ? (weighted / total) : null;
 }
 
 function formatDisplaySection(sectionName) {
@@ -1184,7 +1208,7 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
     });
 
     const ratingDistribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-    let ratingDistributionAverage = 0;
+    let ratingDistributionAverage = null;
     const matchedEvaluations = [];
     const comments = [];
 
@@ -1247,7 +1271,7 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
             const bucket = Math.max(1, Math.min(5, Math.round(evaluationAverage)));
             ratingDistribution[bucket] += 1;
         });
-        ratingDistributionAverage = evaluationAverageCount ? (evaluationAverageTotal / evaluationAverageCount) : 0;
+        ratingDistributionAverage = evaluationAverageCount ? (evaluationAverageTotal / evaluationAverageCount) : null;
     } else {
         ratingDistributionAverage = computeDistributionAverage(ratingDistribution);
     }
@@ -1258,25 +1282,42 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
     let receivedTotal = 0;
 
     if (evaluationType === 'student') {
+        const setMetricsByOffering = new Map();
+        (context.scopedProfessors || []).forEach(professor => {
+            const professorMetrics = window.SetCalculation.calculateProfessorSetMetrics({
+                professorUserId: professor && professor.id,
+                semesterId,
+                offerings: context.offerings,
+                enrollments: context.enrollments,
+                evaluations: context.evaluations,
+            });
+            professorMetrics.byOffering.forEach(item => {
+                setMetricsByOffering.set(String(item.courseOfferingId), item);
+            });
+        });
         const scopedOfferings = (context.offerings || []).filter(offering =>
             isSemesterTokenMatch(offering && offering.semesterSlug, semesterId)
+            && setMetricsByOffering.has(String(offering && offering.id || '').trim())
         );
 
         scopedOfferings.forEach(offering => {
             const offeringId = String(offering && offering.id || '').trim();
             if (!offeringId) return;
 
-            const required = (context.enrollments || []).filter(enrollment => {
-                if (String(enrollment && enrollment.courseOfferingId || '').trim() !== offeringId) return false;
-                const status = normalizeRoleToken(enrollment && enrollment.status || 'enrolled');
-                return status !== 'dropped' && status !== 'inactive';
-            }).length;
+            const offeringMetrics = setMetricsByOffering.get(offeringId) || {
+                registered: 0,
+                completed: 0,
+                averageRating: null,
+                weightedScore: null,
+                available: false,
+            };
+            const required = offeringMetrics.registered;
 
             const offeringEvaluations = matchedEvaluations.filter(evaluation =>
                 String(evaluation && evaluation.courseOfferingId || '').trim() === offeringId
             );
-            const received = offeringEvaluations.length;
-            const avgRating = computeAverageRatingFromEvaluations(offeringEvaluations);
+            const received = offeringMetrics.completed;
+            const avgRating = offeringMetrics.averageRating;
             const subject = offering.subjectCode
                 ? `${offering.subjectCode} - ${offering.subjectName}`
                 : String(offering.subjectName || '').trim();
@@ -1294,7 +1335,9 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
                 section: formatDisplaySection(offering.sectionName),
                 required,
                 received,
-                avgRating
+                avgRating,
+                weightedScore: offeringMetrics.weightedScore,
+                available: offeringMetrics.available,
             });
         });
 
@@ -1366,7 +1409,7 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
         const stat = categoryStats[category] || createCategoryStatBucket();
         return {
             name: category,
-            average: stat.count ? (stat.sum / stat.count) : 0
+            average: stat.count ? (stat.sum / stat.count) : null
         };
     }).filter(item => item.name);
 
@@ -1374,7 +1417,7 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
         const stat = categoryStats[category] || createCategoryStatBucket();
         return {
             category,
-            avgScore: stat.count ? (stat.sum / stat.count) : 0,
+            avgScore: stat.count ? (stat.sum / stat.count) : null,
             responses: stat.responses || 0,
             excellent: stat.excellent || 0,
             good: stat.good || 0,
@@ -1384,7 +1427,16 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
         };
     }).filter(item => item.category);
 
-    const averageScore = computeAverageRatingFromEvaluations(matchedEvaluations);
+    const averageScore = evaluationType === 'student'
+        ? (() => {
+            const scorableRows = breakdownRows.filter(item =>
+                Number(item.required || 0) > 0 && item.available === true
+            );
+            const scorableRegistered = scorableRows.reduce((sum, item) => sum + Number(item.required || 0), 0);
+            const totalWeighted = scorableRows.reduce((sum, item) => sum + Number(item.weightedScore || 0), 0);
+            return scorableRegistered > 0 ? totalWeighted / scorableRegistered : null;
+        })()
+        : computeAverageRatingFromEvaluations(matchedEvaluations);
     const responseRate = requiredTotal ? Math.round((receivedTotal / requiredTotal) * 100) : 0;
 
     return {
@@ -1401,7 +1453,16 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
             required: requiredTotal,
             received: receivedTotal,
             responseRate,
-            averageScore
+            averageScore,
+            partial: evaluationType === 'student' && breakdownRows.some(item =>
+                Number(item.required || 0) > 0 && item.available !== true
+            ) && breakdownRows.some(item => item.available === true),
+            scorableClassCount: evaluationType === 'student'
+                ? breakdownRows.filter(item => item.available === true).length
+                : 0,
+            registeredClassCount: evaluationType === 'student'
+                ? breakdownRows.filter(item => Number(item.required || 0) > 0).length
+                : 0,
         }
     };
 }
@@ -1575,6 +1636,7 @@ function initializeDashboard() {
     loadFacultySummary({ evaluationType: 'student' });
     loadProfessorCount();
     setupFacultyResponseView();
+    setupDepartmentFacultyReportAccessControl();
     setupDeanIferDirectory();
     setupPeerManagementView();
     setupDeanFacultyPaperInbox();
@@ -1979,7 +2041,9 @@ function initializeStudentCharts() {
     if (pieCtx) {
         window.studentPieChartInstance = window.AppChartDesign.renderRatingDistributionChart(pieCtx, {
             ratingDistribution: distribution,
-            averageRating: Number(summary.ratingDistributionAverage || summary.averageRating || (summary.totals && summary.totals.averageScore) || 0)
+            averageRating: summary.averageRating === null
+                ? null
+                : Number(summary.averageRating || (summary.totals && summary.totals.averageScore) || 0)
         });
     }
 }
@@ -2011,7 +2075,9 @@ function initializePeerCharts() {
     if (pieCtx) {
         window.peerPieChartInstance = window.AppChartDesign.renderRatingDistributionChart(pieCtx, {
             ratingDistribution: distribution,
-            averageRating: Number(summary.averageRating || (summary.totals && summary.totals.averageScore) || 0)
+            averageRating: summary.averageRating === null
+                ? null
+                : Number(summary.averageRating || (summary.totals && summary.totals.averageScore) || 0)
         });
     }
 }
@@ -2955,7 +3021,17 @@ function updateSummaryCards() {
     const responseCard = document.querySelector('.summary-card.response .card-number');
 
     if (evaluationsCard) evaluationsCard.textContent = `${stats.received}/${stats.required}`;
-    if (scoreCard) scoreCard.textContent = `${stats.averageScore.toFixed(1)}/5.0`;
+    if (scoreCard) {
+        const hasScore = stats.averageScore !== null && Number.isFinite(Number(stats.averageScore));
+        scoreCard.innerHTML = hasScore
+            ? `${Number(stats.averageScore).toFixed(1)}/5.0${stats.partial
+                ? `<small class="count-pill" style="display:block;margin-top:.35rem;font-size:.7rem;">Partial &middot; ${Number(stats.scorableClassCount || 0)}/${Number(stats.registeredClassCount || 0)} sections rated</small>`
+                : ''}`
+            : 'N/A';
+        scoreCard.title = stats.partial
+            ? 'Available SET rating; zero-response sections are excluded from the rating calculation.'
+            : '';
+    }
     if (professorsCard) professorsCard.textContent = String(deanProfessorCount);
     if (responseCard) responseCard.textContent = `${stats.responseRate}%`;
 }
@@ -2977,7 +3053,7 @@ function setupPeerEvaluationForm() {
     if (evaluationTypeInput) evaluationTypeInput.value = 'supervisor';
     if (form) form.dataset.evalType = 'supervisor';
     if (targetLabel) targetLabel.textContent = 'Select Employee';
-    if (endpoint) endpoint.textContent = 'SQL Ready: connect to /api/dean/supervisor-evaluations/submit (POST)';
+    if (endpoint) endpoint.textContent = 'Evaluations are saved securely to the system.';
 
     form.addEventListener('submit', function (e) {
         e.preventDefault();
@@ -3084,6 +3160,7 @@ function syncSupervisorTargetFromInput() {
     );
     if (match) {
         hiddenTarget.value = match.userId;
+        SharedData.startEvaluationTiming('supervisor', match.userId, getSupervisorSemesterId());
         searchInput.value = match.label;
         searchInput.setCustomValidity('');
     } else {
@@ -3265,16 +3342,10 @@ function handlePeerEvaluation() {
 
     try {
         // Save via centralized API
+        payload.behaviorMeta = SharedData.buildEvaluationTiming(payload, allQuestions);
         SharedData.addEvaluation(payload);
+        SharedData.clearEvaluationTiming(payload);
 
-        // Add to activity log
-        SharedData.addActivityLogEntry({
-            type: 'evaluation_submitted',
-            title: 'Supervisor Evaluation Submitted',
-            user: payload.evaluatorName,
-            role: SUPERVISOR_ROLE,
-            date: SharedData.getNowIsoString()
-        });
     } catch (error) {
         const message = String(error && error.message || '');
         if (message.toLowerCase().includes('inactive')) {
@@ -3853,9 +3924,12 @@ function renderCriteriaSummary(criteria) {
         return;
     }
 
-    list.innerHTML = criteria.map(item => `
-        <li><span>${item.name}</span><strong>${item.average.toFixed(1)}</strong></li>
-    `).join('');
+    list.innerHTML = criteria.map(item => {
+        const average = item && item.average !== null && Number.isFinite(Number(item.average))
+            ? Number(item.average).toFixed(1)
+            : 'N/A';
+        return `<li><span>${escapeHTML(String(item && item.name || ''))}</span><strong>${average}</strong></li>`;
+    }).join('');
 }
 
 /**
@@ -3885,7 +3959,7 @@ function computeTotals(subjects) {
 function getFacultySummaryTotals() {
     const activeType = getDeanEvaluationTypeMeta(deanSummaryState.selectedEvaluationType || 'student').id;
     const summary = getDeanSummaryForType(activeType);
-    return summary && summary.totals ? summary.totals : { required: 0, received: 0, responseRate: 0, averageScore: 0 };
+    return summary && summary.totals ? summary.totals : { required: 0, received: 0, responseRate: 0, averageScore: null };
 }
 
 function renderDetailedSummaryTable(rows, evaluationType) {
@@ -3901,7 +3975,7 @@ function renderDetailedSummaryTable(rows, evaluationType) {
     tbody.innerHTML = data.map(item => `
         <tr>
             <td>${escapeHTML(item.category)}</td>
-            <td><span class="avg-score">${Number(item.avgScore || 0).toFixed(1)}</span></td>
+            <td><span class="avg-score">${item.avgScore === null ? 'N/A' : Number(item.avgScore).toFixed(1)}</span></td>
             <td>${Number(item.responses || 0)}</td>
             <td><span class="count excellent">${Number(item.excellent || 0)}</span></td>
             <td><span class="count good">${Number(item.good || 0)}</span></td>
@@ -4198,9 +4272,9 @@ function buildDeanPeerRequiredCountMap(semesterId) {
 
     const selectedSemester = resolveSelectedSemesterId(semesterId);
     try {
-        const response = SharedData[detailMethod]({});
-        const currentSemester = String(response && response.currentSemester || '').trim();
-        if (!currentSemester || (selectedSemester && currentSemester !== selectedSemester)) {
+        const response = SharedData[detailMethod]({ semesterId: selectedSemester });
+        const responseSemester = String(response && response.currentSemester || '').trim();
+        if (!responseSemester || (selectedSemester && responseSemester !== selectedSemester)) {
             return requiredByProfessor;
         }
 
@@ -4210,7 +4284,7 @@ function buildDeanPeerRequiredCountMap(semesterId) {
             professors.forEach(professor => {
                 const professorUserId = normalizeUserIdToken(professor && professor.userId);
                 if (!professorUserId) return;
-                requiredByProfessor[professorUserId] = Math.max(Number(professor && professor.outgoingCount || 0), 0);
+                requiredByProfessor[professorUserId] = Math.max(Number(professor && professor.incomingCount || 0), 0);
             });
         });
     } catch (error) {
@@ -4242,7 +4316,6 @@ function buildDeanProfessorResultRows(query, typeOverride) {
     const peerRequiredByProfessor = normalizedType === 'professor'
         ? buildDeanPeerRequiredCountMap(semesterId)
         : {};
-    const hasPeerAssignmentMap = Object.keys(peerRequiredByProfessor).length > 0;
     const filteredByType = evaluations.filter(evaluation =>
         resolveEvaluationTypeToken(evaluation) === normalizedType &&
         isEvaluationInSemester(evaluation, semesterId)
@@ -4253,19 +4326,22 @@ function buildDeanProfessorResultRows(query, typeOverride) {
         const institute = String((professor && (professor.department || professor.institute)) || '').trim().toUpperCase();
         const professorEvaluations = [];
         let required = 0;
+        let studentSetMetrics = null;
 
         if (normalizedType === 'student') {
+            studentSetMetrics = window.SetCalculation.calculateProfessorSetMetrics({
+                professorUserId,
+                semesterId,
+                offerings: context.offerings,
+                enrollments: context.enrollments,
+                evaluations: context.evaluations,
+            });
             const offeringIds = new Set((context.offerings || []).filter(offering =>
                 normalizeUserIdToken(offering && offering.professorUserId) === professorUserId &&
                 isSemesterTokenMatch(offering && offering.semesterSlug, semesterId)
             ).map(offering => String(offering && offering.id || '').trim()).filter(Boolean));
 
-            required = (context.enrollments || []).filter(enrollment => {
-                const offeringId = String(enrollment && enrollment.courseOfferingId || '').trim();
-                if (!offeringIds.has(offeringId)) return false;
-                const status = normalizeRoleToken(enrollment && enrollment.status || 'enrolled');
-                return status !== 'dropped' && status !== 'inactive';
-            }).length;
+            required = studentSetMetrics.registered;
 
             filteredByType.forEach(evaluation => {
                 const offeringId = String(evaluation && evaluation.courseOfferingId || '').trim();
@@ -4277,9 +4353,7 @@ function buildDeanProfessorResultRows(query, typeOverride) {
         } else {
             if (normalizedType === 'professor') {
                 const assignmentRequired = Number(peerRequiredByProfessor[professorUserId] || 0);
-                required = hasPeerAssignmentMap
-                    ? Math.max(assignmentRequired, 0)
-                    : Math.max(scopedProfessors.length - 1, 0);
+                required = Math.max(assignmentRequired, 0);
             } else {
                 required = 1;
             }
@@ -4297,10 +4371,14 @@ function buildDeanProfessorResultRows(query, typeOverride) {
             });
         }
 
-        const avgScore = computeAverageRatingFromEvaluations(professorEvaluations);
-        const receivedCount = normalizedType === 'supervisor'
-            ? Math.min(professorEvaluations.length, 1)
-            : professorEvaluations.length;
+        const avgScore = normalizedType === 'student'
+            ? studentSetMetrics.averageRating
+            : computeAverageRatingFromEvaluations(professorEvaluations);
+        const receivedCount = normalizedType === 'student'
+            ? studentSetMetrics.completed
+            : normalizedType === 'supervisor'
+                ? Math.min(professorEvaluations.length, 1)
+                : professorEvaluations.length;
         const lastUpdated = professorEvaluations.reduce((latest, evaluation) => {
             const current = String(evaluation && (evaluation.submittedAt || evaluation.timestamp) || '').trim();
             if (!current) return latest;
@@ -4321,6 +4399,16 @@ function buildDeanProfessorResultRows(query, typeOverride) {
             required,
             received: receivedCount,
             avgScore,
+            scorableRegistered: normalizedType === 'student'
+                ? Number(studentSetMetrics.scorableRegistered || 0)
+                : required,
+            partial: normalizedType === 'student' && Boolean(studentSetMetrics.partial),
+            scorableClassCount: normalizedType === 'student'
+                ? Number(studentSetMetrics.scorableClassCount || 0)
+                : 0,
+            registeredClassCount: normalizedType === 'student'
+                ? Number(studentSetMetrics.registeredClassCount || 0)
+                : 0,
             lastUpdated,
             status: statusText
         };
@@ -4351,7 +4439,7 @@ function renderDeanProfessorResults(results, selectedInstitute) {
     if (!filtered.length) {
         tbody.innerHTML = '<tr><td colspan="8">No professor evaluation results in this scope.</td></tr>';
         if (professorCountEl) professorCountEl.textContent = '0';
-        if (averageScoreEl) averageScoreEl.textContent = '0.0/5.0';
+        if (averageScoreEl) averageScoreEl.textContent = 'N/A';
         if (responseRateEl) responseRateEl.textContent = '0%';
         if (scopeBadge) scopeBadge.textContent = 'Scope: ' + (selectedInstitute === 'all' ? (isProgramScopedSupervisorPanel() ? 'Program scope' : 'Department scope') : selectedInstitute);
         return;
@@ -4365,23 +4453,51 @@ function renderDeanProfessorResults(results, selectedInstitute) {
         const statusClass = (statusText === 'Inactive')
             ? 'inactive'
             : 'active';
+        const averageText = item.avgScore !== null && Number.isFinite(Number(item.avgScore))
+            ? Number(item.avgScore).toFixed(1)
+            : 'N/A';
+        const partialText = item.partial
+            ? '<br><span class="count-pill" title="Zero-response sections are excluded from this available SET average.">Partial &middot; '
+                + Number(item.scorableClassCount || 0) + '/' + Number(item.registeredClassCount || 0) + ' sections rated</span>'
+            : '';
         return '<tr>' +
-            '<td>' + item.professorId + '</td>' +
-            '<td>' + item.professorName + '</td>' +
-            '<td>' + item.institute + '</td>' +
-            '<td><span class=\"count-pill\">' + item.received + '/' + item.required + '</span></td>' +
+            '<td>' + escapeHTML(String(item.professorId || '')) + '</td>' +
+            '<td>' + escapeHTML(String(item.professorName || '')) + '</td>' +
+            '<td>' + escapeHTML(String(item.institute || '')) + '</td>' +
+            '<td><span class=\"count-pill\">' + Number(item.received || 0) + '/' + Number(item.required || 0) + '</span></td>' +
             '<td>' + rowResponseRate + '%</td>' +
-            '<td>' + item.avgScore.toFixed(1) + '</td>' +
-            '<td>' + formatDisplayDate(item.lastUpdated) + '</td>' +
+            '<td>' + averageText + partialText + '</td>' +
+            '<td>' + escapeHTML(formatDisplayDate(item.lastUpdated)) + '</td>' +
             '<td><span class=\"dean-status-pill ' + statusClass + '\">' + statusText + '</span></td>' +
             '</tr>';
     }).join('');
     const totalRequired = filtered.reduce((sum, item) => sum + item.required, 0);
     const totalReceived = filtered.reduce((sum, item) => sum + item.received, 0);
-    const averageScore = filtered.reduce((sum, item) => sum + item.avgScore, 0) / filtered.length;
+    const scorable = filtered.filter(item =>
+        item.avgScore !== null
+        && Number.isFinite(Number(item.avgScore))
+        && Number(item.scorableRegistered || 0) > 0
+    );
+    const scorableRegistered = scorable.reduce((sum, item) => sum + Number(item.scorableRegistered || 0), 0);
+    const averageScore = scorableRegistered > 0
+        ? scorable.reduce((sum, item) => sum + (Number(item.avgScore) * Number(item.scorableRegistered || 0)), 0) / scorableRegistered
+        : null;
+    const scorableClassCount = filtered.reduce((sum, item) => sum + Number(item.scorableClassCount || 0), 0);
+    const registeredClassCount = filtered.reduce((sum, item) => sum + Number(item.registeredClassCount || 0), 0);
+    const partial = averageScore !== null && filtered.some(item => item.partial);
     const responseRate = totalRequired ? Math.round((totalReceived / totalRequired) * 100) : 0;
     if (professorCountEl) professorCountEl.textContent = String(filtered.length);
-    if (averageScoreEl) averageScoreEl.textContent = averageScore.toFixed(1) + '/5.0';
+    if (averageScoreEl) {
+        averageScoreEl.innerHTML = averageScore === null
+            ? 'N/A'
+            : averageScore.toFixed(1) + '/5.0' + (partial
+                ? '<small class="count-pill" style="display:block;margin-top:.35rem;font-size:.7rem;">Partial &middot; '
+                    + scorableClassCount + '/' + registeredClassCount + ' sections rated</small>'
+                : '');
+        averageScoreEl.title = partial
+            ? 'Available SET rating; zero-response sections are excluded from the rating calculation.'
+            : '';
+    }
     if (responseRateEl) responseRateEl.textContent = responseRate + '%';
     if (scopeBadge) scopeBadge.textContent = 'Scope: ' + (selectedInstitute === 'all' ? (isProgramScopedSupervisorPanel() ? 'Program scope' : 'Department scope') : selectedInstitute);
 }
@@ -4763,6 +4879,93 @@ function setupDeanIferDirectory() {
 /**
  * Setup faculty response rate view search and table rendering
  */
+function setupDepartmentFacultyReportAccessControl() {
+    const panel = document.getElementById('departmentReportAccessPanel');
+    const statusEl = document.getElementById('departmentReportAccessStatus');
+    const descriptionEl = document.getElementById('departmentReportAccessDescription');
+    const toggleBtn = document.getElementById('departmentReportAccessToggleBtn');
+    const feedbackEl = document.getElementById('departmentReportAccessFeedback');
+    if (!panel || !statusEl || !descriptionEl || !toggleBtn || !feedbackEl || SUPERVISOR_ROLE !== 'dean') {
+        return;
+    }
+
+    let currentAccess = { enabled: true, departmentCode: '', updatedAt: '' };
+    let pending = false;
+
+    function setFeedback(message, tone) {
+        feedbackEl.textContent = String(message || '');
+        feedbackEl.classList.toggle('is-success', tone === 'success');
+        feedbackEl.classList.toggle('is-error', tone === 'error');
+    }
+
+    function render(access) {
+        currentAccess = Object.assign({ enabled: true, departmentCode: '', updatedAt: '' }, access || {});
+        const enabled = currentAccess.enabled !== false;
+        const department = String(currentAccess.departmentCode || getScopedDeanDepartment() || 'your department').trim();
+        panel.classList.toggle('is-restricted', !enabled);
+        statusEl.textContent = enabled ? 'Allowed' : 'Restricted';
+        descriptionEl.textContent = enabled
+            ? `Professors in ${department} can open their evaluation reports after the scheduled evaluation period.`
+            : `Professors in ${department} cannot open evaluation reports. Faculty Paper remains available under its normal schedule.`;
+        toggleBtn.textContent = enabled ? 'Restrict Department Reports' : 'Allow Department Reports';
+        toggleBtn.classList.toggle('btn-cancel', enabled);
+        toggleBtn.classList.toggle('btn-submit', !enabled);
+        toggleBtn.disabled = pending;
+        toggleBtn.setAttribute('aria-disabled', pending ? 'true' : 'false');
+    }
+
+    async function refresh() {
+        if (!SharedData || typeof SharedData.refreshFacultyReportAccess !== 'function') {
+            toggleBtn.disabled = true;
+            setFeedback('Report access service is unavailable.', 'error');
+            return;
+        }
+        pending = true;
+        render(currentAccess);
+        setFeedback('Checking access...', '');
+        try {
+            const access = await SharedData.refreshFacultyReportAccess();
+            setFeedback('', '');
+            render(access);
+        } catch (error) {
+            setFeedback(error && error.message ? error.message : 'Unable to load report access.', 'error');
+        } finally {
+            pending = false;
+            render(currentAccess);
+        }
+    }
+
+    toggleBtn.addEventListener('click', async function () {
+        if (pending) return;
+        const nextEnabled = currentAccess.enabled === false;
+        const department = String(currentAccess.departmentCode || getScopedDeanDepartment() || 'your department').trim();
+        const prompt = nextEnabled
+            ? `Allow every professor in ${department} to open Evaluation Reports?`
+            : `Restrict Evaluation Reports for every professor in ${department}? Faculty Paper will remain functional under its normal schedule.`;
+        if (!confirm(prompt)) return;
+
+        pending = true;
+        render(currentAccess);
+        setFeedback(nextEnabled ? 'Allowing reports...' : 'Restricting reports...', '');
+        try {
+            const access = await SharedData.setDepartmentFacultyReportAccess(nextEnabled);
+            render(access);
+            setFeedback(nextEnabled ? 'Department reports are now allowed.' : 'Department reports are now restricted.', 'success');
+        } catch (error) {
+            setFeedback(error && error.message ? error.message : 'Unable to update report access.', 'error');
+        } finally {
+            pending = false;
+            render(currentAccess);
+        }
+    });
+
+    const cached = SharedData && typeof SharedData.getFacultyReportAccess === 'function'
+        ? SharedData.getFacultyReportAccess()
+        : currentAccess;
+    render(cached);
+    refresh();
+}
+
 function setupFacultyResponseView() {
     const searchInput = document.getElementById('facultySearchInput');
     const searchBtn = document.getElementById('facultySearchBtn');
@@ -5240,17 +5443,22 @@ function renderFacultyResponseTable(items) {
             : 'active';
         const employmentType = item.employmentType || '-';
         const position = item.position || '-';
+        const averageText = item.avgScore !== null && Number.isFinite(Number(item.avgScore))
+            ? Number(item.avgScore).toFixed(1)
+            : 'N/A';
+        const professorId = String(item.professorId || '');
+        const professorUserId = String(item.professorUserId || '');
         return '<tr>' +
-            '<td data-label="Employee ID">' + item.professorId + '</td>' +
-            '<td data-label="Faculty Name">' + item.professorName + '</td>' +
-            '<td data-label="Institute">' + item.institute + '</td>' +
-            '<td data-label="Regular/Temporary">' + employmentType + '</td>' +
-            '<td data-label="Position">' + position + '</td>' +
-            '<td data-label="Evaluations Received"><span class="count-pill">' + item.received + '/' + item.required + '</span></td>' +
+            '<td data-label="Employee ID">' + escapeHTML(professorId) + '</td>' +
+            '<td data-label="Faculty Name">' + escapeHTML(String(item.professorName || '')) + '</td>' +
+            '<td data-label="Institute">' + escapeHTML(String(item.institute || '')) + '</td>' +
+            '<td data-label="Employment Type">' + escapeHTML(String(employmentType)) + '</td>' +
+            '<td data-label="Position">' + escapeHTML(String(position)) + '</td>' +
+            '<td data-label="Evaluations Received"><span class="count-pill">' + Number(item.received || 0) + '/' + Number(item.required || 0) + '</span></td>' +
             '<td data-label="Response Rate">' + responseRate + '%</td>' +
-            '<td data-label="Average Score">' + item.avgScore.toFixed(1) + '</td>' +
+            '<td data-label="Average Score">' + averageText + '</td>' +
             '<td data-label="Status"><span class="dean-status-pill ' + statusClass + '">' + statusText + '</span></td>' +
-            '<td data-label="Comments"><button type="button" class="btn-submit faculty-comments-btn js-view-comments" data-professor-id="' + item.professorId + '" data-professor-user-id="' + (item.professorUserId || '') + '">View</button></td>' +
+            '<td data-label="Comments"><button type="button" class="btn-submit faculty-comments-btn js-view-comments" data-professor-id="' + escapeHTML(professorId) + '" data-professor-user-id="' + escapeHTML(professorUserId) + '">View</button></td>' +
             '</tr>';
     }).join('');
 }

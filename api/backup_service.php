@@ -1572,6 +1572,7 @@ function naapBackupLogEvent(PDO $pdo, array $actor, string $action, string $desc
             'role' => $actor['role'] ?? 'system',
         ]);
     } catch (Throwable $ignored) {
+        naapLogServerException($ignored, 'audit.backup');
     }
 }
 

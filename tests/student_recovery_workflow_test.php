@@ -77,9 +77,9 @@ workflowAssert(
     'Reset-password validation does not match the backend password policy.'
 );
 workflowAssert(
-    str_contains($studentHtml, 'db-data.js?v=20260925c')
-        && str_contains($studentHtml, 'studentpanel.js?v=20260925c')
-        && str_contains($mainHtml, 'mainpage.js?v=20260923c'),
+    str_contains($studentHtml, 'db-data.js?v=20261004a')
+        && str_contains($studentHtml, 'studentpanel.js?v=20261004a')
+        && str_contains($mainHtml, 'mainpage.js?v=20261004a'),
     'Updated recovery scripts are not cache-busted in their pages.'
 );
 

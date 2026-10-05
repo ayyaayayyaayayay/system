@@ -33,7 +33,7 @@ const PROFESSOR_PANEL_EMPTY_SUMMARY = {
     comments: [],
     commentBuckets: {},
     detailedRows: [],
-    totals: { required: 0, received: 0, responseRate: 0, averageScore: 0 },
+    totals: { required: 0, received: 0, responseRate: 0, averageScore: null },
 };
 
 const professorPanelState = {
@@ -56,9 +56,17 @@ const professorPanelState = {
         filter: 'active',
         records: [],
         selectedId: '',
+        aiAuditReceipts: {},
     },
+    semesterSnapshots: {},
     linked: false,
 };
+
+let professorReportSelectionRequestId = 0;
+let professorTrendSnapshotRequestId = 0;
+let professorTrendRefreshTimer = 0;
+let professorReportAccessRefreshPromise = null;
+let professorReportAccessVerified = false;
 
 function normalizeToken(value) {
     return String(value || '').trim().toLowerCase();
@@ -452,7 +460,7 @@ function computeAverageRatingFromEvaluations(evaluations) {
         });
     });
 
-    return count ? (total / count) : 0;
+    return count ? (total / count) : null;
 }
 
 function buildProfessorPanelContext() {
@@ -657,6 +665,7 @@ function initializeDashboard() {
     initializeReports();
     setupProfessorDataSync();
     refreshProfessorPanelData({ preserveSelection: false });
+    refreshProfessorReportAccessState();
     showProfessorLoginAnnouncements();
 }
 
@@ -1053,7 +1062,7 @@ function setProfessorActionsEnabled(enabled) {
 
 function refreshProfessorPanelData(options = {}) {
     const preserveSelection = !!options.preserveSelection;
-    const context = buildProfessorPanelContext();
+    let context = buildProfessorPanelContext();
     professorPanelState.context = context;
     professorPanelState.linked = !!context.linked;
 
@@ -1069,6 +1078,13 @@ function refreshProfessorPanelData(options = {}) {
     const evaluationType = preserveSelection && professorPanelState.currentSelection.evaluationType
         ? professorPanelState.currentSelection.evaluationType
         : 'student';
+
+    cacheProfessorContextSemesterSnapshot(context, context.currentSemester);
+    const semesterContext = buildProfessorContextForSemester(context, semesterId);
+    if (semesterContext) {
+        context = semesterContext;
+        professorPanelState.context = context;
+    }
 
     professorPanelState.currentSelection = {
         semesterId,
@@ -1168,11 +1184,19 @@ function setupNavigation() {
     const navLinks = document.querySelectorAll('.nav-link:not(.logout)');
 
     navLinks.forEach(link => {
-        link.addEventListener('click', function (e) {
+        link.addEventListener('click', async function (e) {
             e.preventDefault();
 
             // Get view to show
             const view = this.getAttribute('data-view');
+            if (view === 'reports') {
+                await refreshProfessorReportAccessState();
+                if (resolveReportsGateState().locked) {
+                    updateNavigation('dashboard');
+                    switchView('dashboard');
+                    return;
+                }
+            }
 
             // Remove active class from all links
             navLinks.forEach(l => l.classList.remove('active'));
@@ -1446,6 +1470,113 @@ function getSemestralWindowIds(context, selectedSemesterId, maxCount = 4) {
     return fallback.slice(0, maxCount);
 }
 
+function cacheProfessorSemesterSnapshot(semesterId, subjectManagement, evaluations) {
+    const id = String(semesterId || '').trim();
+    if (!id) return null;
+
+    const management = subjectManagement && typeof subjectManagement === 'object'
+        ? subjectManagement
+        : {};
+    const snapshot = {
+        subjectManagement: {
+            subjects: Array.isArray(management.subjects) ? management.subjects.slice() : [],
+            offerings: Array.isArray(management.offerings) ? management.offerings.slice() : [],
+            enrollments: Array.isArray(management.enrollments) ? management.enrollments.slice() : [],
+        },
+        evaluations: Array.isArray(evaluations) ? evaluations.slice() : [],
+    };
+    professorPanelState.semesterSnapshots[id] = snapshot;
+    return snapshot;
+}
+
+function cacheProfessorContextSemesterSnapshot(context, semesterId) {
+    const id = String(semesterId || '').trim();
+    if (!context || !id) return null;
+
+    const offerings = (context.offerings || []).filter(offering =>
+        String(offering && (offering.semesterSlug || offering.semesterId) || '').trim() === id
+    );
+    const offeringIds = new Set(offerings.map(offering => String(offering && offering.id || '').trim()).filter(Boolean));
+    const enrollments = (context.enrollments || []).filter(enrollment =>
+        offeringIds.has(String(enrollment && enrollment.courseOfferingId || '').trim())
+    );
+    const evaluations = (context.evaluations || []).filter(evaluation =>
+        String(evaluation && (evaluation.semesterId || evaluation.semesterSlug) || '').trim() === id
+    );
+
+    return cacheProfessorSemesterSnapshot(id, {
+        subjects: [],
+        offerings,
+        enrollments,
+    }, evaluations);
+}
+
+function buildProfessorContextForSemester(baseContext, semesterId) {
+    const id = String(semesterId || '').trim();
+    const snapshot = id ? professorPanelState.semesterSnapshots[id] : null;
+    if (!baseContext || !snapshot) return null;
+
+    const management = snapshot.subjectManagement || {};
+    const offerings = Array.isArray(management.offerings) ? management.offerings : [];
+    const offeringsById = {};
+    offerings.forEach(offering => {
+        const offeringId = String(offering && offering.id || '').trim();
+        if (offeringId) offeringsById[offeringId] = offering;
+    });
+
+    return Object.assign({}, baseContext, {
+        offerings,
+        enrollments: Array.isArray(management.enrollments) ? management.enrollments : [],
+        offeringsById,
+        evaluations: Array.isArray(snapshot.evaluations) ? snapshot.evaluations : [],
+    });
+}
+
+async function refreshProfessorTrendSnapshots(semesterId) {
+    if (!SharedData.fetchSubjectManagementSnapshot || !SharedData.fetchEvaluationsSnapshot) return;
+
+    const baseContext = professorPanelState.context || buildProfessorPanelContext();
+    const windowIds = getSemestralWindowIds(baseContext, semesterId, 4);
+    if (!windowIds.length) return;
+
+    const requestId = ++professorTrendSnapshotRequestId;
+    try {
+        const results = await Promise.all(windowIds.map(async id => {
+            const [subjectManagement, evaluations] = await Promise.all([
+                SharedData.fetchSubjectManagementSnapshot({
+                    semesterId: id,
+                    includeInactiveOfferings: true,
+                }),
+                SharedData.fetchEvaluationsSnapshot({ semesterId: id }),
+            ]);
+            return { id, subjectManagement, evaluations };
+        }));
+
+        if (requestId !== professorTrendSnapshotRequestId) return;
+        results.forEach(result => {
+            cacheProfessorSemesterSnapshot(result.id, result.subjectManagement, result.evaluations);
+        });
+
+        const selectedId = String(professorPanelState.currentSelection.semesterId || '').trim();
+        if (selectedId === String(semesterId || '').trim()) {
+            renderSemestralEvaluationTrend(selectedId);
+        }
+    } catch (error) {
+        if (requestId === professorTrendSnapshotRequestId) {
+            console.warn('[Professor] Unable to load semestral trend snapshots.', error);
+        }
+    }
+}
+
+function scheduleProfessorTrendSnapshotRefresh(semesterId, delayMs = 80) {
+    if (professorTrendRefreshTimer) clearTimeout(professorTrendRefreshTimer);
+    const id = String(semesterId || '').trim();
+    professorTrendRefreshTimer = window.setTimeout(function () {
+        professorTrendRefreshTimer = 0;
+        refreshProfessorTrendSnapshots(id);
+    }, Math.max(0, Number(delayMs) || 0));
+}
+
 function computeOverallAverageFromSummaries(studentSummary, peerSummary, supervisorSummary) {
     const buckets = [studentSummary, peerSummary, supervisorSummary];
     let weightedSum = 0;
@@ -1454,13 +1585,14 @@ function computeOverallAverageFromSummaries(studentSummary, peerSummary, supervi
     buckets.forEach(summary => {
         const detailedRows = Array.isArray(summary && summary.detailedRows) ? summary.detailedRows : [];
         const responseCount = detailedRows.reduce((sum, row) => sum + Number(row && row.responses || 0), 0);
-        const avgScore = Number(summary && summary.totals && summary.totals.averageScore || 0);
+        const rawAverage = summary && summary.totals ? summary.totals.averageScore : null;
+        const avgScore = rawAverage === null ? null : Number(rawAverage);
         if (!responseCount || !Number.isFinite(avgScore)) return;
         weightedSum += avgScore * responseCount;
         totalResponses += responseCount;
     });
 
-    if (!totalResponses) return 0;
+    if (!totalResponses) return null;
     return weightedSum / totalResponses;
 }
 
@@ -1468,18 +1600,31 @@ function buildSemestralEvaluationTrend(semesterId) {
     const context = professorPanelState.context || buildProfessorPanelContext();
     const windowIds = getSemestralWindowIds(context, semesterId, 4);
     const rows = windowIds.map(id => {
-        const student = fetchFacultySummaryFromSql({ semesterId: id, evaluationType: 'student' });
-        const peer = fetchFacultySummaryFromSql({ semesterId: id, evaluationType: 'professor' });
-        const supervisor = fetchFacultySummaryFromSql({ semesterId: id, evaluationType: 'supervisor' });
+        const semesterContext = buildProfessorContextForSemester(context, id);
+        const student = semesterContext
+            ? fetchFacultySummaryFromSql({ semesterId: id, evaluationType: 'student', context: semesterContext })
+            : PROFESSOR_PANEL_EMPTY_SUMMARY;
+        const peer = semesterContext
+            ? fetchFacultySummaryFromSql({ semesterId: id, evaluationType: 'professor', context: semesterContext })
+            : PROFESSOR_PANEL_EMPTY_SUMMARY;
+        const supervisor = semesterContext
+            ? fetchFacultySummaryFromSql({ semesterId: id, evaluationType: 'supervisor', context: semesterContext })
+            : PROFESSOR_PANEL_EMPTY_SUMMARY;
         const overall = computeOverallAverageFromSummaries(student, peer, supervisor);
 
         return {
             semesterId: id,
             semesterLabel: getSemesterLabelById(id, context.semesterList),
-            overallAverage: Number(overall || 0),
-            studentAverage: Number(student && student.totals && student.totals.averageScore || 0),
-            peerAverage: Number(peer && peer.totals && peer.totals.averageScore || 0),
-            supervisorAverage: Number(supervisor && supervisor.totals && supervisor.totals.averageScore || 0),
+            overallAverage: overall === null ? null : Number(overall),
+            studentAverage: student && student.totals && student.totals.averageScore !== null
+                ? Number(student.totals.averageScore)
+                : null,
+            peerAverage: peer && peer.totals && peer.totals.averageScore !== null
+                ? Number(peer.totals.averageScore)
+                : null,
+            supervisorAverage: supervisor && supervisor.totals && supervisor.totals.averageScore !== null
+                ? Number(supervisor.totals.averageScore)
+                : null,
         };
     });
 
@@ -1493,8 +1638,13 @@ function renderSemestralTrendChart(rows) {
     const chartRows = (Array.isArray(rows) ? rows.slice() : [])
         .reverse();
     const labels = chartRows.map(item => item.semesterLabel);
-    const values = chartRows.map(item => Number((item.overallAverage || 0).toFixed(2)));
-    const hasData = values.some(value => value > 0);
+    const values = chartRows.map(item => {
+        const value = Number(item && item.overallAverage);
+        return item && item.overallAverage !== null && Number.isFinite(value)
+            ? Number(value.toFixed(2))
+            : null;
+    });
+    const hasData = values.some(value => Number.isFinite(value));
 
     window.semestralTrendChartInstance = window.AppChartDesign.renderLineChart(canvas, {
         labels: labels.length ? labels : ['No Data'],
@@ -1528,15 +1678,24 @@ function renderSemestralEvaluationTrend(semesterId) {
     tableBody.innerHTML = rows.map(item => `
         <tr>
             <td data-label="Semester">${escapeHTML(item.semesterLabel || item.semesterId)}</td>
-            <td data-label="Overall Avg"><span class="avg-score">${Number(item.overallAverage || 0).toFixed(2)}</span></td>
-            <td data-label="Student">${Number(item.studentAverage || 0).toFixed(2)}</td>
-            <td data-label="Peer">${Number(item.peerAverage || 0).toFixed(2)}</td>
-            <td data-label="Supervisor">${Number(item.supervisorAverage || 0).toFixed(2)}</td>
+            <td data-label="Overall Avg"><span class="avg-score">${item.overallAverage === null ? 'N/A' : Number(item.overallAverage).toFixed(2)}</span></td>
+            <td data-label="Student">${item.studentAverage === null ? 'N/A' : Number(item.studentAverage).toFixed(2)}</td>
+            <td data-label="Peer">${item.peerAverage === null ? 'N/A' : Number(item.peerAverage).toFixed(2)}</td>
+            <td data-label="Supervisor">${item.supervisorAverage === null ? 'N/A' : Number(item.supervisorAverage).toFixed(2)}</td>
         </tr>
     `).join('');
 
-    const current = Number(rows[0] && rows[0].overallAverage || 0);
-    const previous = Number(rows[1] && rows[1].overallAverage || 0);
+    const currentRaw = rows[0] && rows[0].overallAverage;
+    const previousRaw = rows[1] && rows[1].overallAverage;
+    const current = currentRaw === null ? NaN : Number(currentRaw);
+    const previous = previousRaw === null ? NaN : Number(previousRaw);
+    if (!Number.isFinite(current)) {
+        statusEl.textContent = 'Current semestral average is unavailable.';
+        statusEl.classList.add('stable');
+        deltaEl.textContent = 'No valid submitted evaluations are available for this semester.';
+        renderSemestralTrendChart(rows);
+        return;
+    }
     if (rows.length < 2 || !Number.isFinite(previous) || previous <= 0) {
         statusEl.textContent = `Current semestral average: ${current.toFixed(2)}`;
         statusEl.classList.add('stable');
@@ -1673,7 +1832,8 @@ function setupProfessorHeroActions() {
     }
 
     if (reportsButton) {
-        reportsButton.addEventListener('click', function () {
+        reportsButton.addEventListener('click', async function () {
+            await refreshProfessorReportAccessState();
             if (switchView('reports') !== false) {
                 updateNavigation('reports');
             }
@@ -1696,11 +1856,11 @@ function setupActionButtons() {
     const actionButtons = document.querySelectorAll('.btn-action');
 
     actionButtons.forEach(button => {
-        button.addEventListener('click', function () {
+        button.addEventListener('click', async function () {
             const actionCard = this.closest('.action-card');
             const titleEl = actionCard ? actionCard.querySelector('h3') : null;
             const actionTitle = titleEl ? titleEl.textContent.trim() : '';
-            handleActionButton(actionTitle);
+            await handleActionButton(actionTitle);
         });
     });
 }
@@ -1709,7 +1869,7 @@ function setupActionButtons() {
  * Handle action button click
  * @param {string} actionTitle - Title of the action
  */
-function handleActionButton(actionTitle) {
+async function handleActionButton(actionTitle) {
     // Placeholder for future action functionality
     console.log(`Action clicked: ${actionTitle}`);
 
@@ -1719,6 +1879,7 @@ function handleActionButton(actionTitle) {
     }
 
     if (actionTitle === 'View Reports') {
+        await refreshProfessorReportAccessState();
         const reportGate = resolveReportsGateState();
         if (reportGate.locked) {
             const unlockText = reportGate.endDate
@@ -1737,6 +1898,7 @@ function handleActionButton(actionTitle) {
  * Convert 1-5 average score into percentage (0-100).
  */
 function toPaperRatingPercent(value) {
+    if (value === null || value === undefined || value === '') return 'N/A';
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return 'N/A';
     const percent = numeric * 20;
@@ -1804,21 +1966,29 @@ function setSelectedFacultyPaperLoadType(value) {
 /**
  * Build payload for faculty acknowledgement paper.
  */
-function buildFacultyPaperData() {
+function buildFacultyPaperData(options = {}) {
     const actor = getProfessorPaperActor();
     const context = actor.context;
     const professor = actor.professor || (context && context.professor ? context.professor : null);
     if (!context || !actor.actorUserId || !professor) return null;
 
+    const requestedSemesterId = String(
+        options.semesterId
+        || (professorPanelState.currentSelection && professorPanelState.currentSelection.semesterId)
+        || (context && context.currentSemester)
+        || 'current'
+    ).trim();
     const selectedSemesterLabel = String(professorPanelState.currentSelection && professorPanelState.currentSelection.semesterLabel || '').trim();
-    const semesterLabel = selectedSemesterLabel || getSemesterLabelById(
-        professorPanelState.currentSelection && professorPanelState.currentSelection.semesterId,
+    const semesterLabel = String(options.semesterLabel || '').trim() || selectedSemesterLabel || getSemesterLabelById(
+        requestedSemesterId,
         context.semesterList
     );
 
-    const loadType = getSelectedFacultyPaperLoadType();
+    const loadType = options.loadType
+        ? normalizeFacultyPaperLoadType(options.loadType)
+        : getSelectedFacultyPaperLoadType();
     const studentSummary = fetchFacultySummaryFromSql({
-        semesterId: professorPanelState.currentSelection && professorPanelState.currentSelection.semesterId,
+        semesterId: requestedSemesterId,
         evaluationType: 'student',
         loadType,
     });
@@ -2299,6 +2469,10 @@ function runFacultySectionCAiRecommendation(paper) {
             if (!response || response.success === false) {
                 throw new Error((response && response.error) || 'Failed to generate AI recommendations.');
             }
+            if (!response.auditId) {
+                throw new Error('AI recommendations were generated without a valid audit receipt. Please try again.');
+            }
+            professorPanelState.facultyPaper.aiAuditReceipts[String(paper.id || '')] = String(response.auditId);
 
             const sectionC = response && response.sectionC && typeof response.sectionC === 'object'
                 ? response.sectionC
@@ -2396,6 +2570,18 @@ function renderProfessorFacultyPaperDetail(paper) {
     }
 
     card.style.display = 'block';
+    const statusToken = normalizeToken(paper.status);
+    const draftStatus = statusToken === 'draft';
+    const liveDraftPaperData = draftStatus
+        ? buildFacultyPaperData({
+            semesterId: paper.semester_id || paper.semesterId,
+            semesterLabel: paper.semester_label || paper.semesterLabel,
+            loadType: paper.load_type || paper.loadType,
+        })
+        : null;
+    const displayedSetRating = liveDraftPaperData
+        ? liveDraftPaperData.set_rating
+        : (paper.set_rating || 'N/A');
     if (meta) {
         meta.textContent = `Updated: ${normalizePaperTimestamp(paper.updated_at)}${paper.sent_at ? ` | Sent: ${normalizePaperTimestamp(paper.sent_at)}` : ''}`;
     }
@@ -2412,7 +2598,7 @@ function renderProfessorFacultyPaperDetail(paper) {
     setText('fpDetailRank', paper.rank || 'N/A');
     setText('fpDetailSemester', paper.semester_label || 'N/A');
     setText('fpDetailLoadType', getFacultyPaperLoadTypeLabel(paper.load_type || paper.loadType));
-    setText('fpDetailSetRating', paper.set_rating || 'N/A');
+    setText('fpDetailSetRating', displayedSetRating);
     setText('fpDetailSafRating', paper.saf_rating || 'N/A');
     setSelectedFacultyPaperLoadType(paper.load_type || paper.loadType);
 
@@ -2422,7 +2608,6 @@ function renderProfessorFacultyPaperDetail(paper) {
     if (approvalNamesAutoFillInput) approvalNamesAutoFillInput.checked = resolveFacultyPaperApprovalFlag(paper, 'approval_names_auto_fill');
     if (approvalDatesAutoFillInput) approvalDatesAutoFillInput.checked = resolveFacultyPaperApprovalFlag(paper, 'approval_dates_auto_fill');
 
-    const draftStatus = normalizeToken(paper.status) === 'draft';
     const sectionCReadOnly = !draftStatus;
     if (areasInput) areasInput.disabled = sectionCReadOnly;
     if (activitiesInput) activitiesInput.disabled = sectionCReadOnly;
@@ -2455,13 +2640,20 @@ function renderProfessorFacultyPaperDetail(paper) {
                 }
             }
 
+            const previewDraftData = statusToken === 'draft'
+                ? buildFacultyPaperData({
+                    semesterId: paper.semester_id || paper.semesterId,
+                    semesterLabel: paper.semester_label || paper.semesterLabel,
+                    loadType: paper.load_type || paper.loadType,
+                })
+                : null;
             await openFacultyAcknowledgementPdf({
                 faculty_name: paper.professor_name || 'N/A',
                 department: paper.department || 'N/A',
                 rank: paper.rank || 'N/A',
                 semester_label: paper.semester_label || 'N/A',
                 load_type: normalizeFacultyPaperLoadType(paper.load_type || paper.loadType),
-                set_rating: paper.set_rating || 'N/A',
+                set_rating: previewDraftData ? previewDraftData.set_rating : (paper.set_rating || 'N/A'),
                 saf_rating: paper.saf_rating || 'N/A',
                 section_c_areas: areasInput ? areasInput.value : (paper.section_c_areas || ''),
                 section_c_activities: activitiesInput ? activitiesInput.value : (paper.section_c_activities || ''),
@@ -2483,10 +2675,15 @@ function renderProfessorFacultyPaperDetail(paper) {
                 return;
             }
             try {
+                const aiGenerationAuditId = professorPanelState.facultyPaper.aiAuditReceipts[String(paper.id || '')] || '';
+                if (!aiGenerationAuditId) {
+                    throw new Error('Generate the audited AI Section C recommendation before saving.');
+                }
                 const response = SharedData.saveFacultyPaperSectionC({
                     actor_role: actor.role,
                     actor_user_id: actor.actorUserId,
                     paper_id: paper.id,
+                    aiGenerationAuditId: aiGenerationAuditId,
                     section_c: {
                         areas: areasInput ? areasInput.value : '',
                         activities: activitiesInput ? activitiesInput.value : '',
@@ -2498,6 +2695,7 @@ function renderProfessorFacultyPaperDetail(paper) {
                 if (!response || response.success === false) {
                     throw new Error((response && response.error) || 'Failed to save Section C.');
                 }
+                delete professorPanelState.facultyPaper.aiAuditReceipts[String(paper.id || '')];
                 await renderProfessorFacultyPaperList();
                 alert('Section C saved successfully.');
             } catch (error) {
@@ -2775,7 +2973,20 @@ function handleViewDetails(subject) {
  * Update summary cards with dynamic data
  */
 function updateSummaryCards(overrideTotals) {
-    const stats = overrideTotals || getFacultySummaryTotals();
+    let stats = overrideTotals || getFacultySummaryTotals();
+    const reportAccess = getProfessorFacultyReportAccessState();
+    if (reportAccess.enabled === false && SharedData && typeof SharedData.getProfessorEvaluationCounts === 'function') {
+        const counts = SharedData.getProfessorEvaluationCounts() || {};
+        stats = {
+            received: Number(counts.received) || 0,
+            required: Number(counts.required) || 0,
+            responseRate: Number(counts.responseRate) || 0,
+            averageScore: null,
+            registeredClassCount: 0,
+            scorableClassCount: 0,
+            partial: false,
+        };
+    }
 
     // Update card numbers
     const evaluationsCard = document.querySelector('.summary-card.evaluations .card-number');
@@ -2784,7 +2995,12 @@ function updateSummaryCards(overrideTotals) {
 
     if (evaluationsCard) evaluationsCard.textContent = `${stats.received}/${stats.required}`;
     if (scoreCard) {
-        scoreCard.dataset.averageScore = String(Number(stats.averageScore || 0));
+        scoreCard.dataset.averageScore = stats.averageScore !== null && Number.isFinite(Number(stats.averageScore))
+            ? String(Number(stats.averageScore))
+            : '';
+        scoreCard.dataset.partial = stats.partial ? 'true' : 'false';
+        scoreCard.dataset.scorableClassCount = String(Number(stats.scorableClassCount || 0));
+        scoreCard.dataset.registeredClassCount = String(Number(stats.registeredClassCount || 0));
     }
     refreshDashboardAverageScoreVisibility();
     if (responseCard) responseCard.textContent = `${stats.responseRate}%`;
@@ -2797,8 +3013,9 @@ function refreshDashboardAverageScoreVisibility() {
 
     const gate = resolveReportsGateState();
     const locked = gate.locked || !resolveActiveProfessorAccount(professorPanelState.context).linked;
-    const numericScore = Number(scoreCard.dataset.averageScore || 0);
-    const safeScore = Number.isFinite(numericScore) ? numericScore : 0;
+    const rawScore = scoreCard.dataset.averageScore;
+    const numericScore = rawScore === '' ? NaN : Number(rawScore);
+    const registeredClassCount = Number(scoreCard.dataset.registeredClassCount || 0);
 
     if (locked) {
         scoreSummaryCard.style.display = 'none';
@@ -2807,7 +3024,13 @@ function refreshDashboardAverageScoreVisibility() {
     }
 
     scoreSummaryCard.style.display = '';
-    scoreCard.textContent = `${safeScore.toFixed(1)}/5.0`;
+    if (!Number.isFinite(numericScore)) {
+        scoreCard.textContent = 'N/A';
+        scoreCard.title = registeredClassCount > 0 ? 'No valid submitted SET responses are available.' : '';
+        return;
+    }
+    scoreCard.textContent = `${numericScore.toFixed(1)}/5.0`;
+    scoreCard.title = '';
 }
 
 /**
@@ -2826,6 +3049,7 @@ function setupPeerEvaluationForm() {
 
     if (peerSelect) {
         peerSelect.addEventListener('change', function () {
+            SharedData.startEvaluationTiming('peer', peerSelect.value, getPeerSemesterId());
             refreshPeerTargetLockState();
         });
     }
@@ -3471,16 +3695,10 @@ function handlePeerEvaluation() {
 
     try {
         // Save via centralized API
+        payload.behaviorMeta = SharedData.buildEvaluationTiming(payload, allQuestions);
         SharedData.addEvaluation(payload);
+        SharedData.clearEvaluationTiming(payload);
 
-        // Add to activity log
-        SharedData.addActivityLogEntry({
-            type: 'evaluation_submitted',
-            title: 'Peer Evaluation Submitted',
-            user: payload.evaluatorName,
-            role: 'professor',
-            date: SharedData.getNowIsoString()
-        });
     } catch (error) {
         const message = String(error && error.message || '');
         if (message.toLowerCase().includes('inactive')) {
@@ -3576,6 +3794,7 @@ function loadFacultySummary(selection = {}) {
     updateSummaryCards(activeSummary.totals);
     resetProfessorSubjectCommentsPanel();
     renderSemestralEvaluationTrend(semesterId);
+    scheduleProfessorTrendSnapshotRefresh(semesterId);
     scheduleProfessorReportViewportRefresh(90);
 }
 
@@ -3587,16 +3806,51 @@ function setupSemesterFilter() {
     const evalFilter = document.getElementById('evaluationTypeFilter');
     if (!filter) return;
 
-    const applySelection = () => {
+    const applySelection = async () => {
+        await refreshProfessorReportAccessState();
+        if (resolveReportsGateState().locked) {
+            applyReportBlackout();
+            return;
+        }
         const selectedOption = filter.options[filter.selectedIndex];
         const value = String(filter.value || '').trim();
-        const label = selectedOption ? selectedOption.textContent.trim() : '';
+        const label = selectedOption ? selectedOption.textContent.trim() : getSemesterLabelById(value, []);
         const evalValue = evalFilter ? String(evalFilter.value || 'student').trim() : 'student';
         const evalLabel = evalFilter
             ? (evalFilter.options[evalFilter.selectedIndex]?.textContent || '').trim()
             : 'Student Evaluation';
+        const requestId = ++professorReportSelectionRequestId;
+
+        professorPanelState.currentSelection = {
+            semesterId: value,
+            semesterLabel: label,
+            evaluationType: evalValue,
+        };
+        professorTrendSnapshotRequestId += 1;
 
         updateSemesterLabels(label, evalLabel);
+        const fetchSubjectManagement = SharedData.fetchSubjectManagementSnapshot || SharedData.refreshSubjectManagement;
+        const fetchEvaluations = SharedData.fetchEvaluationsSnapshot || SharedData.refreshEvaluations;
+        if (fetchSubjectManagement && fetchEvaluations) {
+            try {
+                const [subjectManagement, evaluations] = await Promise.all([
+                    fetchSubjectManagement({
+                        semesterId: value,
+                        includeInactiveOfferings: true,
+                    }),
+                    fetchEvaluations({ semesterId: value }),
+                ]);
+                if (requestId !== professorReportSelectionRequestId) return;
+
+                cacheProfessorSemesterSnapshot(value, subjectManagement, evaluations);
+                const baseContext = buildProfessorPanelContext();
+                professorPanelState.context = buildProfessorContextForSemester(baseContext, value) || baseContext;
+            } catch (error) {
+                if (requestId !== professorReportSelectionRequestId) return;
+                console.warn('[Professor] Unable to refresh the selected semester SET data.', error);
+            }
+        }
+        if (requestId !== professorReportSelectionRequestId) return;
         loadFacultySummary({ semesterId: value, evaluationType: evalValue });
     };
 
@@ -3767,7 +4021,9 @@ function buildInitials(name) {
 }
 
 function fetchFacultySummaryFromSql(query) {
-    const context = professorPanelState.context || buildProfessorPanelContext();
+    const context = query && query.context
+        ? query.context
+        : (professorPanelState.context || buildProfessorPanelContext());
     const semesterId = String(query && query.semesterId || professorPanelState.currentSelection.semesterId || context.currentSemester || '').trim();
     const evaluationType = getEvaluationTypeMeta(query && query.evaluationType || 'student').id;
     const requestedLoadType = String(query && query.loadType || '').trim();
@@ -3837,13 +4093,34 @@ function fetchFacultySummaryFromSql(query) {
     let commentBuckets = {};
     let requiredTotal = 0;
     let receivedTotal = 0;
+    let studentSetMetrics = null;
 
     if (evaluationType === 'student') {
         const groupedBySubject = new Map();
         const localBuckets = {};
+        const calculationOfferings = selectedLoadType
+            ? (context.offerings || []).filter(offering =>
+                normalizeFacultyPaperLoadType(offering && (offering.loadType || offering.load_type)) === selectedLoadType
+            )
+            : context.offerings;
+        studentSetMetrics = window.SetCalculation.calculateProfessorSetMetrics({
+            professorUserId: professorId,
+            semesterId,
+            offerings: calculationOfferings,
+            enrollments: context.enrollments,
+            evaluations: context.evaluations,
+            includeInactiveOfferings: Boolean(
+                semesterId
+                && context.currentSemester
+                && semesterId !== context.currentSemester
+            ),
+        });
+        const setMetricsByOffering = new Map(
+            studentSetMetrics.byOffering.map(item => [String(item.courseOfferingId), item])
+        );
         const professorOfferings = (context.offerings || []).filter(offering =>
             normalizeUserIdToken(offering && offering.professorUserId) === professorId &&
-            !!(offering && offering.isActive) &&
+            setMetricsByOffering.has(String(offering && offering.id || '').trim()) &&
             (!selectedLoadType || normalizeFacultyPaperLoadType(offering && (offering.loadType || offering.load_type)) === selectedLoadType) &&
             (!semesterId || String(offering && offering.semesterSlug || '').trim() === semesterId)
         );
@@ -3852,10 +4129,13 @@ function fetchFacultySummaryFromSql(query) {
             const offeringId = String(offering && offering.id || '').trim();
             if (!offeringId) return;
 
-            const required = (context.enrollments || []).filter(item =>
-                String(item && item.courseOfferingId || '').trim() === offeringId &&
-                normalizeToken(item && item.status) === 'enrolled'
-            ).length;
+            const offeringMetrics = setMetricsByOffering.get(offeringId) || {
+                registered: 0,
+                completed: 0,
+                weightedScore: null,
+                available: false,
+            };
+            const required = offeringMetrics.registered;
 
             const offeringEvaluations = matchedEvaluations.filter(item =>
                 String(item && item.courseOfferingId || '').trim() === offeringId
@@ -3884,14 +4164,29 @@ function fetchFacultySummaryFromSql(query) {
                     sectionSet: new Set(),
                     evaluations: [],
                     comments: [],
+                    weightedScore: 0,
+                    scorableRegistered: 0,
+                    registeredSectionCount: 0,
+                    scorableSectionCount: 0,
+                    excludedSectionCount: 0,
                 });
             }
 
             const group = groupedBySubject.get(subjectIdentity);
             group.required += required;
-            group.received += offeringEvaluations.length;
+            group.received += offeringMetrics.completed;
             group.sectionSet.add(formatDisplaySection(offering.sectionName));
             group.evaluations.push(...offeringEvaluations);
+            if (required > 0) {
+                group.registeredSectionCount += 1;
+                if (offeringMetrics.available) {
+                    group.weightedScore += Number(offeringMetrics.weightedScore || 0);
+                    group.scorableRegistered += required;
+                    group.scorableSectionCount += 1;
+                } else {
+                    group.excludedSectionCount += 1;
+                }
+            }
             group.comments.push(
                 ...offeringEvaluations
                     .flatMap(item => collectEvaluationComments(item))
@@ -3907,7 +4202,13 @@ function fetchFacultySummaryFromSql(query) {
                 sectionCount: group.sectionSet.size,
                 required: group.required,
                 received: group.received,
-                avgRating: computeAverageRatingFromEvaluations(group.evaluations),
+                avgRating: group.scorableRegistered > 0
+                    ? group.weightedScore / group.scorableRegistered
+                    : null,
+                ratedSectionCount: group.scorableSectionCount,
+                registeredSectionCount: group.registeredSectionCount,
+                partial: group.scorableSectionCount > 0 && group.excludedSectionCount > 0,
+                noResponses: group.registeredSectionCount > 0 && group.scorableSectionCount === 0,
             };
         });
 
@@ -3963,11 +4264,9 @@ function fetchFacultySummaryFromSql(query) {
         if (evaluationType === 'professor') {
             requiredTotal = Math.max(Number(context && context.peerAssignmentsStats && context.peerAssignmentsStats.total || 0), 0);
         } else {
-            const supervisorRoles = new Set(['dean', 'procoor', 'hr', 'vpaa', 'admin']);
-            requiredTotal = (context.users || []).filter(user =>
-                supervisorRoles.has(normalizeToken(user && user.role)) &&
-                normalizeToken(user && user.status) !== 'inactive'
-            ).length;
+            // A professor is evaluated by exactly one active supervisor for a
+            // semester: the program coordinator when assigned, otherwise the dean.
+            requiredTotal = 1;
         }
         receivedTotal = matchedEvaluations.length;
     }
@@ -3981,8 +4280,9 @@ function fetchFacultySummaryFromSql(query) {
         return {
             name: category,
             average: stat.count ? (stat.sum / stat.count) : 0,
+            responses: stat.count || 0,
         };
-    }).filter(item => item.name);
+    }).filter(item => item.name && item.responses > 0);
 
     const detailedRows = categories.map(category => {
         const stat = categoryStats[category] || { sum: 0, count: 0, responses: 0, excellent: 0, good: 0, fair: 0, poor: 0, veryPoor: 0 };
@@ -3998,7 +4298,9 @@ function fetchFacultySummaryFromSql(query) {
         };
     }).filter(item => item.category);
 
-    const averageScore = computeAverageRatingFromEvaluations(matchedEvaluations);
+    const averageScore = evaluationType === 'student'
+        ? (studentSetMetrics ? studentSetMetrics.averageRating : null)
+        : computeAverageRatingFromEvaluations(matchedEvaluations);
     const responseRate = requiredTotal ? Math.round((receivedTotal / requiredTotal) * 100) : 0;
 
     return {
@@ -4013,6 +4315,16 @@ function fetchFacultySummaryFromSql(query) {
             received: receivedTotal,
             responseRate,
             averageScore,
+            partial: evaluationType === 'student' && Boolean(studentSetMetrics && studentSetMetrics.partial),
+            scorableClassCount: evaluationType === 'student' && studentSetMetrics
+                ? Number(studentSetMetrics.scorableClassCount || 0)
+                : 0,
+            registeredClassCount: evaluationType === 'student' && studentSetMetrics
+                ? Number(studentSetMetrics.registeredClassCount || 0)
+                : 0,
+            excludedClassCount: evaluationType === 'student' && studentSetMetrics
+                ? Number(studentSetMetrics.excludedClassCount || 0)
+                : 0,
         },
     };
 }
@@ -4078,10 +4390,19 @@ function renderBreakdownTable(rows, evaluationType = 'student') {
             return `
                 <tr data-required="${item.required || 0}" data-received="${item.received || 0}" data-avg="${item.avgRating}" data-comment-key="${item.rowKey || ''}">
                     <td data-label="Employee Number">${escapeHTML(String(item.employeeId || 'N/A'))}</td>
-                    <td data-label="Avg Rating">${item.avgRating.toFixed(1)}</td>
+                    <td data-label="Avg Rating">${item.avgRating !== null && Number.isFinite(Number(item.avgRating)) ? Number(item.avgRating).toFixed(1) : 'N/A'}</td>
                 </tr>
             `;
         }
+
+        const hasAverage = item.avgRating !== null && Number.isFinite(Number(item.avgRating));
+        const coverageTotal = Number(item.registeredSectionCount || 0);
+        const ratedSections = Number(item.ratedSectionCount || 0);
+        const coverageHtml = item.partial
+            ? `<span class="count-pill" title="Zero-response sections are excluded from this available SET average.">Partial &middot; ${ratedSections}/${coverageTotal} sections rated</span>`
+            : item.noResponses
+                ? `<span class="count-pill" title="No valid submitted SET evaluation is available for these sections.">No responses &middot; 0/${coverageTotal} sections rated</span>`
+                : '';
 
         return `
             <tr data-required="${item.required}" data-received="${item.received}" data-avg="${item.avgRating}" data-comment-key="${item.rowKey || ''}">
@@ -4089,7 +4410,7 @@ function renderBreakdownTable(rows, evaluationType = 'student') {
                 <td data-label="Section Count">${Number(item.sectionCount || 0)}</td>
                 <td data-label="Evaluations Received"><span class="count-pill">${item.received}/${item.required}</span></td>
                 <td data-label="Response Rate">${responseRate}%</td>
-                <td data-label="Avg Rating">${item.avgRating.toFixed(1)}</td>
+                <td data-label="Avg Rating">${hasAverage ? Number(item.avgRating).toFixed(1) : 'N/A'}${coverageHtml ? `<br>${coverageHtml}` : ''}</td>
             </tr>
         `;
     }).join('');
@@ -4752,7 +5073,7 @@ function parseDateBoundary(dateString, boundary) {
     return SharedData.parsePhilippineDateBoundary(dateString, boundary);
 }
 
-function resolveReportsGateState() {
+function resolveEvaluationWindowGateState() {
     const studentPeriod = SharedData.getEvalPeriodDates('student-professor') || { start: '', end: '' };
     const startDate = parseDateBoundary(studentPeriod.start, 'start');
     const endDate = parseDateBoundary(studentPeriod.end, 'end');
@@ -4771,8 +5092,99 @@ function resolveReportsGateState() {
     };
 }
 
+function getProfessorFacultyReportAccessState() {
+    if (!SharedData || typeof SharedData.getFacultyReportAccess !== 'function') {
+        return { enabled: true, departmentCode: '', updatedAt: '' };
+    }
+    return SharedData.getFacultyReportAccess() || { enabled: true, departmentCode: '', updatedAt: '' };
+}
+
+function resolveReportsGateState() {
+    const periodGate = resolveEvaluationWindowGateState();
+    const access = getProfessorFacultyReportAccessState();
+    const departmentRestricted = access.enabled === false;
+    const accessPending = !professorReportAccessVerified;
+    return Object.assign({}, periodGate, {
+        locked: periodGate.locked || departmentRestricted || accessPending,
+        departmentRestricted,
+        accessPending,
+        departmentCode: String(access.departmentCode || '').trim(),
+    });
+}
+
 function resolveFacultyPaperGateState() {
-    return resolveReportsGateState();
+    return resolveEvaluationWindowGateState();
+}
+
+function clearRestrictedProfessorReportData() {
+    professorReportSelectionRequestId += 1;
+    professorTrendSnapshotRequestId += 1;
+    if (professorTrendRefreshTimer) {
+        clearTimeout(professorTrendRefreshTimer);
+        professorTrendRefreshTimer = 0;
+    }
+    professorPanelState.summaryByType = {
+        student: { ...PROFESSOR_PANEL_EMPTY_SUMMARY },
+        professor: { ...PROFESSOR_PANEL_EMPTY_SUMMARY },
+        supervisor: { ...PROFESSOR_PANEL_EMPTY_SUMMARY },
+    };
+    professorPanelState.semesterSnapshots = {};
+    if (professorPanelState.context && typeof professorPanelState.context === 'object') {
+        professorPanelState.context.evaluations = [];
+    }
+    resetProfessorSubjectCommentsPanel();
+    renderCriteriaSummary([]);
+    renderBreakdownTable([], professorPanelState.currentSelection.evaluationType || 'student');
+    renderEvaluationCount([], { received: 0, required: 0 });
+    initializeStudentCharts();
+    initializePeerCharts();
+    initializeSupervisorCharts();
+    const trendStatus = document.getElementById('semestralTrendStatus');
+    const trendDelta = document.getElementById('semestralTrendDelta');
+    const trendTableBody = document.getElementById('semestralTrendTableBody');
+    if (trendStatus) trendStatus.textContent = 'No semestral trend data available.';
+    if (trendDelta) trendDelta.textContent = 'Detailed evaluation reports are unavailable.';
+    if (trendTableBody) {
+        trendTableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="5">No data available.</td></tr>';
+    }
+    renderSemestralTrendChart([]);
+}
+
+function refreshProfessorReportAccessState() {
+    if (!SharedData || typeof SharedData.refreshFacultyReportAccess !== 'function') {
+        applyReportBlackout();
+        return Promise.resolve(getProfessorFacultyReportAccessState());
+    }
+    if (professorReportAccessRefreshPromise) {
+        return professorReportAccessRefreshPromise;
+    }
+
+    const previouslyEnabled = getProfessorFacultyReportAccessState().enabled !== false;
+    professorReportAccessRefreshPromise = SharedData.refreshFacultyReportAccess()
+        .then(async access => {
+            const currentlyEnabled = !access || access.enabled !== false;
+            professorReportAccessVerified = true;
+            if (access && access.enabled === false) {
+                clearRestrictedProfessorReportData();
+            }
+            if (
+                previouslyEnabled !== currentlyEnabled
+                && typeof SharedData.refreshEvaluations === 'function'
+            ) {
+                await SharedData.refreshEvaluations({});
+            }
+            applyReportBlackout();
+            return access;
+        })
+        .catch(error => {
+            console.warn('[Professor] Unable to refresh faculty report access.', error);
+            applyReportBlackout();
+            return getProfessorFacultyReportAccessState();
+        })
+        .finally(() => {
+            professorReportAccessRefreshPromise = null;
+        });
+    return professorReportAccessRefreshPromise;
 }
 
 function setReportsNavVisibility(locked) {
@@ -4834,10 +5246,18 @@ function setupReportGateSync() {
     if (!SharedData || typeof SharedData.onDataChange !== 'function') return;
 
     SharedData.onDataChange(function (key) {
-        if (key === SharedData.KEYS.EVAL_PERIODS) {
+        if (
+            key === SharedData.KEYS.EVAL_PERIODS
+            || key === SharedData.KEYS.FACULTY_REPORT_ACCESS
+            || key === SharedData.KEYS.PROFESSOR_EVALUATION_COUNTS
+        ) {
             applyReportBlackout();
             renderDashboardSupportWidgets();
         }
+    });
+
+    window.addEventListener('focus', function () {
+        refreshProfessorReportAccessState();
     });
 }
 
@@ -4878,6 +5298,24 @@ function applyReportBlackout() {
     if (blackoutEl && contentEl) {
         blackoutEl.style.display = locked ? 'block' : 'none';
         contentEl.style.display = locked ? 'none' : 'block';
+    }
+
+    if (gate.departmentRestricted) {
+        clearRestrictedProfessorReportData();
+        const counts = SharedData && typeof SharedData.getProfessorEvaluationCounts === 'function'
+            ? SharedData.getProfessorEvaluationCounts()
+            : null;
+        if (counts) {
+            updateSummaryCards({
+                received: Number(counts.received) || 0,
+                required: Number(counts.required) || 0,
+                responseRate: Number(counts.responseRate) || 0,
+                averageScore: null,
+                registeredClassCount: 0,
+                scorableClassCount: 0,
+                partial: false,
+            });
+        }
     }
 
     if (locked && reportsView && reportsView.style.display === 'block') {

@@ -154,6 +154,24 @@ naapAuthRateRecordEvent(
     $identityFingerprint,
     $now
 );
+naapAuthRateRecordEvent(
+    $pdo,
+    NAAP_AUTH_RATE_ACTION_OTP_SENT,
+    $ipFingerprint,
+    $identityFingerprint,
+    $now
+);
+authRateAssert(
+    naapAuthRateCountEvents(
+        $pdo,
+        NAAP_AUTH_RATE_ACTION_OTP_SENT,
+        'identity_hash',
+        $identityFingerprint,
+        NAAP_AUTH_RATE_OTP_SEND_WINDOW_SECONDS,
+        $now
+    ) === 1,
+    'OTP issuance did not maintain its independent rate-limit bucket.'
+);
 authRateAssert(
     naapAuthRateCountEvents(
         $pdo,

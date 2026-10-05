@@ -22,16 +22,32 @@ let latestVpaaAnalyticsSnapshot = null;
 let currentVpaaAnalyticsSemester = "all";
 let currentVpaaAnalyticsEvaluationType = "student";
 let currentVpaaAnalyticsProfessorId = null;
+let vpaaProfessorAnalyticsRenderId = 0;
 const VPAA_PROFESSOR_PAGE_SIZE = 100;
 let vpaaProfessorPage = 1;
 let vpaaProfessorPageMeta = { total: 0, limit: VPAA_PROFESSOR_PAGE_SIZE, offset: 0, page: 1, hasMore: false };
 let vpaaProfessorRefreshPromise = null;
 let vpaaProfessorRefreshKey = "";
+let vpaaProfessorPageUsers = null;
 let vpaaDashboardBaseUsers = [];
 let vpaaDashboardDataRefreshPromise = null;
 let vpaaDashboardDataRefreshKey = "";
+let vpaaDashboardDataRefreshId = 0;
+let vpaaSubjectManagementSnapshot = null;
+let vpaaEvaluationsSnapshot = null;
+const vpaaSemesterDataCache = new Map();
+const vpaaSemesterDataPromises = new Map();
 
 const VPAA_EVALUATION_TYPE_OPTIONS = [
+    {
+        id: "all",
+        label: "All Evaluations",
+        unitLabel: "Evaluators",
+        totalLabel: "Total Eligible Evaluators",
+        statusTitle: "All Evaluation Status",
+        icon: "fas fa-layer-group",
+        feedbackIcon: "fas fa-comments"
+    },
     {
         id: "student",
         label: "Student Evaluation",
@@ -211,15 +227,19 @@ function collectEvaluationComments(evaluation) {
 
 function buildVpaaDatabaseContext(sourceUsers) {
     const users = mergeVpaaDashboardUsers(sourceUsers);
-    const evaluations = SharedData.getCachedEvaluations
-        ? SharedData.getCachedEvaluations()
-        : ((SharedData.getEvaluations && SharedData.getEvaluations()) || []);
+    const evaluations = Array.isArray(vpaaEvaluationsSnapshot)
+        ? vpaaEvaluationsSnapshot
+        : (SharedData.getCachedEvaluations
+            ? SharedData.getCachedEvaluations()
+            : ((SharedData.getEvaluations && SharedData.getEvaluations()) || []));
     const semesterList = (SharedData.getSemesterList && SharedData.getSemesterList()) || [];
-    const subjectManagement = SharedData.getCachedSubjectManagement
-        ? SharedData.getCachedSubjectManagement()
-        : (SharedData.getSubjectManagement
-            ? SharedData.getSubjectManagement()
-            : { offerings: [], enrollments: [] });
+    const subjectManagement = vpaaSubjectManagementSnapshot
+        ? vpaaSubjectManagementSnapshot
+        : (SharedData.getCachedSubjectManagement
+            ? SharedData.getCachedSubjectManagement()
+            : (SharedData.getSubjectManagement
+                ? SharedData.getSubjectManagement()
+                : { offerings: [], enrollments: [] }));
 
     const professors = users.filter(function (user) {
         return normalizeVpaaToken(user && user.role) === "professor";
@@ -434,11 +454,57 @@ function buildVpaaChartDataForType(typeKey, semesterLabel, context) {
     result.averageRating = distTotal ? (weightedTotal / distTotal) : 0;
     result.evaluatedCount = targetedProfessors.size;
 
+    if (typeKey === "student") {
+        const professorIds = new Set((context.offerings || []).map(function (offering) {
+            return normalizeVpaaProfessorUserId(offering && (offering.professorUserId || offering.professorId));
+        }).filter(Boolean));
+        let registered = 0;
+        let completed = 0;
+        let totalWeightedScore = 0;
+        let scorableRegistered = 0;
+        let excludedRegistered = 0;
+        let registeredClassCount = 0;
+        let scorableClassCount = 0;
+        let excludedClassCount = 0;
+        let evaluatedCount = 0;
+        professorIds.forEach(function (professorUserId) {
+            const metrics = window.SetCalculation.calculateProfessorSetMetrics({
+                professorUserId: professorUserId,
+                semesterId: semesterLabel,
+                offerings: context.offerings,
+                enrollments: context.enrollments,
+                evaluations: context.evaluations,
+            });
+            registered += metrics.registered;
+            completed += metrics.completed;
+            if (metrics.completed > 0) evaluatedCount += 1;
+            if (metrics.totalWeightedScore !== null) totalWeightedScore += metrics.totalWeightedScore;
+            scorableRegistered += Number(metrics.scorableRegistered || 0);
+            excludedRegistered += Number(metrics.excludedRegistered || 0);
+            registeredClassCount += Number(metrics.registeredClassCount || 0);
+            scorableClassCount += Number(metrics.scorableClassCount || 0);
+            excludedClassCount += Number(metrics.excludedClassCount || 0);
+        });
+        result.averageRating = scorableRegistered > 0 ? totalWeightedScore / scorableRegistered : null;
+        result.totalEvaluations = completed;
+        result.evaluatedCount = evaluatedCount;
+        result.registered = registered;
+        result.scorableRegistered = scorableRegistered;
+        result.excludedRegistered = excludedRegistered;
+        result.registeredClassCount = registeredClassCount;
+        result.scorableClassCount = scorableClassCount;
+        result.excludedClassCount = excludedClassCount;
+        result.partial = scorableRegistered > 0 && excludedClassCount > 0;
+    }
+
     return result;
 }
 
 function buildProfessorDataFromSharedData(sourceUsers) {
     const context = buildVpaaDatabaseContext(sourceUsers);
+    context.evaluations = (context.evaluations || []).filter(function (evaluation) {
+        return !evaluation.credibilityStatus || ['AUTO_ACCEPTED', 'ACCEPTED_BY_HR'].includes(evaluation.credibilityStatus);
+    });
     const currentSemester = context.currentSemester || currentSemesterLabel || "Current Semester";
     currentSemesterLabel = currentSemester;
 
@@ -486,16 +552,14 @@ function buildProfessorDataFromSharedData(sourceUsers) {
                 return offeringSemester === semesterToken;
             });
 
-            const offeringIdSet = new Set(semesterOfferings.map(function (offering) {
-                return String(offering && offering.id || "").trim();
-            }).filter(Boolean));
-
-            const requiredStudentRaters = (context.enrollments || []).filter(function (enrollment) {
-                const offeringId = String(enrollment && enrollment.courseOfferingId || "").trim();
-                if (!offeringIdSet.has(offeringId)) return false;
-                const status = normalizeVpaaToken(enrollment && enrollment.status || "enrolled");
-                return status !== "inactive" && status !== "dropped";
-            }).length;
+            const professorSetMetrics = window.SetCalculation.calculateProfessorSetMetrics({
+                professorUserId: professorId,
+                semesterId: semesterLabel,
+                offerings: context.offerings,
+                enrollments: context.enrollments,
+                evaluations: context.evaluations,
+            });
+            const requiredStudentRaters = professorSetMetrics.registered;
 
             const studentEvals = [];
             const peerEvals = [];
@@ -525,10 +589,16 @@ function buildProfessorDataFromSharedData(sourceUsers) {
                 supervisor: buildProfessorAnalyticsForType("supervisor", supervisorEvals, semesterLabel),
                 professor: buildProfessorAnalyticsForType("professor", peerEvals, semesterLabel)
             };
+            analyticsByType.student.averageRating = professorSetMetrics.averageRating;
+            analyticsByType.student.totalEvaluations = professorSetMetrics.completed;
+            analyticsByType.student.partial = professorSetMetrics.partial;
+            analyticsByType.student.registeredClassCount = professorSetMetrics.registeredClassCount;
+            analyticsByType.student.scorableClassCount = professorSetMetrics.scorableClassCount;
+            analyticsByType.student.excludedClassCount = professorSetMetrics.excludedClassCount;
 
             const supervisorCount = getVpaaApplicableSupervisorUsersForProfessor(context, professorId).length || 1;
             const totalRequired = requiredStudentRaters + Math.max(activeProfessorCount - 1, 0) + supervisorCount;
-            const totalReceived = allEvals.length;
+            const totalReceived = professorSetMetrics.completed + peerEvals.length + supervisorEvals.length;
             const responseRate = totalRequired > 0 ? Math.round((totalReceived / totalRequired) * 100) : 0;
 
             resultRows.push({
@@ -548,6 +618,8 @@ function buildProfessorDataFromSharedData(sourceUsers) {
                 overall: parseFloat(overall.toFixed(1)),
                 responseRate: responseRate,
                 evaluations: totalReceived,
+                requiredEvaluations: totalRequired,
+                pendingEvaluations: Math.max(totalRequired - totalReceived, 0),
                 students: requiredStudentRaters,
                 subjects: semesterOfferings.map(function (offering) {
                     const code = String(offering && offering.subjectCode || "").trim();
@@ -697,12 +769,157 @@ function mergeVpaaDashboardUsers(sourceUsers) {
 
 function getVpaaDashboardSemesterValue(value) {
     const raw = String(value || "").trim();
-    if (raw && raw !== "all") return raw;
+    if (raw) return raw;
     return String(
         currentSemesterLabel ||
         (SharedData.getCurrentSemester && SharedData.getCurrentSemester()) ||
         ""
     ).trim();
+}
+
+function getVpaaSemesterIdsForSelection(value) {
+    const selected = getVpaaDashboardSemesterValue(value);
+    if (selected && selected !== "all") return [selected];
+
+    const ids = [];
+    const addSemester = function (semesterId) {
+        const token = String(semesterId || "").trim();
+        if (token && token !== "all" && !ids.includes(token)) ids.push(token);
+    };
+
+    addSemester(SharedData.getCurrentSemester && SharedData.getCurrentSemester());
+    availableSemesterLabels.forEach(addSemester);
+    const semesterList = SharedData.getSemesterList ? SharedData.getSemesterList() : [];
+    (Array.isArray(semesterList) ? semesterList : []).forEach(function (item) {
+        addSemester(item && (item.value || item.id || item.slug || item.label));
+    });
+    return ids;
+}
+
+function normalizeVpaaSubjectManagementSnapshot(value) {
+    const snapshot = value && value.subjectManagement ? value.subjectManagement : value;
+    return {
+        subjects: Array.isArray(snapshot && snapshot.subjects) ? snapshot.subjects : [],
+        offerings: Array.isArray(snapshot && snapshot.offerings) ? snapshot.offerings : [],
+        enrollments: Array.isArray(snapshot && snapshot.enrollments) ? snapshot.enrollments : []
+    };
+}
+
+function normalizeVpaaEvaluationSnapshot(value) {
+    if (value && Array.isArray(value.evaluations)) return value.evaluations;
+    return Array.isArray(value) ? value : [];
+}
+
+function mergeVpaaSnapshotRows(snapshots, propertyName, identityResolver) {
+    const rows = [];
+    const indexesByIdentity = new Map();
+    (Array.isArray(snapshots) ? snapshots : []).forEach(function (snapshot) {
+        const source = Array.isArray(snapshot && snapshot[propertyName]) ? snapshot[propertyName] : [];
+        source.forEach(function (row, index) {
+            const identity = String(identityResolver(row, index) || "").trim();
+            if (!identity || !indexesByIdentity.has(identity)) {
+                if (identity) indexesByIdentity.set(identity, rows.length);
+                rows.push(row);
+                return;
+            }
+            rows[indexesByIdentity.get(identity)] = row;
+        });
+    });
+    return rows;
+}
+
+function applyVpaaSemesterDataSelection(semesterIds) {
+    const snapshots = (Array.isArray(semesterIds) ? semesterIds : [])
+        .map(function (semesterId) { return vpaaSemesterDataCache.get(semesterId); })
+        .filter(Boolean);
+    const subjectSnapshots = snapshots.map(function (snapshot) { return snapshot.subjectManagement; });
+
+    vpaaSubjectManagementSnapshot = {
+        subjects: mergeVpaaSnapshotRows(subjectSnapshots, "subjects", function (row, index) {
+            return row && (row.id || row.subjectId || row.subjectCode) || `subject-${index}`;
+        }),
+        offerings: mergeVpaaSnapshotRows(subjectSnapshots, "offerings", function (row, index) {
+            return row && (row.id || row.courseOfferingId) || `offering-${index}`;
+        }),
+        enrollments: mergeVpaaSnapshotRows(subjectSnapshots, "enrollments", function (row, index) {
+            return row && row.id
+                ? row.id
+                : [
+                    row && (row.courseOfferingId || row.offeringId),
+                    row && (row.studentUserId || row.studentId || row.studentNumber),
+                    index
+                ].join("|");
+        })
+    };
+
+    vpaaEvaluationsSnapshot = mergeVpaaSnapshotRows(snapshots, "evaluations", function (row, index) {
+        if (!row) return `evaluation-${index}`;
+        return row.databaseEvaluationId || row.id || row.submissionDuplicateKey || [
+            row.semesterId,
+            row.evaluationType || row.evaluatorRole,
+            row.evaluatorUserId || row.evaluatorId || row.studentUserId,
+            row.evaluateeUserId || row.targetProfessorId || row.professorId,
+            row.courseOfferingId,
+            index
+        ].join("|");
+    });
+}
+
+function fetchVpaaSemesterData(semesterId, forceRefresh) {
+    const token = String(semesterId || "").trim();
+    if (!token || token === "all") return Promise.resolve(null);
+    if (!forceRefresh && vpaaSemesterDataCache.has(token)) {
+        return Promise.resolve(vpaaSemesterDataCache.get(token));
+    }
+    if (vpaaSemesterDataPromises.has(token)) {
+        return vpaaSemesterDataPromises.get(token);
+    }
+
+    const subjectPromise = SharedData.fetchSubjectManagementSnapshot
+        ? SharedData.fetchSubjectManagementSnapshot({ semesterId: token })
+        : (SharedData.refreshSubjectManagement
+            ? SharedData.refreshSubjectManagement({ semesterId: token })
+            : Promise.resolve({ subjects: [], offerings: [], enrollments: [] }));
+    const evaluationPromise = SharedData.fetchEvaluationsSnapshot
+        ? SharedData.fetchEvaluationsSnapshot({ semesterId: token })
+        : (SharedData.refreshEvaluations
+            ? SharedData.refreshEvaluations({ semesterId: token })
+            : Promise.resolve([]));
+
+    const request = Promise.all([subjectPromise, evaluationPromise])
+        .then(function (results) {
+            const snapshot = {
+                subjectManagement: normalizeVpaaSubjectManagementSnapshot(results[0]),
+                evaluations: normalizeVpaaEvaluationSnapshot(results[1])
+            };
+            vpaaSemesterDataCache.set(token, snapshot);
+            return snapshot;
+        })
+        .finally(function () {
+            if (vpaaSemesterDataPromises.get(token) === request) {
+                vpaaSemesterDataPromises.delete(token);
+            }
+        });
+    vpaaSemesterDataPromises.set(token, request);
+    return request;
+}
+
+function refreshVpaaSemesterDataSelection(value, forceRefresh) {
+    const semesterIds = getVpaaSemesterIdsForSelection(value);
+    if (!semesterIds.length) return Promise.resolve([]);
+    return Promise.all(semesterIds.map(function (semesterId) {
+        return fetchVpaaSemesterData(semesterId, forceRefresh === true);
+    })).then(function () {
+        applyVpaaSemesterDataSelection(semesterIds);
+        return semesterIds;
+    });
+}
+
+function invalidateVpaaSemesterDataCache() {
+    vpaaSemesterDataCache.clear();
+    vpaaSemesterDataPromises.clear();
+    vpaaSubjectManagementSnapshot = null;
+    vpaaEvaluationsSnapshot = null;
 }
 
 function rebuildVpaaDashboardState(sourceUsers) {
@@ -711,7 +928,10 @@ function rebuildVpaaDashboardState(sourceUsers) {
     const previousDepartment = elements.departmentFilter ? elements.departmentFilter.value : "";
     const previousSort = elements.sortFilter ? elements.sortFilter.value : "";
 
-    loadDashboardDataFromDb(sourceUsers);
+    const effectiveSourceUsers = Array.isArray(sourceUsers)
+        ? sourceUsers
+        : (hasSubmittedSearch && Array.isArray(vpaaProfessorPageUsers) ? vpaaProfessorPageUsers : undefined);
+    loadDashboardDataFromDb(effectiveSourceUsers);
     populateDepartments();
     populateSemesters();
     populateCampuses();
@@ -729,13 +949,14 @@ function rebuildVpaaDashboardState(sourceUsers) {
 }
 
 function refreshVpaaDashboardDataForSemester(semesterValue, sourceUsers) {
-    const semesterId = getVpaaDashboardSemesterValue(semesterValue);
-    if (!semesterId) {
+    const selectedSemester = getVpaaDashboardSemesterValue(semesterValue);
+    const semesterIds = getVpaaSemesterIdsForSelection(selectedSemester);
+    if (!semesterIds.length) {
         return Promise.resolve(null);
     }
 
     const refreshKey = JSON.stringify({
-        semesterId: semesterId,
+        semesterIds: semesterIds,
         source: Array.isArray(sourceUsers)
             ? sourceUsers.map(function (user) { return normalizeVpaaUserId(user && (user.id || user.userId)); }).join(",")
             : ""
@@ -757,25 +978,25 @@ function refreshVpaaDashboardDataForSemester(semesterValue, sourceUsers) {
             })
         );
     }
-    if (SharedData.refreshSubjectManagement) {
-        tasks.push(SharedData.refreshSubjectManagement({ semesterId: semesterId }));
-    }
-    if (SharedData.refreshEvaluations) {
-        tasks.push(SharedData.refreshEvaluations({ semesterId: semesterId }));
-    }
+    tasks.push(refreshVpaaSemesterDataSelection(selectedSemester, true));
 
+    const refreshId = ++vpaaDashboardDataRefreshId;
     vpaaDashboardDataRefreshKey = refreshKey;
-    vpaaDashboardDataRefreshPromise = Promise.all(tasks)
+    const refreshPromise = Promise.all(tasks)
         .then(function () {
+            if (refreshId !== vpaaDashboardDataRefreshId) return;
             rebuildVpaaDashboardState(sourceUsers);
         })
         .catch(function (error) {
             console.warn("[VPAA] Failed to refresh dashboard data.", error);
         })
         .finally(function () {
-            vpaaDashboardDataRefreshPromise = null;
-            vpaaDashboardDataRefreshKey = "";
+            if (vpaaDashboardDataRefreshPromise === refreshPromise) {
+                vpaaDashboardDataRefreshPromise = null;
+                vpaaDashboardDataRefreshKey = "";
+            }
         });
+    vpaaDashboardDataRefreshPromise = refreshPromise;
 
     return vpaaDashboardDataRefreshPromise;
 }
@@ -865,6 +1086,14 @@ function setupDataSubscriptions() {
             key === SharedData.KEYS.QUESTIONNAIRES ||
             key === SharedData.KEYS.FACULTY_PAPERS
         ) {
+            const semesterDataChanged =
+                key === SharedData.KEYS.EVALUATIONS ||
+                key === SharedData.KEYS.SUBJECT_MANAGEMENT ||
+                key === SharedData.KEYS.CURRENT_SEMESTER ||
+                key === SharedData.KEYS.SEMESTER_LIST;
+            if (semesterDataChanged) {
+                invalidateVpaaSemesterDataCache();
+            }
             if (key === SharedData.KEYS.USERS && hasSubmittedSearch && elements.searchInput && String(elements.searchInput.value || "").trim()) {
                 refreshVpaaProfessorReportPage({ page: vpaaProfessorPage });
                 return;
@@ -889,6 +1118,10 @@ function setupDataSubscriptions() {
             refreshVpaaDescriptiveAnalytics();
             if (currentVpaaAnalyticsProfessorId && isReportModalOpen()) {
                 viewVpaaProfessorAnalytics(currentVpaaAnalyticsProfessorId);
+            }
+            if (semesterDataChanged) {
+                const selectedSemester = elements.semesterFilter ? elements.semesterFilter.value : currentSemesterLabel;
+                refreshVpaaDashboardDataForSemester(selectedSemester);
             }
         }
     });
@@ -1120,6 +1353,7 @@ function normalizeVpaaProfessorPageResult(result, fallbackFilters) {
 
 function applyVpaaProfessorPageResult(pageResult, filters) {
     const users = Array.isArray(pageResult && pageResult.users) ? pageResult.users : [];
+    vpaaProfessorPageUsers = users;
     vpaaProfessorPageMeta = {
         total: Number(pageResult && pageResult.total) || users.length,
         limit: Number(pageResult && pageResult.limit) || VPAA_PROFESSOR_PAGE_SIZE,
@@ -1135,6 +1369,7 @@ function refreshVpaaProfessorReportPage(options = {}) {
     const rawTerm = String(elements.searchInput && elements.searchInput.value || "").trim();
     if (!hasSubmittedSearch || !rawTerm) {
         resetVpaaProfessorPageMeta();
+        vpaaProfessorPageUsers = null;
         allProfessorData = [];
         renderProfessors([], "Enter a professor name or employee ID, then click Search to view reports.");
         return Promise.resolve([]);
@@ -1190,6 +1425,7 @@ function bindEvents() {
     });
     elements.searchInput.addEventListener("input", () => {
         hasSubmittedSearch = false;
+        vpaaProfessorPageUsers = null;
         closeReportModal();
         resetVpaaProfessorPageMeta();
         allProfessorData = [];
@@ -1235,6 +1471,7 @@ function bindEvents() {
 
 function resetFilters() {
     hasSubmittedSearch = false;
+    vpaaProfessorPageUsers = null;
     vpaaProfessorPage = 1;
     resetVpaaProfessorPageMeta();
     allProfessorData = [];
@@ -1271,7 +1508,7 @@ function applyFilters() {
     if (semester !== "all" && semester !== currentSemesterLabel) {
         currentSemesterLabel = semester;
     }
-    refreshDashboardChartsForSemester(semester === "all" ? currentSemesterLabel : semester);
+    refreshDashboardChartsForSemester(semester);
     renderDashboardCharts();
 
     const scopeData = allProfessorData.filter(
@@ -1284,12 +1521,13 @@ function applyFilters() {
             prof.employeeId.toLowerCase().includes(term) ||
             (prof.subjects || []).some((subj) => subj.toLowerCase().includes(term));
         const matchesDept = department === "all" || prof.department === department;
-        return matchesTerm && matchesDept;
+        const matchesCampus = campus === "all" || normalizeVpaaToken(prof.campus) === normalizeVpaaToken(campus);
+        return matchesTerm && matchesDept && matchesCampus;
     });
 
     filtered = sortProfessors(filtered, sortMode);
 
-    updateSummary(filtered);
+    updateSummary(filtered, { campus: campus, department: department });
     updateWordFrequency(filtered);
 
     let highlightScope = scopeData.filter((prof) => {
@@ -1483,27 +1721,34 @@ function buildVpaaStudentDirectory() {
 }
 
 function buildVpaaStudentAnalyticsRows() {
-    const semesterId = String((SharedData.getCurrentSemester && SharedData.getCurrentSemester()) || currentSemesterLabel || "").trim();
+    const selectedSemester = String(elements.semesterFilter && elements.semesterFilter.value || "").trim();
+    const semesterId = selectedSemester || String(
+        (SharedData.getCurrentSemester && SharedData.getCurrentSemester()) || currentSemesterLabel || ""
+    ).trim();
     const directory = buildVpaaStudentDirectory();
     const directoryByUserId = directory.directoryByUserId;
     const userIdByStudentNumber = directory.userIdByStudentNumber;
-    const subjectManagement = SharedData.getCachedSubjectManagement
-        ? SharedData.getCachedSubjectManagement()
-        : (SharedData.getSubjectManagement
-            ? SharedData.getSubjectManagement()
-            : { offerings: [], enrollments: [] });
+    const subjectManagement = vpaaSubjectManagementSnapshot
+        ? vpaaSubjectManagementSnapshot
+        : (SharedData.getCachedSubjectManagement
+            ? SharedData.getCachedSubjectManagement()
+            : (SharedData.getSubjectManagement
+                ? SharedData.getSubjectManagement()
+                : { offerings: [], enrollments: [] }));
     const offerings = Array.isArray(subjectManagement.offerings) ? subjectManagement.offerings : [];
     const enrollments = Array.isArray(subjectManagement.enrollments) ? subjectManagement.enrollments : [];
-    const evaluations = SharedData.getCachedEvaluations
-        ? SharedData.getCachedEvaluations()
-        : (SharedData.getEvaluations ? SharedData.getEvaluations() : []);
+    const evaluations = Array.isArray(vpaaEvaluationsSnapshot)
+        ? vpaaEvaluationsSnapshot
+        : (SharedData.getCachedEvaluations
+            ? SharedData.getCachedEvaluations()
+            : (SharedData.getEvaluations ? SharedData.getEvaluations() : []));
 
     const activeOfferingsById = new Map(
         offerings
             .filter(function (offering) {
                 if (!offering || !offering.isActive) return false;
                 const offeringSemester = String(offering.semesterSlug || "").trim();
-                if (!semesterId) return true;
+                if (!semesterId || semesterId === "all") return true;
                 return !offeringSemester || offeringSemester === semesterId;
             })
             .map(function (offering) {
@@ -1515,7 +1760,8 @@ function buildVpaaStudentAnalyticsRows() {
     const studentMetaById = new Map();
 
     enrollments.forEach(function (enrollment) {
-        if (!enrollment || normalizeVpaaToken(enrollment.status) !== "enrolled") return;
+        const enrollmentStatus = normalizeVpaaToken(enrollment && enrollment.status);
+        if (!enrollment || (enrollmentStatus !== "enrolled" && enrollmentStatus !== "completed")) return;
 
         const offeringId = String(enrollment.courseOfferingId || "").trim();
         if (!offeringId || !activeOfferingsById.has(offeringId)) return;
@@ -1835,18 +2081,25 @@ function setupVpaaAnalyticsInteractions() {
     }
 }
 
-function getVpaaActiveStudentCount() {
+function getVpaaActiveStudentCount(scope) {
+    const selectedCampus = normalizeVpaaToken(scope && scope.campus || "all");
+    const selectedDepartment = normalizeVpaaToken(scope && scope.department || "all");
     const users = mergeVpaaDashboardUsers();
     return users.filter((user) => {
         const role = normalizeVpaaToken(user && user.role);
         if (role !== "student") return false;
         const status = normalizeVpaaToken(user && (user.status || "active"));
-        return status !== "inactive";
+        if (status === "inactive") return false;
+        const campus = normalizeVpaaToken(user && (user.campus || user.campusSlug));
+        const department = normalizeVpaaToken(user && (user.department || user.institute));
+        const matchesCampus = !selectedCampus || selectedCampus === "all" || campus === selectedCampus;
+        const matchesDepartment = !selectedDepartment || selectedDepartment === "all" || department === selectedDepartment;
+        return matchesCampus && matchesDepartment;
     }).length;
 }
 
-function updateSummary(list) {
-    const activeStudentCount = getVpaaActiveStudentCount();
+function updateSummary(list, scope) {
+    const activeStudentCount = getVpaaActiveStudentCount(scope);
 
     if (list.length === 0) {
         elements.totalStudents.textContent = activeStudentCount.toString();
@@ -1856,15 +2109,28 @@ function updateSummary(list) {
         return;
     }
 
-    const expectedStudentEvaluations = list.reduce((sum, prof) => sum + prof.students, 0);
-    const totalEvaluations = list.reduce((sum, prof) => sum + prof.evaluations, 0);
-    const completionRate = expectedStudentEvaluations === 0 ? 0 : Math.round((totalEvaluations / expectedStudentEvaluations) * 100);
-    const pendingEvaluations = Math.max(0, expectedStudentEvaluations - totalEvaluations);
+    const expectedEvaluations = list.reduce(function (sum, prof) {
+        const required = Number(prof && prof.requiredEvaluations);
+        return sum + (Number.isFinite(required) ? Math.max(0, required) : Math.max(0, Number(prof && prof.students) || 0));
+    }, 0);
+    const completedEvaluations = list.reduce(function (sum, prof) {
+        const required = Number(prof && prof.requiredEvaluations);
+        const completed = Math.max(0, Number(prof && prof.evaluations) || 0);
+        return sum + (Number.isFinite(required) && required >= 0 ? Math.min(completed, required) : completed);
+    }, 0);
+    const completionRate = expectedEvaluations === 0
+        ? 0
+        : Math.min(100, Math.round((completedEvaluations / expectedEvaluations) * 100));
+    const pendingEvaluations = Math.max(0, expectedEvaluations - completedEvaluations);
+    const activeProfessorIds = new Set(list
+        .filter(function (prof) { return !prof || prof.isActive !== false; })
+        .map(function (prof) { return normalizeVpaaProfessorUserId(prof && (prof.userId || prof.id)); })
+        .filter(Boolean));
 
     elements.totalStudents.textContent = activeStudentCount.toString();
     elements.completionRate.textContent = `${completionRate}%`;
     elements.pendingEvaluations.textContent = pendingEvaluations.toString();
-    elements.activeProfessors.textContent = list.length.toString();
+    elements.activeProfessors.textContent = activeProfessorIds.size.toString();
 }
 
 function updateWordFrequency(list) {
@@ -2007,6 +2273,7 @@ function buildProfessorAnalyticsForType(typeKey, evaluations, semesterLabel) {
 
 function normalizeVpaaAnalyticsEvaluationType(value) {
     const token = normalizeVpaaToken(value);
+    if (token === "all" || token === "all-evaluations") return "all";
     if (token === "peer" || token === "professor" || token === "professor-to-professor") return "professor";
     if (token === "supervisor" || token === "supervisor-to-professor") return "supervisor";
     return "student";
@@ -2020,7 +2287,9 @@ function getVpaaEvaluationTypeMeta(id) {
     const normalized = normalizeVpaaAnalyticsEvaluationType(id);
     return VPAA_EVALUATION_TYPE_OPTIONS.find(function (item) {
         return item.id === normalized;
-    }) || VPAA_EVALUATION_TYPE_OPTIONS[0];
+    }) || VPAA_EVALUATION_TYPE_OPTIONS.find(function (item) {
+        return item.id === "student";
+    });
 }
 
 function getVpaaSemesterOptions() {
@@ -2284,60 +2553,80 @@ function aggregateVpaaEvaluationData(options) {
 }
 
 function getVpaaProfessorStudentTotals(context, professorId, semesterId) {
-    const professorToken = normalizeVpaaProfessorUserId(professorId);
-    const expectedPairs = new Set();
-
-    (context.enrollments || []).forEach(function (enrollment) {
-        if (!enrollment) return;
-        if (normalizeVpaaToken(enrollment.status || "enrolled") !== "enrolled") return;
-
-        const offeringId = String(enrollment.courseOfferingId || "").trim();
-        const offering = context.offeringsById[offeringId];
-        if (!offering || offering.isActive === false) return;
-        if (!isVpaaEvaluationInSemester({ semesterId: offering.semesterSlug || "" }, semesterId)) return;
-
-        const offeringProfessorId = normalizeVpaaProfessorUserId(offering.professorUserId);
-        if (offeringProfessorId !== professorToken) return;
-
-        const studentToken = normalizeVpaaToken(enrollment.studentUserId || enrollment.studentId || enrollment.studentNumber || enrollment.studentName);
-        const offeringToken = normalizeVpaaToken(offeringId);
-        if (!studentToken || !offeringToken) return;
-        expectedPairs.add(`${studentToken}|${offeringToken}`);
+    const metrics = window.SetCalculation.calculateProfessorSetMetrics({
+        professorUserId: professorId,
+        semesterId,
+        offerings: context.offerings,
+        enrollments: context.enrollments,
+        evaluations: context.evaluations,
     });
+    return {
+        totalRaters: metrics.registered,
+        evaluatedPairs: metrics.completed,
+        averageRating: metrics.averageRating,
+        metrics: metrics
+    };
+}
 
-    const completedPairs = new Set();
-    (context.evaluations || []).forEach(function (evaluation) {
-        if (resolveVpaaEvaluationType(evaluation) !== "student") return;
-        if (!isVpaaEvaluationInSemester(evaluation, semesterId)) return;
+function combineVpaaProfessorEvaluationSnapshots(snapshotsByType) {
+    const sourceRows = [
+        { type: "student", weight: 0.50, label: "Student Evaluation" },
+        { type: "professor", weight: 0.25, label: "Peer Evaluation" },
+        { type: "supervisor", weight: 0.25, label: "Supervisor Evaluation" }
+    ];
+    const ratingDistribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    let totalRaters = 0;
+    let evaluatedCount = 0;
+    let notEvaluatedCount = 0;
+    let totalEvaluations = 0;
+    let weightedRating = 0;
+    let availableWeight = 0;
+    let qualitativeResponses = [];
 
-        const targetId = resolveTargetProfessorIdFromEvaluation(evaluation, "student", context);
-        if (targetId !== professorToken) return;
+    sourceRows.forEach(function (source) {
+        const snapshot = snapshotsByType && snapshotsByType[source.type]
+            ? snapshotsByType[source.type]
+            : {};
+        const sourceEvaluatedCount = Math.max(0, Number(snapshot.evaluatedCount || 0));
+        const sourceAverage = Number(snapshot.averageRating);
+        totalRaters += Math.max(0, Number(snapshot.totalRaters || 0));
+        evaluatedCount += sourceEvaluatedCount;
+        notEvaluatedCount += Math.max(0, Number(snapshot.notEvaluatedCount || 0));
+        totalEvaluations += Math.max(0, Number(snapshot.totalEvaluations || sourceEvaluatedCount));
 
-        const studentToken = normalizeVpaaToken(
-            evaluation.studentUserId ||
-            evaluation.studentId ||
-            evaluation.evaluatorUserId ||
-            evaluation.evaluatorId ||
-            evaluation.evaluatorUsername
-        );
-        if (!studentToken) return;
-
-        const offeringToken = normalizeVpaaToken(evaluation.courseOfferingId);
-        if (expectedPairs.size > 0) {
-            if (!offeringToken) return;
-            const pairKey = `${studentToken}|${offeringToken}`;
-            if (expectedPairs.has(pairKey)) {
-                completedPairs.add(pairKey);
-            }
-            return;
+        if (sourceEvaluatedCount > 0 && Number.isFinite(sourceAverage) && sourceAverage > 0) {
+            weightedRating += sourceAverage * source.weight;
+            availableWeight += source.weight;
         }
 
-        completedPairs.add(`${studentToken}|${offeringToken || "direct"}`);
+        Object.keys(ratingDistribution).forEach(function (rating) {
+            ratingDistribution[rating] += Math.max(0, Number(snapshot.ratingDistribution && snapshot.ratingDistribution[rating] || 0));
+        });
+
+        const responses = Array.isArray(snapshot.qualitativeResponses)
+            ? snapshot.qualitativeResponses
+            : [];
+        qualitativeResponses = qualitativeResponses.concat(responses.map(function (response) {
+            return Object.assign({}, response, {
+                evaluationType: source.type,
+                evaluationLabel: source.label
+            });
+        }));
     });
 
     return {
-        totalRaters: expectedPairs.size,
-        evaluatedPairs: completedPairs.size
+        totalRaters: totalRaters,
+        evaluatedCount: evaluatedCount,
+        notEvaluatedCount: notEvaluatedCount,
+        averageRating: availableWeight > 0
+            ? parseFloat((weightedRating / availableWeight).toFixed(2))
+            : null,
+        qualitativeResponses: qualitativeResponses,
+        categoryScores: [],
+        ratingDistribution: ratingDistribution,
+        totalEvaluations: totalEvaluations,
+        sourceSnapshots: snapshotsByType || {},
+        meta: getVpaaEvaluationTypeMeta("all")
     };
 }
 
@@ -2354,10 +2643,19 @@ function getVpaaProfessorEvaluationSnapshot(professor, semesterId, evaluationTyp
         };
     }
 
-    const context = contextInput || buildVpaaDatabaseContext();
+    const originalContext = contextInput || buildVpaaDatabaseContext();
+    const context = Object.assign({}, originalContext, { evaluations: (originalContext.evaluations || []).filter(e => !e.credibilityStatus || ['AUTO_ACCEPTED', 'ACCEPTED_BY_HR'].includes(e.credibilityStatus)) });
     const professorId = normalizeVpaaProfessorUserId(professor.userId || professor.id);
     const normalizedSemester = String(semesterId || "all").trim() || "all";
     const normalizedType = getVpaaEvaluationTypeMeta(evaluationType).id;
+    if (normalizedType === "all") {
+        return combineVpaaProfessorEvaluationSnapshots({
+            student: getVpaaProfessorEvaluationSnapshot(professor, normalizedSemester, "student", context),
+            professor: getVpaaProfessorEvaluationSnapshot(professor, normalizedSemester, "professor", context),
+            supervisor: getVpaaProfessorEvaluationSnapshot(professor, normalizedSemester, "supervisor", context)
+        });
+    }
+
     const aggregate = aggregateVpaaEvaluationData({
         context: context,
         typeKey: normalizedType,
@@ -2368,14 +2666,18 @@ function getVpaaProfessorEvaluationSnapshot(professor, semesterId, evaluationTyp
 
     if (normalizedType === "student") {
         const studentTotals = getVpaaProfessorStudentTotals(context, professorId, normalizedSemester);
-        const fallbackRaters = aggregate.uniqueRaterCount;
-        const totalRaters = studentTotals.totalRaters > 0 ? studentTotals.totalRaters : fallbackRaters;
-        const evaluatedCount = studentTotals.totalRaters > 0 ? studentTotals.evaluatedPairs : aggregate.uniqueRaterCount;
+        const totalRaters = studentTotals.totalRaters;
+        const evaluatedCount = studentTotals.evaluatedPairs;
         return {
             totalRaters: totalRaters,
             evaluatedCount: evaluatedCount,
             notEvaluatedCount: Math.max(totalRaters - evaluatedCount, 0),
-            averageRating: aggregate.averageRating,
+            averageRating: studentTotals.averageRating,
+            partial: Boolean(studentTotals.metrics && studentTotals.metrics.partial),
+            registeredClassCount: Number(studentTotals.metrics && studentTotals.metrics.registeredClassCount || 0),
+            scorableClassCount: Number(studentTotals.metrics && studentTotals.metrics.scorableClassCount || 0),
+            excludedClassCount: Number(studentTotals.metrics && studentTotals.metrics.excludedClassCount || 0),
+            setMetrics: studentTotals.metrics,
             qualitativeResponses: aggregate.qualitativeResponses,
             categoryScores: aggregate.categoryScores,
             ratingDistribution: aggregate.ratingDistribution,
@@ -2470,7 +2772,8 @@ function getVpaaLatestSemestersForTrend(context, limit) {
 }
 
 function buildVpaaProfessorHistoricalTrend(professorId, contextInput) {
-    const context = contextInput || buildVpaaDatabaseContext();
+    const originalContext = contextInput || buildVpaaDatabaseContext();
+    const context = Object.assign({}, originalContext, { evaluations: (originalContext.evaluations || []).filter(e => !e.credibilityStatus || ['AUTO_ACCEPTED', 'ACCEPTED_BY_HR'].includes(e.credibilityStatus)) });
     const normalizedProfessorId = normalizeVpaaProfessorUserId(professorId);
     const semesters = getVpaaLatestSemestersForTrend(context, 4);
     const weights = { student: 0.50, professor: 0.25, supervisor: 0.25 };
@@ -2478,14 +2781,12 @@ function buildVpaaProfessorHistoricalTrend(professorId, contextInput) {
     const points = semesters.map(function (semester) {
         const semesterId = String(semester && semester.id || "").trim();
         const semesterLabel = String(semester && (semester.label || semester.id) || semesterId).trim() || semesterId;
+        const studentSetMetrics = getVpaaProfessorStudentTotals(context, normalizedProfessorId, semesterId);
         const sourceScores = {
-            student: resolveVpaaHistoricalTrendSourceAverage(aggregateVpaaEvaluationData({
-                context: context,
-                typeKey: "student",
-                semesterId: semesterId,
-                targetProfessorId: normalizedProfessorId,
-                includeCategoryScores: false
-            })),
+            student: Number(studentSetMetrics.evaluatedPairs) > 0
+                && Number.isFinite(Number(studentSetMetrics.averageRating))
+                ? Number(studentSetMetrics.averageRating)
+                : null,
             professor: resolveVpaaHistoricalTrendSourceAverage(aggregateVpaaEvaluationData({
                 context: context,
                 typeKey: "professor",
@@ -2872,7 +3173,18 @@ function renderDashboardChartPair(config, chartData) {
     const totalEvalEl = document.getElementById(config.totalId);
     const profCountEl = document.getElementById(config.countId);
 
-    if (avgRatingEl) avgRatingEl.textContent = Number(chartData.averageRating || 0).toFixed(1);
+    if (avgRatingEl) {
+        const averageRating = chartData.averageRating === null ? null : Number(chartData.averageRating);
+        avgRatingEl.textContent = Number.isFinite(averageRating) ? averageRating.toFixed(1) : 'N/A';
+        avgRatingEl.title = config.key === 'student' && chartData.partial
+            ? `Partial: ${Number(chartData.scorableClassCount || 0)}/${Number(chartData.registeredClassCount || 0)} sections rated; zero-response sections are excluded.`
+            : '';
+        if (config.key === 'student' && avgRatingEl.nextSibling && avgRatingEl.nextSibling.nodeType === 3) {
+            avgRatingEl.nextSibling.textContent = Number.isFinite(averageRating)
+                ? `/5.0${chartData.partial ? ` · Partial ${Number(chartData.scorableClassCount || 0)}/${Number(chartData.registeredClassCount || 0)} sections` : ''}`
+                : '';
+        }
+    }
     if (totalEvalEl) totalEvalEl.textContent = String(chartData.totalEvaluations || 0);
     if (profCountEl) profCountEl.textContent = String(chartData.evaluatedCount || 0);
 }
@@ -3314,7 +3626,7 @@ function createProfessorCard(prof) {
                 openVpaaProfessorFileOptions(professorId);
                 return;
             }
-            viewVpaaProfessorAnalytics(professorId);
+            openProfessorReportModal(prof);
         });
     });
 
@@ -3493,6 +3805,72 @@ function renderPopupAnalyticsForType(prof, typeKey) {
     scope.setAttribute("data-popup-type", normalized);
 }
 
+function setVpaaProfessorAnalyticsLoading(isLoading, message) {
+    if (!elements.reportModal || !elements.reportModalBody) return;
+
+    elements.reportModal.setAttribute("aria-busy", isLoading ? "true" : "false");
+    let status = elements.reportModalBody.querySelector("[data-professor-analytics-loading]");
+    if (isLoading) {
+        if (!status) {
+            status = document.createElement("div");
+            status.className = "professor-analytics-loading";
+            status.setAttribute("data-professor-analytics-loading", "");
+            status.setAttribute("role", "status");
+            status.setAttribute("aria-live", "polite");
+            status.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span></span>';
+            elements.reportModalBody.prepend(status);
+        }
+        const label = status.querySelector("span");
+        if (label) label.textContent = message || "Updating professor analytics...";
+    } else if (status) {
+        status.remove();
+    }
+}
+
+function scheduleVpaaProfessorAnalyticsRender(professorId) {
+    const renderId = ++vpaaProfessorAnalyticsRenderId;
+    const normalizedProfessorId = normalizeVpaaProfessorUserId(professorId);
+    if (!normalizedProfessorId || !isReportModalOpen()) return;
+
+    setVpaaProfessorAnalyticsLoading(true, "Updating analytics for the selected filters...");
+    const renderLatestSelection = function () {
+        if (
+            renderId !== vpaaProfessorAnalyticsRenderId
+            || normalizeVpaaProfessorUserId(currentVpaaAnalyticsProfessorId) !== normalizedProfessorId
+            || !isReportModalOpen()
+        ) {
+            return;
+        }
+
+        try {
+            const sourceUsers = hasSubmittedSearch && Array.isArray(vpaaProfessorPageUsers)
+                ? vpaaProfessorPageUsers
+                : undefined;
+            loadDashboardDataFromDb(sourceUsers);
+            viewVpaaProfessorAnalytics(normalizedProfessorId);
+        } finally {
+            if (renderId === vpaaProfessorAnalyticsRenderId) {
+                setVpaaProfessorAnalyticsLoading(false);
+            }
+        }
+    };
+
+    refreshVpaaSemesterDataSelection("all", false)
+        .then(function () {
+            if (typeof window.requestAnimationFrame === "function") {
+                window.requestAnimationFrame(renderLatestSelection);
+            } else {
+                window.setTimeout(renderLatestSelection, 0);
+            }
+        })
+        .catch(function (error) {
+            console.warn("[VPAA] Failed to load complete semester analytics.", error);
+            if (renderId === vpaaProfessorAnalyticsRenderId) {
+                setVpaaProfessorAnalyticsLoading(false);
+            }
+        });
+}
+
 function viewVpaaProfessorAnalytics(professorId) {
     const selectedSemester = currentVpaaAnalyticsSemester || "all";
     const semesterOptions = getVpaaSemesterOptions();
@@ -3531,7 +3909,7 @@ function viewVpaaProfessorAnalytics(professorId) {
     const totalRaters = Number(snapshot.totalRaters || 0);
     const evaluatedCount = Number(snapshot.evaluatedCount || 0);
     const notEvaluatedCount = Number(snapshot.notEvaluatedCount || Math.max(totalRaters - evaluatedCount, 0));
-    const averageRating = parseFloat(snapshot.averageRating) || 0;
+    const averageRating = snapshot.averageRating === null ? null : Number(snapshot.averageRating);
     const completionPercentage = totalRaters > 0 ? Math.round((evaluatedCount / totalRaters) * 100) : 0;
     const evaluatorLabel = evaluationMeta.unitLabel.endsWith("s")
         ? evaluationMeta.unitLabel.slice(0, -1)
@@ -3594,9 +3972,9 @@ function viewVpaaProfessorAnalytics(professorId) {
                     </div>
                     <div class="stat-content">
                         <h3>Average Rating</h3>
-                        <p class="stat-value">${averageRating.toFixed(1)}<span class="stat-unit">/5.0</span></p>
+                        <p class="stat-value">${Number.isFinite(averageRating) ? `${averageRating.toFixed(1)}<span class="stat-unit">/5.0</span>` : 'N/A'}</p>
                         <div class="rating-stars">
-                            ${generateVpaaStarRating(averageRating)}
+                            ${Number.isFinite(averageRating) ? generateVpaaStarRating(averageRating) : ''}
                         </div>
                     </div>
                 </div>
@@ -3728,7 +4106,7 @@ function viewVpaaProfessorAnalytics(professorId) {
                                         <i class="${escapeAttr(evaluationMeta.feedbackIcon)}"></i>
                                     </div>
                                     <div class="response-meta">
-                                        <span class="response-label">${escapeHtml(evaluationMeta.label)} Feedback</span>
+                                        <span class="response-label">${escapeHtml(response.evaluationLabel || evaluationMeta.label)} Feedback</span>
                                         <span class="response-student">${escapeHtml(response.studentName || evaluatorLabel)} &bull; ${escapeHtml(response.studentNumber || "N/A")}</span>
                                     </div>
                                     <span class="response-date">${escapeHtml(response.date || "-")}</span>
@@ -3789,7 +4167,7 @@ function setupReportModalEvents() {
         if (semesterSelect) {
             currentVpaaAnalyticsSemester = String(semesterSelect.value || "all").trim() || "all";
             if (currentVpaaAnalyticsProfessorId) {
-                viewVpaaProfessorAnalytics(currentVpaaAnalyticsProfessorId);
+                scheduleVpaaProfessorAnalyticsRender(currentVpaaAnalyticsProfessorId);
             }
             return;
         }
@@ -3798,7 +4176,7 @@ function setupReportModalEvents() {
         if (!typeSelect) return;
         currentVpaaAnalyticsEvaluationType = normalizeVpaaAnalyticsEvaluationType(typeSelect.value);
         if (currentVpaaAnalyticsProfessorId) {
-            viewVpaaProfessorAnalytics(currentVpaaAnalyticsProfessorId);
+            scheduleVpaaProfessorAnalyticsRender(currentVpaaAnalyticsProfessorId);
         }
     });
 
@@ -3813,11 +4191,14 @@ function openProfessorReportModal(prof) {
     const professorId = normalizeVpaaProfessorUserId(prof && (prof.userId || prof.id));
     if (!professorId) return;
     viewVpaaProfessorAnalytics(professorId);
+    scheduleVpaaProfessorAnalyticsRender(professorId);
 }
 
 function closeReportModal() {
     if (!elements.reportModal || !elements.reportModalBody) return;
 
+    vpaaProfessorAnalyticsRenderId += 1;
+    setVpaaProfessorAnalyticsLoading(false);
     elements.reportModal.classList.remove("active");
     elements.reportModal.style.display = "none";
     elements.reportModal.setAttribute("aria-hidden", "true");
@@ -5004,15 +5385,24 @@ function buildProfessorAiAnalyticsMetrics(prof) {
         supervisor: computeAiAverageFromDistribution(byType.supervisor && byType.supervisor.ratingDistribution),
     };
 
-    const available = Object.values(averagesBySource).filter((value) => Number.isFinite(Number(value))).map(Number);
-    const combinedAverage = available.length
-        ? Number((available.reduce((sum, value) => sum + value, 0) / available.length).toFixed(2))
-        : (Number.isFinite(Number(prof && prof.overall)) ? Number(prof.overall) : null);
+    const sourceWeights = { student: 0.50, professor: 0.25, supervisor: 0.25 };
+    let weightedRatingTotal = 0;
+    let availableRatingWeight = 0;
+    Object.keys(sourceWeights).forEach((sourceKey) => {
+        const value = Number(averagesBySource[sourceKey]);
+        if (!Number.isFinite(value) || value <= 0) return;
+        weightedRatingTotal += value * sourceWeights[sourceKey];
+        availableRatingWeight += sourceWeights[sourceKey];
+    });
+    const overallRating = getAiAnalyticsRating(prof && prof.overall);
+    const combinedAverage = availableRatingWeight > 0
+        ? Number((weightedRatingTotal / availableRatingWeight).toFixed(2))
+        : overallRating;
 
     return {
-        overallRating: Number.isFinite(Number(prof && prof.overall)) ? Number(prof.overall) : null,
-        combinedAverage: Number.isFinite(Number(combinedAverage)) ? Number(combinedAverage) : null,
-        responseRate: Number.isFinite(Number(prof && prof.responseRate)) ? Number(prof.responseRate) : null,
+        overallRating,
+        combinedAverage: getAiAnalyticsRating(combinedAverage),
+        responseRate: getAiAnalyticsNumber(prof && prof.responseRate, 0, 100),
         totalEvaluations: Number.isFinite(Number(prof && prof.evaluations)) ? Number(prof.evaluations) : 0,
         averagesBySource: averagesBySource,
         countsBySource: {
@@ -5115,12 +5505,42 @@ function buildLocalAiClusters(comments) {
         }));
 }
 
+function getAiAnalyticsRating(value) {
+    if (value === null || value === undefined || value === "") return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 && numeric <= 5 ? numeric : null;
+}
+
+function getAiAnalyticsNumber(value, minimum, maximum) {
+    if (value === null || value === undefined || value === "") return null;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return null;
+    if (Number.isFinite(Number(minimum)) && numeric < Number(minimum)) return null;
+    if (Number.isFinite(Number(maximum)) && numeric > Number(maximum)) return null;
+    return numeric;
+}
+
+function hasAiAnalyticsEvidence(payload) {
+    const comments = Array.isArray(payload && payload.comments) ? payload.comments : [];
+    const metrics = payload && payload.metrics && typeof payload.metrics === "object" ? payload.metrics : {};
+    const averages = metrics.averagesBySource && typeof metrics.averagesBySource === "object"
+        ? metrics.averagesBySource
+        : {};
+    return comments.length > 0
+        || getAiAnalyticsRating(metrics.combinedAverage) !== null
+        || getAiAnalyticsRating(metrics.overallRating) !== null
+        || Object.keys(averages).some((key) => getAiAnalyticsRating(averages[key]) !== null);
+}
+
 function buildLocalAiJudgment(payload, keywords) {
     const metrics = payload && payload.metrics ? payload.metrics : {};
     const comments = Array.isArray(payload && payload.comments) ? payload.comments : [];
-    const combinedAverage = Number.isFinite(Number(metrics.combinedAverage)) ? Number(metrics.combinedAverage) : null;
-    const responseRate = Number.isFinite(Number(metrics.responseRate)) ? Number(metrics.responseRate) : null;
+    const combinedAverage = getAiAnalyticsRating(metrics.combinedAverage);
+    const responseRate = getAiAnalyticsNumber(metrics.responseRate, 0, 100);
+    const totalEvaluations = Math.max(0, Number(metrics.totalEvaluations || 0));
     const totalComments = comments.length;
+    const hasRatings = combinedAverage !== null;
+    const hasComments = totalComments > 0;
 
     let positiveWeight = 0;
     let negativeWeight = 0;
@@ -5133,19 +5553,22 @@ function buildLocalAiJudgment(payload, keywords) {
         else neutralWeight += count;
     });
 
-    const toneTotal = Math.max(1, positiveWeight + negativeWeight + neutralWeight);
-    const toneBalance = ((positiveWeight * 1.0) - (negativeWeight * 1.2)) / toneTotal;
+    const toneTotal = positiveWeight + negativeWeight + neutralWeight;
+    const toneBalance = toneTotal > 0
+        ? ((positiveWeight * 1.0) - (negativeWeight * 1.2)) / toneTotal
+        : 0;
+    const ratingScore = hasRatings ? Math.max(0, Math.min(100, combinedAverage * 20)) : null;
+    const commentScore = hasComments
+        ? Math.max(0, Math.min(100, 50 + (Math.max(-1, Math.min(1, toneBalance)) * 50)))
+        : null;
+    const disagreement = Number.isFinite(ratingScore)
+        && Number.isFinite(commentScore)
+        && Math.abs(ratingScore - commentScore) >= 20;
 
     let score = 50;
-    if (Number.isFinite(combinedAverage)) {
-        score += (combinedAverage - 3) * 18;
-    }
-    score += Math.max(-20, Math.min(20, toneBalance * 24));
-    if (Number.isFinite(responseRate)) {
-        score += ((responseRate - 50) / 50) * 10;
-    }
-    if (totalComments <= 3) score -= 8;
-    else if (totalComments >= 20) score += 4;
+    if (hasRatings && hasComments) score = (ratingScore + commentScore) / 2;
+    else if (hasRatings) score = ratingScore;
+    else if (hasComments) score = commentScore;
     score = Math.round(Math.max(0, Math.min(100, score)));
 
     let label = "Needs Improvement";
@@ -5153,24 +5576,57 @@ function buildLocalAiJudgment(payload, keywords) {
     else if (score >= 70) label = "Good";
     else if (score < 50) label = "Critical Concern";
 
-    let confidence = 45 + Math.min(35, totalComments * 2);
-    if (Number.isFinite(responseRate)) confidence += Math.min(10, responseRate / 10);
-    if (Number.isFinite(combinedAverage)) confidence += 10;
-    if (totalComments < 3) confidence -= 10;
-    confidence = Math.round(Math.max(25, Math.min(98, confidence)));
+    let confidence = 0;
+    if (hasRatings && hasComments) {
+        confidence = 55 + Math.min(15, totalEvaluations * 1.5) + Math.min(15, totalComments * 1.5);
+    } else if (hasRatings) {
+        confidence = 45 + Math.min(20, totalEvaluations * 2);
+    } else if (hasComments) {
+        confidence = 40 + Math.min(25, totalComments * 2);
+    }
+    if (Number.isFinite(responseRate)) confidence += Math.min(10, Math.max(0, responseRate) / 10);
+    const confidenceCap = hasRatings && hasComments ? 95 : (hasRatings ? 75 : (hasComments ? 70 : 0));
+    confidence = Math.round(Math.max(0, Math.min(confidenceCap, confidence)));
 
-    let rationale = "Mixed sentiment and performance indicators suggest improvements are needed.";
-    if (label === "Excellent") rationale = "Consistent positive feedback and strong rating indicators across available sources.";
-    if (label === "Good") rationale = "Feedback is generally positive with limited critical concerns.";
-    if (label === "Critical Concern") rationale = "Negative patterns and lower performance indicators suggest urgent review.";
-    if (!Number.isFinite(combinedAverage)) rationale += " Overall rating context is limited.";
+    let rationale = "Available evidence indicates that performance needs improvement.";
+    if (label === "Excellent") rationale = "The balanced rating and feedback evidence indicates excellent performance.";
+    if (label === "Good") rationale = "The balanced rating and feedback evidence indicates good performance.";
+    if (label === "Critical Concern") rationale = "The available rating and feedback evidence indicates a critical concern.";
+    if (disagreement) rationale += " Numeric ratings and written feedback differ significantly and should be reviewed together.";
+    if (hasRatings && !hasComments) rationale += " This is a quantitative-only judgment because no written comments were available.";
+    if (!hasRatings && hasComments) rationale += " Numeric rating context is unavailable, so this judgment relies on written feedback.";
 
-    return {
-        label,
-        rationale,
-        confidence,
-        score,
-    };
+    return { label, rationale, confidence, score, ratingScore, commentScore, disagreement, hasRatings, hasComments };
+}
+
+function buildLocalAiRatingReview(payload, judgment) {
+    const metrics = payload && payload.metrics ? payload.metrics : {};
+    const combinedAverage = getAiAnalyticsRating(metrics.combinedAverage);
+    const averages = metrics.averagesBySource && typeof metrics.averagesBySource === "object"
+        ? metrics.averagesBySource
+        : {};
+    const sourceParts = [
+        ["Student", getAiAnalyticsRating(averages.student)],
+        ["Peer", getAiAnalyticsRating(averages.professor)],
+        ["Supervisor", getAiAnalyticsRating(averages.supervisor)],
+    ].filter((entry) => entry[1] !== null)
+        .map((entry) => `${entry[0]} ${entry[1].toFixed(2)}/5`);
+
+    if (combinedAverage === null) {
+        return "No valid numeric rating was available; the judgment is based on written feedback only.";
+    }
+
+    let review = `The weighted combined rating is ${combinedAverage.toFixed(2)}/5`;
+    if (sourceParts.length) review += ` (${sourceParts.join(", ")})`;
+    review += ". Student ratings carry 50% weight, while peer and supervisor ratings carry 25% each; available weights are renormalized when a source is missing.";
+    if (judgment && judgment.disagreement) {
+        review += " The numeric rating and comment sentiment differ significantly, so both signals should be reviewed before taking action.";
+    } else if (judgment && judgment.hasComments) {
+        review += " The rating and available comment sentiment are reasonably aligned.";
+    } else {
+        review += " No written comments were available, so this is a quantitative-only review with reduced confidence.";
+    }
+    return review;
 }
 
 function buildLocalAiReasoning(payload, keywords, clusters, judgment) {
@@ -5180,8 +5636,9 @@ function buildLocalAiReasoning(payload, keywords, clusters, judgment) {
         `Analyzed ${Array.isArray(payload && payload.comments) ? payload.comments.length : 0} comments from Student (${Number(sourceCounts.student || 0)}), Professor (${Number(sourceCounts.professor || 0)}), and Supervisor (${Number(sourceCounts.supervisor || 0)}) sources.`
     );
 
-    if (payload && payload.metrics && Number.isFinite(Number(payload.metrics.combinedAverage))) {
-        lines.push(`Combined rating context is ${Number(payload.metrics.combinedAverage).toFixed(2)} / 5.00 based on available evaluation data.`);
+    const combinedAverage = getAiAnalyticsRating(payload && payload.metrics ? payload.metrics.combinedAverage : null);
+    if (combinedAverage !== null) {
+        lines.push(`Combined rating context is ${combinedAverage.toFixed(2)} / 5.00 based on available evaluation data.`);
     } else {
         lines.push("Combined rating context is limited, so conclusions rely more on textual feedback patterns.");
     }
@@ -5197,8 +5654,12 @@ function buildLocalAiReasoning(payload, keywords, clusters, judgment) {
         lines.push(`Most comments cluster around "${sanitizeAiAnalyticsText(dominant && dominant.theme, 90)}" (${Number(dominant && dominant.count || 0)} comments).`);
     }
 
-    lines.push(`Final judgment: ${normalizeAiAnalyticsJudgmentLabel(judgment && judgment.label)} (confidence ${Math.round(Number(judgment && judgment.confidence || 0))}%).`);
-    return lines.slice(0, 5);
+    if (judgment && judgment.disagreement) {
+        lines.push("Numeric ratings and written feedback differ by at least 20 points on the normalized scale, so the final judgment balances both signals.");
+    }
+
+    const finalLine = `Final judgment: ${normalizeAiAnalyticsJudgmentLabel(judgment && judgment.label)} (confidence ${Math.round(Number(judgment && judgment.confidence || 0))}%).`;
+    return lines.slice(0, 4).concat(finalLine);
 }
 
 function buildLocalAiExplainabilityInsight(payload) {
@@ -5208,18 +5669,23 @@ function buildLocalAiExplainabilityInsight(payload) {
     const judgment = buildLocalAiJudgment(payload, keywords);
     const reasoning = buildLocalAiReasoning(payload, keywords, clusters, judgment);
     return {
+        ratingReview: buildLocalAiRatingReview(payload, judgment),
         keywords,
         clusters,
         reasoning,
         judgment: {
             label: normalizeAiAnalyticsJudgmentLabel(judgment.label),
-            rationale: sanitizeAiAnalyticsText(judgment.rationale, 320),
+            rationale: sanitizeAiAnalyticsText(judgment.rationale, 900),
             confidence: Math.max(0, Math.min(100, Number(judgment.confidence || 0))),
         },
         stats: {
             totalComments: comments.length,
             sourceCounts: payload && payload.metrics && payload.metrics.countsBySource ? payload.metrics.countsBySource : { student: 0, professor: 0, supervisor: 0 },
+            overallRating: payload && payload.metrics ? payload.metrics.overallRating : null,
             combinedAverage: payload && payload.metrics ? payload.metrics.combinedAverage : null,
+            averagesBySource: payload && payload.metrics && payload.metrics.averagesBySource
+                ? payload.metrics.averagesBySource
+                : { student: null, professor: null, supervisor: null },
             responseRate: payload && payload.metrics ? payload.metrics.responseRate : null,
             totalEvaluations: payload && payload.metrics ? payload.metrics.totalEvaluations : 0,
         },
@@ -5229,6 +5695,9 @@ function buildLocalAiExplainabilityInsight(payload) {
 function normalizeAiInsightData(rawInsight, fallbackInsight) {
     const fallback = fallbackInsight && typeof fallbackInsight === "object" ? fallbackInsight : buildLocalAiExplainabilityInsight({ comments: [], metrics: {} });
     const insight = rawInsight && typeof rawInsight === "object" ? rawInsight : {};
+    const ratingReview = sanitizeAiAnalyticsText(insight.ratingReview, 700)
+        || sanitizeAiAnalyticsText(fallback.ratingReview, 700)
+        || "No numeric rating review is available.";
 
     const keywords = Array.isArray(insight.keywords) && insight.keywords.length
         ? insight.keywords.map((row) => ({
@@ -5254,7 +5723,7 @@ function normalizeAiInsightData(rawInsight, fallbackInsight) {
     const rawJudgment = insight.judgment && typeof insight.judgment === "object" ? insight.judgment : {};
     const fallbackJudgment = fallback.judgment || {};
     const label = normalizeAiAnalyticsJudgmentLabel(rawJudgment.label || fallbackJudgment.label);
-    const rationale = sanitizeAiAnalyticsText(rawJudgment.rationale, 320) || sanitizeAiAnalyticsText(fallbackJudgment.rationale, 320);
+    const rationale = sanitizeAiAnalyticsText(rawJudgment.rationale, 900) || sanitizeAiAnalyticsText(fallbackJudgment.rationale, 900);
     let confidence = Number(rawJudgment.confidence);
     if (!Number.isFinite(confidence) || confidence <= 0) confidence = Number(fallbackJudgment.confidence || 0);
     if (confidence > 0 && confidence <= 1) confidence *= 100;
@@ -5263,6 +5732,9 @@ function normalizeAiInsightData(rawInsight, fallbackInsight) {
     const sourceCounts = insight.stats && insight.stats.sourceCounts && typeof insight.stats.sourceCounts === "object"
         ? insight.stats.sourceCounts
         : (fallback.stats && fallback.stats.sourceCounts ? fallback.stats.sourceCounts : { student: 0, professor: 0, supervisor: 0 });
+    const sourceAverages = insight.stats && insight.stats.averagesBySource && typeof insight.stats.averagesBySource === "object"
+        ? insight.stats.averagesBySource
+        : (fallback.stats && fallback.stats.averagesBySource ? fallback.stats.averagesBySource : { student: null, professor: null, supervisor: null });
     const stats = {
         totalComments: Number(insight.stats && insight.stats.totalComments),
         sourceCounts: {
@@ -5270,12 +5742,17 @@ function normalizeAiInsightData(rawInsight, fallbackInsight) {
             professor: Number(sourceCounts.professor || 0),
             supervisor: Number(sourceCounts.supervisor || 0),
         },
-        combinedAverage: Number.isFinite(Number(insight.stats && insight.stats.combinedAverage))
-            ? Number(insight.stats.combinedAverage)
-            : (fallback.stats ? fallback.stats.combinedAverage : null),
-        responseRate: Number.isFinite(Number(insight.stats && insight.stats.responseRate))
-            ? Number(insight.stats.responseRate)
-            : (fallback.stats ? fallback.stats.responseRate : null),
+        overallRating: getAiAnalyticsRating(insight.stats && insight.stats.overallRating)
+            ?? getAiAnalyticsRating(fallback.stats && fallback.stats.overallRating),
+        combinedAverage: getAiAnalyticsRating(insight.stats && insight.stats.combinedAverage)
+            ?? getAiAnalyticsRating(fallback.stats && fallback.stats.combinedAverage),
+        averagesBySource: {
+            student: getAiAnalyticsRating(sourceAverages.student),
+            professor: getAiAnalyticsRating(sourceAverages.professor),
+            supervisor: getAiAnalyticsRating(sourceAverages.supervisor),
+        },
+        responseRate: getAiAnalyticsNumber(insight.stats && insight.stats.responseRate, 0, 100)
+            ?? getAiAnalyticsNumber(fallback.stats && fallback.stats.responseRate, 0, 100),
         totalEvaluations: Number.isFinite(Number(insight.stats && insight.stats.totalEvaluations))
             ? Number(insight.stats.totalEvaluations)
             : (fallback.stats ? fallback.stats.totalEvaluations : 0),
@@ -5287,6 +5764,7 @@ function normalizeAiInsightData(rawInsight, fallbackInsight) {
     }
 
     return {
+        ratingReview,
         keywords,
         clusters,
         reasoning,
@@ -5323,9 +5801,14 @@ function renderAiInsightState(outputEl, stateType, message) {
         : safeMessage;
     outputEl.classList.add("visible");
     outputEl.innerHTML = `
-        <div class="vpaa-ai-note">AI Analytics uses all comment sources (student, peer, supervisor).</div>
+        <div class="vpaa-ai-note">AI Analytics balances professor ratings and written feedback from student, peer, and supervisor evaluations.</div>
         <div class="vpaa-ai-state ${escapeAttr(type)}">${stateContent}</div>
     `;
+}
+
+function formatAiRatingValue(value) {
+    const rating = getAiAnalyticsRating(value);
+    return rating === null ? "N/A" : `${rating.toFixed(2)} / 5`;
 }
 
 function renderAiInsightResult(outputEl, insightData, source, noticeText) {
@@ -5336,10 +5819,19 @@ function renderAiInsightResult(outputEl, insightData, source, noticeText) {
     const reasoning = Array.isArray(insight.reasoning) ? insight.reasoning : [];
     const judgment = insight.judgment && typeof insight.judgment === "object" ? insight.judgment : {};
     const stats = insight.stats && typeof insight.stats === "object" ? insight.stats : {};
+    const sourceAverages = stats.averagesBySource && typeof stats.averagesBySource === "object"
+        ? stats.averagesBySource
+        : {};
+    const ratingReview = sanitizeAiAnalyticsText(insight.ratingReview, 700) || "No numeric rating review is available.";
     const sourceLabel = formatAiInsightSource(source);
     const judgmentLabel = normalizeAiAnalyticsJudgmentLabel(judgment.label);
     const judgmentClass = getAiJudgmentClass(judgmentLabel);
     const confidence = Math.round(Math.max(0, Math.min(100, Number(judgment.confidence || 0))));
+    const hasComments = Math.max(0, Number(stats.totalComments || 0)) > 0;
+    const hasRatings = getAiAnalyticsRating(stats.combinedAverage) !== null;
+    const evidenceLabel = hasRatings && hasComments
+        ? "Ratings + comments"
+        : (hasRatings ? "Ratings only" : "Comments only");
 
     const keywordHtml = keywords.length
         ? keywords.map((row) => `
@@ -5348,7 +5840,7 @@ function renderAiInsightResult(outputEl, insightData, source, noticeText) {
                 <span class="vpaa-ai-keyword-count">${Math.max(1, Number(row.count || 1))}x</span>
             </span>
         `).join("")
-        : '<div class="vpaa-ai-empty">No keywords detected.</div>';
+        : `<div class="vpaa-ai-empty">${hasComments ? "No keywords detected." : "No written comments were available for keyword analysis."}</div>`;
 
     const clusterHtml = clusters.length
         ? clusters.map((cluster) => {
@@ -5369,7 +5861,7 @@ function renderAiInsightResult(outputEl, insightData, source, noticeText) {
                 </div>
             `;
         }).join("")
-        : '<div class="vpaa-ai-empty">No comment clusters detected.</div>';
+        : `<div class="vpaa-ai-empty">${hasComments ? "No comment clusters detected." : "No written comments were available for clustering."}</div>`;
 
     const reasoningHtml = reasoning.length
         ? `<ul class="vpaa-ai-reasoning-list">${reasoning.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
@@ -5381,11 +5873,24 @@ function renderAiInsightResult(outputEl, insightData, source, noticeText) {
 
     outputEl.classList.add("visible");
     outputEl.innerHTML = `
-        <div class="vpaa-ai-note">AI Analytics uses all comment sources (student, peer, supervisor).</div>
+        <div class="vpaa-ai-note">AI Analytics balances professor ratings and written feedback from student, peer, and supervisor evaluations.</div>
         ${noticeHtml}
         <div class="vpaa-ai-meta">
             <span class="vpaa-ai-meta-pill">Source: ${escapeHtml(sourceLabel)}</span>
+            <span class="vpaa-ai-meta-pill">Evidence: ${escapeHtml(evidenceLabel)}</span>
             <span class="vpaa-ai-meta-pill">Comments analyzed: ${Math.max(0, Number(stats.totalComments || 0))}</span>
+            <span class="vpaa-ai-meta-pill">Evaluations: ${Math.max(0, Number(stats.totalEvaluations || 0))}</span>
+            <span class="vpaa-ai-meta-pill">Response rate: ${getAiAnalyticsNumber(stats.responseRate, 0, 100) === null ? "N/A" : `${Number(stats.responseRate).toFixed(1)}%`}</span>
+        </div>
+        <div class="vpaa-ai-rating-review">
+            <div class="vpaa-ai-section-title">Professor Rating Review</div>
+            <div class="vpaa-ai-rating-grid">
+                <div class="vpaa-ai-rating-item featured"><span>Weighted Combined</span><strong>${escapeHtml(formatAiRatingValue(stats.combinedAverage))}</strong></div>
+                <div class="vpaa-ai-rating-item"><span>Student (50%)</span><strong>${escapeHtml(formatAiRatingValue(sourceAverages.student))}</strong></div>
+                <div class="vpaa-ai-rating-item"><span>Peer (25%)</span><strong>${escapeHtml(formatAiRatingValue(sourceAverages.professor))}</strong></div>
+                <div class="vpaa-ai-rating-item"><span>Supervisor (25%)</span><strong>${escapeHtml(formatAiRatingValue(sourceAverages.supervisor))}</strong></div>
+            </div>
+            <p class="vpaa-ai-rating-summary">${escapeHtml(ratingReview)}</p>
         </div>
         <div class="vpaa-ai-section">
             <div class="vpaa-ai-section-title">Detected Keywords</div>
@@ -5416,14 +5921,23 @@ function runAiAnalyticsForProfessor(profId, outputEl, btnEl) {
         return;
     }
 
-    const payload = buildProfessorAiAnalyticsPayload(prof);
-    if (!Array.isArray(payload.comments) || payload.comments.length === 0) {
-        renderAiInsightState(outputEl, "empty", "No comments available for AI analytics.");
+    let payload;
+    try {
+        const request = buildProfessorAiAnalyticsPayload(prof);
+        request.professor.id = normalizeVpaaProfessorUserId(prof.userId || prof.id);
+        request.semesterId = prof.semester || 'all';
+        payload = SharedData.getProfessorAnalyticsPayload(request);
+    } catch (error) {
+        renderAiInsightState(outputEl, 'error', error.message || 'Unable to load eligible analytics data.');
+        return;
+    }
+    if (!hasAiAnalyticsEvidence(payload)) {
+        renderAiInsightState(outputEl, "empty", "No valid ratings or written comments are available for AI analytics.");
         return;
     }
 
     const fallbackInsight = buildLocalAiExplainabilityInsight(payload);
-    renderAiInsightState(outputEl, "loading", "Analyzing comments with AI...");
+    renderAiInsightState(outputEl, "loading", "Analyzing professor ratings and comments with AI...");
 
     const originalText = btnEl ? btnEl.textContent : "";
     if (btnEl) {
@@ -5472,7 +5986,7 @@ function runAiAnalyticsForProfessor(profId, outputEl, btnEl) {
         return;
     }
 
-    loadingOverlay.show("Analyzing comments with AI...");
+    loadingOverlay.show("Analyzing professor ratings and comments with AI...");
     setTimeout(() => {
         try {
             executeAnalysis();

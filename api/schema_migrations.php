@@ -75,6 +75,97 @@ function applyNaapAuthenticationRateLimitsSchema(PDO $pdo) {
     );
 }
 
+function applyNaapTrustedDeviceOtpSchema(PDO $pdo) {
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS user_auth_security (
+            user_id BIGINT UNSIGNED NOT NULL,
+            first_otp_verified_at DATETIME DEFAULT NULL,
+            failed_password_count SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            failed_login_otp_required TINYINT(1) NOT NULL DEFAULT 0,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id),
+            CONSTRAINT fk_user_auth_security_user
+                FOREIGN KEY (user_id) REFERENCES users (id)
+                ON UPDATE CASCADE
+                ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS trusted_devices (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            user_id BIGINT UNSIGNED NOT NULL,
+            device_token_hash CHAR(64) NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_used_at DATETIME NOT NULL,
+            expires_at DATETIME NOT NULL,
+            revoked_at DATETIME DEFAULT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_trusted_devices_user_token (user_id, device_token_hash),
+            KEY idx_trusted_devices_token (device_token_hash),
+            KEY idx_trusted_devices_expiry (expires_at),
+            CONSTRAINT fk_trusted_devices_user
+                FOREIGN KEY (user_id) REFERENCES users (id)
+                ON UPDATE CASCADE
+                ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS login_otp_challenges (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            challenge_id CHAR(64) NOT NULL,
+            user_id BIGINT UNSIGNED NOT NULL,
+            purpose ENUM('device_verification', 'failed_login') NOT NULL,
+            otp_hash VARCHAR(255) NOT NULL,
+            device_token_hash CHAR(64) NOT NULL,
+            expires_at DATETIME NOT NULL,
+            failed_attempt_count TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            email_sent_at DATETIME NOT NULL,
+            consumed_at DATETIME DEFAULT NULL,
+            invalidated_at DATETIME DEFAULT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_login_otp_challenges_code (challenge_id),
+            KEY idx_login_otp_challenges_user_active (user_id, consumed_at, invalidated_at, expires_at),
+            KEY idx_login_otp_challenges_expiry (expires_at),
+            CONSTRAINT fk_login_otp_challenges_user
+                FOREIGN KEY (user_id) REFERENCES users (id)
+                ON UPDATE CASCADE
+                ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+
+    $legacyState = getSettingJson($pdo, 'loginSecurityState', []);
+    if (is_array($legacyState)) {
+        $upsert = $pdo->prepare(
+            'INSERT INTO user_auth_security
+                (user_id, failed_password_count, failed_login_otp_required)
+             VALUES (:user_id, :failed_password_count, :otp_required)
+             ON DUPLICATE KEY UPDATE
+                failed_password_count = GREATEST(failed_password_count, VALUES(failed_password_count)),
+                failed_login_otp_required = GREATEST(failed_login_otp_required, VALUES(failed_login_otp_required))'
+        );
+        foreach ($legacyState as $userKey => $record) {
+            $userId = resolveStoredUserIdNumber($userKey);
+            if ($userId <= 0 || !is_array($record)) {
+                continue;
+            }
+            $failedCount = max(0, (int) ($record['failed_password_count'] ?? 0));
+            $hasChallenge = is_array($record['otp_challenge'] ?? null);
+            if ($failedCount <= 0 && !$hasChallenge) {
+                continue;
+            }
+            $upsert->execute([
+                ':user_id' => $userId,
+                ':failed_password_count' => min($failedCount, 65535),
+                ':otp_required' => ($failedCount >= 3 || $hasChallenge) ? 1 : 0,
+            ]);
+        }
+    }
+    setSettingJson($pdo, 'loginSecurityState', []);
+}
+
 function applyNaapStudentEvaluationReminderSchema(PDO $pdo) {
     $pdo->exec(
         "CREATE TABLE IF NOT EXISTS student_evaluation_reminder_deliveries (
@@ -152,6 +243,26 @@ function getNaapForeignKeyDeleteRule(PDO $pdo, string $table, string $constraint
     return strtoupper(trim((string) ($stmt->fetchColumn() ?: '')));
 }
 
+function getNaapForeignKeyRules(PDO $pdo, string $table, string $constraint): array {
+    $stmt = $pdo->prepare(
+        'SELECT rc.UPDATE_RULE, rc.DELETE_RULE
+         FROM information_schema.REFERENTIAL_CONSTRAINTS rc
+         WHERE rc.CONSTRAINT_SCHEMA = DATABASE()
+           AND rc.TABLE_NAME = :table_name
+           AND rc.CONSTRAINT_NAME = :constraint_name
+         LIMIT 1'
+    );
+    $stmt->execute([
+        ':table_name' => $table,
+        ':constraint_name' => $constraint,
+    ]);
+    $row = $stmt->fetch();
+    return [
+        'update' => strtoupper(trim((string) ($row['UPDATE_RULE'] ?? ''))),
+        'delete' => strtoupper(trim((string) ($row['DELETE_RULE'] ?? ''))),
+    ];
+}
+
 function ensureNaapSoftDeleteColumn(PDO $pdo, string $table, string $column, string $definition): void {
     if (tableExistsInCurrentSchema($pdo, $table) && !columnExistsInCurrentSchema($pdo, $table, $column)) {
         $pdo->exec('ALTER TABLE `' . $table . '` ADD COLUMN `' . $column . '` ' . $definition);
@@ -166,6 +277,55 @@ function ensureNaapSoftDeleteIndex(PDO $pdo, string $table, string $index, array
         return '`' . $column . '`';
     }, $columns);
     $pdo->exec('ALTER TABLE `' . $table . '` ADD KEY `' . $index . '` (' . implode(', ', $quotedColumns) . ')');
+}
+
+function applyNaapAppendOnlyAuditSchema(PDO $pdo): void {
+    $columns = [
+        ['activity_log', 'event_code', "VARCHAR(80) NOT NULL DEFAULT 'legacy.activity' AFTER `log_code`"],
+        ['activity_log', 'actor_role', "VARCHAR(50) NOT NULL DEFAULT '' AFTER `event_code`"],
+        ['activity_log', 'target_type', "VARCHAR(60) NOT NULL DEFAULT '' AFTER `entry_type`"],
+        ['activity_log', 'target_id', "VARCHAR(120) NOT NULL DEFAULT '' AFTER `target_type`"],
+        ['activity_log', 'related_log_code', 'VARCHAR(30) DEFAULT NULL AFTER `target_id`'],
+        ['activity_log', 'request_method', "VARCHAR(10) NOT NULL DEFAULT '' AFTER `ip_address`"],
+        ['activity_log', 'request_path', "VARCHAR(255) NOT NULL DEFAULT '' AFTER `request_method`"],
+        ['faculty_acknowledgement_papers', 'section_c_ai_audit_code', 'VARCHAR(30) DEFAULT NULL AFTER `section_c_saved_by_user_id`'],
+    ];
+    foreach ($columns as $column) {
+        ensureNaapSoftDeleteColumn($pdo, $column[0], $column[1], $column[2]);
+    }
+
+    ensureNaapSoftDeleteIndex($pdo, 'activity_log', 'idx_activity_log_event', ['event_code', 'happened_at']);
+    ensureNaapSoftDeleteIndex($pdo, 'activity_log', 'idx_activity_log_target', ['target_type', 'target_id', 'happened_at']);
+    ensureNaapSoftDeleteIndex($pdo, 'activity_log', 'idx_activity_log_related', ['related_log_code']);
+    ensureNaapSoftDeleteIndex($pdo, 'faculty_acknowledgement_papers', 'idx_faculty_ack_papers_ai_audit', ['section_c_ai_audit_code']);
+
+    $rules = getNaapForeignKeyRules($pdo, 'activity_log', 'fk_activity_log_user');
+    if ($rules['update'] !== '' || $rules['delete'] !== '') {
+        $pdo->exec('ALTER TABLE `activity_log` DROP FOREIGN KEY `fk_activity_log_user`');
+    }
+    $pdo->exec(
+        'ALTER TABLE `activity_log`
+         ADD CONSTRAINT `fk_activity_log_user`
+         FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+         ON UPDATE RESTRICT ON DELETE RESTRICT'
+    );
+
+    $pdo->exec('DROP TRIGGER IF EXISTS `trg_activity_log_no_update`');
+    $pdo->exec(
+        "CREATE TRIGGER `trg_activity_log_no_update`
+         BEFORE UPDATE ON `activity_log`
+         FOR EACH ROW
+         SIGNAL SQLSTATE '45000'
+         SET MESSAGE_TEXT = 'activity_log is append-only; UPDATE is prohibited'"
+    );
+    $pdo->exec('DROP TRIGGER IF EXISTS `trg_activity_log_no_delete`');
+    $pdo->exec(
+        "CREATE TRIGGER `trg_activity_log_no_delete`
+         BEFORE DELETE ON `activity_log`
+         FOR EACH ROW
+         SIGNAL SQLSTATE '45000'
+         SET MESSAGE_TEXT = 'activity_log is append-only; DELETE is prohibited'"
+    );
 }
 
 function getNaapHistoricalForeignKeyDefinitions(): array {
@@ -356,6 +516,9 @@ function buildNaapSchemaObjectLabel(array $object) {
     if ($type === 'foreign_key') {
         return 'foreign key ' . $table . '.' . trim((string) ($object['constraint'] ?? ''));
     }
+    if ($type === 'trigger') {
+        return 'trigger ' . trim((string) ($object['trigger'] ?? ''));
+    }
     return $table !== '' ? $table : $type;
 }
 
@@ -414,13 +577,50 @@ function checkNaapSchemaObject(PDO $pdo, array $object) {
 
         if ($type === 'foreign_key') {
             $constraint = trim((string) ($object['constraint'] ?? ''));
-            $expectedRule = strtoupper(trim((string) ($object['deleteRule'] ?? 'RESTRICT')));
-            $actualRule = getNaapForeignKeyDeleteRule($pdo, $table, $constraint);
-            $ok = $constraint !== '' && ($actualRule === $expectedRule || ($expectedRule === 'RESTRICT' && $actualRule === 'NO ACTION'));
+            $expectedDeleteRule = strtoupper(trim((string) ($object['deleteRule'] ?? 'RESTRICT')));
+            $expectedUpdateRule = strtoupper(trim((string) ($object['updateRule'] ?? '')));
+            $rules = getNaapForeignKeyRules($pdo, $table, $constraint);
+            $deleteOk = $rules['delete'] === $expectedDeleteRule
+                || ($expectedDeleteRule === 'RESTRICT' && $rules['delete'] === 'NO ACTION');
+            $updateOk = $expectedUpdateRule === ''
+                || $rules['update'] === $expectedUpdateRule
+                || ($expectedUpdateRule === 'RESTRICT' && $rules['update'] === 'NO ACTION');
+            $ok = $constraint !== '' && $deleteOk && $updateOk;
             return [
                 'ok' => $ok,
                 'label' => $label,
-                'message' => $ok ? 'Present.' : 'Missing or has unsafe delete rule.',
+                'message' => $ok ? 'Present.' : 'Missing or has unsafe update/delete rule.',
+            ];
+        }
+
+        if ($type === 'trigger') {
+            $trigger = trim((string) ($object['trigger'] ?? ''));
+            $stmt = $pdo->prepare(
+                'SELECT ACTION_TIMING, EVENT_MANIPULATION, ACTION_STATEMENT
+                 FROM information_schema.TRIGGERS
+                 WHERE TRIGGER_SCHEMA = DATABASE()
+                   AND EVENT_OBJECT_TABLE = :table_name
+                   AND TRIGGER_NAME = :trigger_name
+                 LIMIT 1'
+            );
+            $stmt->execute([':table_name' => $table, ':trigger_name' => $trigger]);
+            $row = $stmt->fetch();
+            $ok = is_array($row);
+            if ($ok && isset($object['timing'])) {
+                $ok = strtoupper(trim((string) $row['ACTION_TIMING'])) === strtoupper(trim((string) $object['timing']));
+            }
+            if ($ok && isset($object['event'])) {
+                $ok = strtoupper(trim((string) $row['EVENT_MANIPULATION'])) === strtoupper(trim((string) $object['event']));
+            }
+            foreach ((array) ($object['statementContains'] ?? []) as $needle) {
+                if ($ok && stripos((string) $row['ACTION_STATEMENT'], (string) $needle) === false) {
+                    $ok = false;
+                }
+            }
+            return [
+                'ok' => $ok,
+                'label' => $label,
+                'message' => $ok ? 'Present.' : 'Missing or has an unsafe definition.',
             ];
         }
     } catch (Throwable $error) {
@@ -585,6 +785,26 @@ function getNaapSchemaMigrationRegistry() {
             },
         ],
         [
+            'id' => 'trusted_device_otp_v1',
+            'label' => 'First-login and trusted-device OTP security',
+            'apply' => function (PDO $pdo) {
+                applyNaapTrustedDeviceOtpSchema($pdo);
+            },
+            'required' => [
+                ['type' => 'table', 'table' => 'user_auth_security'],
+                ['type' => 'table', 'table' => 'trusted_devices'],
+                ['type' => 'unique_index', 'table' => 'trusted_devices', 'index' => 'uq_trusted_devices_user_token', 'columns' => ['user_id', 'device_token_hash']],
+                ['type' => 'index', 'table' => 'trusted_devices', 'index' => 'idx_trusted_devices_token', 'columns' => ['device_token_hash']],
+                ['type' => 'table', 'table' => 'login_otp_challenges'],
+                ['type' => 'unique_index', 'table' => 'login_otp_challenges', 'index' => 'uq_login_otp_challenges_code', 'columns' => ['challenge_id']],
+                ['type' => 'index', 'table' => 'login_otp_challenges', 'index' => 'idx_login_otp_challenges_user_active', 'columns' => ['user_id', 'consumed_at', 'invalidated_at', 'expires_at']],
+            ],
+            'dataCheck' => function (PDO $pdo) {
+                $legacyState = getSettingJson($pdo, 'loginSecurityState', []);
+                return !is_array($legacyState) || count($legacyState) === 0;
+            },
+        ],
+        [
             'id' => 'student_evaluation_reminders_v1',
             'label' => 'Student evaluation reminder configuration and delivery history',
             'apply' => function (PDO $pdo) {
@@ -675,6 +895,37 @@ function getNaapSchemaMigrationRegistry() {
                 ['type' => 'column', 'table' => 'evaluations', 'column' => 'submission_duplicate_key'],
                 ['type' => 'unique_index', 'table' => 'evaluations', 'index' => 'uq_evaluations_submission_duplicate_key', 'columns' => ['submission_duplicate_key']],
             ],
+        ],
+        [
+            'id' => 'evaluation_behavior_metadata_v1',
+            'label' => 'Evaluation behavior timing metadata',
+            'apply' => function (PDO $pdo) {
+                ensureEvaluationBehaviorMetadataSchema($pdo);
+            },
+            'required' => [
+                ['type' => 'column', 'table' => 'evaluations', 'column' => 'behavior_meta'],
+            ],
+        ],
+        [
+            'id' => 'evaluation_credibility_review_v1',
+            'label' => 'Persistent evaluation credibility and HR review',
+            'apply' => function (PDO $pdo) { ensureEvaluationCredibilitySchema($pdo); },
+            'required' => [
+                ['type'=>'column', 'table'=>'evaluations', 'column'=>'behavior_score'],
+                ['type'=>'column', 'table'=>'evaluations', 'column'=>'credibility_score'],
+                ['type'=>'column', 'table'=>'evaluations', 'column'=>'credibility_components'],
+                ['type'=>'column', 'table'=>'evaluations', 'column'=>'credibility_flags'],
+                ['type'=>'column', 'table'=>'evaluations', 'column'=>'credibility_calculated_at'],
+                ['type'=>'column', 'table'=>'evaluations', 'column'=>'credibility_status'],
+                ['type'=>'column', 'table'=>'evaluations', 'column'=>'credibility_reviewed_by'],
+                ['type'=>'column', 'table'=>'evaluations', 'column'=>'credibility_reviewed_at'],
+                ['type'=>'column', 'table'=>'evaluations', 'column'=>'credibility_review_decision'],
+                ['type'=>'column', 'table'=>'evaluations', 'column'=>'credibility_review_note'],
+                ['type'=>'index', 'table'=>'evaluations', 'index'=>'idx_evaluations_credibility', 'columns'=>['credibility_status','semester_id','evaluatee_user_id','id']],
+            ],
+            'dataCheck' => function (PDO $pdo) {
+                return !$pdo->query('SELECT 1 FROM evaluations WHERE credibility_status IS NULL LIMIT 1')->fetchColumn();
+            },
         ],
         [
             'id' => 'student_evaluation_drafts_v1',
@@ -834,6 +1085,51 @@ function getNaapSchemaMigrationRegistry() {
                 ['type' => 'index', 'table' => 'evaluations', 'index' => 'idx_evaluations_report_sem_type_evaluator', 'columns' => ['semester_id', 'evaluation_type_id', 'evaluator_user_id']],
                 ['type' => 'index', 'table' => 'evaluation_responses', 'index' => 'idx_eval_responses_eval_order', 'columns' => ['evaluation_id', 'display_order', 'id']],
                 ['type' => 'index', 'table' => 'course_offerings', 'index' => 'idx_course_offerings_prof_sem_load_active', 'columns' => ['professor_id', 'semester_id', 'load_type', 'is_active']],
+            ],
+        ],
+        [
+            'id' => 'department_faculty_report_access_v1',
+            'label' => 'Department faculty report access controls',
+            'apply' => function (PDO $pdo) {
+                ensureDepartmentFacultyReportAccessSchema($pdo);
+            },
+            'required' => [
+                ['type' => 'table', 'table' => 'department_faculty_report_access'],
+                ['type' => 'index', 'table' => 'department_faculty_report_access', 'index' => 'idx_department_faculty_report_access_updated_by', 'columns' => ['updated_by_user_id']],
+                ['type' => 'foreign_key', 'table' => 'department_faculty_report_access', 'constraint' => 'fk_department_faculty_report_access_department', 'deleteRule' => 'RESTRICT'],
+                ['type' => 'foreign_key', 'table' => 'department_faculty_report_access', 'constraint' => 'fk_department_faculty_report_access_updated_by', 'deleteRule' => 'RESTRICT'],
+            ],
+            'dataCheck' => function (PDO $pdo) {
+                return (int) $pdo->query(
+                    'SELECT COUNT(*)
+                     FROM departments d
+                     LEFT JOIN department_faculty_report_access dfra ON dfra.department_id = d.id
+                     WHERE dfra.department_id IS NULL'
+                )->fetchColumn() === 0;
+            },
+        ],
+        [
+            'id' => 'audit_trail_append_only_v1',
+            'label' => 'Append-only server-side audit trail',
+            'apply' => function (PDO $pdo) {
+                applyNaapAppendOnlyAuditSchema($pdo);
+            },
+            'required' => [
+                ['type' => 'column', 'table' => 'activity_log', 'column' => 'event_code'],
+                ['type' => 'column', 'table' => 'activity_log', 'column' => 'actor_role'],
+                ['type' => 'column', 'table' => 'activity_log', 'column' => 'target_type'],
+                ['type' => 'column', 'table' => 'activity_log', 'column' => 'target_id'],
+                ['type' => 'column', 'table' => 'activity_log', 'column' => 'related_log_code'],
+                ['type' => 'column', 'table' => 'activity_log', 'column' => 'request_method'],
+                ['type' => 'column', 'table' => 'activity_log', 'column' => 'request_path'],
+                ['type' => 'index', 'table' => 'activity_log', 'index' => 'idx_activity_log_event', 'columns' => ['event_code', 'happened_at']],
+                ['type' => 'index', 'table' => 'activity_log', 'index' => 'idx_activity_log_target', 'columns' => ['target_type', 'target_id', 'happened_at']],
+                ['type' => 'index', 'table' => 'activity_log', 'index' => 'idx_activity_log_related', 'columns' => ['related_log_code']],
+                ['type' => 'foreign_key', 'table' => 'activity_log', 'constraint' => 'fk_activity_log_user', 'updateRule' => 'RESTRICT', 'deleteRule' => 'RESTRICT'],
+                ['type' => 'trigger', 'table' => 'activity_log', 'trigger' => 'trg_activity_log_no_update', 'event' => 'UPDATE', 'timing' => 'BEFORE', 'statementContains' => ['SIGNAL', '45000']],
+                ['type' => 'trigger', 'table' => 'activity_log', 'trigger' => 'trg_activity_log_no_delete', 'event' => 'DELETE', 'timing' => 'BEFORE', 'statementContains' => ['SIGNAL', '45000']],
+                ['type' => 'column', 'table' => 'faculty_acknowledgement_papers', 'column' => 'section_c_ai_audit_code'],
+                ['type' => 'index', 'table' => 'faculty_acknowledgement_papers', 'index' => 'idx_faculty_ack_papers_ai_audit', 'columns' => ['section_c_ai_audit_code']],
             ],
         ],
     ];

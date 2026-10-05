@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/audit.php';
+
 /**
  * Server-side campus authorization helpers.
  *
@@ -107,44 +109,24 @@ function campusAuthorizationLogDeniedAttempt(
     $requestedCampus = substr(preg_replace('/[^a-z0-9_-]+/i', '', trim($requestedCampus)) ?: 'unknown', 0, 80);
     $actorCampus = substr(preg_replace('/[^a-z0-9_-]+/i', '', (string) ($context['campusSlug'] ?? '')) ?: 'unknown', 0, 80);
 
-    try {
-        if (function_exists('addActivityLogEntrySnapshot')) {
-            addActivityLogEntrySnapshot($pdo, [
-                'action' => 'Cross-campus Access Denied',
-                'description' => sprintf(
-                    'Denied %s operation on %s. Actor campus: %s; requested campus: %s.',
-                    $operation,
-                    $resourceType,
-                    $actorCampus,
-                    $requestedCampus
-                ),
-                'type' => 'security',
-                'userId' => 'u' . (int) ($context['userId'] ?? 0),
-                'role' => (string) ($context['role'] ?? ''),
-            ]);
-            return;
-        }
-
-        $stmt = $pdo->prepare(
-            'INSERT INTO activity_log (user_id, action, description, entry_type, ip_address, happened_at)
-             VALUES (:user_id, :action, :description, :entry_type, :ip_address, CURRENT_TIMESTAMP)'
-        );
-        $stmt->execute([
-            ':user_id' => (int) ($context['userId'] ?? 0) ?: null,
-            ':action' => 'Cross-campus Access Denied',
-            ':description' => sprintf(
-                'Denied %s operation on %s. Actor campus: %s; requested campus: %s.',
-                $operation,
-                $resourceType,
-                $actorCampus,
-                $requestedCampus
-            ),
-            ':entry_type' => 'security',
-            ':ip_address' => '',
-        ]);
-    } catch (Throwable $ignored) {
-        // Authorization must fail closed even when security logging is unavailable.
-    }
+    naapAuditTryWrite($pdo, [
+        'eventCode' => 'security.cross_campus_denied',
+        'action' => 'Cross-campus Access Denied',
+        'description' => sprintf(
+            'Denied %s operation on %s. Actor campus: %s; requested campus: %s.',
+            $operation,
+            $resourceType,
+            $actorCampus,
+            $requestedCampus
+        ),
+        'type' => 'security',
+        'actor' => [
+            'id' => 'u' . (int) ($context['userId'] ?? 0),
+            'role' => (string) ($context['role'] ?? ''),
+        ],
+        'targetType' => $resourceType,
+        'targetId' => $requestedCampus,
+    ], 'audit.cross_campus_denied');
 }
 
 function campusAuthorizationDeny(

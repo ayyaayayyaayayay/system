@@ -1781,6 +1781,70 @@ body {
     gap: 10px;
 }
 
+.department-report-access-panel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 16px 18px;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    background: var(--bg-secondary);
+}
+
+.department-report-access-copy {
+    min-width: 0;
+}
+
+.department-report-access-label {
+    display: block;
+    margin-bottom: 4px;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.department-report-access-copy strong {
+    display: block;
+    color: #166534;
+    font-size: 15px;
+}
+
+.department-report-access-panel.is-restricted .department-report-access-copy strong {
+    color: #b91c1c;
+}
+
+.department-report-access-copy p {
+    margin: 4px 0 0;
+    color: #64748b;
+    font-size: 12px;
+}
+
+.department-report-access-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.department-report-access-feedback {
+    min-height: 18px;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.department-report-access-feedback.is-success {
+    color: #166534;
+}
+
+.department-report-access-feedback.is-error {
+    color: #b91c1c;
+}
+
 .response-divider {
     height: 1px;
     background: var(--border-color);
@@ -3471,11 +3535,22 @@ body {
     }
 
     .dean-panel .faculty-response-actions,
+    .dean-panel .department-report-access-panel,
     .dean-panel .faculty-response-toggle,
     .dean-panel .faculty-comments-actions,
     .dean-panel .dean-faculty-paper-actions {
         width: 100%;
         flex-wrap: wrap;
+    }
+
+    .dean-panel .department-report-access-panel {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .dean-panel .department-report-access-actions {
+        justify-content: flex-start;
+        width: 100%;
     }
 
     .dean-panel .faculty-response-actions > *,

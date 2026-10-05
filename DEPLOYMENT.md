@@ -164,6 +164,56 @@ An optional hosting-provider or WAF rule may apply a coarser POST limit to `api/
 
 ## Publish Steps
 
+### Append-only audit migration and database privileges
+
+Run `audit_trail_append_only_v1` with a separate DDL-capable migration account before switching the application to its runtime account:
+
+```bash
+php api/migrate_schema.php --check
+php api/migrate_schema.php --apply
+php api/migrate_schema.php --check
+```
+
+The migration preserves every existing `activity_log` row, adds the structured audit columns and indexes, changes `fk_activity_log_user` to `ON UPDATE RESTRICT ON DELETE RESTRICT`, adds `faculty_acknowledgement_papers.section_c_ai_audit_code`, and creates `trg_activity_log_no_update` and `trg_activity_log_no_delete`. Both triggers use MariaDB-compatible `SIGNAL SQLSTATE '45000'`; this approach is supported by MariaDB 10.4.32. No stored procedure is installed.
+
+Verify the database protection as the migration account:
+
+```sql
+SHOW TRIGGERS FROM `naap_evaluation_system` WHERE `Table` = 'activity_log';
+SELECT CONSTRAINT_NAME, UPDATE_RULE, DELETE_RULE
+FROM information_schema.REFERENTIAL_CONSTRAINTS
+WHERE CONSTRAINT_SCHEMA = 'naap_evaluation_system'
+  AND TABLE_NAME = 'activity_log'
+  AND CONSTRAINT_NAME = 'fk_activity_log_user';
+```
+
+Production must use a dedicated runtime account, not `root`. Substitute the account host and a separately managed strong password below. Do not commit those values:
+
+```sql
+CREATE USER 'naap_runtime'@'localhost' IDENTIFIED BY '<RUNTIME_PASSWORD>';
+GRANT SELECT, INSERT ON `naap_evaluation_system`.`activity_log` TO 'naap_runtime'@'localhost';
+```
+
+Generate table-specific runtime CRUD grants for the remaining application tables. Review and execute the generated statements as the migration administrator; do not replace them with a database-wide write grant:
+
+```sql
+SELECT CONCAT(
+  'GRANT SELECT, INSERT, UPDATE, DELETE ON `', TABLE_SCHEMA, '`.`', TABLE_NAME,
+  '` TO ''naap_runtime''@''localhost'';'
+) AS grant_statement
+FROM information_schema.TABLES
+WHERE TABLE_SCHEMA = 'naap_evaluation_system'
+  AND TABLE_TYPE = 'BASE TABLE'
+  AND TABLE_NAME <> 'activity_log'
+ORDER BY TABLE_NAME;
+
+SHOW GRANTS FOR 'naap_runtime'@'localhost';
+```
+
+The runtime account must have no `UPDATE`, `DELETE`, `ALTER`, `DROP`, or `TRIGGER` privilege on `activity_log`. Keep DDL and trigger privileges on the separate migration account. Point `NAAP_DB_USER` and `NAAP_DB_PASS` at the runtime account only after migration verification.
+
+Required audit inserts for login, evaluation submission, AI generation/publication/approval, user management, and administrative configuration participate in the operation transaction. A required audit failure rolls the operation back and returns a referenced server error. Logout is the exception: the session is always destroyed and the response includes an audit warning/reference if recording fails. Student evaluation events are de-identified: `user_id` is `NULL`, and request/IP/target fields are blank. Admin can view request/IP metadata; HR receives those fields redacted; all other roles are denied audit queries.
+
 1. Back up the database and the existing `files/faculty_papers/` directory to restricted storage before upgrading.
 2. Upload the project files to hosting. Deploy the root and directory-level `.htaccess` deny rules before making the upgraded application public.
 3. Run `composer install --no-dev --optimize-autoloader` if the host supports Composer.
@@ -184,7 +234,7 @@ An optional hosting-provider or WAF rule may apply a coarser POST limit to `api/
    php api/migrate_schema.php --check
    ```
 
-   The final check must report no pending or failed `application_secrets_encryption_v1`, `faculty_paper_private_storage_v1`, `authentication_rate_limits_v1`, `student_evaluation_reminders_v1`, or `encrypted_backup_system_v1` migration. The faculty-paper migration copies and verifies every PDF, including unreferenced files, before removing public copies. Correct configuration or destination conflicts and rerun safely; do not move or delete individual files manually.
+   The final check must report no pending or failed `application_secrets_encryption_v1`, `faculty_paper_private_storage_v1`, `authentication_rate_limits_v1`, `student_evaluation_reminders_v1`, `encrypted_backup_system_v1`, or `audit_trail_append_only_v1` migration. The faculty-paper migration copies and verifies every PDF, including unreferenced files, before removing public copies. Correct configuration or destination conflicts and rerun safely; do not move or delete individual files manually.
 10. Confirm the private faculty-paper directory is writable by PHP and contains the migrated files with restrictive permissions.
 11. Enable SSL for the domain.
 12. Visit `/` and test login, profile photo uploads, PDF generation, SMTP test mail, and each enabled OpenAI feature.
@@ -205,14 +255,14 @@ This app has a CLI reminder job:
 
 - [`api/scheduled_student_eval_reminder.php`](api/scheduled_student_eval_reminder.php)
 
-On Linux hosting, add this daily entry to the application user's crontab (adjust the paths):
+On Linux hosting, add this every-minute entry to the application user's crontab (adjust the paths):
 
 ```bash
 CRON_TZ=Asia/Manila
-0 7 * * * /usr/bin/php /home/USERNAME/public_html/api/scheduled_student_eval_reminder.php
+* * * * * /usr/bin/php /home/USERNAME/public_html/api/scheduled_student_eval_reminder.php
 ```
 
-Run it daily at `07:00` Asia/Manila if you want automated reminder emails.
+Run it every minute so changes to HR?s reminder send time take effect without rescheduling cron.
 
 For Windows Task Scheduler/XAMPP, use:
 
@@ -220,9 +270,9 @@ For Windows Task Scheduler/XAMPP, use:
 C:\xampp\php\php.exe -f C:\xampp\htdocs\system\api\scheduled_student_eval_reminder.php
 ```
 
-Schedule the Windows task daily at `07:00` and set the server time zone to `(UTC+08:00) Kuala Lumpur, Singapore` (Manila time).
+Schedule the Windows task to repeat every 1 minute indefinitely. The application uses its existing authoritative Asia/Manila timezone.
 
-Keep the scheduler daily even when HR selects a longer interval. The PHP job reads the active
+Keep the scheduler running every minute even when HR selects a longer interval. HR can set Reminder Send Time alongside frequency and message content. Existing settings default to `07:00` until saved; the time is stored in the same system settings JSON record. The job sends on the first run at or after that local time, allowing delayed runs, and retains the existing daily duplicate protection. The PHP job reads the active
 `studentEvaluationReminderConfig` record, checks the current evaluation period, and uses delivery
 history to decide which incomplete students are due. Before enabling the task after this upgrade,
 apply and verify the `student_evaluation_reminders_v1` migration:

@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="../design/apple-touch-icon.png">
     <title>VPAA Evaluation Overview - National Aviation Academy of the Philippines</title>
     <link rel="stylesheet" href="../css/panel-theme.css?v=20260907a">
-    <link rel="stylesheet" href="../css/vpaapanel.css?v=20260906a">
+    <link rel="stylesheet" href="../css/vpaapanel.css?v=20260930c">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
@@ -150,12 +150,16 @@
                                 <div class="chart-container graph-chart-container">
                                     <h3 class="chart-title">Average Scores by Category</h3>
                                     <p class="chart-subtitle">Performance across different evaluation criteria</p>
-                                    <canvas id="vpaa-student-professor-bar-chart"></canvas>
+                                    <div class="vpaa-chart-canvas-frame vpaa-chart-canvas-frame--graph">
+                                        <canvas id="vpaa-student-professor-bar-chart"></canvas>
+                                    </div>
                                 </div>
                                 <div class="chart-container rating-chart-container">
                                     <h3 class="chart-title">Rating Distribution</h3>
                                     <p class="chart-subtitle">Breakdown of student ratings</p>
-                                    <canvas id="vpaa-student-professor-pie-chart"></canvas>
+                                    <div class="vpaa-chart-canvas-frame vpaa-chart-canvas-frame--rating">
+                                        <canvas id="vpaa-student-professor-pie-chart"></canvas>
+                                    </div>
                                 </div>
                             </div>
                             <div class="stats-summary">
@@ -186,12 +190,16 @@
                                 <div class="chart-container graph-chart-container">
                                     <h3 class="chart-title">Average Scores by Category</h3>
                                     <p class="chart-subtitle">Performance across different evaluation criteria</p>
-                                    <canvas id="vpaa-professor-professor-bar-chart"></canvas>
+                                    <div class="vpaa-chart-canvas-frame vpaa-chart-canvas-frame--graph">
+                                        <canvas id="vpaa-professor-professor-bar-chart"></canvas>
+                                    </div>
                                 </div>
                                 <div class="chart-container rating-chart-container">
                                     <h3 class="chart-title">Rating Distribution</h3>
                                     <p class="chart-subtitle">Breakdown of professor ratings</p>
-                                    <canvas id="vpaa-professor-professor-pie-chart"></canvas>
+                                    <div class="vpaa-chart-canvas-frame vpaa-chart-canvas-frame--rating">
+                                        <canvas id="vpaa-professor-professor-pie-chart"></canvas>
+                                    </div>
                                 </div>
                             </div>
                             <div class="stats-summary">
@@ -222,12 +230,16 @@
                                 <div class="chart-container graph-chart-container">
                                     <h3 class="chart-title">Average Scores by Category</h3>
                                     <p class="chart-subtitle">Performance across different evaluation criteria</p>
-                                    <canvas id="vpaa-supervisor-professor-bar-chart"></canvas>
+                                    <div class="vpaa-chart-canvas-frame vpaa-chart-canvas-frame--graph">
+                                        <canvas id="vpaa-supervisor-professor-bar-chart"></canvas>
+                                    </div>
                                 </div>
                                 <div class="chart-container rating-chart-container">
                                     <h3 class="chart-title">Rating Distribution</h3>
                                     <p class="chart-subtitle">Breakdown of supervisor ratings</p>
-                                    <canvas id="vpaa-supervisor-professor-pie-chart"></canvas>
+                                    <div class="vpaa-chart-canvas-frame vpaa-chart-canvas-frame--rating">
+                                        <canvas id="vpaa-supervisor-professor-pie-chart"></canvas>
+                                    </div>
                                 </div>
                             </div>
                             <div class="stats-summary">
@@ -330,6 +342,47 @@
                         </p>
                     </section>
 
+                    <section class="admin-section vpaa-key-highlights-section" aria-labelledby="vpaaKeyHighlightsTitle">
+                        <div class="vpaa-key-highlights-header">
+                            <h2 id="vpaaKeyHighlightsTitle">Key Highlights</h2>
+                            <p>Automatic insights based on current evaluation summaries.</p>
+                        </div>
+                        <div class="vpaa-key-highlights-divider" aria-hidden="true"></div>
+                        <div class="vpaa-key-highlights-grid" id="vpaaKeyHighlightsGrid">
+                            <article class="vpaa-highlight-card" id="vpaaHighlightTopRating">
+                                <div class="vpaa-highlight-icon" aria-hidden="true">
+                                    <i class="fas fa-trophy"></i>
+                                </div>
+                                <div class="vpaa-highlight-content">
+                                    <h3>Top Rating</h3>
+                                    <p class="vpaa-highlight-name">No data yet</p>
+                                    <p class="vpaa-highlight-metric">Waiting for evaluation data.</p>
+                                </div>
+                            </article>
+                            <article class="vpaa-highlight-card" id="vpaaHighlightMostComments">
+                                <div class="vpaa-highlight-icon" aria-hidden="true">
+                                    <i class="fas fa-comments"></i>
+                                </div>
+                                <div class="vpaa-highlight-content">
+                                    <h3>Most Comments</h3>
+                                    <p class="vpaa-highlight-name">No data yet</p>
+                                    <p class="vpaa-highlight-metric">Waiting for evaluation data.</p>
+                                </div>
+                            </article>
+                            <article class="vpaa-highlight-card" id="vpaaHighlightNeedsAttention">
+                                <div class="vpaa-highlight-icon" aria-hidden="true">
+                                    <i class="fas fa-triangle-exclamation"></i>
+                                </div>
+                                <div class="vpaa-highlight-content">
+                                    <h3>Needs Attention</h3>
+                                    <p class="vpaa-highlight-name">No data yet</p>
+                                    <p class="vpaa-highlight-metric">Waiting for evaluation data.</p>
+                                </div>
+                            </article>
+                        </div>
+                        <p class="vpaa-highlights-empty" id="vpaaHighlightsEmpty" hidden>No insights available for the current filters.</p>
+                    </section>
+
                     <section class="admin-section">
                         <div class="section-header">
                             <div class="section-title">
@@ -383,47 +436,6 @@
                                 Reset Filters
                             </button>
                         </div>
-                    </section>
-
-                    <section class="admin-section vpaa-key-highlights-section" aria-labelledby="vpaaKeyHighlightsTitle">
-                        <div class="vpaa-key-highlights-header">
-                            <h2 id="vpaaKeyHighlightsTitle">Key Highlights</h2>
-                            <p>Automatic insights based on current evaluation summaries.</p>
-                        </div>
-                        <div class="vpaa-key-highlights-divider" aria-hidden="true"></div>
-                        <div class="vpaa-key-highlights-grid" id="vpaaKeyHighlightsGrid">
-                            <article class="vpaa-highlight-card" id="vpaaHighlightTopRating">
-                                <div class="vpaa-highlight-icon" aria-hidden="true">
-                                    <i class="fas fa-trophy"></i>
-                                </div>
-                                <div class="vpaa-highlight-content">
-                                    <h3>Top Rating</h3>
-                                    <p class="vpaa-highlight-name">No data yet</p>
-                                    <p class="vpaa-highlight-metric">Waiting for evaluation data.</p>
-                                </div>
-                            </article>
-                            <article class="vpaa-highlight-card" id="vpaaHighlightMostComments">
-                                <div class="vpaa-highlight-icon" aria-hidden="true">
-                                    <i class="fas fa-comments"></i>
-                                </div>
-                                <div class="vpaa-highlight-content">
-                                    <h3>Most Comments</h3>
-                                    <p class="vpaa-highlight-name">No data yet</p>
-                                    <p class="vpaa-highlight-metric">Waiting for evaluation data.</p>
-                                </div>
-                            </article>
-                            <article class="vpaa-highlight-card" id="vpaaHighlightNeedsAttention">
-                                <div class="vpaa-highlight-icon" aria-hidden="true">
-                                    <i class="fas fa-triangle-exclamation"></i>
-                                </div>
-                                <div class="vpaa-highlight-content">
-                                    <h3>Needs Attention</h3>
-                                    <p class="vpaa-highlight-name">No data yet</p>
-                                    <p class="vpaa-highlight-metric">Waiting for evaluation data.</p>
-                                </div>
-                            </article>
-                        </div>
-                        <p class="vpaa-highlights-empty" id="vpaaHighlightsEmpty" hidden>No insights available for the current filters.</p>
                     </section>
 
                     <section class="admin-section">
@@ -634,10 +646,11 @@
         </div>
     </div>
 
-    <script src="../JsScrip/db-data.js?v=20260912b"></script>
+    <script src="../JsScrip/db-data.js?v=20261004a"></script>
+    <script src="../JsScrip/set-calculation.js?v=20260929b"></script>
     <script src="../JsScrip/system-report.js?v=20260907a"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
-    <script src="../JsScrip/vpaapanel.js?v=20260911e"></script>
+    <script src="../JsScrip/vpaapanel.js?v=20261001a"></script>
 </body>
 
 </html>

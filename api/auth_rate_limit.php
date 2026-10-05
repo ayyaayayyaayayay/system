@@ -5,6 +5,7 @@ declare(strict_types=1);
 const NAAP_AUTH_RATE_ACTION_FAILURE = 'authentication_failure';
 const NAAP_AUTH_RATE_ACTION_RESET_REQUEST = 'password_reset_request';
 const NAAP_AUTH_RATE_ACTION_RESET_SENT = 'password_reset_sent';
+const NAAP_AUTH_RATE_ACTION_OTP_SENT = 'login_otp_sent';
 
 const NAAP_AUTH_RATE_IP_FAILURE_LIMIT = 60;
 const NAAP_AUTH_RATE_IP_FAILURE_WINDOW_SECONDS = 600;
@@ -15,6 +16,9 @@ const NAAP_AUTH_RATE_RESET_IP_WINDOW_SECONDS = 900;
 const NAAP_AUTH_RATE_RESET_IDENTITY_LIMIT = 5;
 const NAAP_AUTH_RATE_RESET_IDENTITY_WINDOW_SECONDS = 3600;
 const NAAP_AUTH_RATE_RESET_COOLDOWN_SECONDS = 600;
+const NAAP_AUTH_RATE_OTP_SEND_LIMIT = 5;
+const NAAP_AUTH_RATE_OTP_SEND_WINDOW_SECONDS = 3600;
+const NAAP_AUTH_RATE_OTP_RESEND_COOLDOWN_SECONDS = 60;
 const NAAP_AUTH_RATE_RETRY_AFTER_SECONDS = 900;
 const NAAP_AUTH_RATE_RETENTION_SECONDS = 86400;
 const NAAP_AUTH_RATE_CLEANUP_LIMIT = 500;
@@ -92,6 +96,7 @@ function naapAuthRateValidateAction(string $action): string
         NAAP_AUTH_RATE_ACTION_FAILURE,
         NAAP_AUTH_RATE_ACTION_RESET_REQUEST,
         NAAP_AUTH_RATE_ACTION_RESET_SENT,
+        NAAP_AUTH_RATE_ACTION_OTP_SENT,
     ], true)) {
         throw new InvalidArgumentException('Unsupported authentication rate-limit action.');
     }

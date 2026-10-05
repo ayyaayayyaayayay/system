@@ -421,13 +421,18 @@ function facultyReportFetchOfferingRowsForProfessorIds(PDO $pdo, array $professo
             co.professor_id,
             sub.subject_code,
             co.section_name,
+            COUNT(DISTINCT CASE
+                WHEN LOWER(TRIM(sce.status)) IN (\'enrolled\', \'completed\')
+                THEN sce.student_id
+                ELSE NULL
+            END) AS registered_student_count,
             COALESCE(
                 NULLIF(
                     SUBSTRING_INDEX(
                         GROUP_CONCAT(
                             DISTINCT CASE
                                 WHEN sce.id IS NOT NULL
-                                 AND LOWER(TRIM(COALESCE(sce.status, \'enrolled\'))) NOT IN (\'dropped\', \'inactive\')
+                                 AND LOWER(TRIM(sce.status)) IN (\'enrolled\', \'completed\')
                                 THEN student_program.code
                                 ELSE NULL
                             END
@@ -492,6 +497,34 @@ function facultyReportBuildProfessorOfferingIdSet(PDO $pdo, string $professorUse
     return facultyReportBuildProfessorOfferingIdSetFromRows(
         facultyReportFetchProfessorOfferingRows($pdo, $professorUserId, $semesterId, $loadType)
     );
+}
+
+function facultyReportFetchEligibleEnrollmentRowsForOfferingIds(PDO $pdo, array $offeringIds): array
+{
+    $offeringIds = facultyReportNormalizeNumericIdList($offeringIds);
+    if (count($offeringIds) === 0) {
+        return [];
+    }
+
+    $params = [];
+    $types = [];
+    $placeholders = facultyReportBuildSqlPlaceholders(
+        $offeringIds,
+        'enrollment_offering_id',
+        $params,
+        $types,
+        PDO::PARAM_INT
+    );
+    $stmt = $pdo->prepare(
+        'SELECT sce.course_offering_id, sce.student_id, sce.status
+         FROM student_course_enrollments sce
+         WHERE sce.course_offering_id IN (' . $placeholders . ')
+           AND LOWER(TRIM(sce.status)) IN (\'enrolled\', \'completed\')
+         ORDER BY sce.course_offering_id ASC, sce.student_id ASC'
+    );
+    bindBootstrapSqlParams($stmt, $params, $types);
+    $stmt->execute();
+    return $stmt->fetchAll();
 }
 
 function facultyReportIsStudentEvaluationForProfessor(array $evaluation, array $offeringIdSet, array $professor): bool
@@ -559,7 +592,20 @@ function facultyReportBuildEmptySetSummaryRows(): array
     return [
         'rows' => [],
         'total_students' => 0,
-        'total_weighted_score' => 0,
+        'completed_evaluations' => 0,
+        'pending_evaluations' => 0,
+        'completion_rate' => 0.0,
+        'valid_rating_count' => 0,
+        'total_weighted_score' => null,
+        'overall_set_rating' => null,
+        'scorable_students' => 0,
+        'excluded_students' => 0,
+        'registered_class_count' => 0,
+        'scorable_class_count' => 0,
+        'excluded_class_count' => 0,
+        'partial_result' => false,
+        'calculation_note' => '',
+        'calculation_available' => false,
         'total_classes' => 0,
         'display_limit' => 8,
     ];
@@ -567,8 +613,18 @@ function facultyReportBuildEmptySetSummaryRows(): array
 
 function facultyReportGetLegacyEvaluations(PDO $pdo): array
 {
-    $settingsSnapshot = getSettingJson($pdo, 'sharedEvaluations', []);
-    return is_array($settingsSnapshot) ? $settingsSnapshot : [];
+    $settings = getSettingJson($pdo, 'sharedEvaluations', []);
+    if (!is_array($settings) || !$settings) return [];
+    // SQL identities remain authoritative even when their survey is rejected.
+    $identities = buildEvaluationsSnapshotFromTables($pdo, null, [
+        '_includeRejected' => true, 'includeRatings' => false, 'includeTextResponses' => false,
+    ]);
+    $ids = array_fill_keys(array_column($identities, 'id'), true);
+    $keys = array_fill_keys(array_map('buildEvaluationSnapshotMergeKey', $identities), true);
+    return array_values(array_filter($settings, static function ($row) use ($ids, $keys) {
+        return is_array($row) && ($row['credibilityStatus'] ?? '') !== 'REJECTED_BY_HR'
+            && !isset($ids[$row['id'] ?? '']) && !isset($keys[buildEvaluationSnapshotMergeKey($row)]);
+    }));
 }
 
 function facultyReportFilterLegacyEvaluations(array $legacyEvaluations, array $legacyFilters, callable $predicate): array
@@ -797,57 +853,221 @@ function facultyReportFetchPeerEvaluationsForProfessor(
     );
 }
 
-function facultyReportGroupStudentEvaluationsByOffering(array $studentEvaluations): array
+function facultyReportNormalizeStudentIdentityToken($value): string
 {
-    $evaluationsByOffering = [];
-    $seenEvaluatorsByOffering = [];
+    $numericId = resolveStoredUserIdNumber($value);
+    if ($numericId > 0) {
+        return 'u' . $numericId;
+    }
+    return facultyReportNormalizeEvaluationIdentityToken($value);
+}
+
+function facultyReportBuildStudentEvaluatorToken(array $evaluation): string
+{
+    foreach ([
+        $evaluation['studentUserId'] ?? '',
+        $evaluation['evaluatorUserId'] ?? '',
+        $evaluation['studentId'] ?? '',
+        $evaluation['evaluatorId'] ?? '',
+        $evaluation['evaluatorStudentNumber'] ?? '',
+        $evaluation['evaluatorUsername'] ?? '',
+        $evaluation['evaluatorEmail'] ?? '',
+    ] as $candidate) {
+        $token = facultyReportNormalizeStudentIdentityToken($candidate);
+        if ($token !== '') {
+            return $token;
+        }
+    }
+    return '';
+}
+
+function facultyReportGetValidRatingValues(array $evaluation): array
+{
+    $values = [];
+    foreach ((is_array($evaluation['ratings'] ?? null) ? $evaluation['ratings'] : []) as $rating) {
+        if (!is_numeric($rating)) {
+            continue;
+        }
+        $value = (float)$rating;
+        if (!is_finite($value) || $value < 1.0 || $value > 5.0) {
+            continue;
+        }
+        $values[] = $value;
+    }
+    return $values;
+}
+
+function facultyReportComputeQuestionnaireAveragePercent(array $evaluation): ?float
+{
+    $ratings = facultyReportGetValidRatingValues($evaluation);
+    if (count($ratings) === 0) {
+        return null;
+    }
+    return (array_sum($ratings) / count($ratings)) * 20.0;
+}
+
+function facultyReportBuildEligibleStudentMapByOffering(array $offeringRows, array $enrollmentRows): array
+{
+    $eligible = [];
+    foreach ($offeringRows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $offeringId = trim((string)($row['id'] ?? ''));
+        if ($offeringId !== '') {
+            $eligible[$offeringId] = [];
+        }
+    }
+    foreach ($enrollmentRows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $status = strtolower(trim((string)($row['status'] ?? '')));
+        if (!in_array($status, ['enrolled', 'completed'], true)) {
+            continue;
+        }
+        $offeringId = trim((string)($row['course_offering_id'] ?? ($row['courseOfferingId'] ?? '')));
+        $studentToken = facultyReportNormalizeStudentIdentityToken(
+            $row['student_id'] ?? ($row['studentUserId'] ?? ($row['studentId'] ?? ''))
+        );
+        if ($offeringId === '' || $studentToken === '' || !array_key_exists($offeringId, $eligible)) {
+            continue;
+        }
+        $eligible[$offeringId][$studentToken] = true;
+    }
+    return $eligible;
+}
+
+function facultyReportEvaluationIsLater(array $candidate, array $current): bool
+{
+    $candidateTime = strtotime((string)($candidate['submittedAt'] ?? ($candidate['timestamp'] ?? ''))) ?: 0;
+    $currentTime = strtotime((string)($current['submittedAt'] ?? ($current['timestamp'] ?? ''))) ?: 0;
+    if ($candidateTime !== $currentTime) {
+        return $candidateTime > $currentTime;
+    }
+    $candidateId = (int)($candidate['databaseEvaluationId'] ?? 0);
+    $currentId = (int)($current['databaseEvaluationId'] ?? 0);
+    if ($candidateId !== $currentId) {
+        return $candidateId > $currentId;
+    }
+    return strcmp((string)($candidate['id'] ?? ''), (string)($current['id'] ?? '')) > 0;
+}
+
+function facultyReportGroupStudentEvaluationsByOffering(
+    array $studentEvaluations,
+    array $eligibleStudentsByOffering = [],
+    array $professorTokenByOffering = []
+): array
+{
+    $latestByOfferingAndStudent = [];
     foreach ($studentEvaluations as $evaluation) {
         if (!is_array($evaluation) || facultyReportResolveEvaluationType($evaluation) !== 'student') {
             continue;
         }
+        $status = strtolower(trim((string)($evaluation['status'] ?? '')));
+        if ($status !== 'submitted') {
+            continue;
+        }
+        if (facultyReportComputeQuestionnaireAveragePercent($evaluation) === null) {
+            continue;
+        }
         $offeringId = trim((string)($evaluation['courseOfferingId'] ?? ''));
-        if ($offeringId === '') {
+        $studentToken = facultyReportBuildStudentEvaluatorToken($evaluation);
+        if ($offeringId === '' || $studentToken === '') {
             continue;
         }
-        if (!isset($evaluationsByOffering[$offeringId])) {
-            $evaluationsByOffering[$offeringId] = [];
+        $targetProfessorToken = '';
+        foreach ([
+            $evaluation['evaluateeUserId'] ?? '',
+            $evaluation['targetProfessorId'] ?? '',
+            $evaluation['professorUserId'] ?? '',
+            $evaluation['professorId'] ?? '',
+            $evaluation['targetId'] ?? '',
+        ] as $candidate) {
+            $targetProfessorToken = facultyReportNormalizeUserIdToken($candidate);
+            if ($targetProfessorToken !== '') {
+                break;
+            }
         }
-        if (!isset($seenEvaluatorsByOffering[$offeringId])) {
-            $seenEvaluatorsByOffering[$offeringId] = [];
-        }
-
-        $identityKey = facultyReportBuildStudentEvaluatorIdentityKey($evaluation);
-        if ($identityKey !== '' && isset($seenEvaluatorsByOffering[$offeringId][$identityKey])) {
+        $offeringProfessorToken = $professorTokenByOffering[$offeringId] ?? '';
+        if (
+            $targetProfessorToken !== ''
+            && $offeringProfessorToken !== ''
+            && $targetProfessorToken !== $offeringProfessorToken
+        ) {
             continue;
         }
-        if ($identityKey !== '') {
-            $seenEvaluatorsByOffering[$offeringId][$identityKey] = true;
+        if (array_key_exists($offeringId, $eligibleStudentsByOffering)) {
+            if (!isset($eligibleStudentsByOffering[$offeringId][$studentToken])) {
+                continue;
+            }
         }
+        $current = $latestByOfferingAndStudent[$offeringId][$studentToken] ?? null;
+        if (!is_array($current) || facultyReportEvaluationIsLater($evaluation, $current)) {
+            $latestByOfferingAndStudent[$offeringId][$studentToken] = $evaluation;
+        }
+    }
 
-        $evaluationsByOffering[$offeringId][] = $evaluation;
+    $evaluationsByOffering = [];
+    foreach ($latestByOfferingAndStudent as $offeringId => $byStudent) {
+        $evaluationsByOffering[$offeringId] = array_values($byStudent);
     }
     return $evaluationsByOffering;
 }
 
-function facultyReportBuildSetSummaryRowsFromInputs(array $offeringRows, array $studentEvaluations): array
+function facultyReportBuildSetSummaryRowsFromInputs(array $offeringRows, array $studentEvaluations, array $enrollmentRows = []): array
 {
     if (count($offeringRows) === 0) {
         return facultyReportBuildEmptySetSummaryRows();
     }
 
-    $evaluationsByOffering = facultyReportGroupStudentEvaluationsByOffering($studentEvaluations);
+    $eligibleStudentsByOffering = facultyReportBuildEligibleStudentMapByOffering($offeringRows, $enrollmentRows);
+    $professorTokenByOffering = [];
+    foreach ($offeringRows as $offeringRow) {
+        if (!is_array($offeringRow)) {
+            continue;
+        }
+        $offeringId = trim((string)($offeringRow['id'] ?? ''));
+        $professorToken = facultyReportNormalizeUserIdToken($offeringRow['professor_id'] ?? '');
+        if ($offeringId !== '' && $professorToken !== '') {
+            $professorTokenByOffering[$offeringId] = $professorToken;
+        }
+    }
+    $evaluationsByOffering = facultyReportGroupStudentEvaluationsByOffering(
+        $studentEvaluations,
+        $eligibleStudentsByOffering,
+        $professorTokenByOffering
+    );
     $rows = [];
     $totalStudents = 0;
     $totalWeightedScore = 0.0;
+    $totalCompleted = 0;
+    $totalValidRatingCount = 0;
+    $scorableStudents = 0;
+    $excludedStudents = 0;
+    $registeredClassCount = 0;
+    $scorableClassCount = 0;
+    $excludedClassCount = 0;
     foreach (array_values($offeringRows) as $index => $row) {
         if (!is_array($row)) {
             continue;
         }
         $offeringId = trim((string)($row['id'] ?? ''));
         $offeringEvaluations = $evaluationsByOffering[$offeringId] ?? [];
-        $studentCount = count($offeringEvaluations);
-        $averageSetRating = facultyReportComputeAverageRatingPercent($offeringEvaluations);
-        $weightedScore = $studentCount * $averageSetRating;
+        $studentCount = count($eligibleStudentsByOffering[$offeringId] ?? []);
+        $questionnaireAverages = [];
+        $validRatingCount = 0;
+        foreach ($offeringEvaluations as $evaluation) {
+            $average = facultyReportComputeQuestionnaireAveragePercent($evaluation);
+            if ($average === null) {
+                continue;
+            }
+            $questionnaireAverages[] = $average;
+            $validRatingCount += count(facultyReportGetValidRatingValues($evaluation));
+        }
+        $completedCount = count($questionnaireAverages);
+        $averageSetRating = $completedCount > 0 ? array_sum($questionnaireAverages) / $completedCount : null;
+        $weightedScore = $averageSetRating !== null ? $studentCount * $averageSetRating : null;
         $yearSection = facultyReportFormatYearSectionValue($row['program_code'] ?? '', $row['section_name'] ?? '');
 
         $rows[] = [
@@ -855,18 +1075,65 @@ function facultyReportBuildSetSummaryRowsFromInputs(array $offeringRows, array $
             'course_code' => trim((string)($row['subject_code'] ?? '')),
             'year_section' => $yearSection,
             'student_count' => $studentCount,
+            'registered_student_count' => $studentCount,
+            'completed_evaluation_count' => $completedCount,
+            'pending_evaluation_count' => max(0, $studentCount - $completedCount),
+            'completion_rate' => $studentCount > 0 ? ($completedCount / $studentCount) * 100.0 : 0.0,
+            'respondent_count' => $completedCount,
+            'valid_rating_count' => $validRatingCount,
             'average_set_rating' => $averageSetRating,
             'weighted_set_score' => $weightedScore,
+            'calculation_available' => $studentCount > 0 && $averageSetRating !== null,
+            'exclusion_reason' => $averageSetRating !== null
+                ? ''
+                : ($studentCount > 0 ? 'no-valid-responses' : 'no-registered-students'),
         ];
 
         $totalStudents += $studentCount;
-        $totalWeightedScore += $weightedScore;
+        $totalCompleted += $completedCount;
+        $totalValidRatingCount += $validRatingCount;
+        if ($studentCount > 0) {
+            $registeredClassCount++;
+            if ($weightedScore !== null) {
+                $totalWeightedScore += $weightedScore;
+                $scorableStudents += $studentCount;
+                $scorableClassCount++;
+            } else {
+                $excludedStudents += $studentCount;
+                $excludedClassCount++;
+            }
+        }
     }
+
+    $calculationAvailable = $scorableStudents > 0;
+    $partialResult = $calculationAvailable && $excludedClassCount > 0;
+    $calculationNote = $partialResult
+        ? sprintf(
+            'Available SET excludes %d %s with no valid responses (%d registered %s).',
+            $excludedClassCount,
+            $excludedClassCount === 1 ? 'class' : 'classes',
+            $excludedStudents,
+            $excludedStudents === 1 ? 'student' : 'students'
+        )
+        : '';
 
     return [
         'rows' => $rows,
         'total_students' => $totalStudents,
-        'total_weighted_score' => $totalWeightedScore,
+        'completed_evaluations' => $totalCompleted,
+        'pending_evaluations' => max(0, $totalStudents - $totalCompleted),
+        'completion_rate' => $totalStudents > 0 ? ($totalCompleted / $totalStudents) * 100.0 : 0.0,
+        'valid_rating_count' => $totalValidRatingCount,
+        'total_weighted_score' => $calculationAvailable ? $totalWeightedScore : null,
+        'overall_set_rating' => $calculationAvailable ? $totalWeightedScore / $scorableStudents : null,
+        'scorable_students' => $scorableStudents,
+        'excluded_students' => $excludedStudents,
+        'registered_class_count' => $registeredClassCount,
+        'scorable_class_count' => $scorableClassCount,
+        'excluded_class_count' => $excludedClassCount,
+        'partial_result' => $partialResult,
+        'calculation_note' => $calculationNote,
+        'calculation_available' => $calculationAvailable,
         'total_classes' => count($rows),
         'display_limit' => 8,
     ];
@@ -935,6 +1202,7 @@ function facultyReportBuildProfessorReportInputs(
     return [
         'offering_rows' => $offeringRows,
         'offering_id_set' => $offeringIdSet,
+        'enrollment_rows' => facultyReportFetchEligibleEnrollmentRowsForOfferingIds($pdo, array_keys($offeringIdSet)),
         'student_evaluations' => $studentEvaluations,
         'supervisor_evaluations' => $includeSupervisor
             ? facultyReportFetchSupervisorEvaluationsForProfessor($pdo, $professor, $semesterId, true, $includeTextResponses)
@@ -988,7 +1256,29 @@ function facultyReportBuildSetSummaryRows(PDO $pdo, string $professorUserId, str
 
     return facultyReportBuildSetSummaryRowsFromInputs(
         $inputs['offering_rows'] ?? [],
-        $inputs['student_evaluations'] ?? []
+        $inputs['student_evaluations'] ?? [],
+        $inputs['enrollment_rows'] ?? []
+    );
+}
+
+function facultyReportFormatFacultyPaperSetRating(array $summary): string
+{
+    $rating = $summary['overall_set_rating'] ?? null;
+    if ($rating === null || !is_numeric($rating) || !is_finite((float)$rating)) {
+        return 'N/A';
+    }
+
+    return number_format(max(0.0, min(100.0, (float)$rating)), 2, '.', '');
+}
+
+function facultyReportBuildFacultyPaperSetRating(
+    PDO $pdo,
+    string $professorUserId,
+    string $semesterId,
+    string $loadType = 'main'
+): string {
+    return facultyReportFormatFacultyPaperSetRating(
+        facultyReportBuildSetSummaryRows($pdo, $professorUserId, $semesterId, $loadType)
     );
 }
 
@@ -1103,11 +1393,10 @@ function facultyReportBuildIferPaperData(
     );
     $setSummary = facultyReportBuildSetSummaryRowsFromInputs(
         $inputs['offering_rows'] ?? [],
-        $inputs['student_evaluations'] ?? []
+        $inputs['student_evaluations'] ?? [],
+        $inputs['enrollment_rows'] ?? []
     );
-    $overallSetRating = (int)$setSummary['total_students'] > 0
-        ? ((float)$setSummary['total_weighted_score'] / (int)$setSummary['total_students'])
-        : 0.0;
+    $overallSetRating = $setSummary['overall_set_rating'] ?? null;
     $sefRating = facultyReportBuildSefRatingFromInputs($inputs['supervisor_evaluations'] ?? []);
     $selectedComments = $includeComments
         ? facultyReportBuildAllCommentsFromInputs(
@@ -1329,6 +1618,7 @@ function facultyReportFetchOverallSasrProfessors(PDO $pdo, string $campusSlug, a
                         WHERE historical_evaluation.evaluatee_user_id = u.id
                           AND historical_evaluation_semester.slug = :historical_evaluation_semester
                           AND historical_evaluation.status = \'submitted\'
+                          AND (historical_evaluation.credibility_status IS NULL OR historical_evaluation.credibility_status <> \'REJECTED_BY_HR\')
                     )
               )';
     $params = [
@@ -1385,6 +1675,7 @@ function facultyReportBuildDefaultProfessorReportInputBucket(): array
     return [
         'offering_rows' => [],
         'offering_id_set' => [],
+        'enrollment_rows' => [],
         'student_evaluations' => [],
         'supervisor_evaluations' => [],
         'peer_evaluations' => [],
@@ -1453,6 +1744,21 @@ function facultyReportBuildOverallSasrReportInputs(PDO $pdo, array $professors, 
         if ($offeringId !== '') {
             $inputsByProfessor[$professorToken]['offering_id_set'][$offeringId] = true;
             $offeringProfessorTokenById[$offeringId] = $professorToken;
+        }
+    }
+
+    $allEnrollmentRows = facultyReportFetchEligibleEnrollmentRowsForOfferingIds(
+        $pdo,
+        array_keys($offeringProfessorTokenById)
+    );
+    foreach ($allEnrollmentRows as $enrollmentRow) {
+        if (!is_array($enrollmentRow)) {
+            continue;
+        }
+        $offeringId = trim((string)($enrollmentRow['course_offering_id'] ?? ''));
+        $professorToken = $offeringProfessorTokenById[$offeringId] ?? '';
+        if ($professorToken !== '' && isset($inputsByProfessor[$professorToken])) {
+            $inputsByProfessor[$professorToken]['enrollment_rows'][] = $enrollmentRow;
         }
     }
 
@@ -1620,11 +1926,10 @@ function facultyReportBuildOverallSasrDataFromPayload(
         $inputs = $inputsByProfessor[$professorToken] ?? facultyReportBuildDefaultProfessorReportInputBucket();
         $setSummary = facultyReportBuildSetSummaryRowsFromInputs(
             $inputs['offering_rows'] ?? [],
-            $inputs['student_evaluations'] ?? []
+            $inputs['student_evaluations'] ?? [],
+            $inputs['enrollment_rows'] ?? []
         );
-        $totalStudents = (int)($setSummary['total_students'] ?? 0);
-        $totalWeightedScore = (float)($setSummary['total_weighted_score'] ?? 0);
-        $setRating = $totalStudents > 0 ? ($totalWeightedScore / $totalStudents) : 0.0;
+        $setRating = $setSummary['overall_set_rating'] ?? null;
         $sefRating = facultyReportBuildSefRatingFromInputs($inputs['supervisor_evaluations'] ?? []);
 
         $rows[] = [
@@ -1634,6 +1939,12 @@ function facultyReportBuildOverallSasrDataFromPayload(
             'department_program' => facultyReportFormatOverallSasrDepartmentProgram($professor),
             'set_rating' => $setRating,
             'sef_rating' => $sefRating,
+            'partial_result' => (bool)($setSummary['partial_result'] ?? false),
+            'scorable_class_count' => (int)($setSummary['scorable_class_count'] ?? 0),
+            'registered_class_count' => (int)($setSummary['registered_class_count'] ?? 0),
+            'excluded_class_count' => (int)($setSummary['excluded_class_count'] ?? 0),
+            'excluded_students' => (int)($setSummary['excluded_students'] ?? 0),
+            'calculation_note' => trim((string)($setSummary['calculation_note'] ?? '')),
         ];
     }
 

@@ -307,6 +307,23 @@ function facultyDocxFillIferSetSummaryTable(DOMDocument $document, DOMXPath $xpa
         facultyDocxSetCellText($document, $xpath, $totalCells[1], (string)$summary['total_students'], true, 'center');
         facultyDocxSetCellText($document, $xpath, $totalCells[3], facultyPdfFormatIferNumericValue($summary['total_weighted_score'], true), true, 'center');
     }
+
+    $note = trim((string)($summary['display_note'] ?? ''));
+    if ($note !== '' && $table->parentNode instanceof DOMNode) {
+        $paragraph = $document->createElementNS(FACULTY_DOCX_WORD_NS, 'w:p');
+        $run = facultyDocxCreateTextRun($document, $note, false);
+        $runProperties = facultyDocxQueryElements($xpath, './w:rPr', $run)[0] ?? null;
+        if ($runProperties instanceof DOMElement) {
+            $size = $document->createElementNS(FACULTY_DOCX_WORD_NS, 'w:sz');
+            $size->setAttributeNS(FACULTY_DOCX_WORD_NS, 'w:val', '16');
+            $runProperties->appendChild($size);
+            $complexSize = $document->createElementNS(FACULTY_DOCX_WORD_NS, 'w:szCs');
+            $complexSize->setAttributeNS(FACULTY_DOCX_WORD_NS, 'w:val', '16');
+            $runProperties->appendChild($complexSize);
+        }
+        $paragraph->appendChild($run);
+        $table->parentNode->insertBefore($paragraph, $table->nextSibling);
+    }
 }
 
 function facultyDocxFillIferRatingTable(DOMDocument $document, DOMXPath $xpath, DOMElement $table, array $paperData): void

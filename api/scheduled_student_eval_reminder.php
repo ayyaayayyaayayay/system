@@ -32,8 +32,8 @@ try {
         'reason' => (string) ($result['reason'] ?? ''),
         'summary' => $summary,
         'failures' => is_array($result['failures'] ?? null) ? $result['failures'] : [],
-        'timezone' => 'Asia/Manila',
-        'scheduled_time' => '07:00',
+        'timezone' => getAuthoritativePhilippineTimezone()->getName(),
+        'scheduled_time' => getStudentEvaluationReminderConfigSnapshot($pdo)['sendTime'],
         'task_scheduler_command' => 'C:\\xampp\\php\\php.exe -f C:\\xampp\\htdocs\\system\\api\\scheduled_student_eval_reminder.php',
     ], JSON_PRETTY_PRINT) . PHP_EOL;
 
@@ -49,7 +49,7 @@ try {
         'success' => false,
         'status' => 'error',
         'error' => $message,
-        'timezone' => 'Asia/Manila',
+        'timezone' => getAuthoritativePhilippineTimezone()->getName(),
     ], JSON_PRETTY_PRINT) . PHP_EOL;
     exit(1);
 }

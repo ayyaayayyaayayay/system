@@ -24,7 +24,7 @@ function spreadsheetTestFunctionSource(string $source, string $functionName): st
 }
 
 spreadsheetTestAssert(SPREADSHEET_IMPORT_MAX_ROWS === 25000, 'Spreadsheet row limit changed unexpectedly.');
-spreadsheetTestAssert(SPREADSHEET_BULK_USER_BATCH_MAX_ROWS === 100, 'Bulk-user batch limit changed unexpectedly.');
+spreadsheetTestAssert(SPREADSHEET_BULK_USER_BATCH_MAX_ROWS === 250, 'Bulk-user batch limit changed unexpectedly.');
 spreadsheetTestAssert(SPREADSHEET_CREDENTIAL_DISTRIBUTION_MAX_ROWS === 500, 'Credential row limit changed unexpectedly.');
 
 assertSpreadsheetImportRowLimit([[], []], 2, 'Test import');
@@ -58,6 +58,25 @@ foreach ($expectedGuards as $functionName => $limitConstant) {
         $functionName . ' must enforce its server-side row limit.'
     );
 }
+
+$bulkFunctionSource = spreadsheetTestFunctionSource($stateHelpersSource, 'persistUsersSnapshotBatch');
+spreadsheetTestAssert(
+    substr_count($bulkFunctionSource, '$pdo->beginTransaction();') === 1
+        && strpos($bulkFunctionSource, "SAVEPOINT ") !== false
+        && strpos($bulkFunctionSource, "ROLLBACK TO SAVEPOINT ") !== false
+        && strpos($bulkFunctionSource, "RELEASE SAVEPOINT ") !== false,
+    'Bulk-user persistence must use one batch transaction with per-row savepoints.'
+);
+spreadsheetTestAssert(
+    strpos($bulkFunctionSource, 'naapAuditPrepareWriteStatement($pdo)') !== false
+        && strpos($bulkFunctionSource, '], $auditInsert)') !== false,
+    'Bulk-user persistence must reuse one prepared audit insert.'
+);
+spreadsheetTestAssert(
+    strpos($bulkFunctionSource, "'staff' => \$profileMaps['staffByUserId'][\$userId] ?? null") !== false
+        && strpos($bulkFunctionSource, "'student' => \$profileMaps['studentByUserId'][\$userId] ?? null") !== false,
+    'Bulk-user persistence must use the preloaded profile records.'
+);
 
 spreadsheetTestAssert(
     substr_count($appStateSource, 'catch (SpreadsheetImportValidationException $e)') >= 5,

@@ -176,6 +176,23 @@ CREATE TABLE IF NOT EXISTS `users` (
         ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `department_faculty_report_access` (
+    `department_id` BIGINT UNSIGNED NOT NULL,
+    `reports_enabled` TINYINT(1) NOT NULL DEFAULT 1,
+    `updated_by_user_id` BIGINT UNSIGNED DEFAULT NULL,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`department_id`),
+    KEY `idx_department_faculty_report_access_updated_by` (`updated_by_user_id`),
+    CONSTRAINT `fk_department_faculty_report_access_department`
+        FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+    CONSTRAINT `fk_department_faculty_report_access_updated_by`
+        FOREIGN KEY (`updated_by_user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `staff_profiles` (
     `user_id` BIGINT UNSIGNED NOT NULL,
     `employee_id` VARCHAR(50) NOT NULL,
@@ -462,6 +479,18 @@ CREATE TABLE IF NOT EXISTS `evaluations` (
     `evaluatee_user_id` BIGINT UNSIGNED DEFAULT NULL,
     `course_offering_id` BIGINT UNSIGNED DEFAULT NULL,
     `general_comments` TEXT DEFAULT NULL,
+    `behavior_meta` JSON DEFAULT NULL,
+    `behavior_score` TINYINT UNSIGNED DEFAULT NULL,
+    `credibility_score` TINYINT UNSIGNED DEFAULT NULL,
+    `credibility_components` JSON DEFAULT NULL,
+    `credibility_flags` JSON DEFAULT NULL,
+    `credibility_calculated_at` DATETIME DEFAULT NULL,
+    `credibility_status` VARCHAR(24) DEFAULT NULL,
+    `credibility_reviewed_by` BIGINT UNSIGNED DEFAULT NULL,
+    `credibility_reviewed_at` DATETIME DEFAULT NULL,
+    `credibility_review_decision` VARCHAR(6) DEFAULT NULL,
+    `credibility_review_note` VARCHAR(1000) DEFAULT NULL,
+    KEY `idx_evaluations_credibility` (`credibility_status`, `semester_id`, `evaluatee_user_id`, `id`),
     `submitted_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `status` ENUM('submitted', 'draft', 'archived') NOT NULL DEFAULT 'submitted',
     `submission_duplicate_key` CHAR(64) DEFAULT NULL,
@@ -700,6 +729,7 @@ CREATE TABLE IF NOT EXISTS `faculty_acknowledgement_papers` (
     `section_c_saved_at` DATETIME DEFAULT NULL,
     `section_c_saved_by_role` VARCHAR(30) NOT NULL DEFAULT '',
     `section_c_saved_by_user_id` BIGINT UNSIGNED DEFAULT NULL,
+    `section_c_ai_audit_code` VARCHAR(30) DEFAULT NULL,
     `section_c_saved_by_user_token` VARCHAR(80) NOT NULL DEFAULT '',
     `approval_auto_fill` TINYINT(1) NOT NULL DEFAULT 0,
     `approval_names_auto_fill` TINYINT(1) NOT NULL DEFAULT 0,
@@ -727,7 +757,8 @@ CREATE TABLE IF NOT EXISTS `faculty_acknowledgement_papers` (
     KEY `idx_faculty_ack_papers_professor_semester_load` (`professor_user_id`, `semester_slug`, `load_type`),
     KEY `idx_faculty_ack_papers_recipient_status` (`recipient_user_id`, `status`),
     KEY `idx_faculty_ack_papers_status` (`status`),
-    KEY `idx_faculty_ack_papers_semester` (`semester_slug`)
+    KEY `idx_faculty_ack_papers_semester` (`semester_slug`),
+    KEY `idx_faculty_ack_papers_ai_audit` (`section_c_ai_audit_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -------------------------------------------------------------
@@ -737,21 +768,45 @@ CREATE TABLE IF NOT EXISTS `activity_log` (
     `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT UNSIGNED DEFAULT NULL,
     `log_code` VARCHAR(30) DEFAULT NULL,
+    `event_code` VARCHAR(80) NOT NULL DEFAULT 'legacy.activity',
+    `actor_role` VARCHAR(50) NOT NULL DEFAULT '',
     `action` VARCHAR(100) NOT NULL,
     `description` TEXT NOT NULL,
     `entry_type` VARCHAR(50) NOT NULL DEFAULT 'system',
+    `target_type` VARCHAR(60) NOT NULL DEFAULT '',
+    `target_id` VARCHAR(120) NOT NULL DEFAULT '',
+    `related_log_code` VARCHAR(30) DEFAULT NULL,
     `ip_address` VARCHAR(45) NOT NULL DEFAULT '',
+    `request_method` VARCHAR(10) NOT NULL DEFAULT '',
+    `request_path` VARCHAR(255) NOT NULL DEFAULT '',
     `happened_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uq_activity_log_code` (`log_code`),
     KEY `idx_activity_log_user` (`user_id`),
     KEY `idx_activity_log_type` (`entry_type`),
     KEY `idx_activity_log_happened_at` (`happened_at`),
+    KEY `idx_activity_log_event` (`event_code`, `happened_at`),
+    KEY `idx_activity_log_target` (`target_type`, `target_id`, `happened_at`),
+    KEY `idx_activity_log_related` (`related_log_code`),
     CONSTRAINT `fk_activity_log_user`
         FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
-        ON UPDATE CASCADE
-        ON DELETE SET NULL
+        ON UPDATE RESTRICT
+        ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS `trg_activity_log_no_update`;
+CREATE TRIGGER `trg_activity_log_no_update`
+BEFORE UPDATE ON `activity_log`
+FOR EACH ROW
+SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'activity_log is append-only; UPDATE is prohibited';
+
+DROP TRIGGER IF EXISTS `trg_activity_log_no_delete`;
+CREATE TRIGGER `trg_activity_log_no_delete`
+BEFORE DELETE ON `activity_log`
+FOR EACH ROW
+SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'activity_log is append-only; DELETE is prohibited';
 
 CREATE TABLE IF NOT EXISTS `system_reports` (
     `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -857,6 +912,57 @@ CREATE TABLE IF NOT EXISTS `password_reset_tokens` (
         FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
         ON UPDATE CASCADE
         ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `user_auth_security` (
+    `user_id` BIGINT UNSIGNED NOT NULL,
+    `first_otp_verified_at` DATETIME DEFAULT NULL,
+    `failed_password_count` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    `failed_login_otp_required` TINYINT(1) NOT NULL DEFAULT 0,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`user_id`),
+    CONSTRAINT `fk_user_auth_security_user`
+        FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `trusted_devices` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `user_id` BIGINT UNSIGNED NOT NULL,
+    `device_token_hash` CHAR(64) NOT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `last_used_at` DATETIME NOT NULL,
+    `expires_at` DATETIME NOT NULL,
+    `revoked_at` DATETIME DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_trusted_devices_user_token` (`user_id`, `device_token_hash`),
+    KEY `idx_trusted_devices_token` (`device_token_hash`),
+    KEY `idx_trusted_devices_expiry` (`expires_at`),
+    CONSTRAINT `fk_trusted_devices_user`
+        FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `login_otp_challenges` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `challenge_id` CHAR(64) NOT NULL,
+    `user_id` BIGINT UNSIGNED NOT NULL,
+    `purpose` ENUM('device_verification', 'failed_login') NOT NULL,
+    `otp_hash` VARCHAR(255) NOT NULL,
+    `device_token_hash` CHAR(64) NOT NULL,
+    `expires_at` DATETIME NOT NULL,
+    `failed_attempt_count` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `email_sent_at` DATETIME NOT NULL,
+    `consumed_at` DATETIME DEFAULT NULL,
+    `invalidated_at` DATETIME DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_login_otp_challenges_code` (`challenge_id`),
+    KEY `idx_login_otp_challenges_user_active` (`user_id`, `consumed_at`, `invalidated_at`, `expires_at`),
+    KEY `idx_login_otp_challenges_expiry` (`expires_at`),
+    CONSTRAINT `fk_login_otp_challenges_user`
+        FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+        ON UPDATE CASCADE ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `authentication_rate_events` (

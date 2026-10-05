@@ -1,0 +1,87 @@
+[
+  {
+    "test": "evaluation_behavior_metadata_test.php",
+    "status": "PASS",
+    "output": "Evaluation behavior metadata tests passed (32 assertions).\n"
+  },
+  {
+    "test": "hr_ai_rating_analysis_test.php",
+    "status": "PASS",
+    "output": "HR AI rating analysis backend tests passed (18 assertions).\n"
+  },
+  {
+    "test": "set_calculation_test.php",
+    "status": "PASS",
+    "output": "SET calculation tests passed (49 assertions).\n"
+  },
+  {
+    "test": "student_panel_regression_test.php",
+    "status": "PASS",
+    "output": "Student panel regression tests passed (7 assertions).\n"
+  },
+  {
+    "test": "dean_peer_semester_test.php",
+    "status": "PASS",
+    "output": "Dean peer semester tests passed (5 assertions).\n"
+  },
+  {
+    "test": "multi_campus_authorization_test.php",
+    "status": "PASS",
+    "output": "PASS: multi-campus authorization helpers enforce database-backed campus scope.\n"
+  },
+  {
+    "test": "student_evaluation_reminder_test.php",
+    "status": "PASS",
+    "output": "Student evaluation reminder tests passed (38 assertions).\n"
+  },
+  {
+    "test": "automated_clearance_reference_test.php",
+    "status": "PASS",
+    "output": "Automated clearance reference tests passed (38 assertions).\n"
+  },
+  {
+    "test": "hr_email_change_test.php",
+    "status": "PASS",
+    "output": "HR email-change tests passed (6 assertions).\n"
+  },
+  {
+    "test": "hr_ai_rating_analysis_test.js",
+    "status": "PASS",
+    "output": "HR AI rating analysis tests passed.\n"
+  },
+  {
+    "test": "admin_vpaa_ai_rating_analysis_test.js",
+    "status": "PASS",
+    "output": "Admin and VPAA AI rating analysis tests passed.\n"
+  },
+  {
+    "test": "professor_analytics_ui_regression_test.js",
+    "status": "PASS",
+    "output": "Professor analytics UI regression tests passed.\n"
+  },
+  {
+    "test": "set_calculation_test.js",
+    "status": "PASS",
+    "output": "SET calculation JavaScript tests passed.\n"
+  },
+  {
+    "test": "dean_procoor_panel_regression_test.js",
+    "status": "PASS",
+    "output": "Dean/program coordinator panel regression tests passed.\n"
+  },
+  {
+    "test": "professor_panel_report_state_test.js",
+    "status": "PASS",
+    "output": "Professor report state regression tests passed.\n"
+  },
+  {
+    "test": "vpaa_osa_panel_regression_test.js",
+    "status": "PASS",
+    "output": "VPAA and OSA panel regression tests passed.\n"
+  },
+  {
+    "test": "faculty_report_access_test.js",
+    "status": "PASS",
+    "output": "Faculty report access regression tests passed.\n"
+  }
+]

@@ -3,15 +3,22 @@
 require_once __DIR__ . '/time_helper.php';
 require_once __DIR__ . '/secret_helper.php';
 require_once __DIR__ . '/faculty_paper_storage.php';
+require_once __DIR__ . '/audit.php';
 require_once __DIR__ . '/campus_authorization.php';
+require_once __DIR__ . '/evaluation_credibility.php';
 
 class SpreadsheetImportValidationException extends RuntimeException
 {
 }
 
 const SPREADSHEET_IMPORT_MAX_ROWS = 25000;
-const SPREADSHEET_BULK_USER_BATCH_MAX_ROWS = 100;
+const SPREADSHEET_BULK_USER_BATCH_MAX_ROWS = 250;
 const SPREADSHEET_CREDENTIAL_DISTRIBUTION_MAX_ROWS = 500;
+const EVALUATION_BEHAVIOR_CAPTURE_VERSION = 1;
+const EVALUATION_BEHAVIOR_MAX_DURATION_SECONDS = 86400;
+const EVALUATION_BEHAVIOR_MAX_SUBMISSION_CLOCK_SKEW_SECONDS = 300;
+const EVALUATION_BEHAVIOR_DURATION_TOLERANCE_SECONDS = 1.0;
+const EVALUATION_BEHAVIOR_SECONDS_PER_QUESTION_TOLERANCE = 0.01;
 
 function assertSpreadsheetImportRowLimit(array $rows, int $maxRows, string $operation): void
 {
@@ -229,6 +236,7 @@ function getDefaultSettings() {
         'institutionName' => 'National Aviation Academy of the Philippines',
         'systemEmail' => '',
         'mainCampus' => 'villamor',
+        'trustedDeviceOtpEnabled' => true,
     ];
 }
 
@@ -236,6 +244,7 @@ function getDefaultStudentEvaluationReminderConfig() {
     return [
         'enabled' => true,
         'frequencyDays' => 7,
+        'sendTime' => '07:00',
         'subject' => 'NAAP Evaluation Reminder: Please Complete Your Evaluation',
         'body' => "Please complete your evaluation while the student evaluation period is open.\n"
             . 'Log in to the NAAP Evaluation System and submit your pending evaluation today.',
@@ -314,6 +323,12 @@ function normalizeStudentEvaluationReminderConfig(array $config, $requireAllFiel
         throw new InvalidArgumentException('Reminder frequency must be between 1 and 365 days.');
     }
 
+    // Older stored settings retain the previous 07:00 schedule.
+    $sendTime = $merged['sendTime'];
+    if (!is_string($sendTime) || !preg_match('/\A(?:[01][0-9]|2[0-3]):[0-5][0-9]\z/', $sendTime)) {
+        throw new InvalidArgumentException('Reminder send time must be a valid time in HH:MM format.');
+    }
+
     $rawSubject = trim((string) $merged['subject']);
     if ($rawSubject === '') {
         throw new InvalidArgumentException('Reminder email subject is required.');
@@ -341,6 +356,7 @@ function normalizeStudentEvaluationReminderConfig(array $config, $requireAllFiel
     return [
         'enabled' => $enabled,
         'frequencyDays' => $frequencyDays,
+        'sendTime' => $sendTime,
         'subject' => $subject,
         'body' => $body,
     ];
@@ -377,6 +393,7 @@ function buildStudentEvaluationReminderConfigActivityState(array $config) {
     return [
         'Reminder Enabled' => !empty($config['enabled']) ? 'Yes' : 'No',
         'Reminder Frequency Days' => (string) ($config['frequencyDays'] ?? ''),
+        'Reminder Send Time' => (string) ($config['sendTime'] ?? '07:00'),
         'Reminder Email Subject' => (string) ($config['subject'] ?? ''),
         'Reminder Email Body' => (string) ($config['body'] ?? ''),
     ];
@@ -388,16 +405,23 @@ function persistStudentEvaluationReminderConfigSnapshot(PDO $pdo, array $config,
     $normalized['updatedAt'] = getAuthoritativePhilippineIso8601();
     $normalized['updatedByUserId'] = trim((string) ($actorUser['id'] ?? ($actorUser['userId'] ?? '')));
 
-    setSettingJson($pdo, 'studentEvaluationReminderConfig', $normalized);
-    safeLogAdminFlatStateChangeSnapshot(
-        $pdo,
-        $actorUser,
-        'Student Evaluation Reminder Configuration Updated',
-        'system',
-        'Student evaluation reminder configuration',
-        buildStudentEvaluationReminderConfigActivityState($before),
-        buildStudentEvaluationReminderConfigActivityState($normalized)
-    );
+    $pdo->beginTransaction();
+    try {
+        setSettingJson($pdo, 'studentEvaluationReminderConfig', $normalized);
+        logAdminFlatStateChangeSnapshot(
+            $pdo,
+            $actorUser,
+            'Student Evaluation Reminder Configuration Updated',
+            'system',
+            'Student evaluation reminder configuration',
+            buildStudentEvaluationReminderConfigActivityState($before),
+            buildStudentEvaluationReminderConfigActivityState($normalized)
+        );
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
 
     $normalized['allowedPlaceholders'] = getStudentEvaluationReminderAllowedPlaceholders();
     return $normalized;
@@ -426,6 +450,31 @@ function getDefaultEvalPeriods() {
         'professor-professor' => ['start' => '', 'end' => ''],
         'supervisor-professor' => ['start' => '', 'end' => ''],
     ];
+}
+
+function isProfessorFacultyPaperLockedForEvaluationWindow($startValue, $endValue, ?DateTimeImmutable $today = null): bool
+{
+    $timezone = new DateTimeZone('Asia/Manila');
+    $startRaw = trim((string) $startValue);
+    $endRaw = trim((string) $endValue);
+    $startDate = DateTimeImmutable::createFromFormat('!Y-m-d', $startRaw, $timezone);
+    $endDate = DateTimeImmutable::createFromFormat('!Y-m-d', $endRaw, $timezone);
+
+    if (
+        !$startDate
+        || !$endDate
+        || $startDate->format('Y-m-d') !== $startRaw
+        || $endDate->format('Y-m-d') !== $endRaw
+        || $startDate > $endDate
+    ) {
+        return true;
+    }
+
+    $effectiveDate = $today instanceof DateTimeImmutable
+        ? $today->setTimezone($timezone)->setTime(0, 0)
+        : new DateTimeImmutable('today', $timezone);
+
+    return $effectiveDate >= $startDate && $effectiveDate <= $endDate;
 }
 
 function buildCampusesFromDatabase(PDO $pdo) {
@@ -1187,7 +1236,7 @@ function resolveEmploymentTypeId(array $lookup, $value) {
 
 function buildExistingUserRecordMaps(PDO $pdo) {
     $rows = $pdo->query(
-        'SELECT u.id, u.email, u.password, r.code AS role_code
+        'SELECT u.id, u.email, u.password, u.status, r.code AS role_code
          FROM users u
          JOIN roles r ON r.id = u.role_id'
     )->fetchAll();
@@ -1284,7 +1333,7 @@ function buildExistingUserRecordMapsForPayloads(PDO $pdo, array $users) {
     $byEmail = [];
     if (count($where) > 0) {
         $stmt = $pdo->prepare(
-            'SELECT u.id, u.email, u.password, r.code AS role_code
+            'SELECT u.id, u.email, u.password, u.status, r.code AS role_code
              FROM users u
              JOIN roles r ON r.id = u.role_id
              WHERE ' . implode(' OR ', $where)
@@ -1405,6 +1454,8 @@ function buildManagedUserProfileIdentityMapsForPayloads(PDO $pdo, array $users) 
         'employeeId' => [],
         'studentNumber' => [],
         'byUserId' => [],
+        'staffByUserId' => [],
+        'studentByUserId' => [],
     ];
     $userIds = [];
     $identityValues = [];
@@ -1462,11 +1513,15 @@ function buildManagedUserProfileIdentityMapsForPayloads(PDO $pdo, array $users) 
 
     $staffScope = $buildScopedWhere('user_id', 'employee_id', 'staff_identity');
     if ($staffScope['where'] !== '') {
-        $stmt = $pdo->prepare('SELECT user_id, employee_id FROM staff_profiles' . $staffScope['where']);
+        $stmt = $pdo->prepare('SELECT user_id, employee_id, employment_type_id FROM staff_profiles' . $staffScope['where']);
         bindBootstrapSqlParams($stmt, $staffScope['params'], $staffScope['types']);
         $stmt->execute();
         foreach ($stmt->fetchAll() as $row) {
             addManagedUserProfileIdentityMapEntry($maps, 'employeeId', $row['user_id'] ?? 0, $row['employee_id'] ?? '');
+            $userId = (int) ($row['user_id'] ?? 0);
+            if ($userId > 0) {
+                $maps['staffByUserId'][$userId] = $row;
+            }
         }
     }
 
@@ -1477,6 +1532,10 @@ function buildManagedUserProfileIdentityMapsForPayloads(PDO $pdo, array $users) 
         $stmt->execute();
         foreach ($stmt->fetchAll() as $row) {
             addManagedUserProfileIdentityMapEntry($maps, 'studentNumber', $row['user_id'] ?? 0, $row['student_number'] ?? '');
+            $userId = (int) ($row['user_id'] ?? 0);
+            if ($userId > 0) {
+                $maps['studentByUserId'][$userId] = $row;
+            }
         }
     }
 
@@ -1538,7 +1597,7 @@ function syncManagedUserProfileIdentityMapsForUser(array &$profileIdentityMaps, 
     );
 }
 
-function syncExistingUserRecordMapsAfterSave(array &$maps, $userId, $email, $password, $roleCode, array $user) {
+function syncExistingUserRecordMapsAfterSave(array &$maps, $userId, $email, $password, $roleCode, array $user, $status = 'active') {
     $userId = (int) $userId;
     if ($userId <= 0) {
         return;
@@ -1560,6 +1619,7 @@ function syncExistingUserRecordMapsAfterSave(array &$maps, $userId, $email, $pas
         'id' => $userId,
         'email' => $email,
         'password' => $password,
+        'status' => normalizeUserStatusValue($status),
         'role_code' => $roleCode,
     ];
     $maps['byId'][$userId] = $updatedRecord;
@@ -1573,9 +1633,36 @@ function syncExistingUserRecordMapsAfterSave(array &$maps, $userId, $email, $pas
             'employeeId' => [],
             'studentNumber' => [],
             'byUserId' => [],
+            'staffByUserId' => [],
+            'studentByUserId' => [],
         ];
     }
     syncManagedUserProfileIdentityMapsForUser($maps['profileIdentity'], $userId, $user, $roleCode);
+}
+
+function syncManagedUserProfileRecordMapsForUser(array &$profileMaps, $userId, array $profileState) {
+    $userId = (int) $userId;
+    if ($userId <= 0) {
+        return;
+    }
+
+    foreach (['staffByUserId', 'studentByUserId'] as $mapName) {
+        if (!isset($profileMaps[$mapName]) || !is_array($profileMaps[$mapName])) {
+            $profileMaps[$mapName] = [];
+        }
+    }
+
+    if (is_array($profileState['staff'] ?? null)) {
+        $profileMaps['staffByUserId'][$userId] = $profileState['staff'];
+    } else {
+        unset($profileMaps['staffByUserId'][$userId]);
+    }
+
+    if (is_array($profileState['student'] ?? null)) {
+        $profileMaps['studentByUserId'][$userId] = $profileState['student'];
+    } else {
+        unset($profileMaps['studentByUserId'][$userId]);
+    }
 }
 
 function throwManagedUserProfileIdentityDuplicateException(PDOException $e, $identityLabel, $identityValue) {
@@ -1651,18 +1738,25 @@ function resolveManagedUserPasswordForWrite(array $user, ?array $existingRecord 
     }
 
     $plainPassword = normalizeUserPasswordValue($passwordInput);
-    $storedPassword = normalizeUserPasswordForStorage($plainPassword);
-    $changed = true;
     if ($existingRecord !== null) {
         $verification = verifyPasswordForLogin($plainPassword, $existingRecord['password'] ?? null);
-        $changed = empty($verification['matched']);
+        if (!empty($verification['matched'])) {
+            return [
+                'storedPassword' => (string) ($existingRecord['password'] ?? ''),
+                'plainPassword' => $plainPassword,
+                'source' => $source,
+                'changed' => false,
+            ];
+        }
     }
+
+    $storedPassword = normalizeUserPasswordForStorage($plainPassword);
 
     return [
         'storedPassword' => $storedPassword,
         'plainPassword' => $plainPassword,
         'source' => $source,
-        'changed' => $changed,
+        'changed' => true,
     ];
 }
 
@@ -1713,7 +1807,8 @@ function persistManagedUserProfiles(
     PDOStatement $selectStudentProfile,
     PDOStatement $insertStudentProfile,
     PDOStatement $updateStudentProfile,
-    $deletedByUserId = null
+    $deletedByUserId = null,
+    ?array $preloadedProfiles = null
 ) {
     if ($roleCode === 'student') {
         $deleteStaffProfile->execute([
@@ -1735,9 +1830,13 @@ function persistManagedUserProfiles(
                 ':year_section' => $yearSection,
             ];
             try {
-                $selectStudentProfile->execute([':user_id' => $userId]);
-                $hasStudentProfile = (bool) $selectStudentProfile->fetchColumn();
-                $selectStudentProfile->closeCursor();
+                if ($preloadedProfiles !== null) {
+                    $hasStudentProfile = is_array($preloadedProfiles['student'] ?? null);
+                } else {
+                    $selectStudentProfile->execute([':user_id' => $userId]);
+                    $hasStudentProfile = (bool) $selectStudentProfile->fetchColumn();
+                    $selectStudentProfile->closeCursor();
+                }
                 if ($hasStudentProfile) {
                     $updateStudentProfile->execute($params);
                 } else {
@@ -1753,7 +1852,10 @@ function persistManagedUserProfiles(
             ]);
         }
 
-        return;
+        return [
+            'staff' => null,
+            'student' => $studentNumber !== '' ? ['user_id' => (int) $userId] : null,
+        ];
     }
 
     $deleteStudentProfile->execute([
@@ -1765,9 +1867,15 @@ function persistManagedUserProfiles(
     $position = trim((string) ($user['position'] ?? ''));
 
     if ($employeeId !== '') {
-        $selectStaffProfile->execute([':user_id' => $userId]);
-        $existingStaffProfile = $selectStaffProfile->fetch();
-        $selectStaffProfile->closeCursor();
+        if ($preloadedProfiles !== null) {
+            $existingStaffProfile = is_array($preloadedProfiles['staff'] ?? null)
+                ? $preloadedProfiles['staff']
+                : null;
+        } else {
+            $selectStaffProfile->execute([':user_id' => $userId]);
+            $existingStaffProfile = $selectStaffProfile->fetch();
+            $selectStaffProfile->closeCursor();
+        }
         $hasStaffProfile = is_array($existingStaffProfile);
 
         $hasEmploymentType = array_key_exists('employmentType', $user) && $user['employmentType'] !== null;
@@ -1808,6 +1916,15 @@ function persistManagedUserProfiles(
             ':deleted_by_user_id' => $deletedByUserId,
         ]);
     }
+
+    return [
+        'staff' => $employeeId !== '' ? [
+            'user_id' => (int) $userId,
+            'employee_id' => $employeeId,
+            'employment_type_id' => $employmentTypeId,
+        ] : null,
+        'student' => null,
+    ];
 }
 
 function persistUsersSnapshot(PDO $pdo, array $users, array $options = []) {
@@ -1891,7 +2008,6 @@ function persistUsersSnapshot(PDO $pdo, array $users, array $options = []) {
          WHERE user_id = :user_id'
     );
     $savedUserIds = [];
-    $activityMutations = [];
 
     $pdo->beginTransaction();
     try {
@@ -1984,6 +2100,10 @@ function persistUsersSnapshot(PDO $pdo, array $users, array $options = []) {
                 continue;
             }
 
+            if ($existingRecord && ($passwordChanged || $params[':status'] !== 'active')) {
+                revokeTrustedDevicesSnapshot($pdo, $userId);
+            }
+
             persistManagedUserProfiles(
                 $pdo,
                 $userId,
@@ -2003,15 +2123,49 @@ function persistUsersSnapshot(PDO $pdo, array $users, array $options = []) {
             );
 
             $savedUserIds[] = $userId;
-            syncExistingUserRecordMapsAfterSave($existingMaps, $userId, $email, $passwordValue, $roleCode, $user);
+            syncExistingUserRecordMapsAfterSave(
+                $existingMaps,
+                $userId,
+                $email,
+                $passwordValue,
+                $roleCode,
+                $user,
+                $params[':status']
+            );
 
             if ($shouldLogActivity) {
-                $activityMutations[] = [
-                    'user_id' => $userId,
-                    'before' => is_array($beforeUserSnapshot) ? $beforeUserSnapshot : [],
-                    'created' => !$existingRecord,
-                    'password_changed' => $passwordChanged,
-                ];
+                $afterUserSnapshot = buildUserSnapshotById($pdo, $userId, false) ?: [];
+                $events = [];
+                if (!$existingRecord) {
+                    $events[] = ['eventCode' => 'user.created', 'action' => 'User Created',
+                        'description' => 'A user account was created.'];
+                } else {
+                    $beforeRole = strtolower(trim((string) ($beforeUserSnapshot['role'] ?? '')));
+                    $afterRole = strtolower(trim((string) ($afterUserSnapshot['role'] ?? $roleCode)));
+                    $beforeStatus = strtolower(trim((string) ($beforeUserSnapshot['status'] ?? '')));
+                    $afterStatus = strtolower(trim((string) ($afterUserSnapshot['status'] ?? $params[':status'])));
+                    if ($beforeRole !== $afterRole) {
+                        $events[] = ['eventCode' => 'user.role_changed', 'action' => 'User Role Changed',
+                            'description' => 'A user role assignment was changed.'];
+                    }
+                    if ($beforeStatus !== $afterStatus) {
+                        $events[] = ['eventCode' => 'user.status_changed', 'action' => 'User Status Changed',
+                            'description' => 'A user activation status was changed.'];
+                    }
+                    $events[] = ['eventCode' => 'user.updated', 'action' => 'User Updated',
+                        'description' => 'A user account was updated.'];
+                }
+                foreach ($events as $event) {
+                    naapAuditWrite($pdo, [
+                        'eventCode' => $event['eventCode'],
+                        'action' => $event['action'],
+                        'description' => $event['description'],
+                        'type' => $activityType,
+                        'actor' => $activityActor,
+                        'targetType' => 'user',
+                        'targetId' => 'u' . $userId,
+                    ]);
+                }
             }
         }
 
@@ -2019,43 +2173,6 @@ function persistUsersSnapshot(PDO $pdo, array $users, array $options = []) {
     } catch (Throwable $e) {
         $pdo->rollBack();
         throw $e;
-    }
-
-    if ($shouldLogActivity && count($activityMutations) > 0) {
-        $afterUsersById = [];
-        foreach ($activityMutations as $mutation) {
-            $savedId = (int) ($mutation['user_id'] ?? 0);
-            if ($savedId <= 0) {
-                continue;
-            }
-            $afterUser = buildUserSnapshotById($pdo, $savedId, false);
-            if (is_array($afterUser)) {
-                $afterUsersById['u' . $savedId] = $afterUser;
-            }
-        }
-
-        $beforeFlat = [];
-        $afterFlat = [];
-        foreach ($activityMutations as $mutation) {
-            $userIdToken = 'u' . (int) ($mutation['user_id'] ?? 0);
-            $beforeUser = is_array($mutation['before'] ?? null) ? $mutation['before'] : [];
-            $afterUser = is_array($afterUsersById[$userIdToken] ?? null) ? $afterUsersById[$userIdToken] : [];
-            $beforeOptions = ['userId' => $userIdToken];
-            $afterOptions = ['userId' => $userIdToken];
-
-            if (!empty($mutation['password_changed'])) {
-                $beforeOptions['passwordMarker'] = !empty($mutation['created']) ? '' : '[stored]';
-                $afterOptions['passwordMarker'] = !empty($mutation['created']) ? '[set]' : '[updated]';
-            }
-
-            $beforeFlat = array_merge($beforeFlat, buildUserActivityFlatState($beforeUser, $beforeOptions));
-            $afterFlat = array_merge($afterFlat, buildUserActivityFlatState($afterUser, $afterOptions));
-        }
-
-        $entityLabel = count($activityMutations) === 1
-            ? ('User u' . (int) ($activityMutations[0]['user_id'] ?? 0))
-            : (count($activityMutations) . ' user records');
-        safeLogAdminFlatStateChangeSnapshot($pdo, $activityActor, $activityAction, $activityType, $entityLabel, $beforeFlat, $afterFlat);
     }
 
     $uniqueSavedUserIds = array_values(array_unique(array_map('intval', $savedUserIds)));
@@ -2171,8 +2288,14 @@ function persistUsersSnapshotBatch(PDO $pdo, array $users, array $options = []) 
     $results = [];
     $credentialRows = [];
     $sampleEmails = [];
+    $auditInsert = naapAuditPrepareWriteStatement($pdo);
+    $ownsBatchTransaction = !$pdo->inTransaction();
+    if ($ownsBatchTransaction) {
+        $pdo->beginTransaction();
+    }
 
-    foreach ($users as $index => $user) {
+    try {
+        foreach ($users as $index => $user) {
         $rowNumber = is_array($user) ? (int) ($user['rowNumber'] ?? 0) : 0;
         if ($rowNumber <= 0) {
             $rowNumber = $index + 1;
@@ -2251,7 +2374,10 @@ function persistUsersSnapshotBatch(PDO $pdo, array $users, array $options = []) 
                 ':status' => normalizeUserStatusValue($user['status'] ?? 'active'),
             ];
 
-            $pdo->beginTransaction();
+            $savepoint = 'bulk_user_row_' . ((int) $index + 1);
+            $savepointActive = false;
+            $pdo->exec('SAVEPOINT ' . $savepoint);
+            $savepointActive = true;
             try {
                 if ($existingRecord) {
                     $params[':id'] = (int) $existingRecord['id'];
@@ -2270,7 +2396,14 @@ function persistUsersSnapshotBatch(PDO $pdo, array $users, array $options = []) 
                     throw new RuntimeException('User could not be saved.');
                 }
 
-                persistManagedUserProfiles(
+                $profileMaps = is_array($existingMaps['profileIdentity'] ?? null)
+                    ? $existingMaps['profileIdentity']
+                    : [];
+                $preloadedProfiles = [
+                    'staff' => $profileMaps['staffByUserId'][$userId] ?? null,
+                    'student' => $profileMaps['studentByUserId'][$userId] ?? null,
+                ];
+                $profileState = persistManagedUserProfiles(
                     $pdo,
                     $userId,
                     $user,
@@ -2285,18 +2418,63 @@ function persistUsersSnapshotBatch(PDO $pdo, array $users, array $options = []) 
                     $selectStudentProfile,
                     $insertStudentProfile,
                     $updateStudentProfile,
-                    $activityActorUserId
+                    $activityActorUserId,
+                    $preloadedProfiles
                 );
 
-                $pdo->commit();
+                $events = [];
+                if ($status === 'created') {
+                    $events[] = ['eventCode' => 'user.created', 'action' => 'User Created',
+                        'description' => 'A user account was created during a bulk import.'];
+                } else {
+                    if (normalizeLookupValue($existingRecord['role_code'] ?? '') !== $roleCode) {
+                        $events[] = ['eventCode' => 'user.role_changed', 'action' => 'User Role Changed',
+                            'description' => 'A user role assignment was changed during a bulk import.'];
+                    }
+                    if (normalizeUserStatusValue($existingRecord['status'] ?? 'active') !== $params[':status']) {
+                        $events[] = ['eventCode' => 'user.status_changed', 'action' => 'User Status Changed',
+                            'description' => 'A user activation status was changed during a bulk import.'];
+                    }
+                    $events[] = ['eventCode' => 'user.updated', 'action' => 'User Updated',
+                        'description' => 'A user account was updated during a bulk import.'];
+                }
+                foreach ($events as $event) {
+                    naapAuditWrite($pdo, [
+                        'eventCode' => $event['eventCode'],
+                        'action' => $event['action'],
+                        'description' => $event['description'],
+                        'type' => $options['activity_type'] ?? 'user',
+                        'actor' => $batchActivityActor,
+                        'targetType' => 'user',
+                        'targetId' => 'u' . $userId,
+                    ], $auditInsert);
+                }
+
+                $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+                $savepointActive = false;
             } catch (Throwable $rowError) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
+                if ($savepointActive && $pdo->inTransaction()) {
+                    $pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
+                    $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+                    $savepointActive = false;
                 }
                 throw $rowError;
             }
 
-            syncExistingUserRecordMapsAfterSave($existingMaps, $userId, $email, $passwordValue, $roleCode, $user);
+            syncExistingUserRecordMapsAfterSave(
+                $existingMaps,
+                $userId,
+                $email,
+                $passwordValue,
+                $roleCode,
+                $user,
+                $params[':status']
+            );
+            syncManagedUserProfileRecordMapsForUser(
+                $existingMaps['profileIdentity'],
+                $userId,
+                is_array($profileState ?? null) ? $profileState : []
+            );
             if ($status === 'created') {
                 $summary['created']++;
             } else {
@@ -2323,9 +2501,6 @@ function persistUsersSnapshotBatch(PDO $pdo, array $users, array $options = []) 
                 $credentialRows[] = $credentialRow;
             }
         } catch (Throwable $rowError) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
             $summary['failed']++;
             $results[] = [
                 'rowNumber' => $rowNumber,
@@ -2334,38 +2509,16 @@ function persistUsersSnapshotBatch(PDO $pdo, array $users, array $options = []) 
                 'error' => $rowError->getMessage(),
             ];
         }
-    }
-
-    $activityActor = is_array($options['activity_actor'] ?? null) ? $options['activity_actor'] : [];
-    $activityAction = trim((string) ($options['activity_action'] ?? ''));
-    if ($activityAction !== '' && ($summary['created'] + $summary['updated'] + $summary['failed'] + $summary['skipped']) > 0) {
-        $importId = sanitizeActivityLogTextValue($options['import_id'] ?? '', 80);
-        $batchIndex = max(1, (int) ($options['batch_index'] ?? 1));
-        $batchTotal = max(1, (int) ($options['batch_total'] ?? 1));
-        $sampleText = count($sampleEmails) > 0 ? (' Sample: ' . implode(', ', $sampleEmails) . '.') : '';
-        try {
-            addActivityLogEntrySnapshot($pdo, [
-                'action' => $activityAction,
-                'description' => sprintf(
-                    'Bulk user import%s batch %d of %d completed: %d created, %d updated, %d skipped, %d failed.%s',
-                    $importId !== '' ? (' ' . $importId) : '',
-                    $batchIndex,
-                    $batchTotal,
-                    (int) $summary['created'],
-                    (int) $summary['updated'],
-                    (int) $summary['skipped'],
-                    (int) $summary['failed'],
-                    $sampleText
-                ),
-                'type' => $options['activity_type'] ?? 'user',
-                'userId' => $activityActor['id'] ?? '',
-                'email' => $activityActor['email'] ?? '',
-                'role' => $activityActor['role'] ?? '',
-                'name' => $activityActor['name'] ?? '',
-            ]);
-        } catch (Throwable $loggingError) {
-            // Batch results should still return if concise activity logging fails.
         }
+
+        if ($ownsBatchTransaction) {
+            $pdo->commit();
+        }
+    } catch (Throwable $batchError) {
+        if ($ownsBatchTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $batchError;
     }
 
     return [
@@ -2667,6 +2820,7 @@ function deleteUserSnapshot(PDO $pdo, $userId, array $options = []) {
             ':deleted_by_user_id' => $activityActorUserId,
             ':id' => $numericUserId,
         ]);
+        revokeTrustedDevicesSnapshot($pdo, $numericUserId);
         if ($stmt->rowCount() === 0) {
             $exists = $pdo->prepare('SELECT status FROM users WHERE id = :id LIMIT 1');
             $exists->execute([':id' => $numericUserId]);
@@ -2718,19 +2872,28 @@ function buildSettingsSnapshot(PDO $pdo) {
 
 function persistSettingsSnapshot(PDO $pdo, array $settings, array $actorUser = []) {
     $before = buildSettingsSnapshot($pdo);
-    $updated = array_merge(getDefaultSettings(), $settings);
+    $defaults = getDefaultSettings();
+    $allowedSettings = array_intersect_key($settings, $defaults);
+    $updated = array_merge($defaults, $allowedSettings);
     $smtpConfig = buildCredentialDistributorConfigSnapshot($pdo);
     $updated['systemEmail'] = strtolower(trim((string) ($smtpConfig['fromEmail'] ?? '')));
-    setSettingJson($pdo, 'sharedSettings', $updated);
-    safeLogAdminFlatStateChangeSnapshot(
-        $pdo,
-        $actorUser,
-        'System Settings Updated',
-        'system',
-        'System settings',
-        buildSettingsActivityFlatState($before),
-        buildSettingsActivityFlatState($updated)
-    );
+    $pdo->beginTransaction();
+    try {
+        setSettingJson($pdo, 'sharedSettings', $updated);
+        logAdminFlatStateChangeSnapshot(
+            $pdo,
+            $actorUser,
+            'System Settings Updated',
+            'system',
+            'System settings',
+            buildSettingsActivityFlatState($before),
+            buildSettingsActivityFlatState($updated)
+        );
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
     return $updated;
 }
 
@@ -2799,21 +2962,20 @@ function setCurrentSemesterSnapshot(PDO $pdo, $value, array $actorUser = []) {
         $stmt = $pdo->prepare('UPDATE semesters SET is_current = CASE WHEN slug = :slug THEN 1 ELSE 0 END');
         $stmt->execute([':slug' => $value]);
         setSettingValue($pdo, 'currentSemester', $value);
+        logAdminFlatStateChangeSnapshot(
+            $pdo,
+            $actorUser,
+            'Current Semester Updated',
+            'system',
+            'Current semester',
+            ['Current Semester' => $beforeValue],
+            ['Current Semester' => (string) $value]
+        );
         $pdo->commit();
     } catch (Throwable $e) {
-        $pdo->rollBack();
+        if ($pdo->inTransaction()) $pdo->rollBack();
         throw $e;
     }
-
-    safeLogAdminFlatStateChangeSnapshot(
-        $pdo,
-        $actorUser,
-        'Current Semester Updated',
-        'system',
-        'Current semester',
-        ['Current Semester' => $beforeValue],
-        ['Current Semester' => (string) $value]
-    );
 }
 
 function addSemesterSnapshot(PDO $pdo, $value, $label, array $actorUser = []) {
@@ -2823,49 +2985,81 @@ function addSemesterSnapshot(PDO $pdo, $value, $label, array $actorUser = []) {
         $academicYear = $matches[1];
     }
 
-    $stmt = $pdo->prepare(
-        'INSERT INTO semesters (slug, label, academic_year, is_current)
-         VALUES (:slug, :label, :academic_year, 0)
-         ON DUPLICATE KEY UPDATE label = VALUES(label), academic_year = VALUES(academic_year)'
-    );
-    $stmt->execute([
-        ':slug' => $value,
-        ':label' => $label,
-        ':academic_year' => $academicYear ?: '0000-0000',
-    ]);
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare(
+            'INSERT INTO semesters (slug, label, academic_year, is_current)
+             VALUES (:slug, :label, :academic_year, 0)
+             ON DUPLICATE KEY UPDATE label = VALUES(label), academic_year = VALUES(academic_year)'
+        );
+        $stmt->execute([
+            ':slug' => $value,
+            ':label' => $label,
+            ':academic_year' => $academicYear ?: '0000-0000',
+        ]);
 
-    $list = buildSemesterListSnapshot($pdo);
-    $exists = false;
-    foreach ($list as $index => $item) {
-        if (($item['value'] ?? '') === $value) {
-            $exists = true;
-            $list[$index]['label'] = $label;
-            break;
+        $list = buildSemesterListSnapshot($pdo);
+        $exists = false;
+        foreach ($list as $index => $item) {
+            if (($item['value'] ?? '') === $value) {
+                $exists = true;
+                $list[$index]['label'] = $label;
+                break;
+            }
         }
-    }
-    if (!$exists) {
-        $list[] = ['value' => $value, 'label' => $label];
-    }
-    setSettingJson($pdo, 'sharedSemesterList', $list);
+        if (!$exists) {
+            $list[] = ['value' => $value, 'label' => $label];
+        }
+        setSettingJson($pdo, 'sharedSemesterList', $list);
 
-    $afterList = buildSemesterListSnapshot($pdo);
-    safeLogAdminFlatStateChangeSnapshot(
-        $pdo,
-        $actorUser,
-        'Semester Saved',
-        'system',
-        'Semester list',
-        buildSemesterListActivityFlatState($beforeList),
-        buildSemesterListActivityFlatState($afterList)
-    );
+        $afterList = buildSemesterListSnapshot($pdo);
+        logAdminFlatStateChangeSnapshot(
+            $pdo,
+            $actorUser,
+            'Semester Saved',
+            'system',
+            'Semester list',
+            buildSemesterListActivityFlatState($beforeList),
+            buildSemesterListActivityFlatState($afterList)
+        );
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
 }
 
 function persistEvalPeriods(PDO $pdo, array $periods, array $actorUser = []) {
     $beforePeriods = buildEvalPeriodsSnapshot($pdo);
-    setSettingJson($pdo, 'sharedEvalPeriods', $periods);
-    $currentSemester = getCurrentSemesterSnapshot($pdo);
-    if ($currentSemester === '') {
-        safeLogAdminFlatStateChangeSnapshot(
+    $pdo->beginTransaction();
+    try {
+        setSettingJson($pdo, 'sharedEvalPeriods', $periods);
+        $currentSemester = getCurrentSemesterSnapshot($pdo);
+        if ($currentSemester !== '') {
+            $stmt = $pdo->prepare('SELECT id FROM semesters WHERE slug = :slug LIMIT 1');
+            $stmt->execute([':slug' => $currentSemester]);
+            $semester = $stmt->fetch();
+            if ($semester) {
+                $upsert = $pdo->prepare(
+                    'INSERT INTO evaluation_periods (semester_id, evaluation_type_id, start_date, end_date)
+                     VALUES (:semester_id, :type_id, :start_date, :end_date)
+                     ON DUPLICATE KEY UPDATE start_date = VALUES(start_date), end_date = VALUES(end_date)'
+                );
+                $types = $pdo->query('SELECT id, code FROM evaluation_types')->fetchAll();
+                foreach ($types as $type) {
+                    $code = $type['code'];
+                    $data = $periods[$code] ?? ['start' => '', 'end' => ''];
+                    $upsert->execute([
+                        ':semester_id' => $semester['id'],
+                        ':type_id' => $type['id'],
+                        ':start_date' => $data['start'] !== '' ? $data['start'] : null,
+                        ':end_date' => $data['end'] !== '' ? $data['end'] : null,
+                    ]);
+                }
+            }
+        }
+
+        logAdminFlatStateChangeSnapshot(
             $pdo,
             $actorUser,
             'Evaluation Periods Updated',
@@ -2874,43 +3068,11 @@ function persistEvalPeriods(PDO $pdo, array $periods, array $actorUser = []) {
             buildEvalPeriodsActivityFlatState($beforePeriods),
             buildEvalPeriodsActivityFlatState($periods)
         );
-        return;
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
     }
-
-    $stmt = $pdo->prepare('SELECT id FROM semesters WHERE slug = :slug LIMIT 1');
-    $stmt->execute([':slug' => $currentSemester]);
-    $semester = $stmt->fetch();
-    if (!$semester) {
-        return;
-    }
-
-    $upsert = $pdo->prepare(
-        'INSERT INTO evaluation_periods (semester_id, evaluation_type_id, start_date, end_date)
-         VALUES (:semester_id, :type_id, :start_date, :end_date)
-         ON DUPLICATE KEY UPDATE start_date = VALUES(start_date), end_date = VALUES(end_date)'
-    );
-
-    $types = $pdo->query('SELECT id, code FROM evaluation_types')->fetchAll();
-    foreach ($types as $type) {
-        $code = $type['code'];
-        $data = $periods[$code] ?? ['start' => '', 'end' => ''];
-        $upsert->execute([
-            ':semester_id' => $semester['id'],
-            ':type_id' => $type['id'],
-            ':start_date' => $data['start'] !== '' ? $data['start'] : null,
-            ':end_date' => $data['end'] !== '' ? $data['end'] : null,
-        ]);
-    }
-
-    safeLogAdminFlatStateChangeSnapshot(
-        $pdo,
-        $actorUser,
-        'Evaluation Periods Updated',
-        'system',
-        'Evaluation periods',
-        buildEvalPeriodsActivityFlatState($beforePeriods),
-        buildEvalPeriodsActivityFlatState($periods)
-    );
 }
 
 function getDefaultQuestionnaireHeaders() {
@@ -3644,6 +3806,118 @@ function formatEvaluationSnapshotRatingValue($value) {
     return rtrim(rtrim(number_format($numeric, 2, '.', ''), '0'), '.');
 }
 
+function parseEvaluationBehaviorTimestamp($value, $fieldLabel) {
+    if (!is_string($value)) {
+        throw new RuntimeException('behaviorMeta.' . $fieldLabel . ' must be an ISO-8601 timestamp.');
+    }
+
+    $raw = trim($value);
+    if (
+        $raw === ''
+        || strlen($raw) > 64
+        || preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:?\d{2})$/i', $raw) !== 1
+    ) {
+        throw new RuntimeException('behaviorMeta.' . $fieldLabel . ' must be an ISO-8601 timestamp with a timezone.');
+    }
+
+    try {
+        $parsed = new DateTimeImmutable($raw);
+        $parseState = DateTimeImmutable::getLastErrors();
+        if (
+            is_array($parseState)
+            && (((int) ($parseState['warning_count'] ?? 0)) > 0 || ((int) ($parseState['error_count'] ?? 0)) > 0)
+        ) {
+            throw new RuntimeException('Invalid timestamp.');
+        }
+        return $parsed;
+    } catch (Throwable $error) {
+        throw new RuntimeException('behaviorMeta.' . $fieldLabel . ' is not a valid timestamp.');
+    }
+}
+
+function formatEvaluationBehaviorTimestamp(DateTimeImmutable $value) {
+    return $value
+        ->setTimezone(new DateTimeZone('UTC'))
+        ->format('Y-m-d\TH:i:s.v\Z');
+}
+
+function evaluationBehaviorTimestampSeconds(DateTimeImmutable $value) {
+    return (float) $value->format('U.u');
+}
+
+function decodeStoredEvaluationBehaviorMeta($value) {
+    if ($value === null || $value === '') {
+        return null;
+    }
+
+    $decoded = $value;
+    if (is_string($value)) {
+        $decoded = json_decode($value, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            return null;
+        }
+    }
+    if (!is_array($decoded)) {
+        return null;
+    }
+
+    try {
+        $captureVersion = $decoded['captureVersion'] ?? null;
+        $questionCount = $decoded['questionCount'] ?? null;
+        $answeredCount = $decoded['answeredCount'] ?? null;
+        $durationSeconds = $decoded['durationSeconds'] ?? null;
+        $secondsPerQuestion = $decoded['secondsPerQuestion'] ?? null;
+        if (
+            !is_int($captureVersion)
+            || $captureVersion !== EVALUATION_BEHAVIOR_CAPTURE_VERSION
+            || !is_int($questionCount)
+            || $questionCount <= 0
+            || !is_int($answeredCount)
+            || $answeredCount <= 0
+            || $answeredCount > $questionCount
+            || !(is_int($durationSeconds) || is_float($durationSeconds))
+            || !is_finite((float) $durationSeconds)
+            || (float) $durationSeconds <= 0
+            || !(is_int($secondsPerQuestion) || is_float($secondsPerQuestion))
+            || !is_finite((float) $secondsPerQuestion)
+            || (float) $secondsPerQuestion <= 0
+        ) {
+            return null;
+        }
+
+        $startedAt = parseEvaluationBehaviorTimestamp($decoded['startedAt'] ?? null, 'startedAt');
+        $submittedAt = parseEvaluationBehaviorTimestamp($decoded['submittedAt'] ?? null, 'submittedAt');
+        $computedDuration = evaluationBehaviorTimestampSeconds($submittedAt)
+            - evaluationBehaviorTimestampSeconds($startedAt);
+        if (
+            $computedDuration <= 0
+            || $computedDuration > EVALUATION_BEHAVIOR_MAX_DURATION_SECONDS
+            || abs((float) $durationSeconds - $computedDuration) > EVALUATION_BEHAVIOR_DURATION_TOLERANCE_SECONDS
+        ) {
+            return null;
+        }
+        $computedSecondsPerQuestion = $computedDuration / $answeredCount;
+        if (
+            abs((float) $secondsPerQuestion - $computedSecondsPerQuestion)
+            > EVALUATION_BEHAVIOR_SECONDS_PER_QUESTION_TOLERANCE
+        ) {
+            return null;
+        }
+
+        return [
+            'captureVersion' => $captureVersion,
+            'startedAt' => formatEvaluationBehaviorTimestamp($startedAt),
+            'submittedAt' => formatEvaluationBehaviorTimestamp($submittedAt),
+            'durationSeconds' => round($computedDuration, 3),
+            'questionCount' => $questionCount,
+            'answeredCount' => $answeredCount,
+            'secondsPerQuestion' => round($computedSecondsPerQuestion, 6),
+        ];
+    } catch (Throwable $error) {
+        return null;
+    }
+}
+
 function buildEvaluationSnapshotMergeKey(array $evaluation) {
     $evaluationKey = strtolower(trim((string) ($evaluation['evaluationKey'] ?? '')));
     if ($evaluationKey !== '') {
@@ -3728,7 +4002,9 @@ function buildEvaluationsSnapshotFromTables(PDO $pdo, $evaluationId = null, arra
     $filterEvaluationId = (int) $evaluationId;
     $includeRatings = normalizeEvaluationSnapshotResponseFlag($filters['includeRatings'] ?? null, true);
     $includeTextResponses = normalizeEvaluationSnapshotResponseFlag($filters['includeTextResponses'] ?? null, true);
+    $includeBehaviorMeta = normalizeEvaluationSnapshotResponseFlag($filters['_includeBehaviorMeta'] ?? null, false);
     $evaluationIndexHint = buildEvaluationSnapshotTableIndexHint($pdo, $filters['forceEvaluationIndex'] ?? '');
+    $behaviorMetaSelect = $includeBehaviorMeta ? "\n            e.behavior_meta, e.behavior_score, e.credibility_score, e.credibility_components, e.credibility_flags, e.credibility_calculated_at," : '';
     $sql =
         'SELECT
             e.id,
@@ -3747,7 +4023,8 @@ function buildEvaluationsSnapshotFromTables(PDO $pdo, $evaluationId = null, arra
             evaluatee.name AS evaluatee_name,
             e.course_offering_id,
             subj.subject_code,
-            e.general_comments,
+            e.credibility_status,
+            e.general_comments,' . $behaviorMetaSelect . '
             e.submitted_at,
             e.status,
             evaluation_campus.id AS campus_id,
@@ -3782,6 +4059,10 @@ function buildEvaluationsSnapshotFromTables(PDO $pdo, $evaluationId = null, arra
     $where = [];
     $params = [];
     $types = [];
+    if ($evaluationId === null && empty($filters['_includeRejected'])) {
+        $where[] = "(e.credibility_status IS NULL OR e.credibility_status <> 'REJECTED_BY_HR')";
+    }
+    if (!empty($filters['analyticsEligible'])) $where[] = evaluationAnalyticsEligibilitySql('e');
 
     if ($filterEvaluationId > 0) {
         $where[] = 'e.id = :evaluation_id';
@@ -4088,6 +4369,17 @@ function buildEvaluationsSnapshotFromTables(PDO $pdo, $evaluationId = null, arra
             'evaluateeUserId' => $evaluateeUserToken,
             'timestamp' => $submittedAt,
         ];
+        $snapshotByEvaluationId[$evaluationId]['credibilityStatus'] = $row['credibility_status'] ?? null;
+        if ($includeBehaviorMeta) {
+            $snapshotByEvaluationId[$evaluationId]['behaviorScore'] = isset($row['behavior_score']) ? (int) $row['behavior_score'] : null;
+            $snapshotByEvaluationId[$evaluationId]['credibilityScore'] = isset($row['credibility_score']) ? (int) $row['credibility_score'] : null;
+            $snapshotByEvaluationId[$evaluationId]['credibilityComponents'] = json_decode($row['credibility_components'] ?? 'null', true);
+            $snapshotByEvaluationId[$evaluationId]['credibilityFlags'] = json_decode($row['credibility_flags'] ?? '[]', true);
+            $snapshotByEvaluationId[$evaluationId]['credibilityCalculatedAt'] = $row['credibility_calculated_at'] ?? null;
+            $snapshotByEvaluationId[$evaluationId]['behaviorMeta'] = decodeStoredEvaluationBehaviorMeta(
+                $row['behavior_meta'] ?? null
+            );
+        }
     }
 
     if (count($snapshotByEvaluationId) === 0) {
@@ -4167,15 +4459,7 @@ function buildEvaluationsSnapshotFromTables(PDO $pdo, $evaluationId = null, arra
 }
 
 function buildEvaluationsSnapshot(PDO $pdo) {
-    $settingsSnapshot = getSettingJson($pdo, 'sharedEvaluations', []);
-    $settingsList = is_array($settingsSnapshot) ? $settingsSnapshot : [];
-    $tableList = buildEvaluationsSnapshotFromTables($pdo);
-
-    if (count($tableList) === 0) {
-        return $settingsList;
-    }
-
-    return mergeEvaluationSnapshotLists($tableList, $settingsList);
+    return buildEvaluationsSnapshotWithLegacy($pdo);
 }
 
 function mergeEvaluationSnapshotLists(array $primaryList, array $fallbackList) {
@@ -4234,6 +4518,26 @@ function filterEvaluationSnapshotsByListFilters(array $evaluations, array $filte
     }));
 }
 
+function applyEvaluationBehaviorMetadataVisibility(array $evaluations, $includeBehaviorMeta) {
+    $include = (bool) $includeBehaviorMeta;
+    foreach ($evaluations as &$evaluation) {
+        if (!is_array($evaluation)) {
+            continue;
+        }
+        if (!$include) {
+            unset($evaluation['behaviorMeta']);
+            continue;
+        }
+        if (array_key_exists('behaviorMeta', $evaluation)) {
+            $evaluation['behaviorMeta'] = decodeStoredEvaluationBehaviorMeta($evaluation['behaviorMeta']);
+        } else {
+            $evaluation['behaviorMeta'] = null;
+        }
+    }
+    unset($evaluation);
+    return array_values($evaluations);
+}
+
 function sliceBootstrapList(array $rows, array $filters) {
     $limit = normalizeBootstrapListLimit($filters['limit'] ?? 0, 0, 1000);
     $offset = normalizeBootstrapListOffset($filters['offset'] ?? 0);
@@ -4250,9 +4554,29 @@ function buildEvaluationsSnapshotWithLegacy(PDO $pdo, array $tableFilters = [], 
         is_array($settingsSnapshot) ? $settingsSnapshot : [],
         $legacyFilters
     );
-    if (count($tableList) === 0) {
-        return $settingsList;
+    // Legacy JSON submissions retain their historical eligibility without fabricated scores.
+    foreach ($settingsList as &$legacy) {
+        if (is_array($legacy) && empty($legacy['credibilityStatus'])) $legacy['credibilityStatus'] = 'AUTO_ACCEPTED';
     }
+    unset($legacy);
+    if (empty($tableFilters['_includeRejected']) || !empty($tableFilters['analyticsEligible'])) {
+        // A SQL-backed legacy copy must never resurrect a pending/rejected SQL row.
+        if ($settingsList) {
+            $identityFilters = $tableFilters;
+            unset($identityFilters['analyticsEligible'], $identityFilters['limit'], $identityFilters['offset']);
+            $identityFilters['_includeRejected'] = true;
+            $identityFilters['includeRatings'] = false;
+            $identityFilters['includeTextResponses'] = false;
+            $identities = buildEvaluationsSnapshotFromTables($pdo, null, $identityFilters);
+            $sqlIds = array_fill_keys(array_column($identities, 'id'), true);
+            $sqlKeys = array_fill_keys(array_map('buildEvaluationSnapshotMergeKey', $identities), true);
+            $settingsList = array_values(array_filter($settingsList, fn($row) => is_array($row)
+                && !isset($sqlIds[$row['id'] ?? '']) && !isset($sqlKeys[buildEvaluationSnapshotMergeKey($row)])
+                && ($row['credibilityStatus'] ?? '') !== 'REJECTED_BY_HR'
+                && (empty($tableFilters['analyticsEligible']) || isEvaluationEligibleForAnalytics($row))));
+        }
+    }
+    if (count($tableList) === 0) return $settingsList;
     return mergeEvaluationSnapshotLists($tableList, $settingsList);
 }
 
@@ -4471,6 +4795,19 @@ function ensureEvaluationDuplicateSubmissionSchema(PDO $pdo) {
         $pdo->exec(
             'ALTER TABLE evaluations
              ADD UNIQUE KEY uq_evaluations_submission_duplicate_key (submission_duplicate_key)'
+        );
+    }
+}
+
+function ensureEvaluationBehaviorMetadataSchema(PDO $pdo) {
+    if (!tableExistsInCurrentSchema($pdo, 'evaluations')) {
+        throw new RuntimeException('Evaluation SQL table is unavailable: evaluations.');
+    }
+
+    if (!columnExistsInCurrentSchema($pdo, 'evaluations', 'behavior_meta')) {
+        $pdo->exec(
+            'ALTER TABLE evaluations
+             ADD COLUMN behavior_meta JSON DEFAULT NULL AFTER general_comments'
         );
     }
 }
@@ -4868,8 +5205,20 @@ function collectEvaluationSubmissionResponses(array $evaluation, array $question
 
             $question = $questionsById[$questionId];
             $questionType = $question['type'];
+            $unboundedValue = is_scalar($value) ? trim((string) $value) : '';
+            if ($questionType === 'qualitative' && $unboundedValue !== '') {
+                $textLength = function_exists('mb_strlen')
+                    ? mb_strlen($unboundedValue, 'UTF-8')
+                    : strlen($unboundedValue);
+                if ($textLength > (int) $question['maxLength']) {
+                    throw new RuntimeException(
+                        'Text answer for question ' . $questionId
+                        . ' exceeds the maximum length of ' . (int) $question['maxLength'] . ' characters.'
+                    );
+                }
+            }
             $rawValue = normalizeEvaluationSubmissionTextValue(
-                $value,
+                $unboundedValue,
                 $questionType === 'qualitative' ? $question['maxLength'] : 100
             );
             if ($rawValue === '') {
@@ -4937,6 +5286,114 @@ function collectEvaluationSubmissionResponses(array $evaluation, array $question
     return $responses;
 }
 
+function normalizeEvaluationSubmissionBehaviorMeta(
+    $value,
+    array $questionsById,
+    array $responses,
+    DateTimeImmutable $serverNow = null
+) {
+    if (!is_array($value)) {
+        throw new RuntimeException('behaviorMeta is required for evaluation submissions.');
+    }
+
+    $requiredFields = [
+        'captureVersion',
+        'startedAt',
+        'submittedAt',
+        'durationSeconds',
+        'questionCount',
+        'answeredCount',
+        'secondsPerQuestion',
+    ];
+    foreach ($requiredFields as $field) {
+        if (!array_key_exists($field, $value)) {
+            throw new RuntimeException('behaviorMeta.' . $field . ' is required.');
+        }
+    }
+
+    if (!is_int($value['captureVersion']) || $value['captureVersion'] !== EVALUATION_BEHAVIOR_CAPTURE_VERSION) {
+        throw new RuntimeException('behaviorMeta.captureVersion is unsupported.');
+    }
+
+    foreach (['questionCount', 'answeredCount'] as $field) {
+        if (!is_int($value[$field]) || $value[$field] <= 0) {
+            throw new RuntimeException('behaviorMeta.' . $field . ' must be a positive integer.');
+        }
+    }
+    foreach (['durationSeconds', 'secondsPerQuestion'] as $field) {
+        if (
+            !(is_int($value[$field]) || is_float($value[$field]))
+            || !is_finite((float) $value[$field])
+            || (float) $value[$field] <= 0
+        ) {
+            throw new RuntimeException('behaviorMeta.' . $field . ' must be a positive finite number.');
+        }
+    }
+
+    $expectedQuestionCount = count($questionsById);
+    $expectedAnsweredCount = count($responses);
+    if ($value['questionCount'] !== $expectedQuestionCount) {
+        throw new RuntimeException('behaviorMeta.questionCount does not match the active questionnaire.');
+    }
+    if ($value['answeredCount'] !== $expectedAnsweredCount) {
+        throw new RuntimeException('behaviorMeta.answeredCount does not match the submitted responses.');
+    }
+
+    $startedAt = parseEvaluationBehaviorTimestamp($value['startedAt'], 'startedAt');
+    $submittedAt = parseEvaluationBehaviorTimestamp($value['submittedAt'], 'submittedAt');
+    $startedSeconds = evaluationBehaviorTimestampSeconds($startedAt);
+    $submittedSeconds = evaluationBehaviorTimestampSeconds($submittedAt);
+    $computedDuration = $submittedSeconds - $startedSeconds;
+    if ($computedDuration <= 0 || $computedDuration > EVALUATION_BEHAVIOR_MAX_DURATION_SECONDS) {
+        throw new RuntimeException('behaviorMeta duration must be greater than zero and no more than 24 hours.');
+    }
+
+    $clientDuration = (float) $value['durationSeconds'];
+    if (
+        $clientDuration > EVALUATION_BEHAVIOR_MAX_DURATION_SECONDS
+        || abs($clientDuration - $computedDuration) > EVALUATION_BEHAVIOR_DURATION_TOLERANCE_SECONDS
+    ) {
+        throw new RuntimeException('behaviorMeta.durationSeconds is inconsistent with its timestamps.');
+    }
+
+    $computedSecondsPerQuestion = $computedDuration / $expectedAnsweredCount;
+    if (
+        abs((float) $value['secondsPerQuestion'] - $computedSecondsPerQuestion)
+        > EVALUATION_BEHAVIOR_SECONDS_PER_QUESTION_TOLERANCE
+    ) {
+        throw new RuntimeException('behaviorMeta.secondsPerQuestion is inconsistent with the submitted responses.');
+    }
+
+    $authoritativeNow = $serverNow instanceof DateTimeImmutable
+        ? $serverNow
+        : getAuthoritativePhilippineDateTime();
+    $clockSkew = abs(evaluationBehaviorTimestampSeconds($authoritativeNow) - $submittedSeconds);
+    if ($clockSkew > EVALUATION_BEHAVIOR_MAX_SUBMISSION_CLOCK_SKEW_SECONDS) {
+        throw new RuntimeException('behaviorMeta.submittedAt is outside the allowed server clock range.');
+    }
+
+    return [
+        'captureVersion' => EVALUATION_BEHAVIOR_CAPTURE_VERSION,
+        'startedAt' => formatEvaluationBehaviorTimestamp($startedAt),
+        'submittedAt' => formatEvaluationBehaviorTimestamp($submittedAt),
+        'durationSeconds' => round($computedDuration, 3),
+        'questionCount' => $expectedQuestionCount,
+        'answeredCount' => $expectedAnsweredCount,
+        'secondsPerQuestion' => round($computedSecondsPerQuestion, 6),
+    ];
+}
+
+function encodeEvaluationBehaviorMetadataForStorage(array $behaviorMeta) {
+    $encoded = json_encode(
+        $behaviorMeta,
+        JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+    );
+    if (!is_string($encoded) || $encoded === '') {
+        throw new RuntimeException('Evaluation behavior metadata could not be encoded.');
+    }
+    return $encoded;
+}
+
 function formatEvaluationSubmissionMysqlDateTime($value) {
     $parsed = parsePhilippineDateTimeValue($value);
     if (!$parsed) {
@@ -5002,6 +5459,14 @@ function persistEvaluationSubmissionSnapshot(PDO $pdo, array $evaluation, array 
     );
     $questionsById = buildEvaluationSubmissionQuestionRows($pdo, (int) $questionnaire['id']);
     $responses = collectEvaluationSubmissionResponses($evaluation, $questionsById);
+    $behaviorMeta = null;
+    if (in_array($typeConfig['snapshotType'], ['student', 'peer', 'supervisor'], true)) {
+        $behaviorMeta = normalizeEvaluationSubmissionBehaviorMeta(
+            $evaluation['behaviorMeta'] ?? null,
+            $questionsById,
+            $responses
+        );
+    }
 
     $courseOfferingId = null;
     $evaluateeUserId = null;
@@ -5043,8 +5508,14 @@ function persistEvaluationSubmissionSnapshot(PDO $pdo, array $evaluation, array 
         $evaluateeUserId
     );
 
-    $submittedAt = formatEvaluationSubmissionMysqlDateTime($evaluation['submittedAt'] ?? ($evaluation['timestamp'] ?? ''));
+    $submittedAtSource = $behaviorMeta !== null
+        ? $behaviorMeta['submittedAt']
+        : ($evaluation['submittedAt'] ?? ($evaluation['timestamp'] ?? ''));
+    $submittedAt = formatEvaluationSubmissionMysqlDateTime($submittedAtSource);
     $comments = normalizeEvaluationSubmissionTextValue($evaluation['comments'] ?? '', 10000);
+    $behaviorMetaJson = $behaviorMeta !== null
+        ? encodeEvaluationBehaviorMetadataForStorage($behaviorMeta)
+        : null;
     $completePeerAssignment = !empty($options['completePeerAssignment']);
     $studentClearance = null;
 
@@ -5066,6 +5537,7 @@ function persistEvaluationSubmissionSnapshot(PDO $pdo, array $evaluation, array 
                 evaluatee_user_id,
                 course_offering_id,
                 general_comments,
+                behavior_meta,
                 submitted_at,
                 status,
                 submission_duplicate_key
@@ -5077,6 +5549,7 @@ function persistEvaluationSubmissionSnapshot(PDO $pdo, array $evaluation, array 
                 :evaluatee_user_id,
                 :course_offering_id,
                 :general_comments,
+                :behavior_meta,
                 :submitted_at,
                 \'submitted\',
                 :submission_duplicate_key
@@ -5089,6 +5562,11 @@ function persistEvaluationSubmissionSnapshot(PDO $pdo, array $evaluation, array 
         bindEvaluationNullableInt($insertEvaluation, ':evaluatee_user_id', $evaluateeUserId);
         bindEvaluationNullableInt($insertEvaluation, ':course_offering_id', $courseOfferingId);
         $insertEvaluation->bindValue(':general_comments', $comments, PDO::PARAM_STR);
+        if ($behaviorMetaJson === null) {
+            $insertEvaluation->bindValue(':behavior_meta', null, PDO::PARAM_NULL);
+        } else {
+            $insertEvaluation->bindValue(':behavior_meta', $behaviorMetaJson, PDO::PARAM_STR);
+        }
         $insertEvaluation->bindValue(':submitted_at', $submittedAt, PDO::PARAM_STR);
         $insertEvaluation->bindValue(':submission_duplicate_key', $submissionDuplicateKey, PDO::PARAM_STR);
         $insertEvaluation->execute();
@@ -5131,6 +5609,8 @@ function persistEvaluationSubmissionSnapshot(PDO $pdo, array $evaluation, array 
             $insertResponse->execute();
         }
 
+        persistEvaluationCredibility($pdo, $databaseEvaluationId, (string) $semester['slug']);
+
         if ($typeConfig['snapshotType'] === 'student') {
             $studentClearance = ensureAutomaticStudentClearanceSnapshot(
                 $pdo,
@@ -5147,6 +5627,23 @@ function persistEvaluationSubmissionSnapshot(PDO $pdo, array $evaluation, array 
                 'db-eval-' . $databaseEvaluationId
             );
         }
+
+        $semesterLabel = trim((string) ($semester['label'] ?? $semester['name'] ?? $semester['slug'] ?? 'semester'));
+        $isAnonymousStudentAudit = $typeConfig['snapshotType'] === 'student';
+        naapAuditWrite($pdo, [
+            'eventCode' => 'evaluation.submitted',
+            'action' => 'Evaluation Submitted',
+            'description' => ($isAnonymousStudentAudit ? 'Anonymous ' : '')
+                . $typeConfig['label'] . ' evaluation submitted for ' . $semesterLabel . '.',
+            'type' => 'evaluation',
+            'actor' => [
+                'id' => $actorUserId,
+                'role' => $actorUser['role'] ?? $actorRole,
+            ],
+            'targetType' => $isAnonymousStudentAudit ? '' : 'evaluation',
+            'targetId' => $isAnonymousStudentAudit ? '' : ('db-eval-' . $databaseEvaluationId),
+            'anonymous' => $isAnonymousStudentAudit,
+        ]);
 
         if ($startedTransaction) {
             $pdo->commit();
@@ -6966,6 +7463,13 @@ function submitStudentEvaluationProofSnapshot(PDO $pdo, array $record) {
     return $row;
 }
 
+function assertStudentEvaluationProofPendingForReview(array $row) {
+    $status = normalizeStudentEvaluationProofStatus($row['status'] ?? '');
+    if ($status !== 'pending') {
+        throw new RuntimeException('This proof request has already been reviewed and is locked.');
+    }
+}
+
 function reviewStudentEvaluationProofSnapshot(PDO $pdo, array $payload, array $actorUser = []) {
     $decision = normalizeStudentEvaluationProofStatus($payload['decision'] ?? $payload['status'] ?? '');
     if ($decision !== 'approved' && $decision !== 'rejected') {
@@ -7016,6 +7520,7 @@ function reviewStudentEvaluationProofSnapshot(PDO $pdo, array $payload, array $a
     }
     try {
         $row = normalizeStudentEvaluationProofSnapshotRow($rows[$targetIndex]);
+        assertStudentEvaluationProofPendingForReview($row);
         $row['status'] = $decision;
         $row['reviewedAt'] = getAuthoritativePhilippineIso8601();
         $row['reviewedBy'] = (string) $approver['name'];
@@ -7398,6 +7903,12 @@ function buildSubjectManagementSnapshotForActor(PDO $pdo, array $ctx, array $fil
 
     $role = bootstrapNormalizePlainToken($ctx['role'] ?? '');
     $actorUserId = (int) ($ctx['numericUserId'] ?? 0);
+    $currentSemesterSlug = trim((string) getCurrentSemesterSnapshot($pdo));
+    $historicalReportRoles = ['professor', 'dean', 'procoor', 'hr', 'vpaa', 'admin'];
+    $includeInactiveOfferings = !empty($filters['includeInactiveOfferings'])
+        && $currentSemesterSlug !== ''
+        && $semesterSlug !== $currentSemesterSlug
+        && in_array($role, $historicalReportRoles, true);
     $campusContext = buildCampusAuthorizationContext($pdo, is_array($ctx['user'] ?? null) ? $ctx['user'] : []);
     $requestedCampusValues = campusAuthorizationRequestedCampusValues($filters);
     $requestedCampus = count($requestedCampusValues) > 0 ? $requestedCampusValues[0] : '';
@@ -7410,12 +7921,14 @@ function buildSubjectManagementSnapshotForActor(PDO $pdo, array $ctx, array $fil
     campusAuthorizationValidatePayloadCampuses($pdo, $campusContext, $filters, 'subject-management-list');
     $where = [
         'sem.slug = :semester_slug',
-        'co.is_active = 1',
         'prof.status = \'active\'',
         'c.is_active = 1',
         'd.is_active = 1',
     ];
     $params = [':semester_slug' => $semesterSlug];
+    if (!$includeInactiveOfferings) {
+        $where[] = 'co.is_active = 1';
+    }
 
     if (empty($campusSelection['isAll'])) {
         $where[] = 'c.id = :authorized_campus_id';
@@ -7443,7 +7956,6 @@ function buildSubjectManagementSnapshotForActor(PDO $pdo, array $ctx, array $fil
             return buildEmptySubjectManagementSnapshot();
         }
         $where[] = 'co.professor_id = :actor_professor_user_id';
-        $where[] = 'co.is_active = 1';
         $params[':actor_professor_user_id'] = $actorUserId;
     } elseif ($role === 'dean') {
         $scope = resolveActiveDeanScopeRow($pdo, $actorUserId);
@@ -7451,7 +7963,6 @@ function buildSubjectManagementSnapshotForActor(PDO $pdo, array $ctx, array $fil
             return buildEmptySubjectManagementSnapshot();
         }
         $where[] = 'prof.department_id = :dean_department_id';
-        $where[] = 'co.is_active = 1';
         $params[':dean_department_id'] = (int) $scope['department_id'];
         $campus = bootstrapNormalizePlainToken($ctx['campus'] ?? '');
         if ($campus !== '') {
@@ -7465,7 +7976,6 @@ function buildSubjectManagementSnapshotForActor(PDO $pdo, array $ctx, array $fil
         }
         $where[] = 'prof.department_id = :coordinator_department_id';
         $where[] = 'prof_staff.program_id = :coordinator_program_id';
-        $where[] = 'co.is_active = 1';
         $params[':coordinator_department_id'] = (int) $scope['department_id'];
         $params[':coordinator_program_id'] = (int) $scope['program_id'];
         $campus = bootstrapNormalizePlainToken($ctx['campus'] ?? '');
@@ -7639,6 +8149,17 @@ function upsertProgramSnapshot(PDO $pdo, array $program, array $actorUser = []) 
             ]);
         }
 
+        $afterPrograms = buildProgramsSnapshot($pdo);
+        logAdminFlatStateChangeSnapshot(
+            $pdo,
+            $actorUser,
+            'Program Saved',
+            'system',
+            'Program catalog',
+            buildProgramsActivityFlatState($beforePrograms),
+            buildProgramsActivityFlatState($afterPrograms)
+        );
+
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
@@ -7649,17 +8170,6 @@ function upsertProgramSnapshot(PDO $pdo, array $program, array $actorUser = []) 
         }
         throw $e;
     }
-
-    $afterPrograms = buildProgramsSnapshot($pdo);
-    safeLogAdminFlatStateChangeSnapshot(
-        $pdo,
-        $actorUser,
-        'Program Saved',
-        'system',
-        'Program catalog',
-        buildProgramsActivityFlatState($beforePrograms),
-        buildProgramsActivityFlatState($afterPrograms)
-    );
 
     return $afterPrograms;
 }
@@ -7765,6 +8275,46 @@ function upsertSubjectSnapshot(PDO $pdo, array $subject, array $actorUser = []) 
             ]);
             $subjectId = (int) $pdo->lastInsertId();
         }
+
+        $lookup = $pdo->prepare(
+            'SELECT
+                s.id,
+                c.slug AS campus_slug,
+                c.name AS campus_name,
+                d.code AS department_code,
+                s.subject_code,
+                s.subject_name
+             FROM subjects s
+             JOIN departments d ON d.id = s.department_id
+             JOIN campuses c ON c.id = d.campus_id
+             WHERE s.id = :id
+             LIMIT 1'
+        );
+        $lookup->execute([':id' => $subjectId]);
+        $row = $lookup->fetch();
+        if (!$row) {
+            throw new RuntimeException('Failed to load saved subject.');
+        }
+
+        $savedSubject = [
+            'id' => (int) $row['id'],
+            'campusSlug' => $row['campus_slug'],
+            'campusName' => $row['campus_name'],
+            'departmentCode' => $row['department_code'],
+            'subjectCode' => $row['subject_code'],
+            'subjectName' => $row['subject_name'],
+        ];
+
+        $afterSubjects = buildSubjectManagementSnapshot($pdo);
+        logAdminFlatStateChangeSnapshot(
+            $pdo,
+            $actorUser,
+            'Subject Saved',
+            'system',
+            'Subject catalog',
+            buildSubjectActivityFlatState($beforeSubjects['subjects'] ?? []),
+            buildSubjectActivityFlatState($afterSubjects['subjects'] ?? [])
+        );
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
@@ -7772,46 +8322,6 @@ function upsertSubjectSnapshot(PDO $pdo, array $subject, array $actorUser = []) 
         }
         throw $e;
     }
-
-    $lookup = $pdo->prepare(
-        'SELECT
-            s.id,
-            c.slug AS campus_slug,
-            c.name AS campus_name,
-            d.code AS department_code,
-            s.subject_code,
-            s.subject_name
-         FROM subjects s
-         JOIN departments d ON d.id = s.department_id
-         JOIN campuses c ON c.id = d.campus_id
-         WHERE s.id = :id
-         LIMIT 1'
-    );
-    $lookup->execute([':id' => $subjectId]);
-    $row = $lookup->fetch();
-    if (!$row) {
-        throw new RuntimeException('Failed to load saved subject.');
-    }
-
-    $savedSubject = [
-        'id' => (int) $row['id'],
-        'campusSlug' => $row['campus_slug'],
-        'campusName' => $row['campus_name'],
-        'departmentCode' => $row['department_code'],
-        'subjectCode' => $row['subject_code'],
-        'subjectName' => $row['subject_name'],
-    ];
-
-    $afterSubjects = buildSubjectManagementSnapshot($pdo);
-    safeLogAdminFlatStateChangeSnapshot(
-        $pdo,
-        $actorUser,
-        'Subject Saved',
-        'system',
-        'Subject catalog',
-        buildSubjectActivityFlatState($beforeSubjects['subjects'] ?? []),
-        buildSubjectActivityFlatState($afterSubjects['subjects'] ?? [])
-    );
 
     return $savedSubject;
 }
@@ -7824,6 +8334,8 @@ function importSubjectsSnapshot(PDO $pdo, array $rows, array $actorUser = []) {
     $failed = 0;
     $errors = [];
 
+    $pdo->beginTransaction();
+    try {
     foreach (array_values($rows) as $idx => $row) {
         $rowNumber = $idx + 2;
         if (!is_array($row)) {
@@ -7886,7 +8398,7 @@ function importSubjectsSnapshot(PDO $pdo, array $rows, array $actorUser = []) {
     }
 
     $afterSubjects = buildSubjectManagementSnapshot($pdo);
-    safeLogAdminFlatStateChangeSnapshot(
+    logAdminFlatStateChangeSnapshot(
         $pdo,
         $actorUser,
         'Subjects Imported',
@@ -7895,6 +8407,11 @@ function importSubjectsSnapshot(PDO $pdo, array $rows, array $actorUser = []) {
         buildSubjectActivityFlatState($beforeSubjects['subjects'] ?? []),
         buildSubjectActivityFlatState($afterSubjects['subjects'] ?? [])
     );
+    $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
 
     return [
         'created' => $created,
@@ -8818,6 +9335,7 @@ function markExcessCourseOfferingsSnapshot(PDO $pdo, array $rows, array $actorUs
     $errors = [];
     $matchedOfferingIds = [];
     $semesterIdsToReplace = [];
+    $afterSubjectManagement = null;
 
     $matchStmt = $pdo->prepare(
         'SELECT co.id
@@ -8949,6 +9467,17 @@ function markExcessCourseOfferingsSnapshot(PDO $pdo, array $rows, array $actorUs
             $markStmt->execute($offeringParams);
             $markedExcess = count($offeringIds);
 
+            $afterSubjectManagement = buildSubjectManagementSnapshot($pdo);
+            logAdminFlatStateChangeSnapshot(
+                $pdo,
+                $actorUser,
+                'Excess Load Imported',
+                'system',
+                'Course offering excess load import',
+                buildOfferingActivityFlatState($beforeSubjectManagement['offerings'] ?? []),
+                buildOfferingActivityFlatState($afterSubjectManagement['offerings'] ?? [])
+            );
+
             $pdo->commit();
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
@@ -8963,16 +9492,9 @@ function markExcessCourseOfferingsSnapshot(PDO $pdo, array $rows, array $actorUs
         }
     }
 
-    $afterSubjectManagement = buildSubjectManagementSnapshot($pdo);
-    safeLogAdminFlatStateChangeSnapshot(
-        $pdo,
-        $actorUser,
-        'Excess Load Imported',
-        'system',
-        'Course offering excess load import',
-        buildOfferingActivityFlatState($beforeSubjectManagement['offerings'] ?? []),
-        buildOfferingActivityFlatState($afterSubjectManagement['offerings'] ?? [])
-    );
+    if (!is_array($afterSubjectManagement)) {
+        $afterSubjectManagement = buildSubjectManagementSnapshot($pdo);
+    }
 
     return [
         'matchedRows' => $matchedRows,
@@ -9349,6 +9871,48 @@ function resolveCurrentSemesterRowSnapshot(PDO $pdo) {
     ];
 }
 
+function resolvePeerAssignmentSemesterRowSnapshot(PDO $pdo, $semesterValue = '') {
+    $semesterToken = trim((string) $semesterValue);
+    if ($semesterToken === '' || strtolower($semesterToken) === 'current') {
+        return resolveCurrentSemesterRowSnapshot($pdo);
+    }
+
+    if (strlen($semesterToken) > 120) {
+        throw new RuntimeException('Peer-assignment semester could not be resolved.');
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT id, slug, label, academic_year
+         FROM semesters
+         WHERE slug = :slug
+         LIMIT 1'
+    );
+    $stmt->execute([':slug' => $semesterToken]);
+    $row = $stmt->fetch();
+
+    if (!$row && preg_match('/^\d+$/', $semesterToken)) {
+        $stmt = $pdo->prepare(
+            'SELECT id, slug, label, academic_year
+             FROM semesters
+             WHERE id = :id
+             LIMIT 1'
+        );
+        $stmt->execute([':id' => (int) $semesterToken]);
+        $row = $stmt->fetch();
+    }
+
+    if (!$row) {
+        throw new RuntimeException('Peer-assignment semester could not be resolved.');
+    }
+
+    return [
+        'id' => (int) $row['id'],
+        'slug' => (string) $row['slug'],
+        'label' => (string) ($row['label'] ?? $row['slug']),
+        'academicYear' => (string) ($row['academic_year'] ?? ''),
+    ];
+}
+
 function resolveActiveDeanScopeRow(PDO $pdo, $deanUserId) {
     $stmt = $pdo->prepare(
         'SELECT u.id, u.name, u.department_id, d.code AS department_code
@@ -9402,6 +9966,232 @@ function resolveActiveDeanScopeRowByDepartmentId(PDO $pdo, $departmentId) {
         'name' => (string) ($row['name'] ?? ''),
         'department_id' => (int) $row['department_id'],
         'department_code' => strtoupper(trim((string) ($row['department_code'] ?? ''))),
+    ];
+}
+
+function ensureDepartmentFacultyReportAccessSchema(PDO $pdo) {
+    if (!tableExistsInCurrentSchema($pdo, 'department_faculty_report_access')) {
+        $pdo->exec(
+            'CREATE TABLE department_faculty_report_access (
+                department_id BIGINT UNSIGNED NOT NULL,
+                reports_enabled TINYINT(1) NOT NULL DEFAULT 1,
+                updated_by_user_id BIGINT UNSIGNED DEFAULT NULL,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (department_id),
+                KEY idx_department_faculty_report_access_updated_by (updated_by_user_id),
+                CONSTRAINT fk_department_faculty_report_access_department
+                    FOREIGN KEY (department_id) REFERENCES departments(id)
+                    ON UPDATE CASCADE ON DELETE RESTRICT,
+                CONSTRAINT fk_department_faculty_report_access_updated_by
+                    FOREIGN KEY (updated_by_user_id) REFERENCES users(id)
+                    ON UPDATE CASCADE ON DELETE RESTRICT
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+        );
+    }
+
+    $pdo->exec(
+        'INSERT IGNORE INTO department_faculty_report_access (department_id, reports_enabled)
+         SELECT id, 1 FROM departments'
+    );
+}
+
+function resolveFacultyReportAccessScopeRow(PDO $pdo, array $actorUser) {
+    $role = bootstrapNormalizePlainToken($actorUser['role'] ?? '');
+    $userId = resolveStoredUserIdNumber($actorUser['id'] ?? ($actorUser['userId'] ?? ''));
+    if ($userId <= 0 || !in_array($role, ['dean', 'professor'], true)) {
+        return null;
+    }
+
+    if ($role === 'dean') {
+        return resolveActiveDeanScopeRow($pdo, $userId);
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT
+            u.id AS user_id,
+            COALESCE(u.department_id, p.department_id) AS department_id,
+            d.code AS department_code
+         FROM users u
+         JOIN roles r ON r.id = u.role_id
+         LEFT JOIN staff_profiles sp ON sp.user_id = u.id AND sp.is_active = 1
+         LEFT JOIN programs p ON p.id = sp.program_id AND p.is_active = 1
+         LEFT JOIN departments d ON d.id = COALESCE(u.department_id, p.department_id)
+         WHERE u.id = :user_id
+           AND r.code = \'professor\'
+           AND u.status = \'active\'
+           AND d.is_active = 1
+         LIMIT 1'
+    );
+    $stmt->execute([':user_id' => $userId]);
+    $row = $stmt->fetch();
+    if (!$row || (int) ($row['department_id'] ?? 0) <= 0) {
+        return null;
+    }
+
+    return [
+        'user_id' => (int) ($row['user_id'] ?? $userId),
+        'department_id' => (int) $row['department_id'],
+        'department_code' => strtoupper(trim((string) ($row['department_code'] ?? ''))),
+    ];
+}
+
+function getFacultyReportAccessSnapshot(PDO $pdo, array $actorUser) {
+    $scope = resolveFacultyReportAccessScopeRow($pdo, $actorUser);
+    if (!$scope) {
+        return [
+            'enabled' => true,
+            'departmentCode' => '',
+            'updatedAt' => '',
+        ];
+    }
+
+    $ensureRow = $pdo->prepare(
+        'INSERT IGNORE INTO department_faculty_report_access (department_id, reports_enabled)
+         VALUES (:department_id, 1)'
+    );
+    $ensureRow->execute([':department_id' => (int) $scope['department_id']]);
+
+    $stmt = $pdo->prepare(
+        'SELECT reports_enabled, updated_at
+         FROM department_faculty_report_access
+         WHERE department_id = :department_id
+         LIMIT 1'
+    );
+    $stmt->execute([':department_id' => (int) $scope['department_id']]);
+    $row = $stmt->fetch();
+
+    return [
+        'enabled' => !$row || !empty($row['reports_enabled']),
+        'departmentCode' => (string) ($scope['department_code'] ?? ''),
+        'updatedAt' => $row ? (string) ($row['updated_at'] ?? '') : '',
+    ];
+}
+
+function isProfessorFacultyReportAccessEnabled(PDO $pdo, array $actorUser) {
+    if (bootstrapNormalizePlainToken($actorUser['role'] ?? '') !== 'professor') {
+        return true;
+    }
+    $snapshot = getFacultyReportAccessSnapshot($pdo, $actorUser);
+    return !empty($snapshot['enabled']);
+}
+
+function persistDepartmentFacultyReportAccessSnapshot(PDO $pdo, array $deanUser, $enabled) {
+    $deanUserId = resolveStoredUserIdNumber($deanUser['id'] ?? ($deanUser['userId'] ?? ''));
+    $scope = resolveActiveDeanScopeRow($pdo, $deanUserId);
+    if (!$scope) {
+        throw new RuntimeException('Active dean department scope could not be resolved.');
+    }
+
+    $pdo->beginTransaction();
+    try {
+    $before = getFacultyReportAccessSnapshot($pdo, $deanUser);
+    $stmt = $pdo->prepare(
+        'INSERT INTO department_faculty_report_access (
+            department_id, reports_enabled, updated_by_user_id, updated_at
+         ) VALUES (
+            :department_id, :reports_enabled, :updated_by_user_id, NOW()
+         )
+         ON DUPLICATE KEY UPDATE
+            reports_enabled = VALUES(reports_enabled),
+            updated_by_user_id = VALUES(updated_by_user_id),
+            updated_at = NOW()'
+    );
+    $stmt->execute([
+        ':department_id' => (int) $scope['department_id'],
+        ':reports_enabled' => $enabled ? 1 : 0,
+        ':updated_by_user_id' => $deanUserId,
+    ]);
+
+    $after = getFacultyReportAccessSnapshot($pdo, $deanUser);
+    if ((bool) ($before['enabled'] ?? true) !== (bool) ($after['enabled'] ?? true)) {
+            addActivityLogEntrySnapshot($pdo, [
+                'eventCode' => 'admin.faculty_report_access.changed',
+                'action' => $after['enabled'] ? 'Faculty Reports Allowed' : 'Faculty Reports Restricted',
+                'description' => sprintf(
+                    '%s professor evaluation-report access for department %s.',
+                    $after['enabled'] ? 'Allowed' : 'Restricted',
+                    (string) ($scope['department_code'] ?? '')
+                ),
+                'type' => 'system',
+                'userId' => $deanUser['id'] ?? '',
+                'user' => $deanUser['name'] ?? '',
+                'role' => 'dean',
+                'targetType' => 'department',
+                'targetId' => (string) ($scope['department_code'] ?? ''),
+            ]);
+    }
+
+    $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
+
+    return $after;
+}
+
+function buildProfessorEvaluationCountsSnapshot(PDO $pdo, array $actorUser) {
+    $empty = [
+        'semesterId' => '',
+        'received' => 0,
+        'required' => 0,
+        'responseRate' => 0,
+    ];
+    if (bootstrapNormalizePlainToken($actorUser['role'] ?? '') !== 'professor') {
+        return $empty;
+    }
+
+    $professorUserId = resolveStoredUserIdNumber($actorUser['id'] ?? ($actorUser['userId'] ?? ''));
+    $semester = resolveCurrentSemesterRowSnapshot($pdo);
+    if ($professorUserId <= 0 || !$semester) {
+        return $empty;
+    }
+
+    $requiredStmt = $pdo->prepare(
+        'SELECT COUNT(*) AS total
+         FROM student_course_enrollments sce
+         JOIN course_offerings co ON co.id = sce.course_offering_id
+         WHERE co.professor_id = :professor_user_id
+           AND co.semester_id = :semester_id
+           AND co.is_active = 1
+           AND co.deleted_at IS NULL
+           AND sce.status = \'enrolled\''
+    );
+    $requiredStmt->execute([
+        ':professor_user_id' => $professorUserId,
+        ':semester_id' => (int) $semester['id'],
+    ]);
+    $required = (int) (($requiredStmt->fetch()['total'] ?? 0));
+
+    $receivedStmt = $pdo->prepare(
+        'SELECT COUNT(*) AS total
+         FROM (
+            SELECT e.course_offering_id, e.evaluator_user_id
+            FROM evaluations e
+            JOIN evaluation_types et ON et.id = e.evaluation_type_id
+            JOIN course_offerings co ON co.id = e.course_offering_id
+            JOIN student_course_enrollments sce
+              ON sce.course_offering_id = e.course_offering_id
+             AND sce.student_id = e.evaluator_user_id
+             AND sce.status = \'enrolled\'
+            WHERE co.professor_id = :professor_user_id
+              AND e.semester_id = :semester_id
+              AND e.status = \'submitted\' AND (e.credibility_status IS NULL OR e.credibility_status <> \'REJECTED_BY_HR\')
+              AND et.code IN (\'student-professor\', \'student-to-professor\')
+            GROUP BY e.course_offering_id, e.evaluator_user_id
+         ) completed'
+    );
+    $receivedStmt->execute([
+        ':professor_user_id' => $professorUserId,
+        ':semester_id' => (int) $semester['id'],
+    ]);
+    $received = (int) (($receivedStmt->fetch()['total'] ?? 0));
+
+    return [
+        'semesterId' => (string) ($semester['slug'] ?? ''),
+        'received' => $received,
+        'required' => $required,
+        'responseRate' => $required > 0 ? (int) round(($received / $required) * 100) : 0,
     ];
 }
 
@@ -11184,8 +11974,8 @@ function listDeanProgramPeerAssignmentsCurrentSnapshot(PDO $pdo, $deanUserId) {
     ];
 }
 
-function listDeanProgramPeerAssignmentDetailsCurrentSnapshot(PDO $pdo, $deanUserId, $programCode = '') {
-    $semester = resolveCurrentSemesterRowSnapshot($pdo);
+function listDeanProgramPeerAssignmentDetailsCurrentSnapshot(PDO $pdo, $deanUserId, $programCode = '', $semesterValue = '') {
+    $semester = resolvePeerAssignmentSemesterRowSnapshot($pdo, $semesterValue);
     if (!$semester) {
         return [
             'currentSemester' => '',
@@ -11561,8 +12351,8 @@ function listCoordinatorProgramPeerAssignmentsCurrentSnapshot(PDO $pdo, $coordin
     ];
 }
 
-function listCoordinatorProgramPeerAssignmentDetailsCurrentSnapshot(PDO $pdo, $coordinatorUserId, $programCode = '') {
-    $semester = resolveCurrentSemesterRowSnapshot($pdo);
+function listCoordinatorProgramPeerAssignmentDetailsCurrentSnapshot(PDO $pdo, $coordinatorUserId, $programCode = '', $semesterValue = '') {
+    $semester = resolvePeerAssignmentSemesterRowSnapshot($pdo, $semesterValue);
     if (!$semester) {
         return [
             'currentSemester' => '',
@@ -12001,7 +12791,12 @@ function logAdminFlatStateChangeSnapshot(PDO $pdo, array $actorUser, $action, $t
         return null;
     }
 
+    $eventCode = resolveActivityEventCode($action, $type);
+    $targetType = str_starts_with($eventCode, 'user.') ? 'user' : 'configuration';
+    $targetId = sanitizeActivityLogTextValue($entityLabel, 120);
+
     return addActivityLogEntrySnapshot($pdo, [
+        'eventCode' => $eventCode,
         'action' => $action,
         'description' => buildAdminActivityDescription($entityLabel, $changes, 2000),
         'type' => $type,
@@ -12009,6 +12804,8 @@ function logAdminFlatStateChangeSnapshot(PDO $pdo, array $actorUser, $action, $t
         'email' => $actorUser['email'] ?? '',
         'user' => $actorUser['name'] ?? ($actorUser['fullName'] ?? ($actorUser['username'] ?? '')),
         'role' => $actorUser['role'] ?? '',
+        'targetType' => $targetType,
+        'targetId' => $targetId,
     ]);
 }
 
@@ -12016,6 +12813,7 @@ function safeLogAdminFlatStateChangeSnapshot(PDO $pdo, array $actorUser, $action
     try {
         return logAdminFlatStateChangeSnapshot($pdo, $actorUser, $action, $type, $entityLabel, $beforeFlat, $afterFlat);
     } catch (Throwable $error) {
+        naapLogServerException($error, 'audit.admin_change');
         return null;
     }
 }
@@ -12042,10 +12840,6 @@ function buildUserActivityFlatState(array $user, array $options = []) {
         $prefix . ' Position' => (string) ($user['position'] ?? ''),
         $prefix . ' Status' => (string) ($user['status'] ?? ''),
     ];
-
-    if (array_key_exists('passwordMarker', $options)) {
-        $state[$prefix . ' Password'] = (string) $options['passwordMarker'];
-    }
 
     return $state;
 }
@@ -12520,7 +13314,16 @@ function inferActivityLogRow(array $row) {
         }
     }
 
-    $role = strtolower(trim((string) ($row['actor_role'] ?? $row['role'] ?? '')));
+    $role = strtolower(trim((string) (
+        $row['stored_actor_role']
+        ?? $row['actor_role']
+        ?? $row['joined_actor_role']
+        ?? $row['role']
+        ?? ''
+    )));
+    if ($role === '') {
+        $role = strtolower(trim((string) ($row['joined_actor_role'] ?? '')));
+    }
     if ($role === '' || $userId === '') {
         $fallbackRole = '';
         $fallbackUser = '';
@@ -12577,6 +13380,12 @@ function inferActivityLogRow(array $row) {
         'log_id' => $logCode,
         'type' => $type,
         'ip_address' => sanitizeActivityLogTextValue($row['ip_address'] ?? '', 45),
+        'eventCode' => sanitizeActivityLogTextValue($row['event_code'] ?? 'legacy.activity', 80),
+        'targetType' => sanitizeActivityLogTextValue($row['target_type'] ?? '', 60),
+        'targetId' => sanitizeActivityLogTextValue($row['target_id'] ?? '', 120),
+        'relatedAuditId' => sanitizeActivityLogTextValue($row['related_log_code'] ?? '', 30),
+        'requestMethod' => sanitizeActivityLogTextValue($row['request_method'] ?? '', 10),
+        'requestPath' => sanitizeActivityLogTextValue($row['request_path'] ?? '', 255),
     ];
 }
 
@@ -12586,13 +13395,20 @@ function fetchActivityLogRowById(PDO $pdo, $activityLogId) {
             l.id,
             l.user_id,
             l.log_code,
+            l.event_code,
+            l.actor_role AS stored_actor_role,
             l.action,
             l.description,
             l.entry_type,
+            l.target_type,
+            l.target_id,
+            l.related_log_code,
             l.ip_address,
+            l.request_method,
+            l.request_path,
             l.happened_at,
             u.name AS actor_name,
-            r.code AS actor_role
+            r.code AS joined_actor_role
          FROM activity_log l
          LEFT JOIN users u ON u.id = l.user_id
          LEFT JOIN roles r ON r.id = u.role_id
@@ -12604,7 +13420,7 @@ function fetchActivityLogRowById(PDO $pdo, $activityLogId) {
     return $row ?: null;
 }
 
-function searchActivityLogSnapshot(PDO $pdo, array $filters = []) {
+function searchActivityLogSnapshot(PDO $pdo, array $filters = [], $viewerRole = '') {
     $selectedType = normalizeActivityLogEntryType($filters['type'] ?? 'all');
     $fromDate = normalizeActivityLogFilterDate($filters['from'] ?? '');
     $toDate = normalizeActivityLogFilterDate($filters['to'] ?? '');
@@ -12633,7 +13449,11 @@ function searchActivityLogSnapshot(PDO $pdo, array $filters = []) {
             . ' OR LOWER(l.description) LIKE :term'
             . ' OR LOWER(COALESCE(l.log_code, \'\')) LIKE :term'
             . ' OR LOWER(COALESCE(l.entry_type, \'\')) LIKE :term'
-            . ' OR LOWER(COALESCE(l.ip_address, \'\')) LIKE :term'
+            . ' OR LOWER(COALESCE(l.event_code, \'\')) LIKE :term'
+            . ' OR LOWER(COALESCE(l.target_type, \'\')) LIKE :term'
+            . ' OR LOWER(COALESCE(l.target_id, \'\')) LIKE :term'
+            . ' OR LOWER(COALESCE(l.related_log_code, \'\')) LIKE :term'
+            . (strtolower(trim((string) $viewerRole)) === 'admin' ? ' OR LOWER(COALESCE(l.ip_address, \'\')) LIKE :term' : '')
             . ' OR LOWER(COALESCE(r.code, \'\')) LIKE :term'
             . ' OR LOWER(COALESCE(u.name, \'\')) LIKE :term'
             . ' OR LOWER(CASE WHEN l.user_id IS NULL THEN \'\' ELSE CONCAT(\'u\', l.user_id) END) LIKE :term'
@@ -12645,13 +13465,20 @@ function searchActivityLogSnapshot(PDO $pdo, array $filters = []) {
                 l.id,
                 l.user_id,
                 l.log_code,
+                l.event_code,
+                l.actor_role AS stored_actor_role,
                 l.action,
                 l.description,
                 l.entry_type,
+                l.target_type,
+                l.target_id,
+                l.related_log_code,
                 l.ip_address,
+                l.request_method,
+                l.request_path,
                 l.happened_at,
                 u.name AS actor_name,
-                r.code AS actor_role
+                r.code AS joined_actor_role
             FROM activity_log l
             LEFT JOIN users u ON u.id = l.user_id
             LEFT JOIN roles r ON r.id = u.role_id';
@@ -12690,7 +13517,69 @@ function searchActivityLogSnapshot(PDO $pdo, array $filters = []) {
         $rows = array_slice($rows, 0, $limit);
     }
 
+    if (strtolower(trim((string) $viewerRole)) === 'hr') {
+        foreach ($rows as &$row) {
+            $row['ip_address'] = '';
+            $row['requestMethod'] = '';
+            $row['requestPath'] = '';
+        }
+        unset($row);
+    }
+
     return $rows;
+}
+
+function resolveActivityEventCode($action, $type = 'system') {
+    $actionToken = strtolower(trim((string) $action));
+    $known = [
+        'login' => 'auth.login.succeeded',
+        'logout' => 'auth.logout',
+        'evaluation submitted' => 'evaluation.submitted',
+        'peer evaluation submitted' => 'evaluation.submitted',
+        'supervisor evaluation submitted' => 'evaluation.submitted',
+        'suspicious login attempt' => 'auth.login.password_threshold',
+        'suspicious otp attempts' => 'auth.otp.attempt_limit',
+        'authentication rate limit reached' => 'auth.rate_limit.reached',
+        'password reset requested' => 'auth.password_reset.requested',
+        'password reset completed' => 'auth.password_reset.completed',
+        'cross-campus access denied' => 'security.cross_campus_denied',
+        'user created' => 'user.created',
+        'user account created' => 'user.created',
+        'user updated' => 'user.updated',
+        'user deactivated' => 'user.status_changed',
+        'own email updated' => 'user.email_changed',
+        'own password updated' => 'user.password_changed',
+        'users saved' => 'user.updated',
+        'bulk users saved' => 'user.bulk_imported',
+        'questionnaire updated' => 'evaluation.questionnaire.changed',
+        'evaluation periods updated' => 'evaluation.period.changed',
+        'student evaluation reminder configuration updated' => 'evaluation.reminder_config.changed',
+        'semester saved' => 'semester.created',
+        'current semester updated' => 'semester.current_changed',
+        'campus settings updated' => 'admin.campus.changed',
+        'program saved' => 'admin.program.changed',
+        'program archived' => 'admin.program.changed',
+        'subject saved' => 'admin.subject.changed',
+        'subjects imported' => 'admin.subject.changed',
+        'course offering saved' => 'admin.course_offering.changed',
+        'course offerings imported' => 'admin.course_offering.changed',
+        'excess load imported' => 'admin.course_offering.changed',
+        'course offering deactivated' => 'admin.course_offering.changed',
+        'offering students updated' => 'admin.course_offering.changed',
+        'announcement saved' => 'admin.announcement.changed',
+        'faculty reports allowed' => 'admin.faculty_report_access.changed',
+        'faculty reports restricted' => 'admin.faculty_report_access.changed',
+        'system settings updated' => 'admin.system_settings.changed',
+    ];
+    if (isset($known[$actionToken])) {
+        return $known[$actionToken];
+    }
+    $prefix = normalizeActivityLogEntryType($type);
+    if ($prefix === '' || $prefix === 'all') {
+        $prefix = 'system';
+    }
+    $slug = preg_replace('/[^a-z0-9]+/', '.', $actionToken) ?: 'activity';
+    return substr($prefix . '.' . trim($slug, '.'), 0, 80);
 }
 
 function addActivityLogEntrySnapshot(PDO $pdo, array $entry) {
@@ -12714,63 +13603,25 @@ function addActivityLogEntrySnapshot(PDO $pdo, array $entry) {
     }
 
     $actorUserId = resolveActivityLogActorUserId($pdo, $entry);
-    $ipAddress = resolveActivityLogIpAddress();
-
-    $ownsTransaction = !$pdo->inTransaction();
-    if ($ownsTransaction) {
-        $pdo->beginTransaction();
+    $actorRole = strtolower(trim((string) ($entry['role'] ?? $entry['actorRole'] ?? '')));
+    $eventCode = trim((string) ($entry['eventCode'] ?? ''));
+    if ($eventCode === '') {
+        $eventCode = resolveActivityEventCode($action, $entryType);
     }
-    try {
-        $insert = $pdo->prepare(
-            'INSERT INTO activity_log (user_id, action, description, entry_type, ip_address, happened_at)
-             VALUES (:user_id, :action, :description, :entry_type, :ip_address, NOW())'
-        );
+    $targetType = sanitizeActivityLogTextValue($entry['targetType'] ?? '', 60);
+    $targetId = sanitizeActivityLogTextValue($entry['targetId'] ?? '', 120);
 
-        if ($actorUserId !== null && $actorUserId > 0) {
-            $insert->bindValue(':user_id', (int) $actorUserId, PDO::PARAM_INT);
-        } else {
-            $insert->bindValue(':user_id', null, PDO::PARAM_NULL);
-        }
-        $insert->bindValue(':action', $action, PDO::PARAM_STR);
-        $insert->bindValue(':description', $description, PDO::PARAM_STR);
-        $insert->bindValue(':entry_type', $entryType, PDO::PARAM_STR);
-        $insert->bindValue(':ip_address', $ipAddress, PDO::PARAM_STR);
-        $insert->execute();
-
-        $activityLogId = (int) $pdo->lastInsertId();
-        $logCode = generateUniqueActivityLogCode($pdo, $activityLogId);
-        $update = $pdo->prepare('UPDATE activity_log SET log_code = :log_code WHERE id = :id');
-        $update->execute([
-            ':log_code' => $logCode,
-            ':id' => $activityLogId,
-        ]);
-
-        $savedRow = fetchActivityLogRowById($pdo, $activityLogId);
-        if ($ownsTransaction) {
-            $pdo->commit();
-        }
-
-        if (is_array($savedRow)) {
-            return inferActivityLogRow($savedRow);
-        }
-
-        return [
-            'id' => $logCode,
-            'timestamp' => getAuthoritativePhilippineIso8601(),
-            'description' => $description,
-            'action' => $action,
-            'role' => '',
-            'user_id' => '',
-            'log_id' => $logCode,
-            'type' => $entryType,
-            'ip_address' => $ipAddress,
-        ];
-    } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
-        throw $error;
-    }
+    return naapAuditWrite($pdo, [
+        'eventCode' => $eventCode,
+        'action' => $action,
+        'description' => $description,
+        'type' => $entryType,
+        'actor' => ['id' => $actorUserId, 'role' => $actorRole],
+        'targetType' => $targetType,
+        'targetId' => $targetId,
+        'relatedAuditId' => $entry['relatedAuditId'] ?? '',
+        'anonymous' => !empty($entry['anonymous']),
+    ]);
 }
 
 function ensureSystemReportsTable(PDO $pdo) {
@@ -13057,7 +13908,7 @@ function submitSystemReportSnapshot(PDO $pdo, array $payload, array $actorUser =
             'name' => $actorUser['name'] ?? '',
         ]);
     } catch (Throwable $loggingError) {
-        // Activity logging must not prevent the reporter from seeing the primary result.
+        naapLogServerException($loggingError, 'audit.system_report');
     }
 
     return [
@@ -13641,7 +14492,7 @@ function runSystemHealthCheckSnapshot(PDO $pdo, array $actorUser = []) {
             'name' => $actorUser['name'] ?? '',
         ]);
     } catch (Throwable $loggingError) {
-        // Verification evidence must still be returned if activity logging fails.
+        naapLogServerException($loggingError, 'audit.system_health_check');
     }
 
     $rows = listSystemHealthChecksSnapshot($pdo, 1);
@@ -13657,8 +14508,8 @@ function runSystemHealthCheckSnapshot(PDO $pdo, array $actorUser = []) {
     ];
 }
 
-function buildActivityLogSnapshot(PDO $pdo) {
-    return searchActivityLogSnapshot($pdo, ['limit' => 200]);
+function buildActivityLogSnapshot(PDO $pdo, $viewerRole = '') {
+    return searchActivityLogSnapshot($pdo, ['limit' => 200], $viewerRole);
 }
 
 function persistActivityLogSnapshot(PDO $pdo, array $rows) {
@@ -13860,16 +14711,23 @@ function buildAnnouncementsSnapshotForActor(PDO $pdo, array $actorUser) {
 function persistAnnouncementsSnapshot(PDO $pdo, array $items, array $actorUser = []) {
     $before = buildAnnouncementsSnapshot($pdo);
     $items = normalizeAnnouncementsSnapshotList($items, true);
-    setSettingJson($pdo, 'sharedAnnouncements', $items);
-    safeLogAdminFlatStateChangeSnapshot(
-        $pdo,
-        $actorUser,
-        'Announcement Saved',
-        'system',
-        'Announcements',
-        buildAnnouncementsActivityFlatState($before),
-        buildAnnouncementsActivityFlatState($items)
-    );
+    $pdo->beginTransaction();
+    try {
+        setSettingJson($pdo, 'sharedAnnouncements', $items);
+        logAdminFlatStateChangeSnapshot(
+            $pdo,
+            $actorUser,
+            'Announcement Saved',
+            'system',
+            'Announcements',
+            buildAnnouncementsActivityFlatState($before),
+            buildAnnouncementsActivityFlatState($items)
+        );
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
 }
 
 function markAnnouncementsReadSnapshot(PDO $pdo, array $announcementIds, array $actorUser = []) {
@@ -14037,6 +14895,48 @@ function maskLoginSecurityEmail($email) {
     }
 
     return $maskedLocal . '@' . $domain;
+}
+
+function revokeTrustedDevicesSnapshot(PDO $pdo, $userIdToken, $revokedAt = '') {
+    $userId = resolveStoredUserIdNumber($userIdToken);
+    if ($userId <= 0 || !tableExistsInCurrentSchema($pdo, 'trusted_devices')) {
+        return 0;
+    }
+
+    $timestamp = trim((string) $revokedAt);
+    if ($timestamp === '') {
+        $timestamp = (new DateTimeImmutable('@' . getAuthoritativePhilippineUnixTimestamp()))
+            ->setTimezone(getAuthoritativePhilippineTimezone())
+            ->format('Y-m-d H:i:s');
+    }
+    $stmt = $pdo->prepare(
+        'UPDATE trusted_devices
+         SET revoked_at = :revoked_at
+         WHERE user_id = :user_id AND revoked_at IS NULL'
+    );
+    $stmt->execute([
+        ':revoked_at' => $timestamp,
+        ':user_id' => $userId,
+    ]);
+    $revokedCount = $stmt->rowCount();
+
+    if (tableExistsInCurrentSchema($pdo, 'login_otp_challenges')) {
+        $invalidate = $pdo->prepare(
+            'UPDATE login_otp_challenges
+             SET invalidated_at = :invalidated_at
+             WHERE user_id = :user_id AND consumed_at IS NULL AND invalidated_at IS NULL'
+        );
+        $invalidate->execute([':invalidated_at' => $timestamp, ':user_id' => $userId]);
+    }
+    if (tableExistsInCurrentSchema($pdo, 'user_auth_security')) {
+        $clearFailures = $pdo->prepare(
+            'UPDATE user_auth_security
+             SET failed_password_count = 0, failed_login_otp_required = 0
+             WHERE user_id = :user_id'
+        );
+        $clearFailures->execute([':user_id' => $userId]);
+    }
+    return $revokedCount;
 }
 
 function getCredentialDistributorOptionalEnvValue(string $name): ?string
@@ -14825,6 +15725,7 @@ function bulkDistributeCredentialsSnapshot(PDO $pdo, array $rows, array $actorUs
                 ':password' => $hashedPassword,
                 ':id' => (int) $user['id'],
             ]);
+            revokeTrustedDevicesSnapshot($pdo, (int) $user['id']);
 
             credentialMailerSendCredentials($config, [
                 'recipientEmail' => (string) $user['email'],
@@ -14866,7 +15767,7 @@ function bulkDistributeCredentialsSnapshot(PDO $pdo, array $rows, array $actorUs
             'email' => $actorUser['email'] ?? '',
         ]);
     } catch (Throwable $error) {
-        // Logging should not block primary response.
+        naapLogServerException($error, 'audit.credential_distribution');
     }
 
     return [
@@ -15049,7 +15950,7 @@ function sendTestSmtpEmailSnapshot(PDO $pdo, $recipientEmail, $subject, $message
                 'email' => $actorUser['email'] ?? '',
             ]);
         } catch (Throwable $loggingError) {
-            // Logging should not block primary response.
+            naapLogServerException($loggingError, 'audit.smtp_test_failure');
         }
 
         throw new RuntimeException($error->getMessage());
@@ -15064,7 +15965,7 @@ function sendTestSmtpEmailSnapshot(PDO $pdo, $recipientEmail, $subject, $message
             'email' => $actorUser['email'] ?? '',
         ]);
     } catch (Throwable $loggingError) {
-        // Logging should not block primary response.
+        naapLogServerException($loggingError, 'audit.smtp_test_success');
     }
 
     return [
@@ -15120,7 +16021,7 @@ function sendBulkTestGmailSnapshot(PDO $pdo, $subject, $message, array $actorUse
                 'email' => $actorUser['email'] ?? '',
             ]);
         } catch (Throwable $loggingError) {
-            // Logging should not block primary response.
+            naapLogServerException($loggingError, 'audit.bulk_test_email_failure');
         }
 
         return [
@@ -15163,7 +16064,7 @@ function sendBulkTestGmailSnapshot(PDO $pdo, $subject, $message, array $actorUse
             'email' => $actorUser['email'] ?? '',
         ]);
     } catch (Throwable $error) {
-        // Logging should not block primary response.
+        naapLogServerException($error, 'audit.bulk_test_email');
     }
 
     return [
@@ -15431,7 +16332,7 @@ function logStudentEvaluationReminderJobSnapshot(PDO $pdo, $description) {
             'type' => 'system',
         ]);
     } catch (Throwable $loggingError) {
-        // Logging should not block the reminder job.
+        naapLogServerException($loggingError, 'audit.student_reminder_job');
     }
 }
 
@@ -15491,6 +16392,19 @@ function runStudentEvaluationReminderJobSnapshot(
         logStudentEvaluationReminderJobSnapshot($pdo, $reason . ' Date=' . $today . '.');
         return [
             'status' => 'closed',
+            'reason' => $reason,
+            'summary' => $summary,
+            'failures' => [],
+        ];
+    }
+
+    // Allow the first scheduler run at or after the configured local time,
+    // including a delayed run. Existing delivery claims prevent duplicate sends.
+    if ($now->format('H:i') < $reminderConfig['sendTime']) {
+        $reason = 'Waiting until ' . $reminderConfig['sendTime'] . ' ' . $timezone->getName() . '.';
+        saveStudentEvaluationReminderJobStateSnapshot($pdo, $now, 'not_due_yet', $summary, [], $reason);
+        return [
+            'status' => 'not_due_yet',
             'reason' => $reason,
             'summary' => $summary,
             'failures' => [],
@@ -16400,6 +17314,7 @@ function normalizeFacultyPaperSnapshotRow(array $paper) {
     $paper['approval_date_signed'] = sanitizeFacultyPaperApprovalSnapshotText($paper['approval_date_signed'] ?? '', 80);
     $paper['section_c_saved_by_role'] = strtolower(trim((string) ($paper['section_c_saved_by_role'] ?? '')));
     $paper['section_c_saved_by_user_id'] = trim((string) ($paper['section_c_saved_by_user_id'] ?? ''));
+    $paper['section_c_ai_audit_code'] = sanitizeFacultyPaperApprovalSnapshotText($paper['section_c_ai_audit_code'] ?? '', 30);
     $paper['latest_file_path'] = trim((string) ($paper['latest_file_path'] ?? ''));
     $paper['latest_file_name'] = trim((string) ($paper['latest_file_name'] ?? ''));
     $paper['latest_file_created_at'] = $paper['latest_file_created_at'] ?? null;
@@ -16546,6 +17461,7 @@ function buildFacultyAcknowledgementPaperSqlRecord(array $paper) {
         'section_c_saved_at' => facultyPaperSqlDateTimeOrNull($paper['section_c_saved_at'] ?? null),
         'section_c_saved_by_role' => strtolower(trim((string) ($paper['section_c_saved_by_role'] ?? ''))),
         'section_c_saved_by_user_id' => resolveStoredUserIdNumber($sectionSavedByToken),
+        'section_c_ai_audit_code' => sanitizeFacultyPaperApprovalSnapshotText($paper['section_c_ai_audit_code'] ?? '', 30),
         'section_c_saved_by_user_token' => $sectionSavedByToken,
         'approval_auto_fill' => normalizeFacultyPaperApprovalAutoFillSnapshotValue($paper['approval_auto_fill'] ?? false) ? 1 : 0,
         'approval_names_auto_fill' => normalizeFacultyPaperApprovalAutoFillSnapshotValue($paper['approval_names_auto_fill'] ?? false) ? 1 : 0,
@@ -16627,6 +17543,7 @@ function ensureFacultyAcknowledgementPapersSchema(PDO $pdo) {
             section_c_saved_at DATETIME DEFAULT NULL,
             section_c_saved_by_role VARCHAR(30) NOT NULL DEFAULT \'\',
             section_c_saved_by_user_id BIGINT UNSIGNED DEFAULT NULL,
+            section_c_ai_audit_code VARCHAR(30) DEFAULT NULL,
             section_c_saved_by_user_token VARCHAR(80) NOT NULL DEFAULT \'\',
             approval_auto_fill TINYINT(1) NOT NULL DEFAULT 0,
             approval_names_auto_fill TINYINT(1) NOT NULL DEFAULT 0,
@@ -16652,7 +17569,8 @@ function ensureFacultyAcknowledgementPapersSchema(PDO $pdo) {
             KEY idx_faculty_ack_papers_professor_semester_load (professor_user_id, semester_slug, load_type),
             KEY idx_faculty_ack_papers_recipient_status (recipient_user_id, status),
             KEY idx_faculty_ack_papers_status (status),
-            KEY idx_faculty_ack_papers_semester (semester_slug)
+            KEY idx_faculty_ack_papers_semester (semester_slug),
+            KEY idx_faculty_ack_papers_ai_audit (section_c_ai_audit_code)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
     );
 }
@@ -16710,6 +17628,7 @@ function facultyPaperSqlRowToSnapshot(array $row) {
         'section_c_saved_at' => facultyPaperSnapshotDateTime($row['section_c_saved_at'] ?? ''),
         'section_c_saved_by_role' => trim((string) ($row['section_c_saved_by_role'] ?? '')),
         'section_c_saved_by_user_id' => $sectionSavedByUserId > 0 ? ('u' . $sectionSavedByUserId) : trim((string) ($row['section_c_saved_by_user_token'] ?? '')),
+        'section_c_ai_audit_code' => trim((string) ($row['section_c_ai_audit_code'] ?? '')),
         'approval_auto_fill' => !empty($row['approval_auto_fill']),
         'approval_names_auto_fill' => !empty($row['approval_names_auto_fill']),
         'approval_dates_auto_fill' => !empty($row['approval_dates_auto_fill']),
@@ -16824,6 +17743,33 @@ function findFacultyAcknowledgementPaperSnapshotByCode(PDO $pdo, $paperCode, $ru
     $stmt->execute([':paper_code' => $code]);
     $row = $stmt->fetch();
     return $row ? facultyPaperSqlRowToSnapshot($row) : null;
+}
+
+function findValidatedFacultySectionCAiAuditReceipt(PDO $pdo, $auditCode, $actorUserId, $paperCode) {
+    $code = sanitizeFacultyPaperApprovalSnapshotText($auditCode, 30);
+    $paper = sanitizeFacultyPaperApprovalSnapshotText($paperCode, 80);
+    $userId = resolveStoredUserIdNumber($actorUserId);
+    if ($code === '' || $paper === '' || $userId <= 0) {
+        return null;
+    }
+
+    $stmt = $pdo->prepare(
+        "SELECT log_code
+         FROM activity_log
+         WHERE log_code = :log_code
+           AND event_code = 'ai.section_c.generated'
+           AND user_id = :user_id
+           AND target_type = 'faculty_paper'
+           AND target_id = :paper_code
+         LIMIT 1"
+    );
+    $stmt->execute([
+        ':log_code' => $code,
+        ':user_id' => $userId,
+        ':paper_code' => $paper,
+    ]);
+    $row = $stmt->fetch();
+    return $row ? trim((string) ($row['log_code'] ?? '')) : null;
 }
 
 function buildFacultyAcknowledgementPaperSqlFilterParts(array $filters) {
@@ -17699,8 +18645,16 @@ function bootstrapOfferingMapToIds(array $offeringMap) {
 function buildEvaluationsSnapshotForActor(PDO $pdo, array $ctx, array $allowedUserTokens, array $allowedOfferingIds, array $filters = []) {
     $role = bootstrapNormalizePlainToken($ctx['role'] ?? '');
     $actorUserId = (int) ($ctx['numericUserId'] ?? 0);
+    $professorReportAccessEnabled = true;
     $tableFilters = $filters;
-    unset($tableFilters['_authorizedCampusId'], $tableFilters['_authorizedCampusSlug']);
+    unset(
+        $tableFilters['_authorizedCampusId'],
+        $tableFilters['_authorizedCampusSlug'],
+        $tableFilters['includeBehaviorMeta'],
+        $tableFilters['_includeBehaviorMeta'],
+        $tableFilters['_includeRejected']
+    );
+    $tableFilters['_includeBehaviorMeta'] = $role === 'hr';
     $campusContext = buildCampusAuthorizationContext($pdo, is_array($ctx['user'] ?? null) ? $ctx['user'] : []);
     $requestedCampusValues = campusAuthorizationRequestedCampusValues($filters);
     $requestedCampus = count($requestedCampusValues) > 0 ? $requestedCampusValues[0] : '';
@@ -17722,7 +18676,16 @@ function buildEvaluationsSnapshotForActor(PDO $pdo, array $ctx, array $allowedUs
         if ($actorUserId <= 0) {
             $tableFilters['forceEmpty'] = true;
         } else {
-            $tableFilters['involvedUserId'] = $actorUserId;
+            $professorReportAccessEnabled = isProfessorFacultyReportAccessEnabled(
+                $pdo,
+                is_array($ctx['user'] ?? null) ? $ctx['user'] : []
+            );
+            if ($professorReportAccessEnabled) {
+                $tableFilters['involvedUserId'] = $actorUserId;
+            } else {
+                $tableFilters['evaluatorUserId'] = $actorUserId;
+                unset($tableFilters['involvedUserId'], $tableFilters['evaluateeUserId']);
+            }
         }
     } elseif ($role === 'dean' || $role === 'procoor') {
         $tableFilters['involvedUserId'] = $actorUserId;
@@ -17743,9 +18706,20 @@ function buildEvaluationsSnapshotForActor(PDO $pdo, array $ctx, array $allowedUs
     $merged = buildEvaluationsSnapshotWithLegacy($pdo, $tableQueryFilters, $withoutPaging);
     $filtered = filterBootstrapEvaluationsForActor($merged, $ctx, $allowedUserTokens, $allowedOfferingIds);
 
+    if ($role === 'professor' && !$professorReportAccessEnabled) {
+        $actorToken = bootstrapNormalizeUserToken($ctx['userId'] ?? '');
+        $filtered = array_values(array_filter($filtered, function ($evaluation) use ($actorToken) {
+            return is_array($evaluation)
+                && $actorToken !== ''
+                && bootstrapRowHasUserToken($evaluation, ['evaluatorUserId'], $actorToken);
+        }));
+    }
+
     if (in_array($role, ['admin', 'hr', 'vpaa', 'osa'], true)) {
         $filtered = filterEvaluationSnapshotsByListFilters($merged, $tableFilters);
     }
+
+    $filtered = applyEvaluationBehaviorMetadataVisibility($filtered, $role === 'hr');
 
     if ($canUseSqlPaging) {
         return array_slice(array_values($filtered), 0, $limit);
@@ -17788,6 +18762,13 @@ function buildAdminDashboardEmptyEvaluationReport() {
         'averageRating' => 0,
         'totalEvaluations' => 0,
         'evaluatedCount' => 0,
+        'registered' => 0,
+        'scorableRegistered' => 0,
+        'excludedRegistered' => 0,
+        'registeredClassCount' => 0,
+        'scorableClassCount' => 0,
+        'excludedClassCount' => 0,
+        'partial' => false,
     ];
 }
 
@@ -17872,10 +18853,10 @@ function buildAdminDashboardStudentRegistrationSnapshot(PDO $pdo, $semesterId) {
 
     $total = fetchAdminDashboardScalar(
         $pdo,
-        'SELECT COUNT(*) AS total
+        'SELECT COUNT(DISTINCT sce.student_id, sce.course_offering_id) AS total
          FROM student_course_enrollments sce
          JOIN course_offerings co ON co.id = sce.course_offering_id
-         WHERE sce.status = \'enrolled\'
+         WHERE LOWER(TRIM(sce.status)) IN (\'enrolled\', \'completed\')
            AND co.is_active = 1
            AND co.semester_id = :semester_id',
         [':semester_id' => $semesterId]
@@ -17890,11 +18871,18 @@ function buildAdminDashboardStudentRegistrationSnapshot(PDO $pdo, $semesterId) {
          JOIN student_course_enrollments sce
            ON sce.student_id = e.evaluator_user_id
           AND sce.course_offering_id = e.course_offering_id
-          AND sce.status = \'enrolled\'
+          AND LOWER(TRIM(sce.status)) IN (\'enrolled\', \'completed\')
          WHERE e.semester_id = :semester_id
-           AND e.status = \'submitted\'
+           AND e.status = \'submitted\' AND (e.credibility_status IS NULL OR e.credibility_status <> \'REJECTED_BY_HR\')
            AND co.is_active = 1
-           AND et.code IN (\'student-professor\', \'student-to-professor\', \'student\')',
+           AND et.code IN (\'student-professor\', \'student-to-professor\', \'student\')
+           AND e.evaluatee_user_id = co.professor_id
+           AND EXISTS (
+               SELECT 1
+               FROM evaluation_responses valid_response
+               WHERE valid_response.evaluation_id = e.id
+                 AND valid_response.rating_value BETWEEN 1 AND 5
+           )',
         [':semester_id' => $semesterId]
     );
 
@@ -17906,7 +18894,7 @@ function buildAdminDashboardStudentRegistrationSnapshot(PDO $pdo, $semesterId) {
          JOIN student_course_enrollments sce
            ON sce.student_id = d.student_user_id
           AND sce.course_offering_id = d.course_offering_id
-          AND sce.status = \'enrolled\'
+          AND LOWER(TRIM(sce.status)) IN (\'enrolled\', \'completed\')
          WHERE d.semester_id = :semester_id
            AND d.student_user_id IS NOT NULL
            AND d.course_offering_id IS NOT NULL
@@ -17919,8 +18907,15 @@ function buildAdminDashboardStudentRegistrationSnapshot(PDO $pdo, $semesterId) {
                WHERE e.semester_id = d.semester_id
                  AND e.evaluator_user_id = d.student_user_id
                  AND e.course_offering_id = d.course_offering_id
-                 AND e.status = \'submitted\'
+                 AND e.status = \'submitted\' AND (e.credibility_status IS NULL OR e.credibility_status <> \'REJECTED_BY_HR\')
                  AND et.code IN (\'student-professor\', \'student-to-professor\', \'student\')
+                 AND e.evaluatee_user_id = co.professor_id
+                 AND EXISTS (
+                     SELECT 1
+                     FROM evaluation_responses valid_response
+                     WHERE valid_response.evaluation_id = e.id
+                       AND valid_response.rating_value BETWEEN 1 AND 5
+                 )
                LIMIT 1
            )',
         [':semester_id' => $semesterId]
@@ -17960,12 +18955,20 @@ function countAdminDashboardCompletedStudentsForSemester(PDO $pdo, $semesterId) 
               AND e.evaluator_user_id = sce.student_id
               AND e.course_offering_id = sce.course_offering_id
               AND e.status = \'submitted\'
+              AND (e.credibility_status IS NULL OR e.credibility_status <> \'REJECTED_BY_HR\')
               AND e.evaluation_type_id IN (
                   SELECT id
                   FROM evaluation_types
                   WHERE code IN (\'student-professor\', \'student-to-professor\', \'student\')
               )
-             WHERE sce.status = \'enrolled\'
+              AND e.evaluatee_user_id = co.professor_id
+              AND EXISTS (
+                  SELECT 1
+                  FROM evaluation_responses valid_response
+                  WHERE valid_response.evaluation_id = e.id
+                    AND valid_response.rating_value BETWEEN 1 AND 5
+              )
+             WHERE LOWER(TRIM(sce.status)) IN (\'enrolled\', \'completed\')
                AND co.is_active = 1
                AND co.semester_id = :semester_id
              GROUP BY sce.student_id
@@ -18038,7 +19041,7 @@ function buildAdminDashboardEvaluationReportsSnapshot(PDO $pdo, $semesterId) {
            ON er.evaluation_id = e.id
           AND er.rating_value IS NOT NULL
          WHERE e.semester_id = :semester_id
-           AND e.status = \'submitted\'
+           AND e.status = \'submitted\' AND (e.credibility_status IS NULL OR e.credibility_status <> \'REJECTED_BY_HR\')
          GROUP BY et.code'
     );
     $summaryStmt->execute([':semester_id' => $semesterId]);
@@ -18053,6 +19056,117 @@ function buildAdminDashboardEvaluationReportsSnapshot(PDO $pdo, $semesterId) {
         $reports[$key]['averageRating'] = round((float) ($row['average_rating'] ?? 0), 2);
     }
 
+    $studentSetStmt = $pdo->prepare(
+        'SELECT
+            co.id AS course_offering_id,
+            co.professor_id,
+            COALESCE(enrollment_totals.registered_students, 0) AS registered_students,
+            evaluation_totals.class_average,
+            COALESCE(evaluation_totals.completed_evaluations, 0) AS completed_evaluations
+         FROM course_offerings co
+         LEFT JOIN (
+             SELECT sce.course_offering_id, COUNT(DISTINCT sce.student_id) AS registered_students
+             FROM student_course_enrollments sce
+             WHERE LOWER(TRIM(sce.status)) IN (\'enrolled\', \'completed\')
+             GROUP BY sce.course_offering_id
+         ) enrollment_totals ON enrollment_totals.course_offering_id = co.id
+         LEFT JOIN (
+             SELECT
+                 questionnaire_averages.course_offering_id,
+                 AVG(questionnaire_averages.questionnaire_average) AS class_average,
+                 COUNT(*) AS completed_evaluations
+             FROM (
+                 SELECT e.id, e.course_offering_id, AVG(er.rating_value) AS questionnaire_average
+                 FROM evaluations e
+                 JOIN evaluation_types et ON et.id = e.evaluation_type_id
+                 JOIN course_offerings evaluation_offering ON evaluation_offering.id = e.course_offering_id
+                 JOIN evaluation_responses er ON er.evaluation_id = e.id
+                 JOIN student_course_enrollments eligible
+                   ON eligible.course_offering_id = e.course_offering_id
+                  AND eligible.student_id = e.evaluator_user_id
+                  AND LOWER(TRIM(eligible.status)) IN (\'enrolled\', \'completed\')
+                 WHERE e.semester_id = :student_set_semester_id
+                   AND e.status = \'submitted\' AND (e.credibility_status IS NULL OR e.credibility_status <> \'REJECTED_BY_HR\')
+                   AND et.code IN (\'student-professor\', \'student-to-professor\', \'student\')
+                   AND e.evaluatee_user_id = evaluation_offering.professor_id
+                   AND er.rating_value BETWEEN 1 AND 5
+                   AND NOT EXISTS (
+                       SELECT 1
+                       FROM evaluations newer
+                       JOIN evaluation_types newer_type ON newer_type.id = newer.evaluation_type_id
+                       WHERE newer.semester_id = e.semester_id
+                         AND newer.course_offering_id = e.course_offering_id
+                         AND newer.evaluator_user_id = e.evaluator_user_id
+                         AND newer.status = \'submitted\' AND (newer.credibility_status IS NULL OR newer.credibility_status <> \'REJECTED_BY_HR\')
+                         AND newer_type.code IN (\'student-professor\', \'student-to-professor\', \'student\')
+                         AND EXISTS (
+                             SELECT 1
+                             FROM evaluation_responses newer_response
+                             WHERE newer_response.evaluation_id = newer.id
+                               AND newer_response.rating_value BETWEEN 1 AND 5
+                         )
+                         AND (
+                             newer.submitted_at > e.submitted_at
+                             OR (newer.submitted_at = e.submitted_at AND newer.id > e.id)
+                         )
+                   )
+                 GROUP BY e.id, e.course_offering_id
+             ) questionnaire_averages
+             GROUP BY questionnaire_averages.course_offering_id
+         ) evaluation_totals ON evaluation_totals.course_offering_id = co.id
+         WHERE co.semester_id = :course_offering_semester_id
+           AND co.is_active = 1'
+    );
+    $studentSetStmt->execute([
+        ':student_set_semester_id' => $semesterId,
+        ':course_offering_semester_id' => $semesterId,
+    ]);
+    $studentRegistered = 0;
+    $studentCompleted = 0;
+    $studentEvaluatedProfessors = [];
+    $studentWeightedScore = 0.0;
+    $studentScorableRegistered = 0;
+    $studentExcludedRegistered = 0;
+    $studentRegisteredClassCount = 0;
+    $studentScorableClassCount = 0;
+    $studentExcludedClassCount = 0;
+    foreach ($studentSetStmt->fetchAll() as $row) {
+        $registered = max(0, (int)($row['registered_students'] ?? 0));
+        if ($registered <= 0) {
+            continue;
+        }
+        $studentRegistered += $registered;
+        $studentRegisteredClassCount++;
+        $completed = max(0, (int)($row['completed_evaluations'] ?? 0));
+        $studentCompleted += $completed;
+        if ($completed > 0) {
+            $professorId = (int)($row['professor_id'] ?? 0);
+            if ($professorId > 0) {
+                $studentEvaluatedProfessors[$professorId] = true;
+            }
+        }
+        if (!is_numeric($row['class_average'] ?? null)) {
+            $studentExcludedRegistered += $registered;
+            $studentExcludedClassCount++;
+            continue;
+        }
+        $studentWeightedScore += $registered * (float)$row['class_average'];
+        $studentScorableRegistered += $registered;
+        $studentScorableClassCount++;
+    }
+    $reports['studentToProfessor']['averageRating'] = $studentScorableRegistered > 0
+        ? round($studentWeightedScore / $studentScorableRegistered, 2)
+        : null;
+    $reports['studentToProfessor']['totalEvaluations'] = $studentCompleted;
+    $reports['studentToProfessor']['evaluatedCount'] = count($studentEvaluatedProfessors);
+    $reports['studentToProfessor']['registered'] = $studentRegistered;
+    $reports['studentToProfessor']['scorableRegistered'] = $studentScorableRegistered;
+    $reports['studentToProfessor']['excludedRegistered'] = $studentExcludedRegistered;
+    $reports['studentToProfessor']['registeredClassCount'] = $studentRegisteredClassCount;
+    $reports['studentToProfessor']['scorableClassCount'] = $studentScorableClassCount;
+    $reports['studentToProfessor']['excludedClassCount'] = $studentExcludedClassCount;
+    $reports['studentToProfessor']['partial'] = $studentScorableRegistered > 0 && $studentExcludedClassCount > 0;
+
     $ratingStmt = $pdo->prepare(
         'SELECT type_code, rating_bucket, COUNT(*) AS total
          FROM (
@@ -18066,7 +19180,7 @@ function buildAdminDashboardEvaluationReportsSnapshot(PDO $pdo, $semesterId) {
                ON er.evaluation_id = e.id
               AND er.rating_value IS NOT NULL
              WHERE e.semester_id = :semester_id
-               AND e.status = \'submitted\'
+               AND e.status = \'submitted\' AND (e.credibility_status IS NULL OR e.credibility_status <> \'REJECTED_BY_HR\')
              GROUP BY e.id, et.code
          ) evaluation_averages
          GROUP BY type_code, rating_bucket'
@@ -18101,7 +19215,7 @@ function buildAdminDashboardEvaluationReportsSnapshot(PDO $pdo, $semesterId) {
          LEFT JOIN questions q ON q.id = er.question_id
          LEFT JOIN questionnaire_sections qs ON qs.id = q.section_id
          WHERE e.semester_id = :semester_id
-           AND e.status = \'submitted\'
+           AND e.status = \'submitted\' AND (e.credibility_status IS NULL OR e.credibility_status <> \'REJECTED_BY_HR\')
          GROUP BY et.code, category
          ORDER BY type_code ASC, section_order ASC, question_order ASC, category ASC'
     );
@@ -18233,6 +19347,12 @@ function buildBootstrapPayload(PDO $pdo, $currentUserInput = '') {
         $profileData = getUserProfileData($pdo, $currentUserId);
         $profilePhoto = getUserProfilePhoto($pdo, $currentUserId);
     }
+    $facultyReportAccess = in_array($role, ['dean', 'professor'], true)
+        ? getFacultyReportAccessSnapshot($pdo, is_array($ctx['user'] ?? null) ? $ctx['user'] : [])
+        : ['enabled' => true, 'departmentCode' => '', 'updatedAt' => ''];
+    $professorEvaluationCounts = $role === 'professor'
+        ? buildProfessorEvaluationCountsSnapshot($pdo, is_array($ctx['user'] ?? null) ? $ctx['user'] : [])
+        : ['semesterId' => '', 'received' => 0, 'required' => 0, 'responseRate' => 0];
 
     return [
         'users' => $scopedUsers,
@@ -18247,7 +19367,7 @@ function buildBootstrapPayload(PDO $pdo, $currentUserInput = '') {
         ],
         'studentDataPrivacyConsents' => buildStudentDataPrivacyConsentsSnapshot($pdo, $currentUserId),
         'questionnaires' => buildQuestionnairesSnapshot($pdo),
-        'activityLog' => in_array($ctx['role'], ['admin', 'hr'], true) ? buildActivityLogSnapshot($pdo) : [],
+        'activityLog' => in_array($ctx['role'], ['admin', 'hr'], true) ? buildActivityLogSnapshot($pdo, $ctx['role']) : [],
         'announcements' => buildAnnouncementsSnapshotForActor($pdo, $ctx['user']),
         'settings' => buildSettingsSnapshot($pdo),
         'studentEvaluationReminderConfig' => in_array($role, ['admin', 'hr'], true)
@@ -18269,5 +19389,7 @@ function buildBootstrapPayload(PDO $pdo, $currentUserInput = '') {
         'currentUserProfileImage' => '',
         'currentUserProfileImageUrl' => $profilePhoto,
         'currentUserProfilePhoto' => $profilePhoto,
+        'facultyReportAccess' => $facultyReportAccess,
+        'professorEvaluationCounts' => $professorEvaluationCounts,
     ];
 }

@@ -38,7 +38,7 @@ professorReportsAssert(
     'Removing the table also removed an Evaluation Reports chart.'
 );
 professorReportsAssert(
-    str_contains($html, 'profesorpanel.js?v=20260923b'),
+    str_contains($html, 'profesorpanel.js?v=20261004a'),
     'The updated professor panel script is not cache-busted.'
 );
 

@@ -193,8 +193,12 @@ function facultyXlsxBuildSasrSheetXml(array $paperData): string
             facultyXlsxStringCell(2, $rowNumber, strtoupper((string)($row['course_code'] ?? '')), 6),
             facultyXlsxStringCell(3, $rowNumber, strtoupper((string)($row['year_section'] ?? '')), 6),
             facultyXlsxNumberCell(4, $rowNumber, (int)($row['student_count'] ?? 0), 4),
-            facultyXlsxNumberCell(5, $rowNumber, (float)($row['average_set_rating'] ?? 0), 5),
-            facultyXlsxNumberCell(6, $rowNumber, (float)($row['weighted_set_score'] ?? 0), 5),
+            is_numeric($row['average_set_rating'] ?? null)
+                ? facultyXlsxNumberCell(5, $rowNumber, (float)$row['average_set_rating'], 5)
+                : facultyXlsxStringCell(5, $rowNumber, 'N/A', 5),
+            is_numeric($row['weighted_set_score'] ?? null)
+                ? facultyXlsxNumberCell(6, $rowNumber, (float)$row['weighted_set_score'], 5)
+                : facultyXlsxStringCell(6, $rowNumber, 'N/A', 5),
         ]);
         $rowNumber += 1;
     }
@@ -204,8 +208,19 @@ function facultyXlsxBuildSasrSheetXml(array $paperData): string
         facultyXlsxStringCell(1, $totalRow, 'TOTAL', 7),
         facultyXlsxNumberCell(4, $totalRow, (int)$summary['total_students'], 7),
         facultyXlsxStringCell(5, $totalRow, 'TOTAL', 7),
-        facultyXlsxNumberCell(6, $totalRow, (float)$summary['total_weighted_score'], 8),
+        is_numeric($summary['total_weighted_score'] ?? null)
+            ? facultyXlsxNumberCell(6, $totalRow, (float)$summary['total_weighted_score'], 8)
+            : facultyXlsxStringCell(6, $totalRow, 'N/A', 8),
     ]);
+
+    $displayNote = trim((string)($summary['display_note'] ?? ''));
+    $noteRow = null;
+    if ($displayNote !== '') {
+        $noteRow = $totalRow + 1;
+        $sheetRows[] = facultyXlsxRow($noteRow, [
+            facultyXlsxStringCell(1, $noteRow, $displayNote, 6),
+        ]);
+    }
 
     $ratingHeaderRow = $totalRow + 3;
     $ratingValueRow = $ratingHeaderRow + 1;
@@ -215,7 +230,9 @@ function facultyXlsxBuildSasrSheetXml(array $paperData): string
     ]);
     $sheetRows[] = facultyXlsxRow($ratingValueRow, [
         facultyXlsxStringCell(1, $ratingValueRow, 'OVERALL RATING', 7),
-        facultyXlsxNumberCell(3, $ratingValueRow, (float)$sectionCSummary['set_rating'], 8),
+        is_numeric($sectionCSummary['set_rating'] ?? null)
+            ? facultyXlsxNumberCell(3, $ratingValueRow, (float)$sectionCSummary['set_rating'], 8)
+            : facultyXlsxStringCell(3, $ratingValueRow, 'N/A', 8),
         facultyXlsxNumberCell(5, $ratingValueRow, (float)$sectionCSummary['sef_rating'], 8),
     ]);
 
@@ -236,6 +253,9 @@ function facultyXlsxBuildSasrSheetXml(array $paperData): string
         'C' . $ratingValueRow . ':D' . $ratingValueRow,
         'E' . $ratingValueRow . ':F' . $ratingValueRow,
     ];
+    if ($noteRow !== null) {
+        $mergeRanges[] = 'A' . $noteRow . ':F' . $noteRow;
+    }
 
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
@@ -261,6 +281,7 @@ function facultyXlsxBuildOverallSasrSheetXml(array $reportData): string
 {
     $rows = array_values(is_array($reportData['rows'] ?? null) ? $reportData['rows'] : []);
     $sheetRows = [];
+    $partialNotes = [];
 
     $sheetRows[] = facultyXlsxRow(1, [
         facultyXlsxStringCell(1, 1, 'OVERALL SASR', 1),
@@ -301,9 +322,26 @@ function facultyXlsxBuildOverallSasrSheetXml(array $reportData): string
             facultyXlsxStringCell(2, $rowNumber, strtoupper((string)($row['employee_id'] ?? '')), 6),
             facultyXlsxStringCell(3, $rowNumber, strtoupper((string)($row['faculty_name'] ?? '')), 6),
             facultyXlsxStringCell(4, $rowNumber, strtoupper((string)($row['department_program'] ?? '')), 6),
-            facultyXlsxNumberCell(5, $rowNumber, (float)($row['set_rating'] ?? 0), 5),
+            is_numeric($row['set_rating'] ?? null)
+                ? facultyXlsxNumberCell(5, $rowNumber, (float)$row['set_rating'], 5)
+                : facultyXlsxStringCell(5, $rowNumber, 'N/A', 5),
             facultyXlsxNumberCell(6, $rowNumber, (float)($row['sef_rating'] ?? 0), 5),
         ]);
+        if (!empty($row['partial_result'])) {
+            $employeeId = trim((string)($row['employee_id'] ?? ''));
+            $facultyName = trim((string)($row['faculty_name'] ?? 'Professor'));
+            $note = trim((string)($row['calculation_note'] ?? ''));
+            if ($note === '') {
+                $note = sprintf(
+                    'Available SET excludes %d %s with no valid responses (%d registered %s).',
+                    max(0, (int)($row['excluded_class_count'] ?? 0)),
+                    (int)($row['excluded_class_count'] ?? 0) === 1 ? 'class' : 'classes',
+                    max(0, (int)($row['excluded_students'] ?? 0)),
+                    (int)($row['excluded_students'] ?? 0) === 1 ? 'student' : 'students'
+                );
+            }
+            $partialNotes[] = trim(($employeeId !== '' ? $employeeId . ' - ' : '') . $facultyName . ': ' . $note);
+        }
         $rowNumber += 1;
     }
 
@@ -324,6 +362,22 @@ function facultyXlsxBuildOverallSasrSheetXml(array $reportData): string
         $lastRow = 10;
     } else {
         $lastRow = $rowNumber - 1;
+    }
+
+    if (count($partialNotes) > 0) {
+        $noteRow = $lastRow + 2;
+        $sheetRows[] = facultyXlsxRow($noteRow, [
+            facultyXlsxStringCell(1, $noteRow, 'PARTIAL SET NOTES', 2),
+        ]);
+        $mergeRanges[] = 'A' . $noteRow . ':F' . $noteRow;
+        foreach ($partialNotes as $partialNote) {
+            $noteRow++;
+            $sheetRows[] = facultyXlsxRow($noteRow, [
+                facultyXlsxStringCell(1, $noteRow, $partialNote, 6),
+            ]);
+            $mergeRanges[] = 'A' . $noteRow . ':F' . $noteRow;
+        }
+        $lastRow = $noteRow;
     }
 
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'

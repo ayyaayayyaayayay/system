@@ -37,6 +37,23 @@ function reminderCreateFixture(): PDO
             setting_key TEXT PRIMARY KEY,
             setting_value TEXT NULL
         );
+        CREATE TABLE activity_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NULL,
+            log_code TEXT NOT NULL UNIQUE,
+            event_code TEXT NOT NULL,
+            actor_role TEXT NOT NULL DEFAULT "",
+            action TEXT NOT NULL,
+            description TEXT NOT NULL,
+            entry_type TEXT NOT NULL,
+            target_type TEXT NOT NULL DEFAULT "",
+            target_id TEXT NOT NULL DEFAULT "",
+            related_log_code TEXT NULL,
+            ip_address TEXT NOT NULL DEFAULT "",
+            request_method TEXT NOT NULL DEFAULT "",
+            request_path TEXT NOT NULL DEFAULT "",
+            happened_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE TABLE roles (
             id INTEGER PRIMARY KEY,
             code TEXT NOT NULL
@@ -160,6 +177,43 @@ function reminderCreateFixture(): PDO
     ]);
 
     return $pdo;
+}
+
+// Timing uses the existing authoritative timezone and does not claim early deliveries.
+$timingPdo = reminderCreateFixture();
+reminderAssert(getStudentEvaluationReminderConfigSnapshot($timingPdo, true)['sendTime'] === '07:00', 'Legacy settings must default to 07:00.');
+$timingConfig = getStudentEvaluationReminderConfigSnapshot($timingPdo, true);
+$timingConfig['sendTime'] = '08:00';
+persistStudentEvaluationReminderConfigSnapshot($timingPdo, $timingConfig);
+reminderAssert(getStudentEvaluationReminderConfigSnapshot($timingPdo, true)['sendTime'] === '08:00', 'Send time must survive database persistence.');
+$timingSent = 0;
+$timingMailer = static function (array $payload) use (&$timingSent): void { $timingSent++; };
+$earlyTiming = runStudentEvaluationReminderJobSnapshot($timingPdo, $timingMailer, reminderNow('2026-09-10 07:59:59'));
+reminderAssert($earlyTiming['status'] === 'not_due_yet' && $timingSent === 0, 'No email may be sent before the configured time.');
+reminderAssert((int) $timingPdo->query('SELECT COUNT(*) FROM student_evaluation_reminder_deliveries')->fetchColumn() === 0, 'Early runs must not claim deliveries.');
+$atTiming = runStudentEvaluationReminderJobSnapshot($timingPdo, $timingMailer, new DateTimeImmutable('2026-09-10 00:00:00', new DateTimeZone('UTC')));
+reminderAssert($atTiming['status'] === 'sent' && $timingSent === 1, '08:00 Manila must send even when the supplied clock uses UTC.');
+$timingConfig['sendTime'] = '09:00';
+persistStudentEvaluationReminderConfigSnapshot($timingPdo, $timingConfig);
+runStudentEvaluationReminderJobSnapshot($timingPdo, $timingMailer, reminderNow('2026-09-10 10:00:00'));
+reminderAssert($timingSent === 1, 'Changing the time must not duplicate a same-day delivery.');
+runStudentEvaluationReminderJobSnapshot($timingPdo, $timingMailer, reminderNow('2026-09-12 10:00:00'));
+reminderAssert($timingSent === 1, 'Configured time must retain the frequency interval.');
+runStudentEvaluationReminderJobSnapshot($timingPdo, $timingMailer, reminderNow('2026-09-13 08:59:59'));
+reminderAssert($timingSent === 1, 'A due date must still wait for the updated send time.');
+runStudentEvaluationReminderJobSnapshot($timingPdo, $timingMailer, reminderNow('2026-09-13 10:00:00'));
+reminderAssert($timingSent === 2, 'A delayed scheduler run must send due reminders.');
+foreach (['', '8:00', '24:00', '12:60', '08:00:00', null, [], 800] as $invalidTime) {
+    $rejected = false;
+    try {
+        normalizeStudentEvaluationReminderConfig(array_merge($timingConfig, ['sendTime' => $invalidTime]));
+    } catch (InvalidArgumentException $error) {
+        $rejected = true;
+    }
+    reminderAssert($rejected, 'Invalid send time must be rejected.');
+}
+foreach (['00:00', '23:59'] as $validTime) {
+    reminderAssert(normalizeStudentEvaluationReminderConfig(array_merge($timingConfig, ['sendTime' => $validTime]))['sendTime'] === $validTime, 'Boundary times must be accepted.');
 }
 
 $pdo = reminderCreateFixture();
@@ -354,6 +408,7 @@ reminderAssert(
 foreach ([$hrHtml, $adminHtml] as $panelHtml) {
     reminderAssert(
         str_contains($panelHtml, 'id="student-eval-reminder-enabled"')
+            && str_contains($panelHtml, 'id="student-eval-reminder-time"')
             && str_contains($panelHtml, 'id="student-eval-reminder-subject"')
             && str_contains($panelHtml, 'id="student-eval-reminder-body"')
             && str_contains($panelHtml, 'id="student-eval-reminder-save-btn"'),

@@ -84,7 +84,7 @@ INSERT IGNORE INTO `semesters` (
         ('academicYear', '2025-2026'),
         ('evaluationPeriodOpen', 'false'),
         ('credentialDistributorConfig', '{"senderEmail":"","senderName":"NAAP Evaluation System","appPassword":""}'),
-        ('studentEvaluationReminderConfig', '{"enabled":true,"frequencyDays":7,"subject":"NAAP Evaluation Reminder: Please Complete Your Evaluation","body":"Please complete your evaluation while the student evaluation period is open. Log in to the NAAP Evaluation System and submit your pending evaluation today.","updatedAt":"","updatedByUserId":"fresh-install"}');
+        ('studentEvaluationReminderConfig', '{"enabled":true,"frequencyDays":7,"sendTime":"07:00","subject":"NAAP Evaluation Reminder: Please Complete Your Evaluation","body":"Please complete your evaluation while the student evaluation period is open. Log in to the NAAP Evaluation System and submit your pending evaluation today.","updatedAt":"","updatedByUserId":"fresh-install"}');
 
 INSERT IGNORE INTO `evaluation_periods` (`semester_id`, `evaluation_type_id`, `start_date`, `end_date`)
 SELECT s.id, et.id, src.start_date, src.end_date
