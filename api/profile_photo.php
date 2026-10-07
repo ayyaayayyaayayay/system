@@ -6,7 +6,7 @@
  * Uses a soft session check: verifies the session cookie and active-session
  * token are valid but does NOT enforce the idle timeout.  This prevents the
  * <img> tag from receiving a JSON 401 when the session has been idle for
- * >5 minutes (which happens if the user refreshes the page after being idle).
+ * >10 minutes (which happens if the user refreshes the page after being idle).
  * The idle timeout is still enforced on all data-mutation actions in app_state.php.
  */
 

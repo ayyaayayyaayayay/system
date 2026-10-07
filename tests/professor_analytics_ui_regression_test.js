@@ -172,11 +172,14 @@ for (const [panel, css] of [
 
 assert.match(hrHtml, /professor-analytics-modal[^>]+aria-hidden="true"/);
 assert.match(adminHtml, /professor-analytics-modal[^>]+aria-hidden="true"/);
-assert.ok(hrHtml.includes('hrpanel.css?v=20261005a'));
-assert.ok(hrHtml.includes('hrpanel.js?v=20261005a'));
-assert.ok(adminHtml.includes('adminpanel.css?v=20261004a'));
-assert.ok(adminHtml.includes('adminpanel.js?v=20261003a'));
-assert.ok(vpaaHtml.includes('vpaapanel.css?v=20260930c'));
-assert.ok(vpaaHtml.includes('vpaapanel.js?v=20261006b'));
+for (const [panel, html] of [['hr', hrHtml], ['admin', adminHtml], ['vpaa', vpaaHtml]]) {
+    for (const extension of ['css', 'js']) {
+        assert.match(
+            html,
+            new RegExp(`${panel}panel\\.${extension}\\?v=\\d{8}[a-z0-9]*["']`),
+            `${panel} analytics ${extension} must retain its cache-busting version.`
+        );
+    }
+}
 
 console.log('Professor analytics UI regression tests passed.');

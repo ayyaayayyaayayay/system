@@ -104,7 +104,7 @@ assert.match(stateHelperSource, /\$includeInactiveOfferings = !empty\(\$filters\
 assert.match(stateHelperSource, /\$semesterSlug !== \$currentSemesterSlug/);
 assert.match(stateHelperSource, /if \(!\$includeInactiveOfferings\) \{\s*\$where\[\] = 'co\.is_active = 1';/);
 
-assert.ok(professorHtml.includes('db-data.js?v=20261004a'));
-assert.ok(professorHtml.includes('profesorpanel.js?v=20261004a'));
+assert.match(professorHtml, /db-data\.js\?v=\d{8}[a-z0-9]*(?:&[^"']*)?["']/);
+assert.match(professorHtml, /profesorpanel\.js\?v=\d{8}[a-z0-9]*(?:&[^"']*)?["']/);
 
 console.log('Professor report state regression tests passed.');

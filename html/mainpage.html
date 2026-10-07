@@ -52,7 +52,7 @@
               <label for="username">Student Number / Employee ID</label>
               <input
                 type="text"
-                id="username"
+                id="username" maxlength="24"
                 name="username"
                 placeholder="Enter student number or employee ID"
                 autocomplete="username"
@@ -63,7 +63,7 @@
               <label for="password">Password</label>
               <input
                 type="password"
-                id="password"
+                id="password" maxlength="32"
                 name="password"
                 placeholder="Enter your password"
                 autocomplete="current-password"
@@ -154,7 +154,7 @@
             <label for="resetIdentifier">Student Number / Employee ID</label>
             <input
               type="text"
-              id="resetIdentifier"
+              id="resetIdentifier" maxlength="24"
               placeholder="Enter your student number or employee ID"
               autocomplete="username"
             />
@@ -168,7 +168,7 @@
             <label for="newResetPassword">New Password</label>
             <input
               type="password"
-              id="newResetPassword"
+              id="newResetPassword" minlength="8" maxlength="32"
               placeholder="Enter new password"
               autocomplete="new-password"
             />
@@ -177,7 +177,7 @@
             <label for="confirmResetPassword">Confirm New Password</label>
             <input
               type="password"
-              id="confirmResetPassword"
+              id="confirmResetPassword" minlength="8" maxlength="32"
               placeholder="Re-enter new password"
               autocomplete="new-password"
             />
@@ -227,7 +227,7 @@
       </div>
     </div>
 
-    <script src="../JsScrip/db-data.js?v=20261004a"></script>
-    <script src="../JsScrip/mainpage.js?v=20261004a"></script>
+    <script src="../JsScrip/db-data.js?v=20261004a&idle=20261007b"></script>
+    <script src="../JsScrip/mainpage.js?v=20261006limits&idle=20261007b&recovery=20261007b"></script>
   </body>
 </html>

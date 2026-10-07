@@ -1,6 +1,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 const SetCalculation = require('../JsScrip/set-calculation.js');
 
 function enrollments(offeringId, count) {
@@ -96,9 +97,9 @@ assert.strictEqual(partial.registeredClassCount, 3);
 assert.strictEqual(partial.scorableClassCount, 2);
 assert.strictEqual(partial.excludedClassCount, 1);
 assert.strictEqual(partial.partial, true);
-assert.strictEqual(partial.available, true);
-assert.strictEqual(partial.averageRatingPercent, 87);
-assert.strictEqual(partial.totalWeightedScorePercent, 4350);
+assert.strictEqual(partial.available, false);
+assert.strictEqual(partial.averageRatingPercent, null);
+assert.strictEqual(partial.totalWeightedScorePercent, null);
 assert.strictEqual(noResponseClass.registered, 25);
 assert.strictEqual(noResponseClass.completed, 0);
 assert.strictEqual(noResponseClass.averageRating, null);
@@ -166,7 +167,80 @@ assert.strictEqual(historical.registered, 1);
 assert.strictEqual(historical.completed, 1);
 assert.strictEqual(historical.averageRating, 4.5);
 
+// Exercise the PDF's 15-item scale and its complete Annex C worked example.
+const annexClasses = [[10,90],[15,85],[20,88],[40,95],[8,70],[35,91],[42,89],[45,92]];
+const annex = SetCalculation.calculateProfessorSetMetrics({
+    professorUserId: 'u500', semesterId: '1st-2026',
+    offerings: annexClasses.map((item, index) => ({ ...offerings[0], id: 400 + index })),
+    enrollments: annexClasses.flatMap(([count], index) => enrollments(400 + index, count)),
+    evaluations: annexClasses.flatMap(([count, percent], index) => Array.from({ length: count }, (_, student) => ({
+        ...evaluation(student + 1, 400 + index, student + 1, percent / 20),
+        ratings: Array(15).fill(percent / 20),
+    }))),
+});
+assert.strictEqual(annex.registered, 215);
+assert(Math.abs(annex.totalWeightedScorePercent - 19358) < 1e-7);
+assert.strictEqual(annex.averageRatingPercent.toFixed(2), '90.04');
+assert.strictEqual(SetCalculation.questionnaireAverage({ ratings: Array(15).fill(4) }) * 20, 80);
+const forty = SetCalculation.calculateProfessorSetMetrics({
+    professorUserId: 'u500', semesterId: '1st-2026', offerings: [offerings[0]],
+    enrollments: enrollments(101, 40),
+    evaluations: Array.from({ length: 24 }, (_, student) => evaluation(student + 1, 101, student + 1, 4.5)),
+});
+assert.strictEqual(forty.registered, 40);
+assert.strictEqual(forty.completed, 24);
+assert.strictEqual(forty.pending, 16);
+assert.strictEqual(forty.completionRate, 60);
+assert.strictEqual(forty.totalWeightedScorePercent, 3600);
+assert.strictEqual(forty.averageRatingPercent, 90);
+const restored = SetCalculation.calculateProfessorSetMetrics({
+    professorUserId: 'u500', semesterId: '1st-2026',
+    offerings: [...offerings, { ...offerings[0], id: 106 }],
+    enrollments: [...enrollmentRows, ...enrollments(106, 25)],
+    evaluations: [...evaluations, evaluation(100, 106, 1, 4)],
+});
+assert.strictEqual(restored.available, true);
+assert.strictEqual(restored.registered, 75);
+assert(Math.abs(restored.averageRatingPercent - (4350 + 25 * 80) / 75) < 1e-7);
+
 const root = path.resolve(__dirname, '..');
+function panelFunction(relativePath, name, dependencies = {}) {
+    const source = fs.readFileSync(path.join(root, relativePath), 'utf8');
+    const start = source.indexOf(`function ${name}(`);
+    assert(start >= 0, `Missing ${name}`);
+    const next = source.indexOf('\nfunction ', start + 1);
+    const sandbox = { window: { SetCalculation }, ...dependencies };
+    vm.runInNewContext(source.slice(start, next < 0 ? undefined : next), sandbox);
+    return sandbox[name];
+}
+const normalizeUser = value => String(value || '').replace(/^u/, '');
+const context = { offerings, enrollments: enrollmentRows, evaluations };
+const missingContext = { ...context, offerings: [...offerings, { ...offerings[0], id: 106 }], enrollments: [...enrollmentRows, ...enrollments(106, 25)] };
+const institutionCalculators = [
+    panelFunction('JsScrip/hrpanel.js', 'getHrInstitutionSetMetrics', { normalizeHrUserIdToken: normalizeUser }),
+    (ctx, semester) => panelFunction('JsScrip/adminpanel.js', 'generateEvaluationTypeData', {
+        normalizeAdminAnalyticsToken: value => value,
+        normalizeAdminUserIdToken: normalizeUser,
+        aggregateAdminEvaluationTypeData: () => ({}),
+    })('student', ctx, semester),
+    (ctx, semester) => panelFunction('JsScrip/vpaapanel.js', 'buildVpaaChartDataForType', {
+        normalizeVpaaProfessorUserId: normalizeUser,
+        buildVpaaQuestionMeta: () => ({ categoryOrder: [], categoryByQuestionId: {} }),
+        criteriaKeys: [], createEmptyChartData: () => ({ ratingDistribution: {}, totalEvaluations: 0 }),
+        // The student overall calculation must come from SET metrics, regardless of chart distributions.
+        resolveVpaaEvaluationType: () => 'peer',
+    })('student', semester, ctx),
+];
+institutionCalculators.forEach(calculate => {
+    assert(Math.abs(calculate(context, '1st-2026').averageRating - 4.35) < 1e-7);
+    assert.strictEqual(calculate(missingContext, '1st-2026').averageRating, null);
+});
+['JsScrip/hrpanel.js', 'JsScrip/adminpanel.js'].forEach(panel => {
+    const combine = panelFunction(panel, 'combineSemesterData');
+    const completeTerm = { totalStudents: 50, evaluatedCount: 20, averageRating: 4.35, scorableStudents: 50, excludedStudents: 0, excludedClassCount: 0 };
+    assert.strictEqual(combine({ first: completeTerm }).averageRating, 4.35);
+    assert.strictEqual(combine({ first: completeTerm, second: { totalStudents: 25, averageRating: null, scorableStudents: 0, excludedStudents: 25, excludedClassCount: 1 } }).averageRating, null);
+});
 [
     ['html/profesorpanel.html', 'JsScrip/profesorpanel.js'],
     ['html/daenpanel.html', 'JsScrip/daenpanel.js'],
@@ -177,7 +251,7 @@ const root = path.resolve(__dirname, '..');
 ].forEach(([htmlPath, scriptPath]) => {
     const html = fs.readFileSync(path.join(root, htmlPath), 'utf8');
     const script = fs.readFileSync(path.join(root, scriptPath), 'utf8');
-    assert(html.includes('set-calculation.js?v=20260929b'), `${htmlPath} does not load the shared SET calculator.`);
+    assert(html.includes('set-calculation.js?v=20261006cmo'), `${htmlPath} does not load the shared SET calculator.`);
     assert(script.includes('SetCalculation.calculateProfessorSetMetrics'), `${scriptPath} does not use the shared SET calculator.`);
 });
 

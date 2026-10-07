@@ -51,6 +51,9 @@ FROM (
 ) AS d
 JOIN `campuses` c ON c.slug = d.campus_slug;
 
+INSERT IGNORE INTO `department_faculty_report_access` (`department_id`, `reports_enabled`)
+SELECT id, 1 FROM `departments`;
+
 INSERT IGNORE INTO `programs` (`department_id`, `code`, `name`)
 SELECT d.id, src.program_code, src.program_name
 FROM (

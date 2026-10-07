@@ -35,6 +35,8 @@ function sanitizeExplainabilityText($value, $maxLength = 300)
     return substr(trim((string) $value), 0, (int) $maxLength);
 }
 
+require_once __DIR__ . '/../api/evaluation_bias_rules.php';
+
 function normalizeExplainabilitySourceLabel($value)
 {
     $token = strtolower(trim((string) $value));

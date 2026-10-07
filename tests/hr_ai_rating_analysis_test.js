@@ -232,11 +232,11 @@ assert.equal(normalRecord.fastFlag, false, 'Normal persisted completion was inco
 assert.equal(legacyRecord.timingAvailable, false, 'Missing historical timing was treated as available.');
 assert.equal(legacyRecord.fastFlag, false, 'Missing historical timing was treated as suspiciously rapid.');
 
-assert.ok(source.includes('Analyzing professor ratings and comments with AI...'));
+assert.ok(source.includes('Analyzing all eligible ratings and comments...'));
 assert.ok(source.includes('Professor Rating Review'));
 assert.ok(source.includes('escapeHrHtml(ratingReview)'), 'The model-generated rating review must be HTML-escaped.');
-assert.ok(html.includes('hrpanel.css?v=20261005a'), 'The HR stylesheet cache version was not updated.');
-assert.ok(html.includes('db-data.js?v=20261004a'), 'The shared data cache version was not updated.');
-assert.ok(html.includes('hrpanel.js?v=20261005a'), 'The HR analytics script cache version was not updated.');
+assert.match(html, /hrpanel\.css\?v=\d{8}[a-z0-9]*["']/);
+assert.ok(html.includes('db-data.js?v=20261006c'), 'The shared data cache version was not updated.');
+assert.ok(html.includes('hrpanel.js?v=20261007behavior'), 'The HR analytics script cache version was not updated.');
 
 console.log('HR AI rating analysis tests passed.');

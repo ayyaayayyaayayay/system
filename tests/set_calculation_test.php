@@ -41,6 +41,7 @@ function setCalculationEvaluation(int $id, int $offeringId, int $studentId, floa
         'databaseEvaluationId' => $id,
         'evaluatorRole' => 'student',
         'status' => $status,
+        'credibilityStatus' => 'AUTO_ACCEPTED',
         'courseOfferingId' => (string)$offeringId,
         'studentUserId' => 'u' . $studentId,
         'submittedAt' => sprintf('2026-09-%02dT08:00:00+08:00', min(28, $id)),
@@ -114,9 +115,9 @@ setCalculationAssert((int)$partialSummary['registered_class_count'] === 3, 'The 
 setCalculationAssert((int)$partialSummary['scorable_class_count'] === 2, 'The scorable class count is incorrect.');
 setCalculationAssert((int)$partialSummary['excluded_class_count'] === 1, 'The excluded class count is incorrect.');
 setCalculationAssert($partialSummary['partial_result'] === true, 'A mixed-response result was not marked partial.');
-setCalculationAssert($partialSummary['calculation_available'] === true, 'A valid mixed-response result was made unavailable.');
-setCalculationAssert(abs((float)$partialSummary['total_weighted_score'] - 4350.0) < 0.0001, 'The partial weighted score includes or zero-fills the unanswered class.');
-setCalculationAssert(abs((float)$partialSummary['overall_set_rating'] - 87.0) < 0.0001, 'The available overall SET rating is not 87.00.');
+setCalculationAssert($partialSummary['calculation_available'] === false, 'An overall SET was published without an average for every registered class.');
+setCalculationAssert($partialSummary['total_weighted_score'] === null, 'An incomplete weighted total was presented as the Annex C total.');
+setCalculationAssert($partialSummary['overall_set_rating'] === null, 'The denominator silently excluded a zero-response class.');
 setCalculationAssert((int)$partialRows[2]['student_count'] === 25, 'The zero-response class lost its registered population.');
 setCalculationAssert((int)$partialRows[2]['completed_evaluation_count'] === 0, 'The zero-response class has an incorrect completed count.');
 setCalculationAssert($partialRows[2]['average_set_rating'] === null, 'The zero-response class received an artificial average.');
@@ -124,8 +125,8 @@ setCalculationAssert($partialRows[2]['weighted_set_score'] === null, 'The zero-r
 setCalculationAssert($partialRows[2]['exclusion_reason'] === 'no-valid-responses', 'The excluded class reason is missing.');
 setCalculationAssert(str_contains($partialSummary['calculation_note'], '1 class'), 'The partial calculation note does not identify the excluded class.');
 setCalculationAssert(
-    facultyReportFormatFacultyPaperSetRating($partialSummary) === '87.00',
-    'Faculty-paper formatting did not retain the available partial SET calculation.'
+    facultyReportFormatFacultyPaperSetRating($partialSummary) === 'N/A',
+    'Faculty-paper formatting published an overall rating without every class average.'
 );
 
 $duplicateSummary = facultyReportBuildSetSummaryRowsFromInputs(
@@ -176,15 +177,15 @@ $partialDocxXml = facultyDocxBuildIferDocumentXml($docxParts['word/document.xml'
     'set_summary' => $partialSummary,
     'section_c_summary' => ['set_rating' => $partialSummary['overall_set_rating'], 'sef_rating' => 80],
 ]);
-setCalculationAssert(str_contains($partialDocxXml, 'Available SET excludes 1 class'), 'IFER DOCX does not disclose the excluded zero-response class.');
+setCalculationAssert(str_contains($partialDocxXml, 'Overall SET is N/A: 1 class'), 'IFER DOCX does not disclose the missing class average.');
 setCalculationAssert(str_contains($partialDocxXml, '>N/A<'), 'IFER DOCX does not retain N/A for the zero-response class.');
 
 $partialXlsxXml = facultyXlsxBuildSasrSheetXml([
     'set_summary' => $partialSummary,
     'section_c_summary' => ['set_rating' => $partialSummary['overall_set_rating'], 'sef_rating' => 80],
 ]);
-setCalculationAssert(str_contains($partialXlsxXml, 'Available SET excludes 1 class'), 'SASR XLSX does not disclose the excluded zero-response class.');
-setCalculationAssert(str_contains($partialXlsxXml, '<v>87</v>'), 'SASR XLSX did not preserve the available SET rating as a numeric cell.');
+setCalculationAssert(str_contains($partialXlsxXml, 'Overall SET is N/A: 1 class'), 'SASR XLSX does not disclose the missing class average.');
+setCalculationAssert(!str_contains($partialXlsxXml, '<v>87</v>'), 'SASR XLSX published a rating based on a reduced enrollment denominator.');
 
 $overallXlsxXml = facultyXlsxBuildOverallSasrSheetXml([
     'rows' => [[
@@ -192,7 +193,7 @@ $overallXlsxXml = facultyXlsxBuildOverallSasrSheetXml([
         'employee_id' => 'EMP-001',
         'faculty_name' => 'Alexa Cabrera',
         'department_program' => 'ILAS',
-        'set_rating' => 87,
+        'set_rating' => null,
         'sef_rating' => 80,
         'partial_result' => true,
         'excluded_class_count' => 1,
@@ -209,5 +210,45 @@ setCalculationAssert(
         && substr_count($appStateSource, 'facultyReportBuildFacultyPaperSetRating(') >= 3,
     'Draft create/update/send paths do not refresh SET through the authoritative server calculator.'
 );
+
+// Reproduce the actual Annex C example, including the total of 215 students.
+$annexOfferings = $annexEnrollments = $annexEvaluations = [];
+foreach ([[10,90],[15,85],[20,88],[40,95],[8,70],[35,91],[42,89],[45,92]] as $index => [$count, $percent]) {
+    $offeringId = 400 + $index;
+    $annexOfferings[] = ['id' => $offeringId, 'professor_id' => 500];
+    $annexEnrollments = array_merge($annexEnrollments, setCalculationEnrollmentRows($offeringId, 1, $count));
+    for ($student = 1; $student <= $count; $student++) {
+        $evaluation = setCalculationEvaluation($student, $offeringId, $student, $percent / 20);
+        $evaluation['ratings'] = array_fill(0, 15, $percent / 20);
+        $annexEvaluations[] = $evaluation;
+    }
+}
+$annex = facultyReportBuildSetSummaryRowsFromInputs($annexOfferings, $annexEvaluations, $annexEnrollments);
+setCalculationAssert($annex['total_students'] === 215, 'Annex C enrollment total differs from the PDF.');
+setCalculationAssert(abs($annex['total_weighted_score'] - 19358) < 0.00001, 'Annex C weighted total differs from the PDF.');
+setCalculationAssert(facultyReportFormatFacultyPaperSetRating($annex) === '90.04', 'Annex C final rating differs from the PDF.');
+
+$fortyEvaluations = [];
+for ($student = 1; $student <= 24; $student++) {
+    $fortyEvaluations[] = setCalculationEvaluation($student, 501, $student, 4.5);
+}
+$forty = facultyReportBuildSetSummaryRowsFromInputs([['id' => 501]], $fortyEvaluations, setCalculationEnrollmentRows(501, 1, 40));
+setCalculationAssert($forty['total_students'] === 40 && $forty['completed_evaluations'] === 24 && $forty['pending_evaluations'] === 16, '24-of-40 participation counts are incorrect.');
+setCalculationAssert($forty['completion_rate'] === 60.0 && $forty['total_weighted_score'] === 3600.0 && $forty['overall_set_rating'] === 90.0, '24-of-40 ratings were zero-filled or weighted by submissions.');
+
+$form = setCalculationEvaluation(1, 601, 1, 4);
+$form['ratings'] = array_fill(0, 15, 4);
+setCalculationAssert(facultyReportComputeQuestionnaireAveragePercent($form) === 80.0, 'Annex A Total Score / 75 x 100 was not reproduced.');
+setCalculationAssert(facultyReportBuildSefRatingFromInputs([$form]) === 80.0, 'Annex B Total Score / 75 x 100 was not reproduced.');
+setCalculationAssert(facultyReportBuildSefRatingFromInputs([]) === null, 'Missing supervisor evaluation became zero.');
+setCalculationAssert(facultyReportBuildSefRatingFromInputs([['status' => 'submitted', 'ratings' => [0, 6, 'invalid']]]) === null, 'Invalid supervisor ratings became a numeric score.');
+$form['status'] = 'draft';
+setCalculationAssert(facultyReportBuildSefRatingFromInputs([$form]) === null, 'A draft supervisor evaluation affected the report.');
+setCalculationAssert(facultyPdfNormalizeIferSectionCSummary([])['sef_rating'] === null, 'PDF/DOCX normalization converted missing SEF to zero.');
+$missingSefXml = facultyXlsxBuildSasrSheetXml(['section_c_summary' => ['set_rating' => 90, 'sef_rating' => null]]);
+setCalculationAssert(preg_match('/<c r="E\d+"[^>]*>.*?N\/A.*?<\/c>/', $missingSefXml) === 1, 'SASR XLSX converted missing SEF to zero.');
+$missingOverallSefXml = facultyXlsxBuildOverallSasrSheetXml(['rows' => [['set_rating' => 90, 'sef_rating' => null]]]);
+setCalculationAssert(preg_match('/<c r="F10"[^>]*>.*?N\/A.*?<\/c>/', $missingOverallSefXml) === 1, 'Overall SASR XLSX converted missing SEF to zero.');
+setCalculationAssert(substr_count($appStateSource, 'facultyReportBuildFacultyPaperSefRating(') >= 3, 'Faculty-paper writes do not refresh authoritative supervisor ratings.');
 
 echo 'SET calculation tests passed (' . $assertions . ' assertions).' . PHP_EOL;

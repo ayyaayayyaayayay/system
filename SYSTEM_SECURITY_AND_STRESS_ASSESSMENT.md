@@ -65,7 +65,7 @@ The present overall risk is **High** until the three high-priority findings are 
 |---|---|---|
 | SQL injection resistance | Good baseline: PDO native prepared statements are broadly used; dynamic query builders still need endpoint tests. | `api/db.php`, `api/state_helpers.php` |
 | Password storage | Bcrypt hashes are used and legacy plaintext values are lazily migrated after login. | `api/db.php:100-153`, `api/login.php:701-788` |
-| Session management | Session ID regeneration, random active-session token, five-minute idle timeout, one active session per user, `HttpOnly`, and `SameSite=Lax`. | `api/auth.php` |
+| Session management | Session ID regeneration, random active-session token, ten-minute idle timeout, one active session per user, `HttpOnly`, and `SameSite=Lax`. | `api/auth.php` |
 | CSRF | POST actions in the main API and profile upload require `X-CSRF-Token`. | `api/app_state.php:3847-3860`, `api/profile_image_upload.php:43-53` |
 | Authorization | Server-side role/scope checks are present for user, evaluation, subject, and faculty-paper operations. | `api/app_state.php`, `api/faculty_paper_file.php` |
 | Upload validation | Profile images are capped at 2 MB and checked by extension plus decoded image MIME/type. | `api/state_helpers.php:13956-14020` |

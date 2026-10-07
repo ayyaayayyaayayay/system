@@ -233,7 +233,9 @@ function facultyXlsxBuildSasrSheetXml(array $paperData): string
         is_numeric($sectionCSummary['set_rating'] ?? null)
             ? facultyXlsxNumberCell(3, $ratingValueRow, (float)$sectionCSummary['set_rating'], 8)
             : facultyXlsxStringCell(3, $ratingValueRow, 'N/A', 8),
-        facultyXlsxNumberCell(5, $ratingValueRow, (float)$sectionCSummary['sef_rating'], 8),
+        is_numeric($sectionCSummary['sef_rating'] ?? null)
+            ? facultyXlsxNumberCell(5, $ratingValueRow, (float)$sectionCSummary['sef_rating'], 8)
+            : facultyXlsxStringCell(5, $ratingValueRow, 'N/A', 8),
     ]);
 
     $mergeRanges = [
@@ -325,15 +327,17 @@ function facultyXlsxBuildOverallSasrSheetXml(array $reportData): string
             is_numeric($row['set_rating'] ?? null)
                 ? facultyXlsxNumberCell(5, $rowNumber, (float)$row['set_rating'], 5)
                 : facultyXlsxStringCell(5, $rowNumber, 'N/A', 5),
-            facultyXlsxNumberCell(6, $rowNumber, (float)($row['sef_rating'] ?? 0), 5),
+            is_numeric($row['sef_rating'] ?? null)
+                ? facultyXlsxNumberCell(6, $rowNumber, (float)$row['sef_rating'], 5)
+                : facultyXlsxStringCell(6, $rowNumber, 'N/A', 5),
         ]);
-        if (!empty($row['partial_result'])) {
+        if (!empty($row['partial_result']) || (int)($row['excluded_class_count'] ?? 0) > 0) {
             $employeeId = trim((string)($row['employee_id'] ?? ''));
             $facultyName = trim((string)($row['faculty_name'] ?? 'Professor'));
             $note = trim((string)($row['calculation_note'] ?? ''));
             if ($note === '') {
                 $note = sprintf(
-                    'Available SET excludes %d %s with no valid responses (%d registered %s).',
+                    'Overall SET is N/A: %d %s without valid responses (%d registered %s). Annex C requires averages for all enrolled classes.',
                     max(0, (int)($row['excluded_class_count'] ?? 0)),
                     (int)($row['excluded_class_count'] ?? 0) === 1 ? 'class' : 'classes',
                     max(0, (int)($row['excluded_students'] ?? 0)),

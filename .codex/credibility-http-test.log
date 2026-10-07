@@ -1975,3 +1975,558 @@
 [Mon Oct  5 18:04:02 2026] 127.0.0.1:61014 Accepted
 [Mon Oct  5 18:04:02 2026] 127.0.0.1:61014 [200]: POST /api/app_state.php?action=getCredibilityReview
 [Mon Oct  5 18:04:02 2026] 127.0.0.1:61014 Closing
+[Tue Oct  6 22:48:47 2026] PHP 8.2.12 Development Server (http://127.0.0.1:18976) started
+[Tue Oct  6 22:48:47 2026] 127.0.0.1:62841 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62841 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62841 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62843 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62843 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62843 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62845 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62845 [409]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62845 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62847 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62847 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62847 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62849 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62849 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62849 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62851 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62851 [400]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62851 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62854 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62854 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62854 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62856 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62856 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62856 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62858 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62858 [409]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62858 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62860 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62860 [403]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62860 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62862 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62862 [403]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62862 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62864 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62864 [403]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62864 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62866 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62866 [200]: POST /api/app_state.php?action=listCredibilityReviews
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62866 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62868 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62868 [200]: POST /api/app_state.php?action=getCredibilityReview
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62868 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62870 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62870 [200]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62870 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62872 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62872 [409]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62872 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62874 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62874 [200]: POST /api/app_state.php?action=analyzeEvaluationExplainability
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62874 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62876 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62876 [200]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62876 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62878 Accepted
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62878 [200]: POST /api/app_state.php?action=listEvaluations
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62878 Closing
+[Tue Oct  6 22:48:48 2026] 127.0.0.1:62880 Accepted
+[Tue Oct  6 22:48:49 2026] 127.0.0.1:62880 [200]: POST /api/app_state.php?action=listEvaluations
+[Tue Oct  6 22:48:49 2026] 127.0.0.1:62880 Closing
+[Tue Oct  6 22:48:49 2026] 127.0.0.1:62882 Accepted
+[Tue Oct  6 22:48:49 2026] 127.0.0.1:62882 [200]: POST /api/app_state.php?action=listEvaluations
+[Tue Oct  6 22:48:49 2026] 127.0.0.1:62882 Closing
+[Tue Oct  6 22:48:49 2026] 127.0.0.1:62884 Accepted
+[Tue Oct  6 22:48:49 2026] 127.0.0.1:62884 [200]: POST /api/app_state.php?action=listEvaluations
+[Tue Oct  6 22:48:49 2026] 127.0.0.1:62884 Closing
+[Tue Oct  6 22:48:49 2026] 127.0.0.1:62886 Accepted
+[Tue Oct  6 22:48:49 2026] 127.0.0.1:62886 [200]: POST /api/app_state.php?action=listEvaluations
+[Tue Oct  6 22:48:49 2026] 127.0.0.1:62886 Closing
+[Tue Oct  6 22:48:49 2026] 127.0.0.1:62888 Accepted
+[Tue Oct  6 22:48:49 2026] 127.0.0.1:62888 [200]: POST /api/app_state.php?action=getCredibilityReview
+[Tue Oct  6 22:48:49 2026] 127.0.0.1:62888 Closing
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:56848 Accepted
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:56848 [200]: GET /html/hrpanel.html
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:56848 Closing
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:61504 Accepted
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:49329 Accepted
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:61504 [200]: GET /css/panel-theme.css?v=20260907a
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:49329 [200]: GET /css/hrpanel.css?v=20261006a
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:61504 Closing
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:51541 Accepted
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:49329 Closing
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:64005 Accepted
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:60590 Accepted
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:51541 [200]: GET /JsScrip/db-data.js?v=20261006c
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:64005 [200]: GET /JsScrip/set-calculation.js?v=20260929b
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:60590 [200]: GET /JsScrip/system-report.js?v=20260907a
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:62886 Accepted
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:51541 Closing
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:64005 Closing
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:60590 Closing
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:62886 [200]: GET /JsScrip/panel-branding.js?v=20260802b
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:62886 Closing
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:55363 Accepted
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:56930 Accepted
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:55363 [200]: GET /JsScrip/hrpanel.js?v=20261006c
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:56930 [200]: GET /JsScrip/credibility-review.js
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:56930 Closing
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:55363 Closing
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:55440 Accepted
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:55440 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791298130474&_background=1
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:55440 Closing
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:62241 Accepted
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:62241 [200]: GET /api/login.php?action=session&_ts=1791298130484
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:62241 Closing
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:49283 Accepted
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:49283 [200]: POST /api/app_state.php?action=listUsers&_background=1
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:49283 Closing
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:57329 Accepted
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:55105 Accepted
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:57329 [200]: POST /api/app_state.php?action=listUsers&_background=1
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:57329 Closing
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:55105 [200]: POST /api/app_state.php?action=listUsers&_background=1
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:55105 Closing
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:65034 Accepted
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:65034 [200]: POST /api/app_state.php?action=getAdminDashboardSummary&_background=1
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:65034 Closing
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:62343 Accepted
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:62343 [200]: GET /favicon.ico
+[Tue Oct  6 22:48:50 2026] 127.0.0.1:62343 Closing
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:52855 Accepted
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:52855 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:52855 Closing
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:63989 Accepted
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:63989 [200]: POST /api/login.php?_heartbeat=1
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:63989 Closing
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:55989 Accepted
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:55989 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:55989 Closing
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:59863 Accepted
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:59863 [200]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:59863 Closing
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:64103 Accepted
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:64103 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:64103 Closing
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:50127 Accepted
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:50127 [200]: POST /api/app_state.php?action=listEvaluations&_background=1
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:50127 Closing
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:62932 Accepted
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:62932 [200]: GET /html/hrpanel.html
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:62932 Closing
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:63386 Accepted
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:60576 Accepted
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:63386 [200]: GET /css/panel-theme.css?v=20260907a
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:60576 [200]: GET /css/hrpanel.css?v=20261006a
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:63386 Closing
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:60576 Closing
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:51377 Accepted
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:51377 [200]: GET /JsScrip/db-data.js?v=20261006c
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:51377 Closing
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:56963 Accepted
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:63604 Accepted
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:62931 Accepted
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:56963 [200]: GET /JsScrip/set-calculation.js?v=20260929b
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:63604 [200]: GET /JsScrip/system-report.js?v=20260907a
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:62931 [200]: GET /JsScrip/panel-branding.js?v=20260802b
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:56963 Closing
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:63604 Closing
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:62931 Closing
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:50549 Accepted
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:50549 [200]: GET /JsScrip/hrpanel.js?v=20261006c
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:61605 Accepted
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:50549 Closing
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:61605 [200]: GET /JsScrip/credibility-review.js
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:61605 Closing
+[Tue Oct  6 22:48:51 2026] 127.0.0.1:62896 Accepted
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:62896 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791298131994&_background=1
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:62896 Closing
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:64679 Accepted
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:64679 [200]: GET /api/login.php?action=session&_ts=1791298131996
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:64679 Closing
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:54976 Accepted
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:54976 [200]: POST /api/app_state.php?action=listUsers&_background=1
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:54976 Closing
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:58329 Accepted
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:60090 Accepted
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:58329 [200]: POST /api/app_state.php?action=listUsers&_background=1
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:58329 Closing
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:50142 Accepted
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:60090 [200]: POST /api/app_state.php?action=listUsers&_background=1
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:60090 Closing
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:52730 Accepted
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:50142 [200]: POST /api/app_state.php?action=getAdminDashboardSummary&_background=1
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:50142 Closing
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:65174 Accepted
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:52730 [200]: GET /favicon.ico
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:49831 Accepted
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:65174 [200]: POST /api/login.php?_heartbeat=1
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:65174 Closing
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:49831 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:49831 Closing
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:52730 Closing
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:53599 Accepted
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:53599 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:53599 Closing
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:60983 Accepted
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:60983 [200]: POST /api/app_state.php?action=getCredibilityReview&_background=1
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:60983 Closing
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:57205 Accepted
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:57205 [200]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:57205 Closing
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:58476 Accepted
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:58476 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:58476 Closing
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:59493 Accepted
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:59493 [200]: POST /api/app_state.php?action=listEvaluations&_background=1
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:59493 Closing
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:61411 Accepted
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:61411 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Tue Oct  6 22:48:52 2026] 127.0.0.1:61411 Closing
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:62915 Accepted
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:62915 [200]: POST /api/app_state.php?action=getCredibilityReview&_background=1
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:62915 Closing
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:57573 Accepted
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:57573 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:57573 Closing
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:53821 Accepted
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:53821 [200]: POST /api/app_state.php?action=getCredibilityReview&_background=1
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:53821 Closing
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:56682 Accepted
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:56682 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:56682 Closing
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:52211 Accepted
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:52211 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:52211 Closing
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:63150 Accepted
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:63150 [200]: POST /api/app_state.php?action=getCredibilityReview&_background=1
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:63150 Closing
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:54283 Accepted
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:54283 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:54283 Closing
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:63961 Accepted
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:63961 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Tue Oct  6 22:48:53 2026] 127.0.0.1:63961 Closing
+[Wed Oct  7 08:30:44 2026] PHP 8.2.12 Development Server (http://127.0.0.1:18976) started
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61620 Accepted
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61620 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61620 Closing
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61622 Accepted
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61622 [200]: POST /api/app_state.php?action=addEvaluation
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61622 Closing
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61624 Accepted
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61624 [409]: POST /api/app_state.php?action=addEvaluation
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61624 Closing
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61626 Accepted
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61626 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61626 Closing
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61628 Accepted
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61628 [200]: POST /api/app_state.php?action=addEvaluation
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61628 Closing
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61630 Accepted
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61630 [400]: POST /api/app_state.php?action=addEvaluation
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61630 Closing
+[Wed Oct  7 08:30:44 2026] 127.0.0.1:61632 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61632 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61632 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61634 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61634 [200]: POST /api/app_state.php?action=addEvaluation
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61634 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61636 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61636 [409]: POST /api/app_state.php?action=addEvaluation
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61636 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61638 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61638 [403]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61638 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61640 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61640 [403]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61640 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61642 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61642 [403]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61642 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61644 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61644 [200]: POST /api/app_state.php?action=listCredibilityReviews
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61644 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61646 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61646 [200]: POST /api/app_state.php?action=analyzeEvaluationBehavior
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61646 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61648 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61648 [403]: POST /api/app_state.php?action=analyzeEvaluationBehavior
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61648 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61650 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61650 [200]: POST /api/app_state.php?action=getCredibilityReview
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61650 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61652 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61652 [200]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61652 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61654 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61654 [409]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61654 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61656 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61656 [200]: POST /api/app_state.php?action=analyzeEvaluationExplainability
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61656 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61658 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61658 [200]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61658 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61660 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61660 [200]: POST /api/app_state.php?action=listEvaluations
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61660 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61662 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61662 [200]: POST /api/app_state.php?action=listEvaluations
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61662 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61664 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61664 [200]: POST /api/app_state.php?action=listEvaluations
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61664 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61666 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61666 [200]: POST /api/app_state.php?action=listEvaluations
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61666 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61668 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61668 [200]: POST /api/app_state.php?action=listEvaluations
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61668 Closing
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61670 Accepted
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61670 [200]: POST /api/app_state.php?action=getCredibilityReview
+[Wed Oct  7 08:30:45 2026] 127.0.0.1:61670 Closing
+[Wed Oct  7 11:47:26 2026] PHP 8.2.12 Development Server (http://127.0.0.1:18976) started
+[Wed Oct  7 11:47:26 2026] 127.0.0.1:51102 Accepted
+[Wed Oct  7 11:47:26 2026] 127.0.0.1:51102 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Wed Oct  7 11:47:26 2026] 127.0.0.1:51102 Closing
+[Wed Oct  7 11:47:26 2026] 127.0.0.1:51104 Accepted
+[Wed Oct  7 11:47:26 2026] 127.0.0.1:51104 [200]: POST /api/app_state.php?action=addEvaluation
+[Wed Oct  7 11:47:26 2026] 127.0.0.1:51104 Closing
+[Wed Oct  7 11:47:26 2026] 127.0.0.1:51106 Accepted
+[Wed Oct  7 11:47:26 2026] 127.0.0.1:51106 [409]: POST /api/app_state.php?action=addEvaluation
+[Wed Oct  7 11:47:26 2026] 127.0.0.1:51106 Closing
+[Wed Oct  7 11:47:26 2026] 127.0.0.1:51108 Accepted
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51108 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51108 Closing
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51110 Accepted
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51110 [200]: POST /api/app_state.php?action=addEvaluation
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51110 Closing
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51112 Accepted
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51112 [400]: POST /api/app_state.php?action=addEvaluation
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51112 Closing
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51114 Accepted
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51114 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51114 Closing
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51116 Accepted
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51116 [200]: POST /api/app_state.php?action=addEvaluation
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51116 Closing
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51118 Accepted
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51118 [409]: POST /api/app_state.php?action=addEvaluation
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51118 Closing
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51120 Accepted
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51120 [403]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51120 Closing
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51122 Accepted
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51122 [403]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51122 Closing
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51124 Accepted
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51124 [403]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51124 Closing
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51126 Accepted
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51126 [200]: POST /api/app_state.php?action=listCredibilityReviews
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51126 Closing
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51128 Accepted
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51128 [200]: POST /api/app_state.php?action=analyzeEvaluationBehavior
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51128 Closing
+[Wed Oct  7 11:47:27 2026] 127.0.0.1:51130 Accepted
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51130 [403]: POST /api/app_state.php?action=analyzeEvaluationBehavior
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51130 Closing
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51132 Accepted
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51132 [200]: POST /api/app_state.php?action=getCredibilityReview
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51132 Closing
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51134 Accepted
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51134 [200]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51134 Closing
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51136 Accepted
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51136 [409]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51136 Closing
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51138 Accepted
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51138 [200]: POST /api/app_state.php?action=analyzeEvaluationExplainability
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51138 Closing
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51140 Accepted
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51140 [200]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51140 Closing
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51142 Accepted
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51142 [200]: POST /api/app_state.php?action=listEvaluations
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:51142 Closing
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:56896 Accepted
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:56896 [200]: POST /api/app_state.php?action=listEvaluations
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:56896 Closing
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:56898 Accepted
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:56898 [200]: POST /api/app_state.php?action=listEvaluations
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:56898 Closing
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:56900 Accepted
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:56900 [200]: POST /api/app_state.php?action=listEvaluations
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:56900 Closing
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:56902 Accepted
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:56902 [200]: POST /api/app_state.php?action=listEvaluations
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:56902 Closing
+[Wed Oct  7 11:47:28 2026] 127.0.0.1:56904 Accepted
+[Wed Oct  7 11:47:29 2026] 127.0.0.1:56904 [200]: POST /api/app_state.php?action=getCredibilityReview
+[Wed Oct  7 11:47:29 2026] 127.0.0.1:56904 Closing
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:60060 Accepted
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:60060 [200]: GET /html/hrpanel.html
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:60060 Closing
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:57479 Accepted
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:58075 Accepted
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:58075 [200]: GET /css/panel-theme.css?v=20260907a
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:55843 Accepted
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:57479 [200]: GET /css/hrpanel.css?v=20261007a
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:61688 Accepted
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:55843 [200]: GET /JsScrip/db-data.js?v=20261006c&idle=20261007b&behavior=20261007a
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:59256 Accepted
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:61688 [200]: GET /JsScrip/set-calculation.js?v=20261006cmo
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:58075 Closing
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:51932 Accepted
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:59256 [200]: GET /JsScrip/system-report.js?v=20260907a
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:59675 Accepted
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:51932 [200]: GET /JsScrip/panel-branding.js?v=20260802b
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:57479 Closing
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:64691 Accepted
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:59675 [200]: GET /JsScrip/hrpanel.js?v=20261007behavior4&trend=20261007a
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:55843 Closing
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:61688 Closing
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:64691 [200]: GET /JsScrip/credibility-review.js
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:59256 Closing
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:58332 Accepted
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:51932 Closing
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:58332 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791344852799&_background=1
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:58332 Closing
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:64691 Closing
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:59675 Closing
+[Wed Oct  7 11:47:32 2026] 127.0.0.1:53143 Accepted
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:53143 [200]: GET /api/login.php?action=session&_ts=1791344852976
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:53143 Closing
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:54877 Accepted
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:54877 [200]: POST /api/app_state.php?action=listUsers&_background=1
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:54877 Closing
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:56410 Accepted
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:60957 Accepted
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:56410 [200]: POST /api/app_state.php?action=listUsers&_background=1
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:56410 Closing
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:60402 Accepted
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:60957 [200]: POST /api/app_state.php?action=listUsers&_background=1
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:60957 Closing
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:62327 Accepted
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:60402 [200]: POST /api/app_state.php?action=getAdminDashboardSummary&_background=1
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:60402 Closing
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:64241 Accepted
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:62327 [200]: POST /api/login.php?_heartbeat=1
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:62327 Closing
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:51395 Accepted
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:64241 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:64241 Closing
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:51395 [200]: GET /favicon.ico
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:51395 Closing
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:56310 Accepted
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:56310 [200]: GET /design/favicon-32x32.png
+[Wed Oct  7 11:47:33 2026] 127.0.0.1:56310 Closing
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:52754 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:52754 [200]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:52754 Closing
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:56822 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:56822 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:56822 Closing
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:51725 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:51725 [200]: POST /api/app_state.php?action=listEvaluations&_background=1
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:51725 Closing
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:50537 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:50537 [200]: GET /html/hrpanel.html
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:50537 Closing
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:49671 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:56303 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:49671 [200]: GET /css/panel-theme.css?v=20260907a
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:56303 [200]: GET /css/hrpanel.css?v=20261007a
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:49671 Closing
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:56303 Closing
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:64824 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:50283 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:63824 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:64824 [200]: GET /JsScrip/db-data.js?v=20261006c&idle=20261007b&behavior=20261007a
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:50283 [200]: GET /JsScrip/set-calculation.js?v=20261006cmo
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:63824 [200]: GET /JsScrip/system-report.js?v=20260907a
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:64824 Closing
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:50283 Closing
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:63824 Closing
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:57387 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:57387 [200]: GET /JsScrip/panel-branding.js?v=20260802b
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:57387 Closing
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:57431 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:49794 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:57431 [200]: GET /JsScrip/hrpanel.js?v=20261007behavior4&trend=20261007a
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:49794 [200]: GET /JsScrip/credibility-review.js
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:49794 Closing
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:57431 Closing
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:64137 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:64137 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791344854538&_background=1
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:64137 Closing
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:53245 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:53245 [200]: GET /api/login.php?action=session&_ts=1791344854548
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:53245 Closing
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:49715 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:49715 [200]: POST /api/app_state.php?action=listUsers&_background=1
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:49715 Closing
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:54304 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:50805 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:54304 [200]: POST /api/app_state.php?action=listUsers&_background=1
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:54304 Closing
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:59191 Accepted
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:50805 [200]: POST /api/app_state.php?action=listUsers&_background=1
+[Wed Oct  7 11:47:34 2026] 127.0.0.1:50805 Closing
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:59191 [200]: POST /api/app_state.php?action=getAdminDashboardSummary&_background=1
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:59191 Closing
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:56935 Accepted
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:56935 [200]: GET /favicon.ico
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:56935 Closing
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:61095 Accepted
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:61095 [200]: GET /design/favicon-32x32.png
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:61095 Closing
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:55780 Accepted
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:55780 [200]: POST /api/login.php?_heartbeat=1
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:55780 Closing
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:49972 Accepted
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:49972 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:49972 Closing
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:64551 Accepted
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:64551 [200]: POST /api/app_state.php?action=getCredibilityReview&_background=1
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:64551 Closing
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:57948 Accepted
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:57948 [200]: POST /api/app_state.php?action=reviewCredibilityEvaluations
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:57948 Closing
+[Wed Oct  7 11:47:35 2026] 127.0.0.1:62115 Accepted
+[Wed Oct  7 11:47:36 2026] 127.0.0.1:62115 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Wed Oct  7 11:47:36 2026] 127.0.0.1:62115 Closing
+[Wed Oct  7 11:47:36 2026] 127.0.0.1:54415 Accepted
+[Wed Oct  7 11:47:36 2026] 127.0.0.1:54415 [200]: POST /api/app_state.php?action=listEvaluations&_background=1
+[Wed Oct  7 11:47:36 2026] 127.0.0.1:54415 Closing
+[Wed Oct  7 11:47:36 2026] 127.0.0.1:53429 Accepted
+[Wed Oct  7 11:47:36 2026] 127.0.0.1:53429 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Wed Oct  7 11:47:36 2026] 127.0.0.1:53429 Closing
+[Wed Oct  7 11:47:36 2026] 127.0.0.1:53629 Accepted
+[Wed Oct  7 11:47:36 2026] 127.0.0.1:53629 [200]: POST /api/app_state.php?action=getCredibilityReview&_background=1
+[Wed Oct  7 11:47:36 2026] 127.0.0.1:53629 Closing
+[Wed Oct  7 11:47:36 2026] 127.0.0.1:51166 Accepted
+[Wed Oct  7 11:47:36 2026] 127.0.0.1:51166 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Wed Oct  7 11:47:36 2026] 127.0.0.1:51166 Closing
+[Wed Oct  7 11:47:36 2026] 127.0.0.1:52022 Accepted
+[Wed Oct  7 11:47:36 2026] 127.0.0.1:52022 [200]: POST /api/app_state.php?action=getCredibilityReview&_background=1
+[Wed Oct  7 11:47:36 2026] 127.0.0.1:52022 Closing
+[Wed Oct  7 11:47:37 2026] 127.0.0.1:62250 Accepted
+[Wed Oct  7 11:47:37 2026] 127.0.0.1:62250 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Wed Oct  7 11:47:37 2026] 127.0.0.1:62250 Closing
+[Wed Oct  7 11:47:37 2026] 127.0.0.1:59255 Accepted
+[Wed Oct  7 11:47:37 2026] 127.0.0.1:59255 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Wed Oct  7 11:47:37 2026] 127.0.0.1:59255 Closing
+[Wed Oct  7 11:47:37 2026] 127.0.0.1:51555 Accepted
+[Wed Oct  7 11:47:37 2026] 127.0.0.1:51555 [200]: POST /api/app_state.php?action=getCredibilityReview&_background=1
+[Wed Oct  7 11:47:37 2026] 127.0.0.1:51555 Closing
+[Wed Oct  7 11:47:37 2026] 127.0.0.1:64868 Accepted
+[Wed Oct  7 11:47:39 2026] 127.0.0.1:64868 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Wed Oct  7 11:47:39 2026] 127.0.0.1:64868 Closing
+[Wed Oct  7 11:47:39 2026] 127.0.0.1:49235 Accepted
+[Wed Oct  7 11:47:39 2026] 127.0.0.1:49235 [200]: POST /api/app_state.php?action=listCredibilityReviews&_background=1
+[Wed Oct  7 11:47:39 2026] 127.0.0.1:49235 Closing

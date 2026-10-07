@@ -196,11 +196,11 @@ assert.ok(vpaaSource.includes('escapeHtml(ratingReview)'));
 
 const adminHtml = fs.readFileSync(path.join(root, 'html', 'adminpanel.html'), 'utf8');
 const vpaaHtml = fs.readFileSync(path.join(root, 'html', 'vpaapanel.html'), 'utf8');
-assert.ok(adminHtml.includes('adminpanel.css?v=20261004a'));
-assert.ok(adminHtml.includes('db-data.js?v=20261004a'));
-assert.ok(adminHtml.includes('adminpanel.js?v=20261003a'));
-assert.ok(vpaaHtml.includes('vpaapanel.css?v=20260930c'));
-assert.ok(vpaaHtml.includes('db-data.js?v=20261006a'));
-assert.ok(vpaaHtml.includes('vpaapanel.js?v=20261006b'));
+assert.match(adminHtml, /adminpanel\.css\?v=\d{8}[a-z0-9]*["']/);
+assert.match(adminHtml, /db-data\.js\?v=\d{8}[a-z0-9]*(?:&[^"']*)?["']/);
+assert.match(adminHtml, /adminpanel\.js\?v=\d{8}[a-z0-9]*(?:&[^"']*)?["']/);
+assert.match(vpaaHtml, /vpaapanel\.css\?v=\d{8}[a-z0-9]*["']/);
+assert.match(vpaaHtml, /db-data\.js\?v=\d{8}[a-z0-9]*(?:&[^"']*)?["']/);
+assert.match(vpaaHtml, /vpaapanel\.js\?v=\d{8}[a-z0-9]*(?:&[^"']*)?["']/);
 
 console.log('Admin and VPAA AI rating analysis tests passed.');

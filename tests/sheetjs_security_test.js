@@ -77,7 +77,7 @@ assert.equal(
     'Vendored SheetJS bytes must match the official distribution.'
 );
 assert(adminHtml.includes('xlsx.full.min.js?v=0.20.3'), 'Admin HTML must cache-bust the approved SheetJS release.');
-assert(adminHtml.includes('adminpanel.js?v=20261003a'), 'Admin HTML must load the hardened import code.');
+assert(adminHtml.includes('adminpanel.js?v=20261006cmo'), 'Admin HTML must load the hardened import code.');
 assert(adminSource.includes('xlsx.full.min.js?v=${SHEETJS_REQUIRED_VERSION}'), 'Worker must load the versioned local asset.');
 assert(adminSource.includes("kind: 'infrastructure'") && adminSource.includes("kind: 'parse'"), 'Worker failures must distinguish infrastructure from parsing errors.');
 assert(!adminSource.includes('parseExcelRowsOnMainThread'), 'Untrusted workbooks must never be parsed on the main UI thread.');

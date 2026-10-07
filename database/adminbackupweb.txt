@@ -1,0 +1,56 @@
+-- NAAP Evaluation System: create a backup administrator.
+-- In phpMyAdmin, open the website database, choose SQL, and paste this file.
+-- Run once after importing the website schema and seed data.
+-- Username: backup
+-- Password: backup (stored below as a PHP-compatible bcrypt hash).
+-- If your hosting database has a different name, change the USE line.
+
+USE `izgrqywp_naap`;
+
+START TRANSACTION;
+
+INSERT INTO `users` (
+    `role_id`,
+    `campus_id`,
+    `department_id`,
+    `name`,
+    `email`,
+    `password`,
+    `status`
+) VALUES (
+    (SELECT `id` FROM `roles` WHERE `code` = 'admin' LIMIT 1),
+    (SELECT `id` FROM `campuses`
+     WHERE `is_active` = 1 AND `deleted_at` IS NULL
+     ORDER BY (`slug` = 'villamor') DESC, `id` ASC LIMIT 1),
+    NULL,
+    'Backup Administrator',
+    'backup@naap.edu.ph',
+    '$2y$10$14l07KT9AJHvqkgtlsH71uH2nbXliwqn4AkMvJ3z5Omtsr224pJMe',
+    'active'
+);
+
+-- The login username is staff_profiles.employee_id.
+INSERT INTO `staff_profiles` (
+    `user_id`,
+    `employee_id`,
+    `employment_type_id`,
+    `program_id`,
+    `position`
+)
+SELECT
+    u.`id`,
+    'backup',
+    (SELECT `id` FROM `employment_types` WHERE `code` = 'regular' LIMIT 1),
+    NULL,
+    'System Administrator'
+FROM `users` u
+WHERE u.`email` = 'backup@naap.edu.ph';
+
+COMMIT;
+
+-- Confirm the new account. Log in with backup / backup.
+SELECT u.`name`, sp.`employee_id` AS `username`, r.`code` AS `role`, u.`status`
+FROM `users` u
+JOIN `roles` r ON r.`id` = u.`role_id`
+JOIN `staff_profiles` sp ON sp.`user_id` = u.`id`
+WHERE u.`email` = 'backup@naap.edu.ph';

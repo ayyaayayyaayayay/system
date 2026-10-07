@@ -299,6 +299,26 @@ function credentialMailerSendOtp(array $smtpConfig, array $payload): void
     }
 }
 
+function credentialMailerSendPasswordResetOtp(array $smtpConfig, array $payload): void
+{
+    $otpCode = trim((string) ($payload['otpCode'] ?? ''));
+    if (!preg_match('/^\d{6}$/', $otpCode)) {
+        throw new RuntimeException('A six-digit password recovery code is required.');
+    }
+    $expiresMinutes = max(1, (int) ($payload['expiresMinutes'] ?? 10));
+    credentialMailerSendCustomMessage($smtpConfig, [
+        'recipientEmail' => $payload['recipientEmail'] ?? '',
+        'recipientName' => $payload['recipientName'] ?? '',
+        'subject' => 'NAAP Evaluation System Password Recovery Code',
+        'intro' => 'We received a request to reset your password.',
+        'message' => "Your password recovery code is: {$otpCode}\n\n"
+            . "Enter this code in the OTP verification popup to open the password reset form.\n"
+            . "This code expires in {$expiresMinutes} minutes and can only be used once.\n"
+            . "This code is not your password.\n\n"
+            . "If you did not request this code, ignore this email.",
+    ]);
+}
+
 function credentialMailerSendPasswordReset(array $smtpConfig, array $payload): void
 {
     $recipientEmail = trim((string) ($payload['recipientEmail'] ?? ''));

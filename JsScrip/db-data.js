@@ -991,6 +991,7 @@ window.AppChartDesign = window.AppChartDesign || (() => {
 const SharedData = (() => {
     const KEYS = {
         USER_SESSION: 'userSession',
+        SESSION_ACTIVITY: 'naapSessionActivity',
         PROFESSORS: 'professorsData',
         USERS: 'sharedUsersData',
         CAMPUSES: 'sharedCampusData',
@@ -1025,7 +1026,7 @@ const SharedData = (() => {
     const PHILIPPINE_TIMEZONE = 'Asia/Manila';
     const SESSION_HEARTBEAT_INTERVAL_MS = 60000;
     const SESSION_HEARTBEAT_CHECK_MS = 15000;
-    const SESSION_IDLE_WINDOW_MS = 5 * 60 * 1000;
+    const SESSION_IDLE_WINDOW_MS = 10 * 60 * 1000;
     const ANNOUNCEMENT_ALLOWED_ROLES = ['admin', 'hr', 'vpaa', 'osa', 'dean', 'procoor', 'professor', 'student'];
     const ANNOUNCEMENT_ROLE_LABELS = {
         admin: 'Administrator',
@@ -1120,8 +1121,10 @@ const SharedData = (() => {
     let evaluationsLastSyncedAt = 0;
     let subjectManagementLastSyncedAt = 0;
     let lastUserActivityAt = Date.now();
+    let sessionActivity = null;
     let lastHeartbeatSentAt = 0;
     let heartbeatTimerId = null;
+    let idleTimerId = null;
     let heartbeatInFlight = false;
     let heartbeatListenersAttached = false;
     let sessionCsrfToken = '';
@@ -1449,6 +1452,8 @@ const SharedData = (() => {
         sessionClearGeneration += 1;
         sessionCsrfToken = '';
         remove(KEYS.USER_SESSION);
+        remove(KEYS.SESSION_ACTIVITY);
+        sessionActivity = null;
         remove('currentUser');
         try {
             if (typeof window !== 'undefined' && window.sessionStorage) {
@@ -1497,7 +1502,70 @@ const SharedData = (() => {
             window.clearInterval(heartbeatTimerId);
         }
         heartbeatTimerId = null;
+        if (idleTimerId !== null && typeof window !== 'undefined') {
+            window.clearTimeout(idleTimerId);
+        }
+        idleTimerId = null;
         heartbeatInFlight = false;
+    }
+
+    function getSessionActivityAt(session) {
+        const activity = getJSON(KEYS.SESSION_ACTIVITY, sessionActivity);
+        if (activity && activity.userId === session.userId
+            && activity.role === session.role && activity.loginTime === session.loginTime
+            && Number.isFinite(activity.at)) {
+            lastUserActivityAt = activity.at;
+        } else {
+            lastUserActivityAt = Date.now();
+            lastHeartbeatSentAt = 0;
+            saveSessionActivity(session);
+        }
+        return lastUserActivityAt;
+    }
+
+    function saveSessionActivity(session) {
+        sessionActivity = {
+            userId: session.userId,
+            role: session.role,
+            loginTime: session.loginTime,
+            at: lastUserActivityAt,
+        };
+        writeLocalFallbackJSON(KEYS.SESSION_ACTIVITY, sessionActivity);
+    }
+
+    function checkSessionIdleTimeout() {
+        const session = getSession();
+        if (!session || session.isAuthenticated !== true
+            || String(session.role || '').trim().toLowerCase() === 'admin') {
+            return false;
+        }
+        if (Date.now() - getSessionActivityAt(session) < SESSION_IDLE_WINDOW_MS) {
+            return false;
+        }
+
+        // End the server session even when no further API request is made.
+        clearSession();
+        window.location.href = resolveLoginRedirectPath();
+        return true;
+    }
+
+    function scheduleSessionIdleTimeout() {
+        if (idleTimerId !== null) {
+            window.clearTimeout(idleTimerId);
+            idleTimerId = null;
+        }
+        const session = getSession();
+        if (!session || session.isAuthenticated !== true
+            || String(session.role || '').trim().toLowerCase() === 'admin') {
+            return;
+        }
+        const remaining = SESSION_IDLE_WINDOW_MS - (Date.now() - getSessionActivityAt(session));
+        idleTimerId = window.setTimeout(function () {
+            idleTimerId = null;
+            if (!checkSessionIdleTimeout()) {
+                scheduleSessionIdleTimeout();
+            }
+        }, Math.max(0, remaining));
     }
 
     function attachHeartbeatActivityListeners() {
@@ -1514,7 +1582,8 @@ const SharedData = (() => {
         });
         document.addEventListener('visibilitychange', function () {
             if (!document.hidden) {
-                recordUserActivity();
+                // Resuming a suspended tab must not revive an expired session.
+                sendSessionHeartbeat(false);
             }
         });
 
@@ -1522,8 +1591,12 @@ const SharedData = (() => {
     }
 
     function recordUserActivity() {
-        lastUserActivityAt = Date.now();
+        if (checkSessionIdleTimeout()) {
+            return;
+        }
         if (isAuthenticated()) {
+            lastUserActivityAt = Date.now();
+            saveSessionActivity(getSession());
             startSessionHeartbeat();
             sendSessionHeartbeat(false);
         }
@@ -1539,6 +1612,10 @@ const SharedData = (() => {
         }
 
         attachHeartbeatActivityListeners();
+        if (checkSessionIdleTimeout()) {
+            return;
+        }
+        scheduleSessionIdleTimeout();
         if (heartbeatTimerId !== null) {
             return;
         }
@@ -1549,21 +1626,28 @@ const SharedData = (() => {
     }
 
     function sendSessionHeartbeat(force) {
+        if (checkSessionIdleTimeout()) {
+            return;
+        }
         const session = getSession();
-        if (!session || session.isAuthenticated !== true || !session.csrfToken) {
+        if (!session || session.isAuthenticated !== true) {
             stopSessionHeartbeat();
+            return;
+        }
+        if (!session.csrfToken) {
             return;
         }
 
         const now = Date.now();
+        const isAdmin = String(session.role || '').trim().toLowerCase() === 'admin';
         if (!force) {
             if ((now - lastHeartbeatSentAt) < SESSION_HEARTBEAT_INTERVAL_MS) {
                 return;
             }
-            if (lastHeartbeatSentAt > 0 && lastUserActivityAt <= lastHeartbeatSentAt) {
+            if (!isAdmin && lastHeartbeatSentAt > 0 && lastUserActivityAt <= lastHeartbeatSentAt) {
                 return;
             }
-            if ((now - lastUserActivityAt) > SESSION_IDLE_WINDOW_MS) {
+            if (!isAdmin && (now - lastUserActivityAt) > SESSION_IDLE_WINDOW_MS) {
                 return;
             }
         }
@@ -2719,6 +2803,8 @@ const SharedData = (() => {
             dispatchChange(KEYS.USERS, deepClone(state.users));
         } else if (response && response.user && typeof response.user === 'object') {
             updateCachedUserRecord(response.user);
+        } else if (response && response.softDeleted && response.deactivatedUserId) {
+            updateCachedUserRecord({ id: response.deactivatedUserId, status: 'inactive', isActive: false });
         } else if (response && (response.deletedUserId || response.userId)) {
             removeCachedUserRecord(response.deletedUserId || response.userId);
         } else if (response && response.summary) {
@@ -2979,14 +3065,22 @@ const SharedData = (() => {
 
     function setCurrentSemester(value) {
         startBootstrap(false);
-        state.currentSemester = value || '';
+        const response = syncRequest('POST', 'setCurrentSemester', { value: value || '' });
+        state.currentSemester = response.currentSemester || value || '';
         writeLocalFallbackJSON(KEYS.CURRENT_SEMESTER, state.currentSemester);
-        dispatchChange(KEYS.CURRENT_SEMESTER, state.currentSemester);
-        try {
-            syncRequest('POST', 'setCurrentSemester', { value: state.currentSemester });
-        } catch (error) {
-            console.error('[DBData] Failed to persist current semester.', error);
+        if (response.changed) {
+            state.users = state.users.map(function (user) {
+                const role = String(user && user.role || '').trim().toLowerCase();
+                return role === 'admin' || role === 'hr'
+                    ? user
+                    : Object.assign({}, user, { status: 'inactive', isActive: false });
+            });
+            usersLastSyncedAt = 0;
+            markBootstrapDatasetPartial('users');
+            dispatchChange(KEYS.USERS, deepClone(state.users));
         }
+        dispatchChange(KEYS.CURRENT_SEMESTER, state.currentSemester);
+        return response;
     }
 
     function getQuestionnaires() {
@@ -3095,6 +3189,15 @@ const SharedData = (() => {
         startBootstrap(false);
         return requestJson('POST', 'listEvaluations', {
             filters: normalizedFilters,
+        }, { background: true }).then(function (response) {
+            return deepClone(Array.isArray(response && response.evaluations) ? response.evaluations : []);
+        });
+    }
+
+    function fetchHrBehaviorAnalysis(filters) {
+        startBootstrap(false);
+        return requestJson('POST', 'analyzeEvaluationBehavior', {
+            filters: Object.assign({}, filters || {}),
         }, { background: true }).then(function (response) {
             return deepClone(Array.isArray(response && response.evaluations) ? response.evaluations : []);
         });
@@ -3923,12 +4026,16 @@ const SharedData = (() => {
         sessionStorage.removeItem(evaluationTimingKey(payload.evaluationType, payload.targetProfessorId, payload.semesterId));
     }
 
-    function analyzeEvaluationExplainability(payload, actor) {
+    async function analyzeEvaluationExplainability(payload, actor) {
         startBootstrap(false);
+        // Only the scope is needed; the server loads all authorized feedback.
         const body = Object.assign({}, buildActorPayload(actor || {}), {
-            payload: payload && typeof payload === 'object' ? payload : {},
+            payload: {
+                professor: { id: payload && payload.professor && payload.professor.id || '' },
+                semesterId: payload && payload.semesterId || 'all',
+            },
         });
-        const response = syncRequest('POST', 'analyzeEvaluationExplainability', body);
+        const response = await requestJson('POST', 'analyzeEvaluationExplainability', body, { background: true });
         const fallbackInsight = {
             ratingReview: 'No numeric rating review is available.',
             keywords: [],
@@ -4692,14 +4799,10 @@ const SharedData = (() => {
     function addSemester(value, label) {
         startBootstrap(false);
         if (!state.semesterList.find(function (item) { return item.value === value; })) {
+            syncRequest('POST', 'addSemester', { value, label });
             state.semesterList.push({ value, label });
             writeLocalFallbackJSON(KEYS.SEMESTER_LIST, state.semesterList);
             dispatchChange(KEYS.SEMESTER_LIST, deepClone(state.semesterList));
-            try {
-                syncRequest('POST', 'addSemester', { value, label });
-            } catch (error) {
-                console.error('[DBData] Failed to persist semester.', error);
-            }
         }
     }
 
@@ -5188,6 +5291,7 @@ const SharedData = (() => {
         listEvaluations,
         refreshEvaluations,
         fetchEvaluationsSnapshot,
+        fetchHrBehaviorAnalysis,
         addEvaluation,
         addEvaluationAsync,
         getStudentEvaluationDrafts,

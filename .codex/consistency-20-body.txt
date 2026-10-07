@@ -1,0 +1,59 @@
+    $db->exec("INSERT INTO question_types(id,code,label) VALUES(2,'qualitative','Qualitative')");
+    $db->exec("INSERT INTO questions(id,questionnaire_id,question_type_id,question_text,is_required,sort_order) VALUES(16,1,2,'Teaching feedback',1,6)");
+    $privacy=getDefaultQuestionnairePrivacyConsentConfig('student-to-professor'); $privacy['enabled']=true;
+    $db->prepare('UPDATE questionnaires SET privacy_consent_json=? WHERE id=1')->execute([json_encode($privacy)]);
+    setSettingJson($db,'openAiConfig',['panelAccess'=>['hr'=>false,'admin'=>false]]);
+    putenv('NAAP_DB_NAME='.$name);
+    $httpLog='C:/xampp/htdocs/system/.codex/consistency-20-http.log';
+    $process=proc_open([PHP_BINARY,'-S','127.0.0.1:18976','-t','C:/xampp/htdocs/system'],[0=>['pipe','r'],1=>['file',$httpLog,'a'],2=>['file',$httpLog,'a']],$pipes);
+    if (!is_resource($process)) throw new RuntimeException('Cannot start isolated server');
+    fclose($pipes[0]);usleep(400000);
+    $rows=[];
+    for($i=0;$i<20;$i++) {
+        $uid=5+$i;$session=credSession($db,$uid,'student');$sessions[]=$session;
+        $consent=credHttp('recordStudentDataPrivacyConsent',['semesterId'=>'cred-test','questionnaireType'=>'student-to-professor'],$session);
+        credAssert($consent['status']===200,'Privacy consent failed');
+        $now=getAuthoritativePhilippineDateTime();
+        $values=$i%2 ? [3,4,4,5,5]:[4,3,5,4,4];$ratings=[];
+        foreach($values as $j=>$v)$ratings[(string)(11+$j)]=(string)$v;
+        $feedback='The instructor explains topic '.($i+1).' clearly and provides useful examples.';
+        $comment='Please provide more practice exercises for topic '.($i+1).'.';
+        $evaluation=['evaluationType'=>'student','semesterId'=>'cred-test','targetProfessorId'=>'u2','courseOfferingId'=>'1',
+            'ratings'=>$ratings,'qualitative'=>['16'=>$feedback],'comments'=>$comment,
+            'behaviorMeta'=>['captureVersion'=>1,'startedAt'=>formatEvaluationBehaviorTimestamp($now->modify('-120 seconds')),
+            'submittedAt'=>formatEvaluationBehaviorTimestamp($now),'durationSeconds'=>120,'secondsPerQuestion'=>20,'questionCount'=>6,'answeredCount'=>6]];
+        $response=credHttp('addEvaluation',['evaluation'=>$evaluation],$session);
+        credAssert($response['status']===200,'Submission failed: '.$response['raw']);
+        $id=(int)$db->query('SELECT MAX(id) FROM evaluations')->fetchColumn();
+        $snapshot=buildEvaluationsSnapshotFromTables($db,$id,['_includeBehaviorMeta'=>true])[0];
+        $ratingQuery=$db->prepare('SELECT question_id,rating_value,text_value FROM evaluation_responses WHERE evaluation_id=? ORDER BY display_order,id');
+        $ratingQuery->execute([$id]);$responses=$ratingQuery->fetchAll();
+        credAssert(count($responses)===6,'Saved response count differs');
+        foreach(array_slice($responses,0,5) as $j=>$saved)credAssert((int)$saved['question_id']===11+$j && (float)$saved['rating_value']===$values[$j]*1.0,'Rating or question mapping differs');
+        credAssert($responses[5]['text_value']===$feedback,'Qualitative database text differs');
+        credAssert($snapshot['qualitative'][16]===$feedback && $snapshot['comments']===$comment,'Returned feedback differs');
+        credAssert(abs(array_sum(array_map('floatval',$snapshot['ratings']))/5-array_sum($values)/5)<.000001,'Returned mean differs');
+        $credQuery=$db->prepare('SELECT credibility_score,credibility_status FROM evaluations WHERE id=?');$credQuery->execute([$id]);$savedCred=$credQuery->fetch();
+        credAssert($snapshot['credibilityScore']===(int)$savedCred['credibility_score'] && $snapshot['credibilityStatus']===$savedCred['credibility_status'],'Credibility snapshot differs');
+        $rows[]=['evaluationId'=>$id,'ratings'=>$values,'feedback'=>$feedback,'comments'=>$comment,'mean'=>array_sum($values)/5];
+    }
+    require_once 'C:/xampp/htdocs/system/api/faculty_report_helper.php';
+    $professor=buildUserSnapshotById($db,'u2',false);
+    $inputs=facultyReportBuildProfessorReportInputs($db,$professor,'u2','cred-test','main',true,false,false);
+    $byId=[];foreach($inputs['student_evaluations'] as $e)$byId[(int)$e['databaseEvaluationId']]=$e;
+    foreach($rows as $row) {
+        $report=$byId[$row['evaluationId']]??null;credAssert($report!==null,'Report input missing evaluation');
+        credAssert(array_values(array_map('intval',$report['ratings']))===$row['ratings'],'Report input ratings differ');
+        credAssert($report['qualitative'][16]===$row['feedback'] && $report['comments']===$row['comments'],'Report input feedback differs');
+    }
+    $set=facultyReportBuildSetSummaryRows($db,'u2','cred-test','main');
+    credAssert((int)$set['completed_evaluations']===20,'Report respondent count differs');
+    credAssert(abs($set['overall_set_rating']-82)<.000001,'Overall SET differs');
+    $message='PASS: 20 synthetic HTTP submissions; exact saved ratings and qualitative feedback; matching returned credibility; 20 matching faculty report inputs; overall SET 82%; '.$assertions.' assertions.'.PHP_EOL;
+} finally {
+    if(is_resource($process)){proc_terminate($process);proc_close($process);}
+    foreach($sessions as $session){session_id($session['id']);session_start();session_destroy();}
+    if(!preg_match('/^naap_cred_test_[a-f0-9]{10}$/',$name))throw new RuntimeException('Unsafe cleanup');
+    $db=null;$server->exec("DROP DATABASE `$name`");
+}
+echo $message;

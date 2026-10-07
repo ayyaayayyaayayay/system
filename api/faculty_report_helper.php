@@ -180,6 +180,9 @@ function facultyReportBuildCommentKey(string $source, string $evaluationId, stri
 
 function facultyReportCollectEvaluationCommentItems(array $evaluation, string $source): array
 {
+    if (!isEvaluationEligibleForAnalytics($evaluation)) {
+        return [];
+    }
     $items = [];
     $evaluationId = trim((string)($evaluation['id'] ?? ''));
 
@@ -208,35 +211,24 @@ function facultyReportCollectEvaluationCommentItems(array $evaluation, string $s
     return $items;
 }
 
-function facultyReportComputeAverageRatingPercent(array $evaluations): float
+function facultyReportComputeAverageRatingPercent(array $evaluations): ?float
 {
-    $sum = 0.0;
-    $count = 0;
-
+    $averages = [];
     foreach ($evaluations as $evaluation) {
-        $ratings = is_array($evaluation['ratings'] ?? null) ? $evaluation['ratings'] : [];
-        foreach ($ratings as $rating) {
-            if (!is_numeric($rating)) {
-                continue;
-            }
-            $value = (float)$rating;
-            if (!is_finite($value)) {
-                continue;
-            }
-            $value = max(1.0, min(5.0, $value));
-            $sum += $value;
-            $count += 1;
+        if (!is_array($evaluation) || strtolower(trim((string)($evaluation['status'] ?? ''))) !== 'submitted'
+            || !isEvaluationEligibleForAnalytics($evaluation)) {
+            continue;
+        }
+        $average = facultyReportComputeQuestionnaireAveragePercent($evaluation);
+        if ($average !== null) {
+            $averages[] = $average;
         }
     }
-
-    if ($count === 0) {
-        return 0.0;
-    }
-
-    return ($sum / $count) * 20.0;
+    // For the prescribed 15-item form, mean x 20 equals Total Score / 75 x 100.
+    return count($averages) > 0 ? array_sum($averages) / count($averages) : null;
 }
 
-function facultyReportBuildSefRating(PDO $pdo, array $professor, string $semesterId): float
+function facultyReportBuildSefRating(PDO $pdo, array $professor, string $semesterId): ?float
 {
     return facultyReportComputeAverageRatingPercent(
         facultyReportFetchSupervisorEvaluationsForProfessor($pdo, $professor, $semesterId, true, false)
@@ -334,6 +326,7 @@ function facultyReportBuildScopedEvaluationTableFilters(
         'semesterId' => $semesterDatabaseId > 0 ? $semesterDatabaseId : $semesterId,
         'includeRatings' => $includeRatings,
         'includeTextResponses' => $includeTextResponses,
+        'analyticsEligible' => true,
     ];
     if ($evaluationTypeDatabaseId > 0) {
         $filters['evaluationTypeId'] = $evaluationTypeDatabaseId;
@@ -615,14 +608,24 @@ function facultyReportGetLegacyEvaluations(PDO $pdo): array
 {
     $settings = getSettingJson($pdo, 'sharedEvaluations', []);
     if (!is_array($settings) || !$settings) return [];
-    // SQL identities remain authoritative even when their survey is rejected.
+    // Only legacy-only history is grandfathered. SQL decisions remain authoritative.
+    foreach ($settings as &$legacy) {
+        if (is_array($legacy) && empty($legacy['credibilityStatus']) && empty($legacy['credibility_status'])) {
+            $legacy['credibilityStatus'] = 'AUTO_ACCEPTED';
+            $legacy['credibilityComponents'] = array_merge(
+                is_array($legacy['credibilityComponents'] ?? null) ? $legacy['credibilityComponents'] : [],
+                ['legacyPreserved' => true]
+            );
+        }
+    }
+    unset($legacy);
     $identities = buildEvaluationsSnapshotFromTables($pdo, null, [
         '_includeRejected' => true, 'includeRatings' => false, 'includeTextResponses' => false,
     ]);
     $ids = array_fill_keys(array_column($identities, 'id'), true);
     $keys = array_fill_keys(array_map('buildEvaluationSnapshotMergeKey', $identities), true);
     return array_values(array_filter($settings, static function ($row) use ($ids, $keys) {
-        return is_array($row) && ($row['credibilityStatus'] ?? '') !== 'REJECTED_BY_HR'
+        return is_array($row) && isEvaluationEligibleForAnalytics($row)
             && !isset($ids[$row['id'] ?? '']) && !isset($keys[buildEvaluationSnapshotMergeKey($row)]);
     }));
 }
@@ -632,7 +635,7 @@ function facultyReportFilterLegacyEvaluations(array $legacyEvaluations, array $l
     $filtered = filterEvaluationSnapshotsByListFilters($legacyEvaluations, $legacyFilters);
     $result = [];
     foreach ($filtered as $evaluation) {
-        if (!is_array($evaluation)) {
+        if (!is_array($evaluation) || !isEvaluationEligibleForAnalytics($evaluation)) {
             continue;
         }
         if (!$predicate($evaluation)) {
@@ -903,6 +906,8 @@ function facultyReportComputeQuestionnaireAveragePercent(array $evaluation): ?fl
     if (count($ratings) === 0) {
         return null;
     }
+    // Annex A/B: the 15 ratings have a maximum total of 75 points.
+    // Using the actual item count also preserves historical questionnaire scales.
     return (array_sum($ratings) / count($ratings)) * 20.0;
 }
 
@@ -965,7 +970,7 @@ function facultyReportGroupStudentEvaluationsByOffering(
             continue;
         }
         $status = strtolower(trim((string)($evaluation['status'] ?? '')));
-        if ($status !== 'submitted') {
+        if ($status !== 'submitted' || !isEvaluationEligibleForAnalytics($evaluation)) {
             continue;
         }
         if (facultyReportComputeQuestionnaireAveragePercent($evaluation) === null) {
@@ -1105,11 +1110,13 @@ function facultyReportBuildSetSummaryRowsFromInputs(array $offeringRows, array $
         }
     }
 
-    $calculationAvailable = $scorableStudents > 0;
-    $partialResult = $calculationAvailable && $excludedClassCount > 0;
-    $calculationNote = $partialResult
+    // Annex C divides by ALL registered students. A missing class average
+    // cannot be silently excluded or replaced with an invented zero rating.
+    $calculationAvailable = $totalStudents > 0 && $excludedClassCount === 0;
+    $partialResult = $scorableStudents > 0 && $excludedClassCount > 0;
+    $calculationNote = $excludedClassCount > 0
         ? sprintf(
-            'Available SET excludes %d %s with no valid responses (%d registered %s).',
+            'Overall SET is N/A: %d %s without valid responses (%d registered %s). Annex C requires averages for all enrolled classes.',
             $excludedClassCount,
             $excludedClassCount === 1 ? 'class' : 'classes',
             $excludedStudents,
@@ -1125,7 +1132,7 @@ function facultyReportBuildSetSummaryRowsFromInputs(array $offeringRows, array $
         'completion_rate' => $totalStudents > 0 ? ($totalCompleted / $totalStudents) * 100.0 : 0.0,
         'valid_rating_count' => $totalValidRatingCount,
         'total_weighted_score' => $calculationAvailable ? $totalWeightedScore : null,
-        'overall_set_rating' => $calculationAvailable ? $totalWeightedScore / $scorableStudents : null,
+        'overall_set_rating' => $calculationAvailable ? $totalWeightedScore / $totalStudents : null,
         'scorable_students' => $scorableStudents,
         'excluded_students' => $excludedStudents,
         'registered_class_count' => $registeredClassCount,
@@ -1139,7 +1146,7 @@ function facultyReportBuildSetSummaryRowsFromInputs(array $offeringRows, array $
     ];
 }
 
-function facultyReportBuildSefRatingFromInputs(array $supervisorEvaluations): float
+function facultyReportBuildSefRatingFromInputs(array $supervisorEvaluations): ?float
 {
     return facultyReportComputeAverageRatingPercent($supervisorEvaluations);
 }
@@ -1280,6 +1287,16 @@ function facultyReportBuildFacultyPaperSetRating(
     return facultyReportFormatFacultyPaperSetRating(
         facultyReportBuildSetSummaryRows($pdo, $professorUserId, $semesterId, $loadType)
     );
+}
+
+function facultyReportBuildFacultyPaperSefRating(PDO $pdo, string $professorUserId, string $semesterId): string
+{
+    $professor = buildUserSnapshotById($pdo, $professorUserId, false);
+    if (!$professor) {
+        return 'N/A';
+    }
+    $rating = facultyReportBuildSefRating($pdo, $professor, $semesterId);
+    return facultyPdfFormatIferRatingValue($rating);
 }
 
 function facultyReportBuildFormattedDate(): string

@@ -642,6 +642,7 @@ function persistCampusesSnapshot(PDO $pdo, array $campuses, array $actorUser = [
             }
         }
 
+        seedDepartmentFacultyReportAccessDefaults($pdo);
         $after = buildCampusesFromDatabase($pdo);
         setSettingJson($pdo, 'sharedCampusData', $after);
         logAdminFlatStateChangeSnapshot(
@@ -1158,6 +1159,8 @@ function ensureCampusAndDepartmentLookupSeed(PDO $pdo, array $users) {
             ]);
         }
     }
+
+    seedDepartmentFacultyReportAccessDefaults($pdo);
 }
 
 function buildSimpleLookupMap(PDO $pdo, $sql, $keyColumn, $valueColumn = 'id') {
@@ -1545,6 +1548,9 @@ function buildManagedUserProfileIdentityMapsForPayloads(PDO $pdo, array $users) 
 function assertManagedUserProfileIdentityAvailable(array $profileIdentityMaps, array $user, $roleCode, $userId = 0) {
     $identity = getManagedUserProfileIdentityForRole($user, $roleCode);
     $value = (string) ($identity['value'] ?? '');
+    if (strlen($value) > 24) {
+        throw new RuntimeException(($identity['label'] ?? 'Identity number') . ' must not exceed 24 characters.');
+    }
     $token = normalizeManagedUserProfileIdentityToken($value);
     if ($value === '' || $token === '') {
         return;
@@ -2102,6 +2108,14 @@ function persistUsersSnapshot(PDO $pdo, array $users, array $options = []) {
 
             if ($existingRecord && ($passwordChanged || $params[':status'] !== 'active')) {
                 revokeTrustedDevicesSnapshot($pdo, $userId);
+                if ($params[':status'] !== 'active') {
+                    $clearSession = $pdo->prepare(
+                        'UPDATE users SET active_session_token_hash = NULL,
+                         active_session_started_at = NULL, active_session_last_seen_at = NULL
+                         WHERE id = :id'
+                    );
+                    $clearSession->execute([':id' => $userId]);
+                }
             }
 
             persistManagedUserProfiles(
@@ -2394,6 +2408,16 @@ function persistUsersSnapshotBatch(PDO $pdo, array $users, array $options = []) 
 
                 if ($userId <= 0) {
                     throw new RuntimeException('User could not be saved.');
+                }
+
+                if ($existingRecord && $params[':status'] !== 'active') {
+                    revokeTrustedDevicesSnapshot($pdo, $userId);
+                    $clearSession = $pdo->prepare(
+                        'UPDATE users SET active_session_token_hash = NULL,
+                         active_session_started_at = NULL, active_session_last_seen_at = NULL
+                         WHERE id = :id'
+                    );
+                    $clearSession->execute([':id' => $userId]);
                 }
 
                 $profileMaps = is_array($existingMaps['profileIdentity'] ?? null)
@@ -2956,26 +2980,72 @@ function getCurrentSemesterSnapshot(PDO $pdo) {
 }
 
 function setCurrentSemesterSnapshot(PDO $pdo, $value, array $actorUser = []) {
-    $beforeValue = getCurrentSemesterSnapshot($pdo);
+    $value = trim((string) $value);
     $pdo->beginTransaction();
     try {
+        // Serialize semester saves so a repeated save cannot deactivate newly activated users.
+        $lockSql = 'SELECT slug FROM semesters ORDER BY id';
+        if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+            $lockSql .= ' FOR UPDATE';
+        }
+        $semesterSlugs = $pdo->query($lockSql)->fetchAll(PDO::FETCH_COLUMN);
+        if ($value === '' || !in_array($value, $semesterSlugs, true)) {
+            throw new InvalidArgumentException('Please select an existing semester.');
+        }
+        $beforeValue = getCurrentSemesterSnapshot($pdo);
+        $changed = $beforeValue !== $value;
+        $deactivatedCount = 0;
+        if ($changed) {
+            // Account access changes; profiles and historical semester records are retained.
+            $roleScope = "role_id IN (SELECT id FROM roles WHERE code NOT IN ('admin', 'hr'))";
+            $deactivatedCount = $pdo->exec(
+                "UPDATE users SET status = 'inactive',
+                 active_session_token_hash = NULL, active_session_started_at = NULL,
+                 active_session_last_seen_at = NULL
+                 WHERE status = 'active' AND " . $roleScope
+            );
+            $inactiveUserScope = "SELECT id FROM users WHERE status = 'inactive' AND " . $roleScope;
+            $timestamp = getAuthoritativePhilippineDateTime()->format('Y-m-d H:i:s');
+            if (tableExistsInCurrentSchema($pdo, 'trusted_devices')) {
+                $revoke = $pdo->prepare(
+                    'UPDATE trusted_devices SET revoked_at = :revoked_at
+                     WHERE revoked_at IS NULL AND user_id IN (' . $inactiveUserScope . ')'
+                );
+                $revoke->execute([':revoked_at' => $timestamp]);
+            }
+            if (tableExistsInCurrentSchema($pdo, 'login_otp_challenges')) {
+                $invalidate = $pdo->prepare(
+                    'UPDATE login_otp_challenges SET invalidated_at = :invalidated_at
+                     WHERE consumed_at IS NULL AND invalidated_at IS NULL
+                     AND user_id IN (' . $inactiveUserScope . ')'
+                );
+                $invalidate->execute([':invalidated_at' => $timestamp]);
+            }
+        }
         $stmt = $pdo->prepare('UPDATE semesters SET is_current = CASE WHEN slug = :slug THEN 1 ELSE 0 END');
         $stmt->execute([':slug' => $value]);
         setSettingValue($pdo, 'currentSemester', $value);
-        logAdminFlatStateChangeSnapshot(
-            $pdo,
-            $actorUser,
-            'Current Semester Updated',
-            'system',
-            'Current semester',
-            ['Current Semester' => $beforeValue],
-            ['Current Semester' => (string) $value]
-        );
+        if ($changed) {
+            logAdminFlatStateChangeSnapshot(
+                $pdo,
+                $actorUser,
+                'Current Semester Updated',
+                'system',
+                'Current semester',
+                ['Current Semester' => $beforeValue],
+                ['Current Semester' => $value, 'Accounts Deactivated' => (int) $deactivatedCount]
+            );
+        }
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         throw $e;
     }
+    return [
+        'currentSemester' => $value,
+        'changed' => $changed,
+        'deactivatedCount' => (int) $deactivatedCount,
+    ];
 }
 
 function addSemesterSnapshot(PDO $pdo, $value, $label, array $actorUser = []) {
@@ -5180,7 +5250,7 @@ function buildEvaluationSubmissionQuestionRows(PDO $pdo, $questionnaireId) {
     return $questions;
 }
 
-function collectEvaluationSubmissionResponses(array $evaluation, array $questionsById) {
+function collectEvaluationSubmissionResponses(array $evaluation, array $questionsById, ?int $qualitativeLengthLimit = null, ?int $qualitativeWordLimit = null) {
     if (count($questionsById) === 0) {
         throw new RuntimeException('Questionnaire has no questions.');
     }
@@ -5205,22 +5275,41 @@ function collectEvaluationSubmissionResponses(array $evaluation, array $question
 
             $question = $questionsById[$questionId];
             $questionType = $question['type'];
+            $maxTextLength = (int) $question['maxLength'];
+            if ($qualitativeLengthLimit !== null) {
+                $maxTextLength = min($maxTextLength, $qualitativeLengthLimit);
+            }
             $unboundedValue = is_scalar($value) ? trim((string) $value) : '';
             if ($questionType === 'qualitative' && $unboundedValue !== '') {
-                $textLength = function_exists('mb_strlen')
-                    ? mb_strlen($unboundedValue, 'UTF-8')
-                    : strlen($unboundedValue);
-                if ($textLength > (int) $question['maxLength']) {
-                    throw new RuntimeException(
-                        'Text answer for question ' . $questionId
-                        . ' exceeds the maximum length of ' . (int) $question['maxLength'] . ' characters.'
-                    );
+                if ($qualitativeWordLimit !== null) {
+                    // Match JavaScript's whitespace-based word count, including Unicode whitespace.
+                    $wordCount = preg_match_all('/[^\x{0009}-\x{000D}\x{0020}\x{00A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}]+/u', $unboundedValue);
+                    if ($wordCount === false) {
+                        throw new RuntimeException('Text answer for question ' . $questionId . ' contains invalid UTF-8.');
+                    }
+                    if ($wordCount > $qualitativeWordLimit) {
+                        throw new RuntimeException(
+                            'Text answer for question ' . $questionId
+                            . ' exceeds the maximum length of ' . $qualitativeWordLimit . ' words.'
+                        );
+                    }
+                } else {
+                    $textLength = function_exists('mb_strlen')
+                        ? mb_strlen($unboundedValue, 'UTF-8')
+                        : strlen($unboundedValue);
+                    if ($textLength > $maxTextLength) {
+                        throw new RuntimeException(
+                            'Text answer for question ' . $questionId
+                            . ' exceeds the maximum length of ' . $maxTextLength . ' characters.'
+                        );
+                    }
                 }
             }
-            $rawValue = normalizeEvaluationSubmissionTextValue(
-                $unboundedValue,
-                $questionType === 'qualitative' ? $question['maxLength'] : 100
-            );
+            // Qualitative text was validated above. Preserve the
+            // complete UTF-8 answer rather than truncating it by byte count.
+            $rawValue = $questionType === 'qualitative'
+                ? $unboundedValue
+                : normalizeEvaluationSubmissionTextValue($unboundedValue, 100);
             if ($rawValue === '') {
                 continue;
             }
@@ -5458,7 +5547,12 @@ function persistEvaluationSubmissionSnapshot(PDO $pdo, array $evaluation, array 
         $typeConfig['label']
     );
     $questionsById = buildEvaluationSubmissionQuestionRows($pdo, (int) $questionnaire['id']);
-    $responses = collectEvaluationSubmissionResponses($evaluation, $questionsById);
+    $responses = collectEvaluationSubmissionResponses(
+        $evaluation,
+        $questionsById,
+        null,
+        in_array($typeConfig['snapshotType'], ['student', 'peer'], true) ? 400 : null
+    );
     $behaviorMeta = null;
     if (in_array($typeConfig['snapshotType'], ['student', 'peer', 'supervisor'], true)) {
         $behaviorMeta = normalizeEvaluationSubmissionBehaviorMeta(
@@ -7920,12 +8014,16 @@ function buildSubjectManagementSnapshotForActor(PDO $pdo, array $ctx, array $fil
     );
     campusAuthorizationValidatePayloadCampuses($pdo, $campusContext, $filters, 'subject-management-list');
     $where = [
-        'sem.slug = :semester_slug',
         'prof.status = \'active\'',
         'c.is_active = 1',
         'd.is_active = 1',
     ];
-    $params = [':semester_slug' => $semesterSlug];
+    $params = [];
+    // "all" is the analytics selection for every semester, not a stored slug.
+    if ($semesterSlug !== 'all') {
+        $where[] = 'sem.slug = :semester_slug';
+        $params[':semester_slug'] = $semesterSlug;
+    }
     if (!$includeInactiveOfferings) {
         $where[] = 'co.is_active = 1';
     }
@@ -9989,9 +10087,21 @@ function ensureDepartmentFacultyReportAccessSchema(PDO $pdo) {
         );
     }
 
+    seedDepartmentFacultyReportAccessDefaults($pdo);
+}
+
+function seedDepartmentFacultyReportAccessDefaults(PDO $pdo) {
+    // Lookup migrations can run before the report-access table is installed.
+    if (!tableExistsInCurrentSchema($pdo, 'department_faculty_report_access')) {
+        return;
+    }
+
     $pdo->exec(
         'INSERT IGNORE INTO department_faculty_report_access (department_id, reports_enabled)
-         SELECT id, 1 FROM departments'
+         SELECT d.id, 1
+         FROM departments d
+         LEFT JOIN department_faculty_report_access a ON a.department_id = d.id
+         WHERE a.department_id IS NULL'
     );
 }
 
@@ -13714,7 +13824,7 @@ function buildSystemReportCodeFromId($reportId) {
 
 function normalizeSystemReportType($value) {
     $raw = trim((string) $value);
-    $token = strtolower(preg_replace('/[^a-z0-9]+/', '', $raw));
+    $token = preg_replace('/[^a-z0-9]+/', '', strtolower($raw));
     $map = [
         'bug' => 'Bug',
         'systemerror' => 'System Error',
@@ -18803,6 +18913,31 @@ function listEvaluationsSnapshotPage(PDO $pdo, array $filters, array $actorUser)
         'offset' => $offset,
         'hasMore' => false,
     ];
+}
+
+function buildHrBehaviorAnalysisSnapshot(PDO $pdo, array $filters, array $actorUser): array {
+    if (bootstrapNormalizePlainToken($actorUser['role'] ?? '') !== 'hr') {
+        throw new RuntimeException('Permission denied.');
+    }
+    $queryFilters = array_intersect_key($filters, array_flip(['semesterId', 'semester', 'campus', 'campusId', 'campusSlug']));
+    $queryFilters = array_merge($queryFilters, [
+        'evaluationType' => 'student-to-professor', 'includeRatings' => true,
+        'includeTextResponses' => true, 'limit' => 0, 'offset' => 0,
+    ]);
+    $page = listEvaluationsSnapshotPage($pdo, $queryFilters, $actorUser);
+    $evaluations = array_values(array_filter($page['evaluations'],
+        fn($row) => strtolower((string) ($row['status'] ?? '')) === 'submitted'));
+    $analysis = calculateEvaluationBehaviorRecords($evaluations);
+    foreach ($evaluations as &$evaluation) {
+        $detail = $analysis[(string) $evaluation['id']];
+        // Current comparisons can detect matches submitted after the original
+        // survey. Official saved scores and HR decisions remain at submission.
+        $evaluation['behaviorRepetition'] = array_intersect_key($detail,
+            array_flip(['ratingRepetitiveFlag', 'commentRepetitiveFlag', 'repetitiveFlag']));
+        unset($evaluation['ratings'], $evaluation['qualitative'], $evaluation['comments']);
+    }
+    unset($evaluation);
+    return $evaluations;
 }
 
 function buildAdminDashboardEmptyEvaluationReport() {

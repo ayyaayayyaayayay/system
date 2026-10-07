@@ -1,0 +1,121 @@
+[Tue Oct  6 22:50:42 2026] PHP 8.2.12 Development Server (http://127.0.0.1:18976) started
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57217 Accepted
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57217 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57217 Closing
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57220 Accepted
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57220 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57220 Closing
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57222 Accepted
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57222 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57222 Closing
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57224 Accepted
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57224 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57224 Closing
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57226 Accepted
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57226 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57226 Closing
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57228 Accepted
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57228 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57228 Closing
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57230 Accepted
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57230 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57230 Closing
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57232 Accepted
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57232 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57232 Closing
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57234 Accepted
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57234 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57234 Closing
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57236 Accepted
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57236 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57236 Closing
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57238 Accepted
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57238 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57238 Closing
+[Tue Oct  6 22:50:43 2026] 127.0.0.1:57240 Accepted
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57240 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57240 Closing
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57242 Accepted
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57242 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57242 Closing
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57244 Accepted
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57244 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57244 Closing
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57246 Accepted
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57246 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57246 Closing
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57248 Accepted
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57248 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57248 Closing
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57250 Accepted
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57250 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57250 Closing
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57252 Accepted
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57252 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57252 Closing
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57254 Accepted
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57254 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57254 Closing
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57256 Accepted
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57256 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57256 Closing
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57258 Accepted
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57258 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57258 Closing
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57260 Accepted
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57260 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57260 Closing
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57262 Accepted
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57262 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57262 Closing
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57264 Accepted
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57264 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57264 Closing
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57266 Accepted
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57266 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57266 Closing
+[Tue Oct  6 22:50:44 2026] 127.0.0.1:57268 Accepted
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57268 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57268 Closing
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57270 Accepted
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57270 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57270 Closing
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57272 Accepted
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57272 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57272 Closing
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57274 Accepted
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57274 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57274 Closing
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57276 Accepted
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57276 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57276 Closing
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57278 Accepted
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57278 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57278 Closing
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57280 Accepted
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57280 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57280 Closing
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57284 Accepted
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57284 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:57284 Closing
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:51737 Accepted
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:51737 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:51737 Closing
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:51739 Accepted
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:51739 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:51739 Closing
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:51741 Accepted
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:51741 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:51741 Closing
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:51743 Accepted
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:51743 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:51743 Closing
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:51745 Accepted
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:51745 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:51745 Closing
+[Tue Oct  6 22:50:45 2026] 127.0.0.1:51747 Accepted
+[Tue Oct  6 22:50:46 2026] 127.0.0.1:51747 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:50:46 2026] 127.0.0.1:51747 Closing
+[Tue Oct  6 22:50:46 2026] 127.0.0.1:51749 Accepted
+[Tue Oct  6 22:50:46 2026] 127.0.0.1:51749 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:50:46 2026] 127.0.0.1:51749 Closing

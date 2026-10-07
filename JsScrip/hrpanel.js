@@ -23,6 +23,10 @@ let hrEvaluationOverviewChartInstance = null;
 let hrSemestralPerformanceChartInstance = null;
 let hrAiInsightsReady = false;
 let hrBehaviorAnalysisHasRun = false;
+let hrBehaviorAnalysisSnapshot = null;
+let hrBehaviorAnalysisRequestId = 0;
+let hrDiscrepancyAnalysisRequestId = 0;
+let hrCredibilityAnalysisRequestId = 0;
 let hrActivitySummaryCache = null;
 let hrMobileDrawerBound = false;
 let hrProfessorViewportBound = false;
@@ -679,13 +683,14 @@ function setupAiInsightsView() {
             syncSemesterFilters(element.value);
             hrBehaviorAnalysisHasRun = false;
             resetAiInsightsBehaviorAnalysisPrompt();
+            resetAiInsightsDiscrepancyPrompt();
+            resetAiInsightsCredibilityPrompt();
         });
     });
 
     if (behaviorBtn) {
         behaviorBtn.addEventListener('click', function () {
-            hrBehaviorAnalysisHasRun = true;
-            renderAiInsightsBehaviorAnalysis({ silent: false });
+            runAiBehaviorAnalysis();
         });
     }
 
@@ -716,6 +721,8 @@ function setupAiInsightsView() {
 }
 
 function resetAiInsightsBehaviorAnalysisPrompt() {
+    hrBehaviorAnalysisRequestId += 1;
+    hrBehaviorAnalysisSnapshot = null;
     const feedbackEl = document.getElementById('hr-ai-behavior-feedback');
     const studentBody = document.getElementById('hr-ai-student-aggregate-body');
     const submissionBody = document.getElementById('hr-ai-submission-body');
@@ -1217,11 +1224,10 @@ async function runAllAiInsightsThenPrint(printBtn) {
     }
 
     try {
-        hrBehaviorAnalysisHasRun = true;
-        renderAiInsightsBehaviorAnalysis({ silent: false });
+        if (!await runAiBehaviorAnalysis()) return;
         await Promise.resolve(runAiBiasDetection());
-        await Promise.resolve(runAiDiscrepancyCheck());
-        await Promise.resolve(runAiCredibilityAnalysis());
+        if (!await runAiDiscrepancyCheck()) return;
+        if (!await runAiCredibilityAnalysis()) return;
         printHrAiInsightsSummary();
     } catch (error) {
         console.error('[HRPanel] Unable to prepare AI Insights print summary.', error);
@@ -1290,9 +1296,12 @@ function buildHrPersistedCredibilityAnalysis(context, semesterId) {
 function buildHrPersistedBehaviorAnalysis(context, semesterId) {
     const records = (context.evaluations || []).filter(e => getHrEvaluationTypeKey(e) === 'student' && isHrEvaluationInSemester(e, semesterId)).map(e => {
         const detail = e.credibilityComponents && e.credibilityComponents.behaviorDetails || {};
+        const repetition = e.behaviorRepetition || detail;
         return { evaluation: e, submissionId: e.id, studentNumber: 'Anonymous', behaviorScore: e.behaviorScore == null ? 'N/A' : e.behaviorScore,
             timingAvailable: e.behaviorScore != null, fastFlag: (detail.flags || []).includes('Rapid completion / low seconds per question'), uniformFlag: (detail.flags || []).includes('Uniform response pattern'),
-            repetitiveFlag: (detail.flags || []).includes('Repetitive response pattern') };
+            ratingRepetitiveFlag: repetition.ratingRepetitiveFlag === true,
+            commentRepetitiveFlag: repetition.commentRepetitiveFlag === true,
+            repetitiveFlag: repetition.repetitiveFlag === true || (!e.behaviorRepetition && (detail.flags || []).includes('Repetitive response pattern')) };
     });
     const groups = new Map();
     records.filter(r => r.timingAvailable).forEach(r => {
@@ -1306,6 +1315,60 @@ function buildHrPersistedBehaviorAnalysis(context, semesterId) {
     return { records, studentRows, timedRecordsCount: records.filter(r => r.timingAvailable).length, legacyRecordsCount: records.filter(r => !r.timingAvailable).length, fastThreshold: 0 };
 }
 
+async function runAiBehaviorAnalysis() {
+    const semesterSelect = document.getElementById('hr-ai-behavior-semester');
+    const feedbackEl = document.getElementById('hr-ai-behavior-feedback');
+    const button = document.getElementById('hr-run-behavior-analysis-btn');
+    if (!semesterSelect || !feedbackEl) return false;
+
+    const semesterId = String(semesterSelect.value || 'all').trim() || 'all';
+    const requestId = ++hrBehaviorAnalysisRequestId;
+    const originalButtonHtml = button ? button.innerHTML : '';
+    hrBehaviorAnalysisHasRun = false;
+    hrBehaviorAnalysisSnapshot = null;
+    feedbackEl.textContent = 'Loading submitted evaluations...';
+    ['hr-ai-student-aggregate-body', 'hr-ai-submission-body'].forEach(function (id, index) {
+        const body = document.getElementById(id);
+        if (body) renderHrResponsiveTablePrompt(body, index === 0 ? 4 : 6, 'Loading submitted evaluations...', 'hr-mobile-card-empty--center');
+    });
+    if (button) {
+        button.disabled = true;
+        button.textContent = 'Loading...';
+    }
+
+    try {
+        // HR bootstrap intentionally omits evaluations. Fetch a dedicated snapshot
+        // so unrelated, partial lists in SharedData cannot hide saved submissions.
+        const evaluations = await SharedData.fetchHrBehaviorAnalysis({
+            semesterId,
+            evaluationType: 'student-to-professor',
+            includeRatings: false,
+            includeTextResponses: false,
+            limit: 0,
+            offset: 0,
+        });
+        if (requestId !== hrBehaviorAnalysisRequestId) return false;
+        hrBehaviorAnalysisSnapshot = { semesterId, evaluations };
+        hrBehaviorAnalysisHasRun = true;
+        renderAiInsightsBehaviorAnalysis({ silent: false });
+        return true;
+    } catch (error) {
+        if (requestId !== hrBehaviorAnalysisRequestId) return false;
+        console.error('[HRPanel] Unable to load behavior scores.', error);
+        feedbackEl.textContent = 'Unable to load submitted evaluations. Please try Run Behavior Analysis again.';
+        ['hr-ai-student-aggregate-body', 'hr-ai-submission-body'].forEach(function (id, index) {
+            const body = document.getElementById(id);
+            if (body) renderHrResponsiveTablePrompt(body, index === 0 ? 4 : 6, 'Behavior results could not be loaded.', 'hr-mobile-card-empty--center');
+        });
+        return false;
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalButtonHtml;
+        }
+    }
+}
+
 function renderAiInsightsBehaviorAnalysis(options) {
     const cfg = options || {};
     const behaviorSemester = document.getElementById('hr-ai-behavior-semester');
@@ -1316,12 +1379,15 @@ function renderAiInsightsBehaviorAnalysis(options) {
 
     const semesterId = String(behaviorSemester.value || 'all').trim() || 'all';
     const context = buildHrEvaluationContext();
+    if (hrBehaviorAnalysisSnapshot && hrBehaviorAnalysisSnapshot.semesterId === semesterId) {
+        context.evaluations = hrBehaviorAnalysisSnapshot.evaluations;
+    }
     const analysis = buildHrPersistedBehaviorAnalysis(context, semesterId);
     const studentEvaluationCount = (context.evaluations || []).filter(function (evaluation) {
         return getHrEvaluationTypeKey(evaluation) === 'student' && isHrEvaluationInSemester(evaluation, semesterId);
     }).length;
 
-    feedbackEl.textContent = `Saved behavior scores: ${analysis.timedRecordsCount}. Unavailable: ${analysis.legacyRecordsCount}. Missing historical behavior is N/A, not zero. Scores are calculated by the server at submission.`;
+    feedbackEl.textContent = `Saved behavior scores: ${analysis.timedRecordsCount}. Unavailable: ${analysis.legacyRecordsCount}. Scores are saved at submission. Repetitive flags compare ratings and comments independently against current submissions in the same semester; either can trigger Yes.`;
 
     if (analysis.studentRows.length === 0) {
         renderHrResponsiveTablePrompt(studentBody, 4, 'No student aggregate results available.', 'hr-mobile-card-empty--center');
@@ -1356,15 +1422,18 @@ function renderAiInsightsBehaviorAnalysis(options) {
     } else {
         const submissionRowsHtml = analysis.records.map(function (record) {
             const fastFlagText = record.timingAvailable ? (record.fastFlag ? 'Yes' : 'No') : 'N/A';
+            const repetitionSources = [record.ratingRepetitiveFlag ? 'ratings' : '', record.commentRepetitiveFlag ? 'comments' : ''].filter(Boolean);
+            const repetitiveFlagText = record.repetitiveFlag
+                ? (repetitionSources.length ? `Yes (${repetitionSources.join(' and ')})` : 'Yes') : 'No';
             if (isHrPhoneViewport()) {
                 return `
                     <article class="hr-mobile-data-card">
                         <div class="hr-mobile-card-title">${escapeHrHtml(record.submissionId)}</div>
-                        ${buildHrMobileDataField('Student Number', escapeHrHtml(record.studentNumber))}
+                        ${buildHrMobileDataField('Student Identity', escapeHrHtml(record.studentNumber))}
                         ${buildHrMobileDataField('Score', record.behaviorScore)}
                         ${buildHrMobileDataField('Fast Flag', fastFlagText)}
                         ${buildHrMobileDataField('Uniform Flag', !record.timingAvailable ? 'N/A' : (record.uniformFlag ? 'Yes' : 'No'))}
-                        ${buildHrMobileDataField('Repetitive Flag', !record.timingAvailable ? 'N/A' : (record.repetitiveFlag ? 'Yes' : 'No'))}
+                        ${buildHrMobileDataField('Repetitive Flag (Ratings / Comments)', repetitiveFlagText)}
                     </article>
                 `;
             }
@@ -1375,7 +1444,7 @@ function renderAiInsightsBehaviorAnalysis(options) {
                     <td>${record.behaviorScore}</td>
                     <td>${fastFlagText}</td>
                     <td>${!record.timingAvailable ? 'N/A' : (record.uniformFlag ? 'Yes' : 'No')}</td>
-                    <td>${!record.timingAvailable ? 'N/A' : (record.repetitiveFlag ? 'Yes' : 'No')}</td>
+                    <td>${repetitiveFlagText}</td>
                 </tr>
             `;
         }).join('');
@@ -1695,6 +1764,13 @@ function analyzeEvaluationBehaviorRecords(context, semesterIdInput) {
                 bestCrossAccountOverlap = similarity.overlapCount;
             }
 
+        });
+
+        // Comments compare independently across offerings and completion speeds.
+        records.forEach(function (candidate) {
+            if (candidate === record || candidate.studentToken === record.studentToken
+                || candidate.semesterId !== record.semesterId) return;
+
             const commentSimilarity = computeBehaviorCommentSimilarity(record, candidate);
             if (commentSimilarity.exactMatch) {
                 crossAccountCommentExactMatch = true;
@@ -1731,6 +1807,8 @@ function analyzeEvaluationBehaviorRecords(context, semesterIdInput) {
             ? clampNumber(strongestCommentSimilarity || 1, 0, 1)
             : clampNumber(strongestCommentSimilarity * 0.25, 0, 1);
 
+        record.ratingRepetitiveFlag = ratingRepetitiveFlag;
+        record.commentRepetitiveFlag = commentRepetitiveFlag;
         record.repetitiveFlag = ratingRepetitiveFlag || commentRepetitiveFlag;
         record.repetitionRisk = Math.max(ratingRepetitionRisk, commentRepetitionRisk);
     });
@@ -2000,7 +2078,17 @@ function runAiBiasDetection() {
     });
 }
 
-function runAiDiscrepancyCheck() {
+function resetAiInsightsDiscrepancyPrompt() {
+    hrDiscrepancyAnalysisRequestId += 1;
+    const feedback = document.getElementById('hr-ai-discrepancy-feedback');
+    const summary = document.getElementById('hr-ai-discrepancy-summary');
+    const body = document.getElementById('hr-ai-discrepancy-body');
+    if (feedback) feedback.textContent = 'Run discrepancy check to compare submitted student and supervisor ratings.';
+    if (summary) summary.textContent = 'Reviewed: 0 | Flagged: 0 | Threshold: 2.0';
+    if (body) renderHrResponsiveTablePrompt(body, 6, 'Run discrepancy check to identify cross-source inconsistencies.', 'hr-mobile-card-empty--center');
+}
+
+async function runAiDiscrepancyCheck() {
     const semesterSelect = document.getElementById('hr-ai-discrepancy-semester');
     const feedbackEl = document.getElementById('hr-ai-discrepancy-feedback');
     const summaryEl = document.getElementById('hr-ai-discrepancy-summary');
@@ -2011,13 +2099,27 @@ function runAiDiscrepancyCheck() {
 
     const threshold = 2.0;
     const semesterId = String(semesterSelect.value || 'all').trim() || 'all';
+    const requestId = ++hrDiscrepancyAnalysisRequestId;
     const original = button.innerHTML;
     button.disabled = true;
     button.textContent = 'Running...';
     feedbackEl.textContent = 'Checking cross-source discrepancies...';
+    summaryEl.textContent = 'Loading submitted evaluations...';
+    renderHrResponsiveTablePrompt(bodyEl, 6, 'Loading submitted evaluations...', 'hr-mobile-card-empty--center');
 
     try {
-        const context = buildHrEvaluationContext();
+        const evaluations = await SharedData.fetchEvaluationsSnapshot({
+            semesterId, analyticsEligible: true, includeRatings: true,
+            includeTextResponses: false, limit: 0, offset: 0,
+        });
+        if (requestId !== hrDiscrepancyAnalysisRequestId) return false;
+        // SQL snapshots carry the professor identity. Do not depend on a partial
+        // directory or offering cache to recognize submitted evaluations.
+        const context = mergeHrProfessorUsersIntoContext(buildHrEvaluationContext(), evaluations.map(function (evaluation) {
+            return { id: evaluation.targetProfessorId || evaluation.evaluateeUserId,
+                name: evaluation.targetProfessor || evaluation.professorName || '' };
+        }).filter(function (professor) { return !!professor.id; }));
+        context.evaluations = evaluations;
         const analysis = analyzeCrossSourceDiscrepancies(context, semesterId, threshold);
         const studentCount = countHrEvaluationsByType(context, semesterId, 'student');
         const supervisorCount = countHrEvaluationsByType(context, semesterId, 'supervisor');
@@ -2035,11 +2137,11 @@ function runAiDiscrepancyCheck() {
         } else if (analysis.reviewedCount === 0 && studentCount === 0) {
             feedbackEl.textContent = 'No student evaluations found for the selected semester.';
         } else {
-            feedbackEl.textContent = 'No discrepancies found for the selected semester.';
+            feedbackEl.textContent = 'Student and supervisor ratings are available, but no professor has both sources in the same semester.';
         }
 
         if (!displayRows.length) {
-            renderHrResponsiveTablePrompt(bodyEl, 6, 'No discrepancies found.', 'hr-mobile-card-empty--center');
+            renderHrResponsiveTablePrompt(bodyEl, 6, 'No comparable student and supervisor ratings for the same professor and semester.', 'hr-mobile-card-empty--center');
             return true;
         }
 
@@ -2072,16 +2174,30 @@ function runAiDiscrepancyCheck() {
         }).join('');
         renderHrResponsiveTableCards(bodyEl, 6, rowsHtml);
     } catch (error) {
+        if (requestId !== hrDiscrepancyAnalysisRequestId) return false;
         console.error('[HRPanel] Discrepancy check failed.', error);
-        feedbackEl.textContent = error && error.message ? error.message : 'Discrepancy check failed.';
+        feedbackEl.textContent = 'Unable to load evaluations for the discrepancy check. Please try again.';
+        summaryEl.textContent = 'Discrepancy analysis could not be completed.';
+        renderHrResponsiveTablePrompt(bodyEl, 6, 'Discrepancy results could not be loaded.', 'hr-mobile-card-empty--center');
+        return false;
     } finally {
         button.disabled = false;
         button.innerHTML = original;
     }
-    return Promise.resolve(true);
+    return true;
 }
 
-function runAiCredibilityAnalysis() {
+function resetAiInsightsCredibilityPrompt() {
+    hrCredibilityAnalysisRequestId += 1;
+    const feedback = document.getElementById('hr-ai-credibility-feedback');
+    const summary = document.getElementById('hr-ai-credibility-summary');
+    const body = document.getElementById('hr-ai-credibility-body');
+    if (feedback) feedback.textContent = 'Run credibility analysis to load saved evaluation reliability scores.';
+    if (summary) summary.textContent = 'Total: 0 | Highly reliable: 0 | Acceptable: 0 | Needs review: 0 | Avg score: 0';
+    if (body) renderHrResponsiveTablePrompt(body, 9, 'Run credibility analysis to view saved scores.', 'hr-mobile-card-empty--center');
+}
+
+async function runAiCredibilityAnalysis() {
     const semesterSelect = document.getElementById('hr-ai-credibility-semester');
     const feedbackEl = document.getElementById('hr-ai-credibility-feedback');
     const summaryEl = document.getElementById('hr-ai-credibility-summary');
@@ -2091,70 +2207,85 @@ function runAiCredibilityAnalysis() {
     if (!semesterSelect || !feedbackEl || !summaryEl || !bodyEl || !button) return Promise.resolve(false);
 
     const semesterId = String(semesterSelect.value || 'all').trim() || 'all';
+    const requestId = ++hrCredibilityAnalysisRequestId;
     const original = button.innerHTML;
     button.disabled = true;
     button.textContent = 'Running...';
-    feedbackEl.textContent = 'Computing credibility scores...';
+    feedbackEl.textContent = 'Loading saved credibility scores...';
+    summaryEl.textContent = 'Loading submitted evaluations...';
+    renderHrResponsiveTablePrompt(bodyEl, 9, 'Loading saved credibility scores...', 'hr-mobile-card-empty--center');
 
-    return runHrWithGlobalLoading('Running AI credibility analysis...', function () {
-        try {
-            const context = buildHrEvaluationContext();
-            const analysis = buildHrPersistedCredibilityAnalysis(context, semesterId);
+    try {
+        // Include pending submissions so scores needing HR review remain visible.
+        // Fetch directly: the shared HR bootstrap/cache may be empty or partial.
+        const evaluations = await SharedData.fetchEvaluationsSnapshot({
+            semesterId, includeRatings: false, includeTextResponses: false,
+            limit: 0, offset: 0,
+        });
+        if (requestId !== hrCredibilityAnalysisRequestId) return false;
+        const context = buildHrEvaluationContext();
+        context.evaluations = evaluations.filter(function (evaluation) {
+            return normalizeHrToken(evaluation.status) === 'submitted';
+        });
+        const analysis = buildHrPersistedCredibilityAnalysis(context, semesterId);
 
-            summaryEl.textContent = `Total: ${analysis.total} | Highly reliable: ${analysis.highlyReliable} | Acceptable: ${analysis.acceptable} | Needs review: ${analysis.needsReview} | Avg score: ${analysis.averageScore.toFixed(1)}`;
-            if (analysis.total === 0) {
-                feedbackEl.textContent = 'No student evaluations found for the selected semester.';
-            } else if (analysis.biasSource === 'unavailable') {
-                feedbackEl.textContent = 'Credibility analysis completed. Bias component unavailable, so scores were reweighted using available signals.';
-            } else {
-                feedbackEl.textContent = 'Credibility analysis completed.';
-            }
-
-            if (!analysis.rows.length) {
-                renderHrResponsiveTablePrompt(bodyEl, 9, 'No evaluations to analyze.', 'hr-mobile-card-empty--center');
-                return;
-            }
-
-            const rowsHtml = analysis.rows.map(function (row) {
-                const categoryClass = getAiCredibilityCategoryBadgeClass(row.category);
-                if (isHrPhoneViewport()) {
-                    return `
-                        <article class="hr-mobile-data-card">
-                            <div class="hr-mobile-card-title">${escapeHrHtml(row.professorName)}</div>
-                            ${buildHrMobileDataField('Evaluation ID', escapeHrHtml(row.evaluationId))}
-                            ${buildHrMobileDataField('Student Number', escapeHrHtml(row.studentNumber))}
-                            ${buildHrMobileDataField('Behavior Score', escapeHrHtml(formatAiCredibilityComponentValue(row.behaviorScore)))}
-                            ${buildHrMobileDataField('Bias Label', escapeHrHtml(row.biasLabel))}
-                            ${buildHrMobileDataField('Cross-Source Status', escapeHrHtml(row.crossStatus))}
-                            ${buildHrMobileDataField('Credibility Score', row.credibilityScore)}
-                            ${buildHrMobileDataField('Category', `<span class="ai-insights-tag ${categoryClass}">${escapeHrHtml(row.category)}</span>`)}
-                            ${buildHrMobileDataField('Reliability Summary', escapeHrHtml(row.reliabilitySummary))}
-                        </article>
-                    `;
-                }
-                return `
-                    <tr>
-                        <td>${escapeHrHtml(row.evaluationId)}</td>
-                        <td>${escapeHrHtml(row.studentNumber)}</td>
-                        <td>${escapeHrHtml(row.professorName)}</td>
-                        <td>${escapeHrHtml(formatAiCredibilityComponentValue(row.behaviorScore))}</td>
-                        <td>${escapeHrHtml(row.biasLabel)}</td>
-                        <td>${escapeHrHtml(row.crossStatus)}</td>
-                        <td>${row.credibilityScore}</td>
-                        <td><span class="ai-insights-tag ${categoryClass}">${escapeHrHtml(row.category)}</span></td>
-                        <td>${escapeHrHtml(row.reliabilitySummary)}</td>
-                    </tr>
-                `;
-            }).join('');
-            renderHrResponsiveTableCards(bodyEl, 9, rowsHtml);
-        } catch (error) {
-            console.error('[HRPanel] Credibility analysis failed.', error);
-            feedbackEl.textContent = error && error.message ? error.message : 'Credibility analysis failed.';
-        } finally {
-            button.disabled = false;
-            button.innerHTML = original;
+        summaryEl.textContent = `Total: ${analysis.total} | Highly reliable: ${analysis.highlyReliable} | Acceptable: ${analysis.acceptable} | Needs review: ${analysis.needsReview} | Avg score: ${analysis.averageScore.toFixed(1)}`;
+        if (analysis.total === 0) {
+            feedbackEl.textContent = 'No submitted evaluations found for the selected semester.';
+        } else {
+            feedbackEl.textContent = 'Credibility analysis completed. Scores and component flags were saved at submission.';
         }
-    });
+
+        if (!analysis.rows.length) {
+            renderHrResponsiveTablePrompt(bodyEl, 9, 'No evaluations to analyze.', 'hr-mobile-card-empty--center');
+            return true;
+        }
+
+        const rowsHtml = analysis.rows.map(function (row) {
+            const categoryClass = getAiCredibilityCategoryBadgeClass(row.category);
+            if (isHrPhoneViewport()) {
+                return `
+                    <article class="hr-mobile-data-card">
+                        <div class="hr-mobile-card-title">${escapeHrHtml(row.professorName)}</div>
+                        ${buildHrMobileDataField('Evaluation ID', escapeHrHtml(row.evaluationId))}
+                        ${buildHrMobileDataField('Evaluator Identity', escapeHrHtml(row.studentNumber))}
+                        ${buildHrMobileDataField('Behavior Score', escapeHrHtml(formatAiCredibilityComponentValue(row.behaviorScore)))}
+                        ${buildHrMobileDataField('Bias Label', escapeHrHtml(row.biasLabel))}
+                        ${buildHrMobileDataField('Cross-Source Status', escapeHrHtml(row.crossStatus))}
+                        ${buildHrMobileDataField('Credibility Score', row.credibilityScore)}
+                        ${buildHrMobileDataField('Category', `<span class="ai-insights-tag ${categoryClass}">${escapeHrHtml(row.category)}</span>`)}
+                        ${buildHrMobileDataField('Reliability Summary', escapeHrHtml(row.reliabilitySummary))}
+                    </article>
+                `;
+            }
+            return `
+                <tr>
+                    <td>${escapeHrHtml(row.evaluationId)}</td>
+                    <td>${escapeHrHtml(row.studentNumber)}</td>
+                    <td>${escapeHrHtml(row.professorName)}</td>
+                    <td>${escapeHrHtml(formatAiCredibilityComponentValue(row.behaviorScore))}</td>
+                    <td>${escapeHrHtml(row.biasLabel)}</td>
+                    <td>${escapeHrHtml(row.crossStatus)}</td>
+                    <td>${row.credibilityScore}</td>
+                    <td><span class="ai-insights-tag ${categoryClass}">${escapeHrHtml(row.category)}</span></td>
+                    <td>${escapeHrHtml(row.reliabilitySummary)}</td>
+                </tr>
+            `;
+        }).join('');
+        renderHrResponsiveTableCards(bodyEl, 9, rowsHtml);
+        return true;
+
+    } catch (error) {
+        if (requestId !== hrCredibilityAnalysisRequestId) return false;
+        console.error('[HRPanel] Credibility analysis failed.', error);
+        feedbackEl.textContent = 'Unable to load credibility scores. Please try Run Credibility Analysis again.';
+        summaryEl.textContent = 'Credibility analysis could not be completed.';
+        renderHrResponsiveTablePrompt(bodyEl, 9, 'Credibility scores could not be loaded.', 'hr-mobile-card-empty--center');
+        return false;
+    } finally {
+        button.disabled = false;
+        button.innerHTML = original;
+    }
 }
 
 function analyzeEvaluationCredibility(contextInput, semesterIdInput) {
@@ -2521,7 +2652,7 @@ function analyzeCrossSourceDiscrepancies(contextInput, semesterIdInput, threshol
         professorNameById[professorId] = name || professorId;
     });
 
-    const candidateProfessorIds = new Set();
+    const candidateProfessorSemesters = new Map();
     (context.evaluations || []).forEach(function (evaluation) {
         const typeKey = getHrEvaluationTypeKey(evaluation);
         if (typeKey !== 'student' && typeKey !== 'supervisor') return;
@@ -2538,7 +2669,10 @@ function analyzeCrossSourceDiscrepancies(contextInput, semesterIdInput, threshol
         const professorId = resolveHrEvaluationTargetProfessorId(evaluation, typeKey, context);
         if (!professorId) return;
 
-        candidateProfessorIds.add(professorId);
+        const comparisonSemester = semesterId === 'all'
+            ? String(evaluation.semesterId || '').trim() : semesterId;
+        if (!comparisonSemester) return;
+        candidateProfessorSemesters.set(JSON.stringify([professorId, comparisonSemester]), { professorId, comparisonSemester });
         if (professorNameById[professorId]) return;
 
         const fallbackRaw = String(
@@ -2554,22 +2688,28 @@ function analyzeCrossSourceDiscrepancies(contextInput, semesterIdInput, threshol
     const reviewedRows = [];
     let reviewedCount = 0;
 
-    candidateProfessorIds.forEach(function (professorId) {
-        const studentSetMetrics = getHrProfessorStudentTotals(context, professorId, semesterId);
+    candidateProfessorSemesters.forEach(function (candidate) {
+        const { professorId, comparisonSemester } = candidate;
+        // Compare observed responses from both sources. Overall SET requires all
+        // enrolled classes, which can be incomplete despite submitted surveys.
+        const studentAggregate = aggregateHrEvaluationData({
+            context, typeKey: 'student', semesterId: comparisonSemester,
+            targetProfessorId: professorId, includeCategoryScores: false,
+        });
         const supervisorAggregate = aggregateHrEvaluationData({
             context,
             typeKey: 'supervisor',
-            semesterId,
+            semesterId: comparisonSemester,
             targetProfessorId: professorId,
             includeCategoryScores: false,
         });
 
-        const hasStudent = Number(studentSetMetrics.evaluatedPairs) > 0
-            && Number.isFinite(Number(studentSetMetrics.averageRating))
-            && Number(studentSetMetrics.averageRating) > 0;
+        const hasStudent = Number(studentAggregate.totalEvaluations) > 0
+            && Number.isFinite(Number(studentAggregate.averageRating))
+            && Number(studentAggregate.averageRating) > 0;
         const hasSupervisor = Number(supervisorAggregate.totalEvaluations) > 0 && Number(supervisorAggregate.averageRating) > 0;
 
-        const studentAvg = hasStudent ? Number(studentSetMetrics.averageRating) : null;
+        const studentAvg = hasStudent ? Number(studentAggregate.averageRating) : null;
         const supervisorAvg = hasSupervisor ? Number(supervisorAggregate.averageRating) : null;
 
         const supervisorComparable = Number.isFinite(studentAvg) && Number.isFinite(supervisorAvg);
@@ -2590,7 +2730,9 @@ function analyzeCrossSourceDiscrepancies(contextInput, semesterIdInput, threshol
         const maxDifference = Number(supervisorDiff);
         const row = {
             professorId,
-            professorName: String(professorNameById[professorId] || professorId).trim() || professorId,
+            semesterId: comparisonSemester,
+            professorName: (String(professorNameById[professorId] || professorId).trim() || professorId)
+                + (semesterId === 'all' ? ` (${getSemesterLabel(comparisonSemester)})` : ''),
             studentAvg,
             supervisorAvg,
             supervisorDiff,
@@ -4857,8 +4999,8 @@ function getHrInstitutionSetMetrics(context, semesterId) {
         registered,
         completed,
         pending: Math.max(registered - completed, 0),
-        averageRating: scorableRegistered > 0 ? totalWeightedScore / scorableRegistered : null,
-        available: scorableRegistered > 0,
+        averageRating: registered > 0 && excludedClassCount === 0 ? totalWeightedScore / registered : null,
+        available: registered > 0 && excludedClassCount === 0,
         scorableRegistered,
         excludedRegistered,
         registeredClassCount,
@@ -5670,8 +5812,8 @@ function combineSemesterData(semesterData) {
     });
 
     const notEvaluatedCount = Math.max(totalStudents - evaluatedCount, 0);
-    const averageRating = ratingWeight > 0
-        ? parseFloat((weightedRating / ratingWeight).toFixed(1))
+    const averageRating = totalStudents > 0 && ratingWeight === totalStudents && excludedClassCount === 0
+        ? weightedRating / totalStudents
         : null;
 
     return {
@@ -8383,11 +8525,21 @@ function getEvaluationSnapshotForType(professor, semesterId, evaluationType, con
     );
 }
 
+function normalizeHistoricalTrendScore(value) {
+    if ((typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '') return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function formatHistoricalTrendScore(value) {
+    const numeric = normalizeHistoricalTrendScore(value);
+    return numeric === null ? 'N/A' : numeric.toFixed(2);
+}
+
 function resolveHistoricalTrendSourceAverage(aggregate) {
     const total = Number(aggregate && aggregate.totalEvaluations);
-    const average = Number(aggregate && aggregate.averageRating);
+    const average = normalizeHistoricalTrendScore(aggregate && aggregate.averageRating);
     if (!Number.isFinite(total) || total <= 0) return null;
-    if (!Number.isFinite(average) || average <= 0) return null;
     return average;
 }
 
@@ -8421,8 +8573,7 @@ function buildProfessorHistoricalTrend(professorId, contextInput) {
 
         const sourceScores = {
             student: Number(studentSetMetrics.evaluatedPairs) > 0
-                && Number.isFinite(Number(studentSetMetrics.averageRating))
-                ? Number(studentSetMetrics.averageRating)
+                ? normalizeHistoricalTrendScore(studentSetMetrics.averageRating)
                 : null,
             peer: resolveHistoricalTrendSourceAverage(peerAggregate),
             supervisor: resolveHistoricalTrendSourceAverage(supervisorAggregate),
@@ -8430,12 +8581,15 @@ function buildProfessorHistoricalTrend(professorId, contextInput) {
 
         let weightedSum = 0;
         let availableWeight = 0;
+        const availableSources = [];
+        const sourceLabels = { student: 'Student', peer: 'Peer', supervisor: 'Supervisor' };
         Object.keys(weights).forEach(function (key) {
-            const value = Number(sourceScores[key]);
-            if (!Number.isFinite(value)) return;
+            const value = normalizeHistoricalTrendScore(sourceScores[key]);
+            if (value === null) return;
             const weight = Number(weights[key]);
             weightedSum += value * weight;
             availableWeight += weight;
+            availableSources.push(sourceLabels[key]);
         });
 
         const combinedScore = availableWeight > 0 ? parseFloat((weightedSum / availableWeight).toFixed(2)) : null;
@@ -8444,20 +8598,18 @@ function buildProfessorHistoricalTrend(professorId, contextInput) {
             semesterId,
             semesterLabel,
             score: combinedScore,
+            availableSources,
             delta: null,
         };
     });
 
     let previousScore = null;
     points.forEach(function (point) {
-        const score = Number(point && point.score);
-        if (!Number.isFinite(score)) {
-            point.delta = null;
-            return;
-        }
-        point.delta = Number.isFinite(previousScore)
+        const score = normalizeHistoricalTrendScore(point && point.score);
+        point.delta = score !== null && previousScore !== null
             ? parseFloat((score - previousScore).toFixed(2))
             : null;
+        // A missing semester breaks adjacency; it must not create a zero or a delta across the gap.
         previousScore = score;
     });
 
@@ -8470,11 +8622,8 @@ function buildProfessorHistoricalTrend(professorId, contextInput) {
 
 function computeHistoricalTrendSummary(pointsInput) {
     const points = Array.isArray(pointsInput) ? pointsInput : [];
-    const validPoints = points.filter(function (point) {
-        return Number.isFinite(Number(point && point.score));
-    }).map(function (point) {
-        return Number(point.score);
-    });
+    const scores = points.map(point => normalizeHistoricalTrendScore(point && point.score));
+    const validPoints = scores.filter(score => score !== null);
 
     if (validPoints.length < 2) {
         return {
@@ -8491,8 +8640,7 @@ function computeHistoricalTrendSummary(pointsInput) {
 
     const earliest = validPoints[0];
     const latest = validPoints[validPoints.length - 1];
-    const safeBaseline = earliest > 0 ? earliest : 0.01;
-    const percentChange = ((latest - earliest) / safeBaseline) * 100;
+    const percentChange = ((latest - earliest) / earliest) * 100;
 
     let direction = 'stable';
     if (percentChange >= 10) {
@@ -8511,8 +8659,8 @@ function computeHistoricalTrendSummary(pointsInput) {
 
     let maxConsecutiveDrops = 0;
     let consecutiveDrops = 0;
-    for (let index = 1; index < validPoints.length; index += 1) {
-        if (validPoints[index] < validPoints[index - 1]) {
+    for (let index = 1; index < scores.length; index += 1) {
+        if (scores[index] !== null && scores[index - 1] !== null && scores[index] < scores[index - 1]) {
             consecutiveDrops += 1;
             if (consecutiveDrops > maxConsecutiveDrops) {
                 maxConsecutiveDrops = consecutiveDrops;
@@ -8578,12 +8726,14 @@ function getHistoricalTrendDeclinePatternClass(summary) {
 }
 
 function formatHistoricalTrendSignedPercent(value) {
+    if ((typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '') return 'N/A';
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return 'N/A';
     return `${numeric >= 0 ? '+' : ''}${numeric.toFixed(1)}%`;
 }
 
 function formatHistoricalTrendDelta(value) {
+    if ((typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '') return '-';
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return '-';
     return `${numeric >= 0 ? '+' : ''}${numeric.toFixed(2)}`;
@@ -8863,7 +9013,7 @@ async function viewProfessorAnalytics(professorId) {
                 </h3>
                 <div class="historical-trend-banner">
                     <p class="historical-trend-statement">${escapeHrHtml(trendSummary.statement || 'Insufficient historical data to determine performance trend.')}</p>
-                    <p class="historical-trend-note">Combined source metric uses Student 50%, Peer 25%, Supervisor 25%, across latest 4 semesters.</p>
+                    <p class="historical-trend-note">Student 50%, Peer 25%, Supervisor 25%, across latest 4 semesters. Available source weights are adjusted when a source is missing; N/A means no score is available.</p>
                     <div class="historical-trend-chips">
                         <span class="historical-trend-chip ${getHistoricalTrendDirectionClass(trendSummary.direction)}">
                             Direction: ${escapeHrHtml(getHistoricalTrendDirectionLabel(trendSummary.direction))}
@@ -8885,6 +9035,7 @@ async function viewProfessorAnalytics(professorId) {
                             <tr>
                                 <th>Semester</th>
                                 <th>Combined Score (/5)</th>
+                                <th>Available Sources</th>
                                 <th>Delta vs Prior</th>
                             </tr>
                         </thead>
@@ -8892,12 +9043,13 @@ async function viewProfessorAnalytics(professorId) {
                             ${trendRows.length > 0 ? trendRows.map(point => `
                                 <tr>
                                     <td>${escapeHrHtml(String(point.semesterLabel || point.semesterId || 'Semester'))}</td>
-                                    <td>${Number.isFinite(Number(point.score)) ? Number(point.score).toFixed(2) : 'N/A'}</td>
+                                    <td>${escapeHrHtml(formatHistoricalTrendScore(point.score))}</td>
+                                    <td>${escapeHrHtml((point.availableSources || []).join(', ') || 'N/A')}</td>
                                     <td>${escapeHrHtml(formatHistoricalTrendDelta(point.delta))}</td>
                                 </tr>
                             `).join('') : `
                                 <tr>
-                                    <td colspan="3" style="text-align:center; padding:14px;">No semester trend data available.</td>
+                                    <td colspan="4" style="text-align:center; padding:14px;">No semester trend data available.</td>
                                 </tr>
                             `}
                         </tbody>
@@ -9052,8 +9204,8 @@ function normalizeHrAiAnalyticsSourceLabel(value) {
     const token = String(value || '').trim().toLowerCase();
     if (!token) return 'General';
     if (token.includes('student')) return 'Student to Professor';
+    if (token.includes('supervisor') || token.includes('dean') || token.includes('procoor') || token.includes('vpaa') || token.includes('hr') || token.includes('admin')) return 'Supervisor to Professor';
     if (token.includes('peer') || token.includes('professor')) return 'Professor to Professor';
-    if (token.includes('supervisor') || token.includes('dean') || token.includes('procoor') || token.includes('vpaa') || token.includes('hr')) return 'Supervisor to Professor';
     return 'General';
 }
 
@@ -9136,17 +9288,12 @@ function buildHrProfessorAiAnalyticsPayload(professor, semesterId, contextInput)
         { source: 'supervisor', rows: Array.isArray(supervisorSnapshot.qualitativeResponses) ? supervisorSnapshot.qualitativeResponses : [] },
     ];
 
-    const dedupe = new Set();
     const comments = [];
     sourceRows.forEach(function (bucket) {
         const sourceLabel = normalizeHrAiAnalyticsSourceLabel(bucket.source);
         bucket.rows.forEach(function (row) {
-            const text = sanitizeHrAiAnalyticsText(row && row.text, 700);
+            const text = String(row && row.text || '').replace(/\s+/g, ' ').trim();
             if (!text) return;
-            const dateKey = sanitizeHrAiAnalyticsText(row && row.date, 80).toLowerCase();
-            const dedupeKey = `${sourceLabel.toLowerCase()}|${text.toLowerCase()}|${dateKey}`;
-            if (dedupe.has(dedupeKey)) return;
-            dedupe.add(dedupeKey);
             comments.push({
                 id: `${baseId}_${comments.length + 1}`,
                 source: sourceLabel,
@@ -9155,7 +9302,6 @@ function buildHrProfessorAiAnalyticsPayload(professor, semesterId, contextInput)
         });
     });
 
-    const limitedComments = comments.slice(0, 240);
     const sourceCounts = {
         student: sourceRows[0].rows.length,
         professor: sourceRows[1].rows.length,
@@ -9202,7 +9348,7 @@ function buildHrProfessorAiAnalyticsPayload(professor, semesterId, contextInput)
             name: sanitizeHrAiAnalyticsText(professor && professor.name, 160),
             semester: sanitizeHrAiAnalyticsText(getSemesterLabel(normalizedSemester), 120),
         },
-        comments: limitedComments,
+        comments,
         metrics: {
             overallRating,
             combinedAverage,
@@ -9707,87 +9853,54 @@ function renderHrAiInsightResult(outputEl, insightData, source, noticeText) {
     `;
 }
 
-function runHrAiAnalyticsForProfessor(professorId, semesterId, outputEl, btnEl) {
-    const professor = professorsData.find(function (item) {
-        return String(item && item.id) === String(professorId);
-    });
+async function runHrAiAnalyticsForProfessor(professorId, semesterId, outputEl, btnEl) {
+    if (btnEl && btnEl.disabled) return;
+    const professor = professorsData.find(item => String(item && item.id) === String(professorId));
     if (!professor) {
         renderHrAiInsightState(outputEl, 'error', 'Unable to load professor data for AI analytics.');
         return;
     }
-
-    const context = buildHrEvaluationContext();
-    let payload;
-    try {
-        const request = buildHrProfessorAiAnalyticsPayload(professor, semesterId, context);
-        request.semesterId = semesterId || 'all';
-        payload = SharedData.getProfessorAnalyticsPayload(request);
-    } catch (error) {
-        renderHrAiInsightState(outputEl, 'error', error.message || 'Unable to load eligible analytics data.');
-        return;
-    }
-    if (!hasHrAiAnalyticsEvidence(payload)) {
-        renderHrAiInsightState(outputEl, 'empty', 'No valid ratings or written comments are available for AI analytics.');
-        return;
-    }
-
-    const fallbackInsight = buildHrLocalAiExplainabilityInsight(payload);
-    renderHrAiInsightState(outputEl, 'loading', 'Analyzing professor ratings and comments with AI...');
 
     const originalText = btnEl ? btnEl.innerHTML : '';
     if (btnEl) {
         btnEl.disabled = true;
         btnEl.textContent = 'Analyzing...';
     }
-
-    const executeAnalysis = function () {
-        try {
-            let response = null;
-            if (typeof SharedData.analyzeEvaluationExplainability === 'function') {
-                response = SharedData.analyzeEvaluationExplainability(payload, getHrAiAnalyticsActorIdentity());
-            } else {
-                throw new Error('SharedData.analyzeEvaluationExplainability is unavailable.');
-            }
-            const insight = normalizeHrAiInsightData(response && response.insight, fallbackInsight);
-            const source = response && response.source ? response.source : 'rule';
-            const notice = source === 'openai' || source === 'gemini'
-                ? ''
-                : 'Showing rule-based analytics.';
-            renderHrAiInsightResult(outputEl, insight, source, notice);
-        } catch (error) {
-            console.error('[HRPanel] AI analytics failed, using local fallback.', error);
-            renderHrAiInsightResult(
-                outputEl,
-                fallbackInsight,
-                'rule',
-                'Showing rule-based analytics.'
-            );
-        } finally {
-            if (btnEl) {
-                btnEl.disabled = false;
-                btnEl.innerHTML = originalText || '<i class="fas fa-robot"></i> AI Analytics';
-            }
-        }
-    };
-
+    renderHrAiInsightState(outputEl, 'loading', 'Analyzing all eligible ratings and comments...');
     const loadingOverlay = window.AppLoadingOverlay;
     const canUseOverlay = loadingOverlay
         && typeof loadingOverlay.show === 'function'
         && typeof loadingOverlay.hide === 'function';
+    if (canUseOverlay) loadingOverlay.show('Analyzing all eligible ratings and comments...');
 
-    if (!canUseOverlay) {
-        executeAnalysis();
-        return;
-    }
-
-    loadingOverlay.show('Analyzing professor ratings and comments with AI...');
-    setTimeout(function () {
-        try {
-            executeAnalysis();
-        } finally {
-            loadingOverlay.hide();
+    try {
+        // The server constructs the complete dataset in one request.
+        const response = await SharedData.analyzeEvaluationExplainability({
+            professor: { id: professor.id },
+            semesterId: semesterId || 'all',
+        }, getHrAiAnalyticsActorIdentity());
+        if (!response || !response.success || !response.insight) {
+            throw new Error('Unable to load analytics. Please try again.');
         }
-    }, 0);
+        const stats = response.insight.stats || {};
+        if (!(Number(stats.totalComments) > 0) && !(Number(stats.combinedAverage) > 0)) {
+            renderHrAiInsightState(outputEl, 'empty', 'No valid ratings or written comments are available for AI analytics.');
+            return;
+        }
+        const insight = normalizeHrAiInsightData(response.insight, response.insight);
+        const source = response.source || 'rule';
+        const notice = source === 'rule' ? 'Showing rule-based analytics for all eligible feedback.' : '';
+        renderHrAiInsightResult(outputEl, insight, source, notice);
+    } catch (error) {
+        console.error('[HR] AI analytics request failed.', error);
+        renderHrAiInsightState(outputEl, 'error', error.message || 'Unable to load analytics. Please try again.');
+    } finally {
+        if (canUseOverlay) loadingOverlay.hide();
+        if (btnEl) {
+            btnEl.disabled = false;
+            btnEl.innerHTML = originalText || 'AI Analytics';
+        }
+    }
 }
 
 function generateEmployeeId() {
@@ -9935,9 +10048,9 @@ function renderStudentProfessorCharts(data) {
     // Update stats
     const studentAverageEl = document.getElementById('student-prof-avg-rating');
     if (studentAverageEl) {
-        studentAverageEl.textContent = data.averageRating === null ? 'N/A' : data.averageRating;
+        studentAverageEl.textContent = data.averageRating === null ? 'N/A' : Number(data.averageRating).toFixed(2);
         studentAverageEl.title = data.partial
-            ? `Partial: ${Number(data.scorableClassCount || 0)}/${Number(data.registeredClassCount || 0)} sections rated; zero-response sections are excluded.`
+            ? `SET unavailable: ${Number(data.scorableClassCount || 0)}/${Number(data.registeredClassCount || 0)} sections rated. Every enrolled section needs a class average.`
             : '';
         if (studentAverageEl.nextSibling && studentAverageEl.nextSibling.nodeType === 3) {
             studentAverageEl.nextSibling.textContent = data.averageRating === null

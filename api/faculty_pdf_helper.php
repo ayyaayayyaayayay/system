@@ -428,7 +428,8 @@ function facultyPdfNormalizeIferSetSummary($summary): array
     }
     if (!array_key_exists('total_weighted_score', $source)) {
         $scorableRows = array_values(array_filter($rows, fn($row) => is_numeric($row['weighted_set_score'])));
-        $totalWeightedScore = count($scorableRows) > 0
+        $missingAverage = count(array_filter($rows, fn($row) => $row['student_count'] > 0 && $row['weighted_set_score'] === null)) > 0;
+        $totalWeightedScore = count($scorableRows) > 0 && !$missingAverage
             ? array_reduce($scorableRows, fn($sum, $row) => $sum + (float)$row['weighted_set_score'], 0.0)
             : null;
     }
@@ -451,9 +452,12 @@ function facultyPdfNormalizeIferSetSummary($summary): array
     $excludedClassCount = max(0, (int)($source['excluded_class_count'] ?? $derivedExcludedClasses));
     $partialResult = $scorableStudents > 0 && $excludedClassCount > 0;
     $calculationNote = trim((string)($source['calculation_note'] ?? ''));
-    if ($calculationNote === '' && $partialResult) {
+    if ($excludedClassCount > 0) {
+        $totalWeightedScore = null;
+    }
+    if ($calculationNote === '' && $excludedClassCount > 0) {
         $calculationNote = sprintf(
-            'Available SET excludes %d %s with no valid responses (%d registered %s).',
+            'Overall SET is N/A: %d %s without valid responses (%d registered %s). Annex C requires averages for all enrolled classes.',
             $excludedClassCount,
             $excludedClassCount === 1 ? 'class' : 'classes',
             $excludedStudents,
@@ -490,7 +494,7 @@ function facultyPdfNormalizeIferSectionCSummary($summary): array
         : null;
     $sefRating = is_numeric($source['sef_rating'] ?? null)
         ? max(0.0, min(100.0, (float)$source['sef_rating']))
-        : 0.0;
+        : null;
 
     return [
         'set_rating' => $setRating,

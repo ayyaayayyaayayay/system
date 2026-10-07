@@ -4,6 +4,12 @@ const loginFlowState = {
   pendingOtp: null,
   otpResendTimer: null,
 };
+const passwordResetFlowState = {
+  mode: "request",
+  token: "",
+  requestInFlight: false,
+  generation: 0,
+};
 const MOBILE_AUTH_BREAKPOINT = 640;
 
 // Wait for DOM to be fully loaded
@@ -275,11 +281,11 @@ function updateOtpMetaText() {
   const maskedEmail = String(pending.maskedEmail || "").trim();
   const expiresAt = formatDisplayDateTime(pending.expiresAt);
   let text = pending.reason === "failed_login"
-    ? "Security verification is required after multiple incorrect password attempts. Enter the 6-digit code sent to your Gmail."
+    ? "After three incorrect password attempts, enter the 6-digit code sent to your email to reset your password."
     : "Enter the 6-digit verification code sent to your Gmail to trust this device.";
   if (maskedEmail) {
     text = pending.reason === "failed_login"
-      ? "Security verification is required after multiple incorrect password attempts. Enter the 6-digit code sent to " + maskedEmail + "."
+      ? "After three incorrect password attempts, enter the 6-digit code sent to " + maskedEmail + " to reset your password."
       : "Enter the 6-digit verification code sent to " + maskedEmail + " to trust this device.";
   }
   if (expiresAt) {
@@ -346,8 +352,13 @@ function handleLogin() {
     return;
   }
 
-  if (username.length > 100 || password.length > 255) {
-    showError("Invalid credentials");
+  if (username.length > 24) {
+    showError("Student Number / Employee ID must not exceed 24 characters.");
+    return;
+  }
+
+  if (password.length > 32) {
+    showError("Password must not exceed 32 characters.");
     return;
   }
 
@@ -395,7 +406,7 @@ function handleLogin() {
         closeOtpModal();
         showError(
           data.error ||
-            "This account is already active in another browser or device. Try again after 5 minutes of inactivity or log out from the active session.",
+            "This account is already active in another browser or device. Try again after 10 minutes of inactivity or log out from the active session.",
         );
         return;
       }
@@ -469,9 +480,17 @@ function handleOtpVerification() {
     )
     .then((data) => {
       if (data && data.success && data.otpVerified) {
+        if (data.passwordResetRequired && !/^[a-f0-9]{64}$/i.test(data.resetToken || "")) {
+          setOtpInlineMessage("Password reset verification is unavailable. Please request a new OTP.", "error");
+          return;
+        }
         loginFlowState.pendingOtp = null;
         closeOtpModal();
         input.value = "";
+        if (data.passwordResetRequired) {
+          openPasswordResetFromOtp(data.resetToken, data.message);
+          return;
+        }
         if (data.role) {
           storeUserSession(data);
           keepLoadingForRedirect = true;
@@ -494,7 +513,7 @@ function handleOtpVerification() {
         closeOtpModal();
         showError(
           data.error ||
-            "This account is already active in another browser or device. Try again after 5 minutes of inactivity or log out from the active session.",
+            "This account is already active in another browser or device. Try again after 10 minutes of inactivity or log out from the active session.",
         );
         return;
       }
@@ -726,6 +745,7 @@ function showError(message) {
  */
 function checkExistingSession() {
   const params = new URLSearchParams(window.location.search || "");
+  if (params.get("reset_token")) return;
   if (params.get("logged_out") === "1") {
     SharedData.clearSession({ localOnly: true });
     params.delete("logged_out");
@@ -784,10 +804,15 @@ function setupForgotPassword() {
 
   forgotPasswordLink.addEventListener("click", function (e) {
     e.preventDefault();
+    passwordResetFlowState.generation += 1;
+    passwordResetFlowState.token = "";
+    removePasswordResetTokenFromUrl();
     setForgotPasswordMode("request");
     openForgotPasswordModal();
     resetEmailInput.value = "";
     resetIdentifierInput.value = "";
+    newPasswordInput.value = "";
+    confirmPasswordInput.value = "";
     clearFeedbackMessage("forgotPasswordFeedback");
     resetEmailInput.focus();
   });
@@ -814,7 +839,7 @@ function setupForgotPassword() {
     input.addEventListener("keypress", function (e) {
       if (e.key !== "Enter") return;
       e.preventDefault();
-      if (getPasswordResetTokenFromUrl()) {
+      if (passwordResetFlowState.mode === "reset") {
         handlePasswordResetSubmit();
       } else {
         handlePasswordResetRequest();
@@ -848,12 +873,27 @@ function removePasswordResetTokenFromUrl() {
   }
 }
 
+function openPasswordResetFromOtp(token, message) {
+  passwordResetFlowState.generation += 1;
+  passwordResetFlowState.token = token;
+  removePasswordResetTokenFromUrl();
+  ["newResetPassword", "confirmResetPassword", "password"].forEach(function (id) {
+    const input = document.getElementById(id);
+    if (input) input.value = "";
+  });
+  setForgotPasswordMode("reset");
+  openForgotPasswordModal();
+  setFeedbackMessage("forgotPasswordFeedback", message || "OTP verified. Set and confirm your new password.", "success");
+  const input = document.getElementById("newResetPassword");
+  if (input) input.focus();
+}
+
 function setForgotPasswordMode(mode) {
   const requestView = document.getElementById("passwordResetRequestView");
   const confirmView = document.getElementById("passwordResetConfirmView");
   const intro = document.getElementById("forgotPasswordIntro");
-  const isReset = String(mode || "").toLowerCase() === "reset";
-
+  passwordResetFlowState.mode = String(mode || "request").toLowerCase();
+  const isReset = passwordResetFlowState.mode === "reset";
   if (requestView) requestView.hidden = isReset;
   if (confirmView) confirmView.hidden = !isReset;
   if (intro) {
@@ -875,6 +915,13 @@ function closeForgotPasswordModal() {
   if (!modal) return;
   modal.classList.remove("show");
   modal.setAttribute("aria-hidden", "true");
+  passwordResetFlowState.generation += 1;
+  passwordResetFlowState.token = "";
+  removePasswordResetTokenFromUrl();
+  ["newResetPassword", "confirmResetPassword"].forEach(function (id) {
+    const input = document.getElementById(id);
+    if (input) input.value = "";
+  });
 }
 
 function isValidEmailAddress(value) {
@@ -901,7 +948,7 @@ function handlePasswordResetRequest() {
   const sendResetBtn = document.getElementById("sendResetLinkBtn");
   const resetEmailInput = document.getElementById("resetEmail");
   const resetIdentifierInput = document.getElementById("resetIdentifier");
-  if (!sendResetBtn || !resetEmailInput || !resetIdentifierInput) return;
+  if (!sendResetBtn || !resetEmailInput || !resetIdentifierInput || passwordResetFlowState.requestInFlight) return;
 
   const email = resetEmailInput.value.trim();
   const identifier = resetIdentifierInput.value.trim();
@@ -923,9 +970,16 @@ function handlePasswordResetRequest() {
     return;
   }
 
+  if (identifier.length > 24) {
+    showErrorInModal("Student Number / Employee ID must not exceed 24 characters.");
+    return;
+  }
+
   const originalText = sendResetBtn.querySelector("span").textContent;
   sendResetBtn.querySelector("span").textContent = "Sending...";
   sendResetBtn.disabled = true;
+  passwordResetFlowState.requestInFlight = true;
+  const generation = ++passwordResetFlowState.generation;
 
   fetch("../api/login.php", {
     method: "POST",
@@ -938,6 +992,11 @@ function handlePasswordResetRequest() {
   })
     .then(readLoginApiJson)
     .then(function (data) {
+      if (generation !== passwordResetFlowState.generation) return;
+      if (!data.success) {
+        throw new Error(data.error || "Unable to request a password reset link.");
+      }
+      passwordResetFlowState.token = "";
       setFeedbackMessage(
         "forgotPasswordFeedback",
         data.message ||
@@ -948,11 +1007,13 @@ function handlePasswordResetRequest() {
       resetIdentifierInput.value = "";
     })
     .catch(function (error) {
+      if (generation !== passwordResetFlowState.generation) return;
       showErrorInModal(error.message || "Password reset service is unavailable. Please try again.");
     })
     .finally(function () {
       sendResetBtn.querySelector("span").textContent = originalText;
       sendResetBtn.disabled = false;
+      passwordResetFlowState.requestInFlight = false;
     });
 }
 
@@ -960,16 +1021,16 @@ function handlePasswordResetSubmit() {
   const resetPasswordBtn = document.getElementById("resetPasswordBtn");
   const newPasswordInput = document.getElementById("newResetPassword");
   const confirmPasswordInput = document.getElementById("confirmResetPassword");
-  if (!resetPasswordBtn || !newPasswordInput || !confirmPasswordInput) return;
+  if (!resetPasswordBtn || !newPasswordInput || !confirmPasswordInput || resetPasswordBtn.disabled) return;
 
-  const token = getPasswordResetTokenFromUrl();
+  const token = passwordResetFlowState.token || getPasswordResetTokenFromUrl();
   const newPassword = newPasswordInput.value.trim();
   const confirmPassword = confirmPasswordInput.value.trim();
 
   clearFeedbackMessage("forgotPasswordFeedback");
 
   if (!token) {
-    showErrorInModal("Password reset link is missing or invalid.");
+    showErrorInModal("Verify a recovery code or open a valid reset link first.");
     return;
   }
 
@@ -978,8 +1039,8 @@ function handlePasswordResetSubmit() {
     return;
   }
 
-  if (newPassword.length > 255) {
-    showErrorInModal("New password must not exceed 255 characters.");
+  if (newPassword.length > 32) {
+    showErrorInModal("New password must not exceed 32 characters.");
     return;
   }
 
@@ -991,6 +1052,7 @@ function handlePasswordResetSubmit() {
   const originalText = resetPasswordBtn.querySelector("span").textContent;
   resetPasswordBtn.querySelector("span").textContent = "Resetting...";
   resetPasswordBtn.disabled = true;
+  const generation = ++passwordResetFlowState.generation;
 
   fetch("../api/login.php", {
     method: "POST",
@@ -1003,8 +1065,13 @@ function handlePasswordResetSubmit() {
   })
     .then(readLoginApiJson)
     .then(function (data) {
+      if (generation !== passwordResetFlowState.generation) return;
+      if (!data.success) throw new Error(data.error || "Unable to reset password.");
       newPasswordInput.value = "";
       confirmPasswordInput.value = "";
+      passwordResetFlowState.token = "";
+      const loginPassword = document.getElementById("password");
+      if (loginPassword) loginPassword.value = "";
       removePasswordResetTokenFromUrl();
       setForgotPasswordMode("request");
       setFeedbackMessage(
@@ -1014,6 +1081,7 @@ function handlePasswordResetSubmit() {
       );
     })
     .catch(function (error) {
+      if (generation !== passwordResetFlowState.generation) return;
       showErrorInModal(error.message || "Unable to reset password. Please try again.");
     })
     .finally(function () {

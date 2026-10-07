@@ -1434,7 +1434,8 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
             );
             const scorableRegistered = scorableRows.reduce((sum, item) => sum + Number(item.required || 0), 0);
             const totalWeighted = scorableRows.reduce((sum, item) => sum + Number(item.weightedScore || 0), 0);
-            return scorableRegistered > 0 ? totalWeighted / scorableRegistered : null;
+            return requiredTotal > 0 && scorableRegistered === requiredTotal
+                ? totalWeighted / requiredTotal : null;
         })()
         : computeAverageRatingFromEvaluations(matchedEvaluations);
     const responseRate = requiredTotal ? Math.round((receivedTotal / requiredTotal) * 100) : 0;
@@ -3029,7 +3030,7 @@ function updateSummaryCards() {
                 : ''}`
             : 'N/A';
         scoreCard.title = stats.partial
-            ? 'Available SET rating; zero-response sections are excluded from the rating calculation.'
+            ? 'Overall SET is unavailable until every enrolled section has a valid class average.'
             : '';
     }
     if (professorsCard) professorsCard.textContent = String(deanProfessorCount);
@@ -3221,6 +3222,10 @@ function refreshSupervisorTargetLockState() {
     const select = document.getElementById('peerProfessor');
     const submitBtn = form ? form.querySelector('.btn-submit') : null;
     if (!form || !select || !submitBtn) return;
+    if (form.dataset.submitting === 'true') {
+        submitBtn.disabled = true;
+        return;
+    }
 
     const targetId = String(select.value || '').trim();
     if (!targetId) {
@@ -3239,9 +3244,9 @@ function refreshSupervisorTargetLockState() {
 /**
  * Placeholder peer evaluation handler (SQL-ready)
  */
-function handlePeerEvaluation() {
+async function handlePeerEvaluation() {
     const form = document.getElementById('peerEvaluationForm');
-    if (!form) return;
+    if (!form || form.dataset.submitting === 'true') return;
 
     syncSupervisorTargetFromInput();
 
@@ -3340,13 +3345,20 @@ function handlePeerEvaluation() {
         submittedAt: SharedData.getNowIsoString()
     };
 
+    const submitBtn = form.querySelector('.btn-submit');
+    const originalText = submitBtn ? submitBtn.textContent : '';
+    form.dataset.submitting = 'true';
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Submitting...';
+    }
     try {
-        // Save via centralized API
         payload.behaviorMeta = SharedData.buildEvaluationTiming(payload, allQuestions);
-        SharedData.addEvaluation(payload);
+        await SharedData.addEvaluationAsync(payload);
         SharedData.clearEvaluationTiming(payload);
 
     } catch (error) {
+        if (submitBtn) submitBtn.disabled = false;
         const message = String(error && error.message || '');
         if (message.toLowerCase().includes('inactive')) {
             enforceActiveDeanAccount({ inline: true, form });
@@ -3354,26 +3366,24 @@ function handlePeerEvaluation() {
         }
         showFormMessage(form, message || 'Failed to submit supervisor evaluation. Please try again.', 'error');
         return;
+    } finally {
+        delete form.dataset.submitting;
+        if (submitBtn) submitBtn.textContent = originalText;
     }
 
-    console.log('Supervisor evaluation submitted to local database:', payload);
+    form.reset();
+    populatePeerProfessorOptions();
+    syncSupervisorTargetFromInput();
+    const evaluationTypeInput = document.getElementById('evaluationType');
+    if (evaluationTypeInput) evaluationTypeInput.value = evaluationType;
+    refreshSupervisorTargetLockState();
+    switchView('peerEvaluation');
+    updateNavigation('peerEvaluation');
     showFormMessage(
         form,
-        'Supervisor evaluation submitted successfully to local database.',
+        'Supervisor evaluation submitted successfully.',
         'success'
     );
-
-    // Keep user on evaluation view and reload the target list after successful submission.
-    setTimeout(() => {
-        form.reset();
-        populatePeerProfessorOptions();
-        syncSupervisorTargetFromInput();
-        const evaluationTypeInput = document.getElementById('evaluationType');
-        if (evaluationTypeInput) evaluationTypeInput.value = evaluationType;
-        refreshSupervisorTargetLockState();
-        switchView('peerEvaluation');
-        updateNavigation('peerEvaluation');
-    }, 1500);
 }
 
 /**
@@ -3524,6 +3534,7 @@ function goToSupervisorStep(index) {
     if (!steps.length) return;
 
     const maxIndex = steps.length - 1;
+    const previousIndex = supervisorSectionFlow.activeIndex;
     supervisorSectionFlow.activeIndex = Math.max(0, Math.min(index, maxIndex));
 
     steps.forEach((step, idx) => {
@@ -3547,6 +3558,7 @@ function goToSupervisorStep(index) {
     if (prevBtn) prevBtn.disabled = isFirst;
     if (nextBtn) nextBtn.style.display = isLast ? 'none' : 'inline-flex';
     if (submitBtn) submitBtn.style.display = isLast ? 'inline-flex' : 'none';
+    if (supervisorSectionFlow.activeIndex !== previousIndex) window.scrollTo(0, 0);
 }
 
 function toggleSupervisorStepInputs(stepElement, enabled) {
@@ -4479,8 +4491,8 @@ function renderDeanProfessorResults(results, selectedInstitute) {
         && Number(item.scorableRegistered || 0) > 0
     );
     const scorableRegistered = scorable.reduce((sum, item) => sum + Number(item.scorableRegistered || 0), 0);
-    const averageScore = scorableRegistered > 0
-        ? scorable.reduce((sum, item) => sum + (Number(item.avgScore) * Number(item.scorableRegistered || 0)), 0) / scorableRegistered
+    const averageScore = totalRequired > 0 && scorableRegistered === totalRequired
+        ? scorable.reduce((sum, item) => sum + (Number(item.avgScore) * Number(item.scorableRegistered || 0)), 0) / totalRequired
         : null;
     const scorableClassCount = filtered.reduce((sum, item) => sum + Number(item.scorableClassCount || 0), 0);
     const registeredClassCount = filtered.reduce((sum, item) => sum + Number(item.registeredClassCount || 0), 0);
@@ -4495,7 +4507,7 @@ function renderDeanProfessorResults(results, selectedInstitute) {
                     + scorableClassCount + '/' + registeredClassCount + ' sections rated</small>'
                 : '');
         averageScoreEl.title = partial
-            ? 'Available SET rating; zero-response sections are excluded from the rating calculation.'
+            ? 'Overall SET is unavailable until every enrolled section has a valid class average.'
             : '';
     }
     if (responseRateEl) responseRateEl.textContent = responseRate + '%';

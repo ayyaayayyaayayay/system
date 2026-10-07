@@ -39,7 +39,7 @@ foreach ([
     'empty' => '',
     'whitespace' => " \t\r\n ",
     'short' => 'Short7',
-    'oversized' => str_repeat('A', 256),
+    'oversized' => str_repeat('A', 33),
 ] as $label => $invalidPassword) {
     passwordTestExpectFailure(
         fn () => normalizeUserPasswordValue($invalidPassword),
@@ -49,6 +49,29 @@ foreach ([
 
 $normalizedPassword = normalizeUserPasswordValue('  ValidPass8  ');
 passwordTestAssert($normalizedPassword === 'ValidPass8', 'User password whitespace was not normalized consistently.');
+
+foreach ([8, 32] as $length) {
+    $boundaryPassword = str_repeat('A', $length - 1) . '8';
+    $boundaryHash = normalizeUserPasswordForStorage($boundaryPassword);
+    passwordTestAssert(password_verify($boundaryPassword, $boundaryHash), 'A password at the ' . $length . '-character boundary did not verify.');
+}
+passwordTestExpectFailure(
+    fn () => resolveManagedUserPasswordForWrite(['password' => str_repeat('A', 33)], null, true),
+    'oversized supplied bulk password'
+);
+passwordTestExpectFailure(
+    fn () => resolveManagedUserPasswordForWrite(['password' => str_repeat('A', 33)], ['password' => normalizeUserPasswordForStorage('ValidPass8')], false),
+    'oversized replacement password'
+);
+
+foreach (['student' => 'studentNumber', 'professor' => 'employeeId'] as $role => $field) {
+    assertManagedUserProfileIdentityAvailable([], [$field => str_repeat('A', 24)], $role);
+    passwordTestAssert(true, 'An ID at the 24-character boundary was accepted.');
+    passwordTestExpectFailure(
+        fn () => assertManagedUserProfileIdentityAvailable([], [$field => str_repeat('A', 25)], $role),
+        'oversized ' . $field
+    );
+}
 
 $firstHash = normalizeUserPasswordForStorage('  ValidPass8  ');
 $secondHash = normalizeUserPasswordForStorage('ValidPass8');

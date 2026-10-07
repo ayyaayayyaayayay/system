@@ -1992,7 +1992,10 @@ function buildFacultyPaperData(options = {}) {
         evaluationType: 'student',
         loadType,
     });
-    const supervisorSummary = professorPanelState.summaryByType.supervisor || PROFESSOR_PANEL_EMPTY_SUMMARY;
+    const supervisorSummary = fetchFacultySummaryFromSql({
+        semesterId: requestedSemesterId,
+        evaluationType: 'supervisor',
+    });
 
     return {
         faculty_name: String(professor.name || '').trim() || 'N/A',
@@ -3329,6 +3332,10 @@ function refreshPeerTargetLockState() {
     const select = document.getElementById('peerProfessor');
     const submitBtn = form ? form.querySelector('.btn-submit') : null;
     if (!form || !select || !submitBtn) return;
+    if (form.dataset.submitting === 'true') {
+        submitBtn.disabled = true;
+        return;
+    }
 
     if (!resolveActiveProfessorAccount(professorPanelState.context).linked) {
         submitBtn.disabled = true;
@@ -3393,6 +3400,7 @@ function renderPeerQuestionHTML(question, index) {
                         name="${qid}" 
                         class="form-textarea" 
                         rows="4" 
+                        data-word-limit="400"
                         placeholder="Type your response here..." 
                         ${isRequired}></textarea>
                 </div>
@@ -3457,6 +3465,7 @@ function goToPeerStep(index) {
     if (!steps.length) return;
 
     const maxIndex = steps.length - 1;
+    const previousIndex = peerSectionFlow.activeIndex;
     peerSectionFlow.activeIndex = Math.max(0, Math.min(index, maxIndex));
 
     steps.forEach((step, idx) => {
@@ -3480,6 +3489,7 @@ function goToPeerStep(index) {
     if (prevBtn) prevBtn.disabled = isFirst;
     if (nextBtn) nextBtn.style.display = isLast ? 'none' : 'inline-flex';
     if (submitBtn) submitBtn.style.display = isLast ? 'inline-flex' : 'none';
+    if (peerSectionFlow.activeIndex !== previousIndex) window.scrollTo(0, 0);
 }
 
 function togglePeerStepInputs(stepElement, enabled) {
@@ -3493,6 +3503,7 @@ function togglePeerStepInputs(stepElement, enabled) {
 function validatePeerCurrentStep() {
     const current = peerSectionFlow.steps[peerSectionFlow.activeIndex];
     if (!current) return true;
+    if (!EvaluationTextLimits.validateAll(current, true)) return false;
     const requiredFields = Array.from(current.querySelectorAll('input[required], textarea[required], select[required]'));
 
     for (const field of requiredFields) {
@@ -3584,9 +3595,9 @@ function ensureQuestionnairePrivacyConsentForSubmission(questionnaireType, semes
 /**
  * Handle Peer Evaluation Submission (Dynamic Data Extraction)
  */
-function handlePeerEvaluation() {
+async function handlePeerEvaluation() {
     const form = document.getElementById('peerEvaluationForm');
-    if (!form) return;
+    if (!form || form.dataset.submitting === 'true') return;
 
     if (!enforceActiveProfessorAccount({ inline: true, form })) {
         return;
@@ -3622,6 +3633,7 @@ function handlePeerEvaluation() {
     }
 
     enableAllPeerStepInputs();
+    EvaluationTextLimits.validateAll(form);
 
     if (!form.checkValidity()) {
         const firstInvalid = form.querySelector(':invalid');
@@ -3693,13 +3705,20 @@ function handlePeerEvaluation() {
         submittedAt: SharedData.getNowIsoString()
     };
 
+    const submitBtn = form.querySelector('.btn-submit');
+    const originalText = submitBtn ? submitBtn.textContent : '';
+    form.dataset.submitting = 'true';
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Submitting...';
+    }
     try {
-        // Save via centralized API
         payload.behaviorMeta = SharedData.buildEvaluationTiming(payload, allQuestions);
-        SharedData.addEvaluation(payload);
+        await SharedData.addEvaluationAsync(payload);
         SharedData.clearEvaluationTiming(payload);
 
     } catch (error) {
+        if (submitBtn) submitBtn.disabled = false;
         const message = String(error && error.message || '');
         if (message.toLowerCase().includes('inactive')) {
             enforceActiveProfessorAccount({ inline: true, form });
@@ -3707,18 +3726,17 @@ function handlePeerEvaluation() {
         }
         showFormMessage(form, message || 'Failed to submit peer evaluation. Please try again.', 'error');
         return;
+    } finally {
+        delete form.dataset.submitting;
+        if (submitBtn) submitBtn.textContent = originalText;
     }
 
-    console.log('Peer evaluation submitted to local database:', payload);
-    showFormMessage(form, 'Peer evaluation submitted successfully to local database.', 'success');
-
-    // Small delay to let the user see the success message
-    setTimeout(() => {
-        form.reset();
-        refreshPeerTargetLockState();
-        switchView('dashboard');
-        updateNavigation('dashboard');
-    }, 1500);
+    form.reset();
+    refreshPeerTargetLockState();
+    switchView('dashboard');
+    updateNavigation('dashboard');
+    window.scrollTo(0, 0);
+    showFormMessage(document.getElementById('dashboardView'), 'Peer evaluation submitted successfully.', 'success');
 }
 
 /**
@@ -4202,8 +4220,8 @@ function fetchFacultySummaryFromSql(query) {
                 sectionCount: group.sectionSet.size,
                 required: group.required,
                 received: group.received,
-                avgRating: group.scorableRegistered > 0
-                    ? group.weightedScore / group.scorableRegistered
+                avgRating: group.required > 0 && group.excludedSectionCount === 0
+                    ? group.weightedScore / group.required
                     : null,
                 ratedSectionCount: group.scorableSectionCount,
                 registeredSectionCount: group.registeredSectionCount,
@@ -4399,7 +4417,7 @@ function renderBreakdownTable(rows, evaluationType = 'student') {
         const coverageTotal = Number(item.registeredSectionCount || 0);
         const ratedSections = Number(item.ratedSectionCount || 0);
         const coverageHtml = item.partial
-            ? `<span class="count-pill" title="Zero-response sections are excluded from this available SET average.">Partial &middot; ${ratedSections}/${coverageTotal} sections rated</span>`
+            ? `<span class="count-pill" title="Overall SET is unavailable until every enrolled section has a valid class average.">Partial &middot; ${ratedSections}/${coverageTotal} sections rated</span>`
             : item.noResponses
                 ? `<span class="count-pill" title="No valid submitted SET evaluation is available for these sections.">No responses &middot; 0/${coverageTotal} sections rated</span>`
                 : '';

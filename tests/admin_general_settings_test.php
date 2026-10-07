@@ -123,8 +123,8 @@ generalSettingsAssert(
 );
 generalSettingsAssert(
     str_contains($appState, "unset(\$partial['systemEmail']);")
-        && str_contains($html, 'db-data.js?v=20261004a')
-        && str_contains($html, 'adminpanel.js?v=20261003a'),
+        && preg_match('/db-data\.js\?v=\d+[^"\s]*/', $html) === 1
+        && str_contains($html, 'adminpanel.js?v=20261006cmo&email=20261007a'),
     'Clients must not override SMTP-derived System Email and updated assets must be cache-busted.'
 );
 generalSettingsAssert(

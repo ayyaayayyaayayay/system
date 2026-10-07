@@ -499,7 +499,7 @@ function buildVpaaChartDataForType(typeKey, semesterLabel, context) {
             scorableClassCount += Number(metrics.scorableClassCount || 0);
             excludedClassCount += Number(metrics.excludedClassCount || 0);
         });
-        result.averageRating = scorableRegistered > 0 ? totalWeightedScore / scorableRegistered : null;
+        result.averageRating = registered > 0 && excludedClassCount === 0 ? totalWeightedScore / registered : null;
         result.totalEvaluations = completed;
         result.evaluatedCount = evaluatedCount;
         result.registered = registered;
@@ -2848,11 +2848,21 @@ function getVpaaProfessorEvaluationSnapshot(professor, semesterId, evaluationTyp
     };
 }
 
+function normalizeVpaaHistoricalTrendScore(value) {
+    if ((typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '') return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function formatVpaaHistoricalTrendScore(value) {
+    const numeric = normalizeVpaaHistoricalTrendScore(value);
+    return numeric === null ? 'N/A' : numeric.toFixed(2);
+}
+
 function resolveVpaaHistoricalTrendSourceAverage(aggregate) {
     const total = Number(aggregate && aggregate.totalEvaluations);
-    const average = Number(aggregate && aggregate.averageRating);
+    const average = normalizeVpaaHistoricalTrendScore(aggregate && aggregate.averageRating);
     if (!Number.isFinite(total) || total <= 0) return null;
-    if (!Number.isFinite(average) || average <= 0) return null;
     return average;
 }
 
@@ -2922,8 +2932,7 @@ function buildVpaaProfessorHistoricalTrend(professorId, contextInput) {
         const studentSetMetrics = getVpaaProfessorStudentTotals(context, normalizedProfessorId, semesterId);
         const sourceScores = {
             student: Number(studentSetMetrics.evaluatedPairs) > 0
-                && Number.isFinite(Number(studentSetMetrics.averageRating))
-                ? Number(studentSetMetrics.averageRating)
+                ? normalizeVpaaHistoricalTrendScore(studentSetMetrics.averageRating)
                 : null,
             professor: resolveVpaaHistoricalTrendSourceAverage(aggregateVpaaEvaluationData({
                 context: context,
@@ -2943,32 +2952,33 @@ function buildVpaaProfessorHistoricalTrend(professorId, contextInput) {
 
         let weightedSum = 0;
         let availableWeight = 0;
+        const availableSources = [];
+        const sourceLabels = { student: 'Student', professor: 'Peer', supervisor: 'Supervisor' };
         Object.keys(weights).forEach(function (key) {
-            const value = Number(sourceScores[key]);
-            if (!Number.isFinite(value)) return;
+            const value = normalizeVpaaHistoricalTrendScore(sourceScores[key]);
+            if (value === null) return;
             const weight = Number(weights[key]);
             weightedSum += value * weight;
             availableWeight += weight;
+            availableSources.push(sourceLabels[key]);
         });
 
         return {
             semesterId: semesterId,
             semesterLabel: semesterLabel,
             score: availableWeight > 0 ? parseFloat((weightedSum / availableWeight).toFixed(2)) : null,
+            availableSources: availableSources,
             delta: null
         };
     });
 
     let previousScore = null;
     points.forEach(function (point) {
-        const score = Number(point && point.score);
-        if (!Number.isFinite(score)) {
-            point.delta = null;
-            return;
-        }
-        point.delta = Number.isFinite(previousScore)
+        const score = normalizeVpaaHistoricalTrendScore(point && point.score);
+        point.delta = score !== null && previousScore !== null
             ? parseFloat((score - previousScore).toFixed(2))
             : null;
+        // A missing semester breaks adjacency; it must not create a zero or a delta across the gap.
         previousScore = score;
     });
 
@@ -2980,12 +2990,14 @@ function buildVpaaProfessorHistoricalTrend(professorId, contextInput) {
 }
 
 function formatVpaaHistoricalTrendSignedPercent(value) {
+    if ((typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '') return "N/A";
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return "N/A";
     return `${numeric >= 0 ? "+" : ""}${numeric.toFixed(1)}%`;
 }
 
 function formatVpaaHistoricalTrendDelta(value) {
+    if ((typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '') return "-";
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return "-";
     return `${numeric >= 0 ? "+" : ""}${numeric.toFixed(2)}`;
@@ -2993,11 +3005,8 @@ function formatVpaaHistoricalTrendDelta(value) {
 
 function computeVpaaHistoricalTrendSummary(pointsInput) {
     const points = Array.isArray(pointsInput) ? pointsInput : [];
-    const validPoints = points.filter(function (point) {
-        return Number.isFinite(Number(point && point.score));
-    }).map(function (point) {
-        return Number(point.score);
-    });
+    const scores = points.map(point => normalizeVpaaHistoricalTrendScore(point && point.score));
+    const validPoints = scores.filter(score => score !== null);
 
     if (validPoints.length < 2) {
         return {
@@ -3014,8 +3023,7 @@ function computeVpaaHistoricalTrendSummary(pointsInput) {
 
     const earliest = validPoints[0];
     const latest = validPoints[validPoints.length - 1];
-    const safeBaseline = earliest > 0 ? earliest : 0.01;
-    const percentChange = ((latest - earliest) / safeBaseline) * 100;
+    const percentChange = ((latest - earliest) / earliest) * 100;
 
     let direction = "stable";
     if (percentChange >= 10) {
@@ -3033,8 +3041,8 @@ function computeVpaaHistoricalTrendSummary(pointsInput) {
 
     let maxConsecutiveDrops = 0;
     let consecutiveDrops = 0;
-    for (let index = 1; index < validPoints.length; index += 1) {
-        if (validPoints[index] < validPoints[index - 1]) {
+    for (let index = 1; index < scores.length; index += 1) {
+        if (scores[index] !== null && scores[index - 1] !== null && scores[index] < scores[index - 1]) {
             consecutiveDrops += 1;
             maxConsecutiveDrops = Math.max(maxConsecutiveDrops, consecutiveDrops);
         } else {
@@ -3315,7 +3323,7 @@ function renderDashboardChartPair(config, chartData) {
         const averageRating = chartData.averageRating === null ? null : Number(chartData.averageRating);
         avgRatingEl.textContent = Number.isFinite(averageRating) ? averageRating.toFixed(1) : 'N/A';
         avgRatingEl.title = config.key === 'student' && chartData.partial
-            ? `Partial: ${Number(chartData.scorableClassCount || 0)}/${Number(chartData.registeredClassCount || 0)} sections rated; zero-response sections are excluded.`
+            ? `SET unavailable: ${Number(chartData.scorableClassCount || 0)}/${Number(chartData.registeredClassCount || 0)} sections rated. Every enrolled section needs a class average.`
             : '';
         if (config.key === 'student' && avgRatingEl.nextSibling && avgRatingEl.nextSibling.nodeType === 3) {
             avgRatingEl.nextSibling.textContent = Number.isFinite(averageRating)
@@ -4179,7 +4187,7 @@ function viewVpaaProfessorAnalytics(professorId) {
                 </h3>
                 <div class="historical-trend-banner">
                     <p class="historical-trend-statement">${escapeHtml(trendSummary.statement || "Insufficient historical data to determine performance trend.")}</p>
-                    <p class="historical-trend-note">Combined source metric uses Student 50%, Peer 25%, Supervisor 25%, across latest 4 semesters.</p>
+                    <p class="historical-trend-note">Student 50%, Peer 25%, Supervisor 25%, across latest 4 semesters. Available source weights are adjusted when a source is missing; N/A means no score is available.</p>
                     <div class="historical-trend-chips">
                         <span class="historical-trend-chip ${escapeAttr(getVpaaHistoricalTrendDirectionClass(trendSummary.direction))}">
                             Direction: ${escapeHtml(getVpaaHistoricalTrendDirectionLabel(trendSummary.direction))}
@@ -4201,6 +4209,7 @@ function viewVpaaProfessorAnalytics(professorId) {
                             <tr>
                                 <th>Semester</th>
                                 <th>Combined Score (/5)</th>
+                                <th>Available Sources</th>
                                 <th>Delta vs Prior</th>
                             </tr>
                         </thead>
@@ -4209,13 +4218,14 @@ function viewVpaaProfessorAnalytics(professorId) {
                                 return `
                                     <tr>
                                         <td>${escapeHtml(String(point.semesterLabel || point.semesterId || "Semester"))}</td>
-                                        <td>${Number.isFinite(Number(point.score)) ? Number(point.score).toFixed(2) : "N/A"}</td>
+                                        <td>${escapeHtml(formatVpaaHistoricalTrendScore(point.score))}</td>
+                                        <td>${escapeHtml((point.availableSources || []).join(', ') || "N/A")}</td>
                                         <td>${escapeHtml(formatVpaaHistoricalTrendDelta(point.delta))}</td>
                                     </tr>
                                 `;
                             }).join("") : `
                                 <tr>
-                                    <td colspan="3" style="text-align:center; padding:14px;">No semester trend data available.</td>
+                                    <td colspan="4" style="text-align:center; padding:14px;">No semester trend data available.</td>
                                 </tr>
                             `}
                         </tbody>
@@ -5484,8 +5494,8 @@ function normalizeAiAnalyticsSourceLabel(value) {
     const token = String(value || "").trim().toLowerCase();
     if (!token) return "General";
     if (token.includes("student")) return "Student to Professor";
+    if (token.includes("supervisor") || token.includes("dean") || token.includes("procoor") || token.includes("vpaa") || token.includes("hr") || token.includes("admin")) return "Supervisor to Professor";
     if (token.includes("peer") || token.includes("professor")) return "Professor to Professor";
-    if (token.includes("supervisor") || token.includes("dean") || token.includes("procoor") || token.includes("vpaa") || token.includes("hr")) return "Supervisor to Professor";
     return "General";
 }
 
@@ -5556,10 +5566,9 @@ function buildProfessorAiAnalyticsPayload(prof) {
         .map((item, index) => ({
             id: `${String(prof && prof.id || "prof")}_${index + 1}`,
             source: normalizeAiAnalyticsSourceLabel(item && item.source),
-            text: sanitizeAiAnalyticsText(item && item.text, 700),
+            text: String(item && item.text || '').replace(/\s+/g, ' ').trim(),
         }))
-        .filter((item) => item.text)
-        .slice(0, 240);
+        .filter((item) => item.text);
 
     return {
         professor: {
@@ -6052,86 +6061,54 @@ function renderAiInsightResult(outputEl, insightData, source, noticeText) {
     `;
 }
 
-function runAiAnalyticsForProfessor(profId, outputEl, btnEl) {
-    const prof = allProfessorData.find((p) => String(p.id) === String(profId));
-    if (!prof) {
-        renderAiInsightState(outputEl, "error", "Unable to load professor data for AI analytics.");
+async function runAiAnalyticsForProfessor(profId, outputEl, btnEl) {
+    if (btnEl && btnEl.disabled) return;
+    const professor = allProfessorData.find(item => String(item && item.id) === String(profId));
+    if (!professor) {
+        renderAiInsightState(outputEl, 'error', 'Unable to load professor data for AI analytics.');
         return;
     }
 
-    let payload;
-    try {
-        const request = buildProfessorAiAnalyticsPayload(prof);
-        request.professor.id = normalizeVpaaProfessorUserId(prof.userId || prof.id);
-        request.semesterId = prof.semester || 'all';
-        payload = SharedData.getProfessorAnalyticsPayload(request);
-    } catch (error) {
-        renderAiInsightState(outputEl, 'error', error.message || 'Unable to load eligible analytics data.');
-        return;
-    }
-    if (!hasAiAnalyticsEvidence(payload)) {
-        renderAiInsightState(outputEl, "empty", "No valid ratings or written comments are available for AI analytics.");
-        return;
-    }
-
-    const fallbackInsight = buildLocalAiExplainabilityInsight(payload);
-    renderAiInsightState(outputEl, "loading", "Analyzing professor ratings and comments with AI...");
-
-    const originalText = btnEl ? btnEl.textContent : "";
+    const originalText = btnEl ? btnEl.textContent : '';
     if (btnEl) {
         btnEl.disabled = true;
-        btnEl.textContent = "Analyzing...";
+        btnEl.textContent = 'Analyzing...';
     }
-
-    const executeAnalysis = () => {
-        try {
-            let response = null;
-            if (typeof SharedData.analyzeEvaluationExplainability === "function") {
-                response = SharedData.analyzeEvaluationExplainability(payload, getAiAnalyticsActorIdentity());
-            } else {
-                throw new Error("SharedData.analyzeEvaluationExplainability is unavailable.");
-            }
-
-            const insight = normalizeAiInsightData(response && response.insight, fallbackInsight);
-            const source = response && response.source ? response.source : "rule";
-            const notice = source === "openai" || source === "gemini"
-                ? ""
-                : "Showing rule-based analytics.";
-            renderAiInsightResult(outputEl, insight, source, notice);
-        } catch (error) {
-            console.error("[VPAA] AI analytics failed, using local fallback.", error);
-            renderAiInsightResult(
-                outputEl,
-                fallbackInsight,
-                "rule",
-                "Showing rule-based analytics."
-            );
-        } finally {
-            if (btnEl) {
-                btnEl.disabled = false;
-                btnEl.textContent = originalText || "AI Analytics";
-            }
-        }
-    };
-
+    renderAiInsightState(outputEl, 'loading', 'Analyzing all eligible ratings and comments...');
     const loadingOverlay = window.AppLoadingOverlay;
     const canUseOverlay = loadingOverlay
-        && typeof loadingOverlay.show === "function"
-        && typeof loadingOverlay.hide === "function";
+        && typeof loadingOverlay.show === 'function'
+        && typeof loadingOverlay.hide === 'function';
+    if (canUseOverlay) loadingOverlay.show('Analyzing all eligible ratings and comments...');
 
-    if (!canUseOverlay) {
-        executeAnalysis();
-        return;
-    }
-
-    loadingOverlay.show("Analyzing professor ratings and comments with AI...");
-    setTimeout(() => {
-        try {
-            executeAnalysis();
-        } finally {
-            loadingOverlay.hide();
+    try {
+        // The server constructs the complete dataset in one request.
+        const response = await SharedData.analyzeEvaluationExplainability({
+            professor: { id: normalizeVpaaProfessorUserId(professor.userId || professor.id) },
+            semesterId: professor.semester || 'all',
+        }, getAiAnalyticsActorIdentity());
+        if (!response || !response.success || !response.insight) {
+            throw new Error('Unable to load analytics. Please try again.');
         }
-    }, 0);
+        const stats = response.insight.stats || {};
+        if (!(Number(stats.totalComments) > 0) && !(Number(stats.combinedAverage) > 0)) {
+            renderAiInsightState(outputEl, 'empty', 'No valid ratings or written comments are available for AI analytics.');
+            return;
+        }
+        const insight = normalizeAiInsightData(response.insight, response.insight);
+        const source = response.source || 'rule';
+        const notice = source === 'rule' ? 'Showing rule-based analytics for all eligible feedback.' : '';
+        renderAiInsightResult(outputEl, insight, source, notice);
+    } catch (error) {
+        console.error('[VPAA] AI analytics request failed.', error);
+        renderAiInsightState(outputEl, 'error', error.message || 'Unable to load analytics. Please try again.');
+    } finally {
+        if (canUseOverlay) loadingOverlay.hide();
+        if (btnEl) {
+            btnEl.disabled = false;
+            btnEl.textContent = originalText || 'AI Analytics';
+        }
+    }
 }
 
 function sanitizePhotoSource(value) {

@@ -24,13 +24,13 @@ $sasr = facultyXlsxGenerateSasrBinary([
             'course_code' => 'TEST101',
             'year_section' => '1-1',
             'student_count' => 20,
-            'average_set_rating' => 4.5,
-            'weighted_set_score' => 90,
+            'average_set_rating' => 90,
+            'weighted_set_score' => 1800,
         ]],
         'total_students' => 20,
-        'total_weighted_score' => 90,
+        'total_weighted_score' => 1800,
     ],
-    'section_c_summary' => ['set_rating' => 4.5, 'sef_rating' => 4.25],
+    'section_c_summary' => ['set_rating' => 90, 'sef_rating' => 85],
 ]);
 $overall = facultyXlsxGenerateOverallSasrBinary([
     'campus_label' => 'Villamor Campus',
@@ -43,13 +43,17 @@ $overall = facultyXlsxGenerateOverallSasrBinary([
         'employee_id' => 'EMP-001',
         'faculty_name' => 'Test Faculty',
         'department_program' => 'ICS',
-        'set_rating' => 4.5,
-        'sef_rating' => 4.25,
+        'set_rating' => 90,
+        'sef_rating' => 85,
     ]],
 ]);
+$missingSef = facultyXlsxGenerateSasrBinary(['section_c_summary' => ['set_rating' => null, 'sef_rating' => null]]);
+$missingOverall = facultyXlsxGenerateOverallSasrBinary(['rows' => [['set_rating' => null, 'sef_rating' => null]]]);
 echo json_encode([
     'sasr' => base64_encode($sasr),
     'overall' => base64_encode($overall),
+    'missingSef' => base64_encode($missingSef),
+    'missingOverall' => base64_encode($missingOverall),
 ], JSON_THROW_ON_ERROR);
 `;
 
@@ -77,10 +81,22 @@ const sasrRows = parseExport(payload.sasr, 'SASR');
 assert(sasrRows.some(row => row.includes('SASR')));
 assert(sasrRows.some(row => row.includes('TEST FACULTY')));
 assert(sasrRows.some(row => row.includes('TEST101')));
+const sasrRatingRow = sasrRows.find(row => row.includes('OVERALL RATING'));
+assert.equal(sasrRatingRow[2], 90);
+assert.equal(sasrRatingRow[4], 85);
 
 const overallRows = parseExport(payload.overall, 'Overall SASR');
 assert(overallRows.some(row => row.includes('OVERALL SASR')));
 assert(overallRows.some(row => row.includes('EMP-001')));
 assert(overallRows.some(row => row.includes('TEST FACULTY')));
+const overallFacultyRow = overallRows.find(row => row.includes('EMP-001'));
+assert.equal(overallFacultyRow[4], 90);
+assert.equal(overallFacultyRow[5], 85);
+const missingRatingRow = parseExport(payload.missingSef, 'SASR').find(row => row.includes('OVERALL RATING'));
+assert.equal(missingRatingRow[2], 'N/A');
+assert.equal(missingRatingRow[4], 'N/A');
+const missingOverallRow = parseExport(payload.missingOverall, 'Overall SASR').find(row => row[0] === 1);
+assert.equal(missingOverallRow[4], 'N/A');
+assert.equal(missingOverallRow[5], 'N/A');
 
 console.log('Faculty XLSX export compatibility tests passed.');

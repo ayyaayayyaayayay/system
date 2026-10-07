@@ -102,6 +102,7 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/state_helpers.php';
 require_once __DIR__ . '/mailer_helper.php';
 require_once __DIR__ . '/auth_rate_limit.php';
+require_once __DIR__ . '/password_reset_otp.php';
 
 const LOGIN_PASSWORD_FAILURE_THRESHOLD = 3;
 const LOGIN_OTP_FAILURE_THRESHOLD = 3;
@@ -223,8 +224,8 @@ function recordFailedPasswordState(PDO $pdo, int $userId): array {
     ensureUserAuthSecurityRow($pdo, $userId);
     $stmt = $pdo->prepare(
         'UPDATE user_auth_security
-         SET failed_password_count = LEAST(65535, failed_password_count + 1),
-             failed_login_otp_required = IF(failed_password_count + 1 >= :threshold, 1, failed_login_otp_required)
+         SET failed_login_otp_required = IF(failed_password_count + 1 >= :threshold, 1, failed_login_otp_required),
+             failed_password_count = LEAST(65535, failed_password_count + 1)
          WHERE user_id = :user_id'
     );
     $stmt->execute([':threshold' => LOGIN_PASSWORD_FAILURE_THRESHOLD, ':user_id' => $userId]);
@@ -381,7 +382,8 @@ function issueLoginOtpChallenge(
     }
 
     try {
-        credentialMailerSendOtp($smtpConfig, [
+        $sendOtp = $purpose === 'failed_login' ? 'credentialMailerSendPasswordResetOtp' : 'credentialMailerSendOtp';
+        $sendOtp($smtpConfig, [
             'recipientEmail' => $recipientEmail,
             'recipientName' => trim((string) ($user['name'] ?? 'User')),
             'otpCode' => $otpCode,
@@ -401,6 +403,22 @@ function issueLoginOtpChallenge(
         'masked_email' => maskLoginSecurityEmail($recipientEmail),
         'purpose' => $purpose,
     ];
+}
+
+function sendFailedLoginRecoveryOtp(PDO $pdo, array $user, string $ipFingerprint, string $identityFingerprint, int $now): void {
+    $userId = resolveLoginUserNumericId($user['id'] ?? '');
+    $deviceToken = readLoginDeviceToken($userId);
+    if ($deviceToken === '') {
+        $deviceToken = mintLoginDeviceToken($userId, $now);
+    }
+    $challenge = findActiveOtpChallenge($pdo, $userId, hashLoginDeviceToken($deviceToken), $now);
+    if (!$challenge || (string) ($challenge['purpose'] ?? '') !== 'failed_login') {
+        $challenge = issueLoginOtpChallenge($pdo, $user, 'failed_login', $deviceToken, $ipFingerprint, $identityFingerprint, $now);
+    }
+    $challenge['masked_email'] = maskLoginSecurityEmail((string) ($user['email'] ?? ''));
+    sendJson(array_merge(buildOtpRequiredPayload($challenge), [
+        'message' => 'An OTP was sent after three incorrect password attempts. Verify it to reset your password.',
+    ]), 401);
 }
 
 function sendAuthenticationRateLimitedResponse(): void {
@@ -583,7 +601,7 @@ function buildSuccessfulAuthPayload(PDO $pdo, array $user, array $extra = []) {
                 $pdo->rollBack();
                 $startedTransaction = false;
             }
-            sendNaapActiveSessionConflictResponse();
+            sendNaapActiveSessionConflictResponse($user['role'] ?? '');
         }
 
         $csrfToken = establishNaapAuthenticatedSession($pdo, $user);
@@ -680,7 +698,7 @@ function findPasswordResetAccount(PDO $pdo, $email, $identifier) {
 }
 
 function logPasswordResetEvent(PDO $pdo, array $user, $action, $description) {
-    $userId = (int) ($user['user_id'] ?? ($user['id'] ?? 0));
+    $userId = resolveLoginUserNumericId($user['user_id'] ?? ($user['id'] ?? 0));
     naapAuditTryWrite($pdo, [
         'eventCode' => strtolower(trim((string) $action)) === 'password reset completed'
             ? 'auth.password_reset.completed'
@@ -688,7 +706,7 @@ function logPasswordResetEvent(PDO $pdo, array $user, $action, $description) {
         'action' => $action,
         'description' => $description,
         'type' => 'login',
-        'actor' => ['id' => $userId, 'role' => trim((string) ($user['role_code'] ?? ''))],
+        'actor' => ['id' => $userId, 'role' => trim((string) ($user['role_code'] ?? $user['role'] ?? ''))],
         'targetType' => 'user',
         'targetId' => $userId > 0 ? ('u' . $userId) : '',
     ], 'audit.password_reset');
@@ -703,7 +721,7 @@ function handlePasswordResetRequest(PDO $pdo, array $body) {
     if ($identifier === '') {
         sendJson(['success' => false, 'error' => 'Student Number / Employee ID is required.'], 400);
     }
-    if (strlen($email) > 190 || strlen($identifier) > 100) {
+    if (strlen($email) > 190 || strlen($identifier) > 24) {
         sendJson(['success' => false, 'error' => 'Invalid password reset request.'], 400);
     }
 
@@ -772,10 +790,11 @@ function handlePasswordResetRequest(PDO $pdo, array $body) {
 
     try {
         $pdo->beginTransaction();
-        $lockUser = $pdo->prepare('SELECT id, status FROM users WHERE id = :id FOR UPDATE');
+        $lockUser = $pdo->prepare('SELECT id, status, email FROM users WHERE id = :id FOR UPDATE');
         $lockUser->execute([':id' => (int)$user['id']]);
         $lockedUser = $lockUser->fetch();
-        if (!$lockedUser || normalizeLoginIdentityToken($lockedUser['status'] ?? '') !== 'active') {
+        if (!$lockedUser || normalizeLoginIdentityToken($lockedUser['status'] ?? '') !== 'active'
+            || normalizeLoginIdentityToken($lockedUser['email'] ?? '') !== $email) {
             $pdo->rollBack();
             sendGenericPasswordResetRequestResponse($now);
         }
@@ -874,7 +893,7 @@ function handlePasswordResetConsume(PDO $pdo, array $body) {
     cleanupExpiredPasswordResetTokens($pdo, getAuthoritativePhilippineUnixTimestamp());
     $token = trim((string) ($body['token'] ?? ''));
     if ($token === '' || !preg_match('/^[a-f0-9]{64}$/i', $token)) {
-        sendJson(['success' => false, 'error' => 'Password reset link is invalid.'], 400);
+        sendJson(['success' => false, 'error' => 'Password reset verification is invalid. Request a new recovery code.'], 400);
     }
     try {
         $newPassword = normalizeUserPasswordValue($body['newPassword'] ?? null);
@@ -913,11 +932,11 @@ function handlePasswordResetConsume(PDO $pdo, array $body) {
         $record = $stmt->fetch();
         if (!$record) {
             $pdo->rollBack();
-            sendJson(['success' => false, 'error' => 'Password reset link is invalid.'], 400);
+            sendJson(['success' => false, 'error' => 'Password reset verification is invalid. Request a new recovery code.'], 400);
         }
         if (trim((string) ($record['used_at'] ?? '')) !== '') {
             $pdo->rollBack();
-            sendJson(['success' => false, 'error' => 'Password reset link has already been used.'], 400);
+            sendJson(['success' => false, 'error' => 'This password reset request has already been used.'], 400);
         }
         if (normalizeLoginIdentityToken($record['status'] ?? 'active') !== 'active') {
             $pdo->rollBack();
@@ -927,7 +946,7 @@ function handlePasswordResetConsume(PDO $pdo, array $body) {
         $expiresAt = trim((string) ($record['expires_at'] ?? ''));
         if ($expiresAt === '' || strcmp($expiresAt, $nowMysql) <= 0) {
             $pdo->rollBack();
-            sendJson(['success' => false, 'error' => 'Password reset link has expired.'], 400);
+            sendJson(['success' => false, 'error' => 'Password reset verification has expired. Request a new recovery code.'], 400);
         }
 
         $updatePassword = $pdo->prepare(
@@ -975,7 +994,7 @@ function handlePasswordResetConsume(PDO $pdo, array $body) {
         $pdo,
         $record,
         'Password Reset Completed',
-        'Account password was reset through an emailed reset link.'
+        'Account password was reset after recovery verification.'
     );
 
     sendJson([
@@ -1077,7 +1096,7 @@ if ($username === '') {
     recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $submittedIdentityFingerprint, $now);
     sendJson(['success' => false, 'error' => 'Username is required'], 400);
 }
-if (strlen($username) > 100) {
+if (strlen($username) > 24) {
     recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $submittedIdentityFingerprint, $now);
     sendJson(['success' => false, 'error' => 'Invalid credentials'], 400);
 }
@@ -1180,6 +1199,30 @@ if ($action === 'verifyotp') {
 
         $consume = $pdo->prepare('UPDATE login_otp_challenges SET consumed_at = :at WHERE id = :id');
         $consume->execute([':at' => loginMysqlDateTime($now), ':id' => (int) $challenge['id']]);
+        if ((string) ($challenge['purpose'] ?? '') === 'failed_login') {
+            $lockUser = $pdo->prepare('SELECT id, status FROM users WHERE id = :id FOR UPDATE');
+            $lockUser->execute([':id' => $userId]);
+            $lockedUser = $lockUser->fetch();
+            if (!$lockedUser || normalizeLoginIdentityToken($lockedUser['status'] ?? '') !== 'active') {
+                $pdo->rollBack();
+                sendJson(['success' => false, 'otpChallengeEnded' => true, 'error' => 'Account is inactive.'], 403);
+            }
+            $resetToken = issuePasswordResetTokenForVerifiedOtp(
+                $pdo,
+                $userId,
+                formatPasswordResetMysqlDateTime($now),
+                formatPasswordResetMysqlDateTime($now + PASSWORD_RESET_EXPIRY_SECONDS)
+            );
+            $pdo->commit();
+            logPasswordResetEvent($pdo, $user, 'Password Reset Requested', 'Email OTP verification authorized a password reset after three failed password attempts.');
+            sendJson([
+                'success' => true,
+                'otpVerified' => true,
+                'passwordResetRequired' => true,
+                'resetToken' => $resetToken,
+                'message' => 'OTP verified. Set and confirm your new password.',
+            ]);
+        }
         trustLoginDevice($pdo, $userId, $deviceHash, $now);
         ensureUserAuthSecurityRow($pdo, $userId);
         $verified = $pdo->prepare(
@@ -1252,7 +1295,7 @@ if ($action === 'resendotp') {
 
 $passwordInput = $body['password'] ?? null;
 $password = is_string($passwordInput) ? trim($passwordInput) : '';
-if (strlen($password) > 255) {
+if (strlen($password) > 32) {
     recordAuthenticationFailureOrLimit($pdo, $ipFingerprint, $identityFingerprint, $now, $user);
     sendJson(['success' => false, 'error' => 'Invalid credentials'], 400);
 }
@@ -1267,8 +1310,11 @@ if (empty($passwordCheck['matched'])) {
             $pdo,
             $user,
             'Suspicious Login Attempt',
-            'Multiple failed password attempts made OTP mandatory after the next correct password.'
+            'Three incorrect password attempts triggered email OTP verification for password recovery.'
         );
+    }
+    if ((int) ($security['failed_password_count'] ?? 0) >= LOGIN_PASSWORD_FAILURE_THRESHOLD) {
+        sendFailedLoginRecoveryOtp($pdo, $user, $ipFingerprint, $identityFingerprint, $now);
     }
     sendJson(['success' => false, 'error' => 'Invalid username or password'], 401);
 }
@@ -1282,11 +1328,13 @@ if (!empty($passwordCheck['needs_migration']) || !empty($passwordCheck['needs_re
     }
 }
 
-$userRole = normalizeLoginIdentityToken($user['role'] ?? '');
-requireNaapLoginCanStartActiveSession($pdo, $userId, false, true, $userRole);
-
 $security = getUserAuthSecurityRow($pdo, $userId);
 $failedLoginOtpRequired = !empty($security['failed_login_otp_required']);
+if ($failedLoginOtpRequired) {
+    sendFailedLoginRecoveryOtp($pdo, $user, $ipFingerprint, $identityFingerprint, $now);
+}
+$userRole = normalizeLoginIdentityToken($user['role'] ?? '');
+requireNaapLoginCanStartActiveSession($pdo, $userId, false, true, $userRole, true);
 if (!$failedLoginOtpRequired && (int) ($security['failed_password_count'] ?? 0) > 0) {
     $clearPasswordFailures = $pdo->prepare(
         'UPDATE user_auth_security SET failed_password_count = 0 WHERE user_id = :user_id'
@@ -1307,7 +1355,7 @@ if ($deviceToken === '' || !$deviceTrusted) {
     $deviceToken = mintLoginDeviceToken($userId, $now);
 }
 $deviceHash = hashLoginDeviceToken($deviceToken);
-$purpose = $failedLoginOtpRequired ? 'failed_login' : 'device_verification';
+$purpose = 'device_verification';
 $existingChallenge = findActiveOtpChallenge($pdo, $userId, $deviceHash, $now);
 if ($existingChallenge && (string) ($existingChallenge['purpose'] ?? '') === $purpose) {
     $existingChallenge['masked_email'] = maskLoginSecurityEmail((string) ($user['email'] ?? ''));

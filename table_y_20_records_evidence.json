@@ -1,0 +1,2871 @@
+{
+    "sampleSize": 20,
+    "scope": "Synthetic student evaluations submitted through the actual PHP HTTP API in an isolated MySQL database",
+    "timezone": "Asia/Manila",
+    "checkedAt": "2026-10-06 22:06:57",
+    "databaseMatches": 20,
+    "reportMatches": 20,
+    "overallSetRating": 82,
+    "records": [
+        {
+            "testCaseId": "TC-DC-01",
+            "evaluationId": 1,
+            "traceId": "TRIAL-aa7d16c9d11f941d13ed9541",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4",
+                    "2": "3",
+                    "3": "5",
+                    "4": "4",
+                    "5": "4"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 1 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 1."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "3.00",
+                    "3": "5.00",
+                    "4": "4.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 1 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 1."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "3.00",
+                    "3": "5.00",
+                    "4": "4.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 1 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 1."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 1.",
+                    "database": "Please provide more practice exercises for topic 1.",
+                    "report": "Please provide more practice exercises for topic 1.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 1 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 1 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 1 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4,
+            "percentage": 80,
+            "credibilityScore": 92,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-02",
+            "evaluationId": 2,
+            "traceId": "TRIAL-260e27c927f18a54a020c2b1",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "3",
+                    "2": "4",
+                    "3": "4",
+                    "4": "5",
+                    "5": "5"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 2 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 2."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "3.00",
+                    "2": "4.00",
+                    "3": "4.00",
+                    "4": "5.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 2 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 2."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "3.00",
+                    "2": "4.00",
+                    "3": "4.00",
+                    "4": "5.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 2 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 2."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 2.",
+                    "database": "Please provide more practice exercises for topic 2.",
+                    "report": "Please provide more practice exercises for topic 2.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 2 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 2 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 2 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4.2,
+            "percentage": 84,
+            "credibilityScore": 93,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-03",
+            "evaluationId": 3,
+            "traceId": "TRIAL-b4414ccfd89df865cd5f7e2d",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "5",
+                    "2": "4",
+                    "3": "3",
+                    "4": "4",
+                    "5": "5"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 3 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 3."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "5.00",
+                    "2": "4.00",
+                    "3": "3.00",
+                    "4": "4.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 3 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 3."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "5.00",
+                    "2": "4.00",
+                    "3": "3.00",
+                    "4": "4.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 3 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 3."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 3.",
+                    "database": "Please provide more practice exercises for topic 3.",
+                    "report": "Please provide more practice exercises for topic 3.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 3 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 3 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 3 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4.2,
+            "percentage": 84,
+            "credibilityScore": 93,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-04",
+            "evaluationId": 4,
+            "traceId": "TRIAL-ac236d4e037e75b62a620333",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4",
+                    "2": "5",
+                    "3": "4",
+                    "4": "3",
+                    "5": "4"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 4 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 4."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "5.00",
+                    "3": "4.00",
+                    "4": "3.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 4 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 4."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "5.00",
+                    "3": "4.00",
+                    "4": "3.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 4 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 4."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 4.",
+                    "database": "Please provide more practice exercises for topic 4.",
+                    "report": "Please provide more practice exercises for topic 4.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 4 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 4 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 4 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4,
+            "percentage": 80,
+            "credibilityScore": 92,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-05",
+            "evaluationId": 5,
+            "traceId": "TRIAL-d2ac74644987f2169dac283d",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4",
+                    "2": "3",
+                    "3": "5",
+                    "4": "4",
+                    "5": "4"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 5 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 5."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "3.00",
+                    "3": "5.00",
+                    "4": "4.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 5 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 5."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "3.00",
+                    "3": "5.00",
+                    "4": "4.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 5 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 5."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 5.",
+                    "database": "Please provide more practice exercises for topic 5.",
+                    "report": "Please provide more practice exercises for topic 5.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 5 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 5 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 5 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4,
+            "percentage": 80,
+            "credibilityScore": 92,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-06",
+            "evaluationId": 6,
+            "traceId": "TRIAL-bab18169cd108c130e13ecf4",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "3",
+                    "2": "4",
+                    "3": "4",
+                    "4": "5",
+                    "5": "5"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 6 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 6."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "3.00",
+                    "2": "4.00",
+                    "3": "4.00",
+                    "4": "5.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 6 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 6."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "3.00",
+                    "2": "4.00",
+                    "3": "4.00",
+                    "4": "5.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 6 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 6."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 6.",
+                    "database": "Please provide more practice exercises for topic 6.",
+                    "report": "Please provide more practice exercises for topic 6.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 6 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 6 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 6 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4.2,
+            "percentage": 84,
+            "credibilityScore": 93,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-07",
+            "evaluationId": 7,
+            "traceId": "TRIAL-65e7a950cdd6447550e021d6",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "5",
+                    "2": "4",
+                    "3": "3",
+                    "4": "4",
+                    "5": "5"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 7 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 7."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "5.00",
+                    "2": "4.00",
+                    "3": "3.00",
+                    "4": "4.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 7 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 7."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "5.00",
+                    "2": "4.00",
+                    "3": "3.00",
+                    "4": "4.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 7 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 7."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 7.",
+                    "database": "Please provide more practice exercises for topic 7.",
+                    "report": "Please provide more practice exercises for topic 7.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 7 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 7 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 7 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4.2,
+            "percentage": 84,
+            "credibilityScore": 93,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-08",
+            "evaluationId": 8,
+            "traceId": "TRIAL-23de3d7115e38e62c8329a15",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4",
+                    "2": "5",
+                    "3": "4",
+                    "4": "3",
+                    "5": "4"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 8 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 8."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "5.00",
+                    "3": "4.00",
+                    "4": "3.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 8 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 8."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "5.00",
+                    "3": "4.00",
+                    "4": "3.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 8 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 8."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 8.",
+                    "database": "Please provide more practice exercises for topic 8.",
+                    "report": "Please provide more practice exercises for topic 8.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 8 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 8 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 8 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4,
+            "percentage": 80,
+            "credibilityScore": 92,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-09",
+            "evaluationId": 9,
+            "traceId": "TRIAL-976a7dc16cf7976b87099e99",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4",
+                    "2": "3",
+                    "3": "5",
+                    "4": "4",
+                    "5": "4"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 9 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 9."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "3.00",
+                    "3": "5.00",
+                    "4": "4.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 9 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 9."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "3.00",
+                    "3": "5.00",
+                    "4": "4.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 9 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 9."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 9.",
+                    "database": "Please provide more practice exercises for topic 9.",
+                    "report": "Please provide more practice exercises for topic 9.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 9 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 9 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 9 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4,
+            "percentage": 80,
+            "credibilityScore": 92,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-10",
+            "evaluationId": 10,
+            "traceId": "TRIAL-6feee60535d560ba0c68ffea",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "3",
+                    "2": "4",
+                    "3": "4",
+                    "4": "5",
+                    "5": "5"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 10 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 10."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "3.00",
+                    "2": "4.00",
+                    "3": "4.00",
+                    "4": "5.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 10 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 10."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "3.00",
+                    "2": "4.00",
+                    "3": "4.00",
+                    "4": "5.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 10 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 10."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 10.",
+                    "database": "Please provide more practice exercises for topic 10.",
+                    "report": "Please provide more practice exercises for topic 10.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 10 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 10 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 10 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4.2,
+            "percentage": 84,
+            "credibilityScore": 93,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-11",
+            "evaluationId": 11,
+            "traceId": "TRIAL-c733da2b932a2cf3d8964a21",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "5",
+                    "2": "4",
+                    "3": "3",
+                    "4": "4",
+                    "5": "5"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 11 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 11."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "5.00",
+                    "2": "4.00",
+                    "3": "3.00",
+                    "4": "4.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 11 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 11."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "5.00",
+                    "2": "4.00",
+                    "3": "3.00",
+                    "4": "4.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 11 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 11."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 11.",
+                    "database": "Please provide more practice exercises for topic 11.",
+                    "report": "Please provide more practice exercises for topic 11.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 11 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 11 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 11 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4.2,
+            "percentage": 84,
+            "credibilityScore": 93,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-12",
+            "evaluationId": 12,
+            "traceId": "TRIAL-477ef3fb579c02016633547f",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4",
+                    "2": "5",
+                    "3": "4",
+                    "4": "3",
+                    "5": "4"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 12 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 12."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "5.00",
+                    "3": "4.00",
+                    "4": "3.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 12 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 12."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "5.00",
+                    "3": "4.00",
+                    "4": "3.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 12 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 12."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 12.",
+                    "database": "Please provide more practice exercises for topic 12.",
+                    "report": "Please provide more practice exercises for topic 12.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 12 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 12 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 12 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4,
+            "percentage": 80,
+            "credibilityScore": 92,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-13",
+            "evaluationId": 13,
+            "traceId": "TRIAL-b47fb5d4e1b9c1efa19e9514",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4",
+                    "2": "3",
+                    "3": "5",
+                    "4": "4",
+                    "5": "4"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 13 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 13."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "3.00",
+                    "3": "5.00",
+                    "4": "4.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 13 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 13."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "3.00",
+                    "3": "5.00",
+                    "4": "4.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 13 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 13."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 13.",
+                    "database": "Please provide more practice exercises for topic 13.",
+                    "report": "Please provide more practice exercises for topic 13.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 13 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 13 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 13 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4,
+            "percentage": 80,
+            "credibilityScore": 92,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-14",
+            "evaluationId": 14,
+            "traceId": "TRIAL-956a95c38dc457f09d09a6e3",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "3",
+                    "2": "4",
+                    "3": "4",
+                    "4": "5",
+                    "5": "5"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 14 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 14."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "3.00",
+                    "2": "4.00",
+                    "3": "4.00",
+                    "4": "5.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 14 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 14."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "3.00",
+                    "2": "4.00",
+                    "3": "4.00",
+                    "4": "5.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 14 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 14."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 14.",
+                    "database": "Please provide more practice exercises for topic 14.",
+                    "report": "Please provide more practice exercises for topic 14.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 14 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 14 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 14 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4.2,
+            "percentage": 84,
+            "credibilityScore": 93,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-15",
+            "evaluationId": 15,
+            "traceId": "TRIAL-6369687aad2fcb2b1e87a14f",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "5",
+                    "2": "4",
+                    "3": "3",
+                    "4": "4",
+                    "5": "5"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 15 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 15."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "5.00",
+                    "2": "4.00",
+                    "3": "3.00",
+                    "4": "4.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 15 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 15."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "5.00",
+                    "2": "4.00",
+                    "3": "3.00",
+                    "4": "4.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 15 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 15."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 15.",
+                    "database": "Please provide more practice exercises for topic 15.",
+                    "report": "Please provide more practice exercises for topic 15.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 15 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 15 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 15 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4.2,
+            "percentage": 84,
+            "credibilityScore": 93,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-16",
+            "evaluationId": 16,
+            "traceId": "TRIAL-234e40f63ccd2a3559aba764",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4",
+                    "2": "5",
+                    "3": "4",
+                    "4": "3",
+                    "5": "4"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 16 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 16."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "5.00",
+                    "3": "4.00",
+                    "4": "3.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 16 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 16."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "5.00",
+                    "3": "4.00",
+                    "4": "3.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 16 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 16."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 16.",
+                    "database": "Please provide more practice exercises for topic 16.",
+                    "report": "Please provide more practice exercises for topic 16.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 16 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 16 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 16 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4,
+            "percentage": 80,
+            "credibilityScore": 92,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-17",
+            "evaluationId": 17,
+            "traceId": "TRIAL-6388250a3220b2ca94790e78",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4",
+                    "2": "3",
+                    "3": "5",
+                    "4": "4",
+                    "5": "4"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 17 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 17."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "3.00",
+                    "3": "5.00",
+                    "4": "4.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 17 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 17."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "3.00",
+                    "3": "5.00",
+                    "4": "4.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 17 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 17."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 17.",
+                    "database": "Please provide more practice exercises for topic 17.",
+                    "report": "Please provide more practice exercises for topic 17.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 17 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 17 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 17 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4,
+            "percentage": 80,
+            "credibilityScore": 92,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-18",
+            "evaluationId": 18,
+            "traceId": "TRIAL-b53333c89810a59bbf1c8bcc",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "3",
+                    "2": "4",
+                    "3": "4",
+                    "4": "5",
+                    "5": "5"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 18 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 18."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "3.00",
+                    "2": "4.00",
+                    "3": "4.00",
+                    "4": "5.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 18 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 18."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "3.00",
+                    "2": "4.00",
+                    "3": "4.00",
+                    "4": "5.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 18 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 18."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 18.",
+                    "database": "Please provide more practice exercises for topic 18.",
+                    "report": "Please provide more practice exercises for topic 18.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 18 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 18 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 18 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4.2,
+            "percentage": 84,
+            "credibilityScore": 93,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-19",
+            "evaluationId": 19,
+            "traceId": "TRIAL-3d8d8e857fa0278273614165",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "5",
+                    "2": "4",
+                    "3": "3",
+                    "4": "4",
+                    "5": "5"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 19 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 19."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "5.00",
+                    "2": "4.00",
+                    "3": "3.00",
+                    "4": "4.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 19 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 19."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "5.00",
+                    "2": "4.00",
+                    "3": "3.00",
+                    "4": "4.00",
+                    "5": "5.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 19 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 19."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 19.",
+                    "database": "Please provide more practice exercises for topic 19.",
+                    "report": "Please provide more practice exercises for topic 19.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 19 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 19 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 19 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4.2,
+            "percentage": 84,
+            "credibilityScore": 93,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        },
+        {
+            "testCaseId": "TC-DC-20",
+            "evaluationId": 20,
+            "traceId": "TRIAL-9737fc05e18f378c7e83fa38",
+            "submitted": {
+                "targetProfessorId": "u2",
+                "courseOfferingId": "1",
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4",
+                    "2": "5",
+                    "3": "4",
+                    "4": "3",
+                    "5": "4"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 20 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 20."
+            },
+            "database": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "5.00",
+                    "3": "4.00",
+                    "4": "3.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 20 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 20."
+            },
+            "report": {
+                "facultyId": 2,
+                "courseOfferingId": 1,
+                "semesterId": "accuracy-test",
+                "ratings": {
+                    "1": "4.00",
+                    "2": "5.00",
+                    "3": "4.00",
+                    "4": "3.00",
+                    "5": "4.00"
+                },
+                "qualitative": {
+                    "6": "The instructor explains lesson 20 clearly and provides useful examples."
+                },
+                "comments": "Please provide more practice exercises for topic 20."
+            },
+            "checks": [
+                {
+                    "field": "Target faculty",
+                    "expected": 2,
+                    "database": 2,
+                    "report": 2,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Course offering",
+                    "expected": 1,
+                    "database": 1,
+                    "report": 1,
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Semester",
+                    "expected": "accuracy-test",
+                    "database": "accuracy-test",
+                    "report": "accuracy-test",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "General feedback",
+                    "expected": "Please provide more practice exercises for topic 20.",
+                    "database": "Please provide more practice exercises for topic 20.",
+                    "report": "Please provide more practice exercises for topic 20.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q1",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q2",
+                    "expected": "5.00",
+                    "database": "5.00",
+                    "report": "5.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q3",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q4",
+                    "expected": "3.00",
+                    "database": "3.00",
+                    "report": "3.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Rating Q5",
+                    "expected": "4.00",
+                    "database": "4.00",
+                    "report": "4.00",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                },
+                {
+                    "field": "Feedback Q6",
+                    "expected": "The instructor explains lesson 20 clearly and provides useful examples.",
+                    "database": "The instructor explains lesson 20 clearly and provides useful examples.",
+                    "report": "The instructor explains lesson 20 clearly and provides useful examples.",
+                    "databaseStatus": "PASS",
+                    "reportStatus": "PASS"
+                }
+            ],
+            "mean": 4,
+            "percentage": 80,
+            "credibilityScore": 92,
+            "credibilityStatus": "AUTO_ACCEPTED",
+            "crossStatus": "Comparator unavailable",
+            "payloadHashMatch": true,
+            "databaseStatus": "PASS",
+            "reportStatus": "PASS"
+        }
+    ]
+}

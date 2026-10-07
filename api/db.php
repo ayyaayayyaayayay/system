@@ -165,8 +165,8 @@ function normalizeUserPasswordValue($value) {
     if (strlen($password) < 8) {
         throw new RuntimeException('Password must be at least 8 characters.');
     }
-    if (strlen($password) > 255) {
-        throw new RuntimeException('Password is too long.');
+    if (strlen($password) > 32) {
+        throw new RuntimeException('Password must not exceed 32 characters.');
     }
 
     return $password;

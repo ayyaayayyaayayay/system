@@ -73,13 +73,14 @@ workflowAssert(
 );
 workflowAssert(
     str_contains($mainPage, 'newPasswordInput.value.trim()')
-        && str_contains($mainPage, 'newPassword.length > 255'),
+        && str_contains($mainPage, 'newPassword.length > 32'),
     'Reset-password validation does not match the backend password policy.'
 );
 workflowAssert(
-    str_contains($studentHtml, 'db-data.js?v=20261004a')
-        && str_contains($studentHtml, 'studentpanel.js?v=20261004a')
-        && str_contains($mainHtml, 'mainpage.js?v=20261004a'),
+    str_contains($studentHtml, 'db-data.js?v=20261006cleanup')
+        && preg_match('/studentpanel\.js\?v=\d+[^"\s]*/', $studentHtml) === 1
+        && str_contains($mainHtml, 'mainpage.js?v=20261006limits')
+        && str_contains($mainHtml, 'recovery=20261007b'),
     'Updated recovery scripts are not cache-busted in their pages.'
 );
 

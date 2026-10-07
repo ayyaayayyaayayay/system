@@ -1775,7 +1775,7 @@ function setupProfileForms() {
             if (!validatePassword(newPassword)) {
                 showFormMessage(
                     passwordMessage,
-                    "Password must be at least 8 characters and include a number.",
+                    "Password must be 8–32 characters and include a number.",
                     "error"
                 );
                 return;
@@ -1854,7 +1854,7 @@ function validateEmail(email) {
 
 function validatePassword(password) {
     if (typeof password !== "string") return false;
-    if (password.length < 8) return false;
+    if (password.length < 8 || password.length > 32) return false;
     const hasNumber = /\d/.test(password);
     return hasNumber;
 }

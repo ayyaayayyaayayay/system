@@ -9,7 +9,7 @@ if (function_exists('header_remove')) {
 const NAAP_SESSION_NAME = 'naap_session';
 const NAAP_ACTIVE_SESSION_TOKEN_KEY = 'auth_session_token';
 const NAAP_ACTIVE_SESSION_TOUCH_KEY = 'auth_session_last_touch';
-const NAAP_SESSION_IDLE_TIMEOUT_SECONDS = 300;
+const NAAP_SESSION_IDLE_TIMEOUT_SECONDS = 600;
 const NAAP_SESSION_HEARTBEAT_THROTTLE_SECONDS = 60;
 
 function naapUsesSecureCookies() {
@@ -257,12 +257,15 @@ function clearNaapUserActiveSessionByUserId(PDO $pdo, $userId) {
     $stmt->execute([':id' => $numericUserId]);
 }
 
-function sendNaapActiveSessionConflictResponse() {
+function sendNaapActiveSessionConflictResponse($role = '') {
+    $message = isNaapRoleExemptFromIdleTimeout($role)
+        ? 'This admin account is already active in another browser or device. Log out from that session before signing in here.'
+        : 'This account is already active in another browser or device. Try again after 10 minutes of inactivity or log out from the active session.';
     sendJson([
         'success' => false,
         'authenticated' => false,
         'activeSession' => true,
-        'error' => 'This account is already active in another browser or device. Try again after 5 minutes of inactivity or log out from the active session.',
+        'error' => $message,
     ], 409);
 }
 
@@ -272,7 +275,7 @@ function requireNaapLoginCanStartActiveSession(
     $forUpdate = false,
     $sendResponse = true,
     $role = '',
-    $replaceAdminSession = false
+    $allowAdminSessionReplacement = false
 ) {
     $record = getNaapActiveSessionRecord($pdo, $userId, $forUpdate);
     if (!$record || trim((string) ($record['active_session_token_hash'] ?? '')) === '') {
@@ -284,10 +287,9 @@ function requireNaapLoginCanStartActiveSession(
         return true;
     }
 
-    if (isNaapRoleExemptFromIdleTimeout($role)) {
-        if ($replaceAdminSession) {
-            clearNaapUserActiveSessionByUserId($pdo, $userId);
-        }
+    // Credential-verified admin logins can recover from a lost browser session.
+    // Keep the old token until authentication completes and the new token is saved.
+    if ($allowAdminSessionReplacement && isNaapRoleExemptFromIdleTimeout($role)) {
         return true;
     }
 
@@ -297,7 +299,7 @@ function requireNaapLoginCanStartActiveSession(
     }
 
     if ($sendResponse) {
-        sendNaapActiveSessionConflictResponse();
+        sendNaapActiveSessionConflictResponse($role);
     }
 
     return false;
@@ -392,7 +394,7 @@ function requireNaapAuthenticatedSession(PDO $pdo = null, $forceTouch = false) {
                 'success' => false,
                 'authenticated' => false,
                 'idleTimeout' => true,
-                'error' => 'Your session expired after 5 minutes of inactivity. Please sign in again.',
+                'error' => 'Your session expired after 10 minutes of inactivity. Please sign in again.',
             ], 401);
         }
 

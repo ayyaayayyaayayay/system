@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="../design/apple-touch-icon.png">
     <title>HR Dashboard - National Aviation Academy of the Philippines</title>
     <link rel="stylesheet" href="../css/panel-theme.css?v=20260907a">
-    <link rel="stylesheet" href="../css/hrpanel.css?v=20261005a">
+    <link rel="stylesheet" href="../css/hrpanel.css?v=20261007a">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -816,7 +816,7 @@
                                 <div class="form-group">
                                     <label for="currentPassword">Current Password</label>
                                     <div class="password-field">
-                                        <input type="password" id="currentPassword" name="currentPassword"
+                                        <input type="password" id="currentPassword" maxlength="32" name="currentPassword"
                                             class="form-input" placeholder="Enter current password" required>
                                         <button type="button" class="toggle-password" data-target="currentPassword"
                                             aria-label="Show password">
@@ -827,7 +827,7 @@
                                 <div class="form-group">
                                     <label for="newPassword">New Password</label>
                                     <div class="password-field">
-                                        <input type="password" id="newPassword" name="newPassword" class="form-input"
+                                        <input type="password" id="newPassword" minlength="8" maxlength="32" name="newPassword" class="form-input"
                                             placeholder="Enter new password" required>
                                         <button type="button" class="toggle-password" data-target="newPassword"
                                             aria-label="Show password">
@@ -838,7 +838,7 @@
                                 <div class="form-group">
                                     <label for="confirmPassword">Confirm New Password</label>
                                     <div class="password-field">
-                                        <input type="password" id="confirmPassword" name="confirmPassword"
+                                        <input type="password" id="confirmPassword" minlength="8" maxlength="32" name="confirmPassword"
                                             class="form-input" placeholder="Re-enter new password" required>
                                         <button type="button" class="toggle-password" data-target="confirmPassword"
                                             aria-label="Show password">
@@ -920,7 +920,7 @@
                         <div class="section-header">
                             <div class="section-title">
                                 <h2><i class="fas fa-shield-alt"></i> Evaluation Behavior Score</h2>
-                                <p>Future submissions only: detects fast, uniform, and repetitive answer patterns.</p>
+                                <p>Shows saved behavior scores and flags for submitted student evaluations.</p>
                             </div>
                             <div class="ai-insights-controls">
                                 <select id="hr-ai-behavior-semester" class="filter-select"></select>
@@ -939,7 +939,7 @@
                                 <table class="ai-insights-table">
                                     <thead>
                                         <tr>
-                                            <th>Student Number</th>
+                                            <th>Anonymous Student Group</th>
                                             <th>Forms Analyzed</th>
                                             <th>Avg Behavior Score</th>
                                             <th>Assessment Level</th>
@@ -961,11 +961,11 @@
                                     <thead>
                                         <tr>
                                             <th>Submission ID</th>
-                                            <th>Student Number</th>
+                                            <th>Student Identity</th>
                                             <th>Score</th>
                                             <th>Fast Flag</th>
                                             <th>Uniform Flag</th>
-                                            <th>Repetitive Flag</th>
+                                            <th>Repetitive Flag (Ratings / Comments)</th>
                                         </tr>
                                     </thead>
                                     <tbody id="hr-ai-submission-body">
@@ -1022,7 +1022,7 @@
                         <div class="section-header">
                             <div class="section-title">
                                 <h2><i class="fas fa-code-compare"></i> Cross-Source Evaluation Discrepancy</h2>
-                                <p>Flags cases where student ratings are significantly lower than supervisor ratings.</p>
+                                <p>Compares submitted student and supervisor ratings for the same professor and semester. Flags differences of 2.0 points or more.</p>
                             </div>
                             <div class="ai-insights-controls">
                                 <select id="hr-ai-discrepancy-semester" class="filter-select"></select>
@@ -1063,7 +1063,7 @@
                         <div class="section-header">
                             <div class="section-title">
                                 <h2><i class="fas fa-shield-alt"></i> Evaluation Credibility Score</h2>
-                                <p>Combines behavior, bias, and cross-source validation into an overall reliability score.</p>
+                                <p>Shows saved reliability scores calculated from behavior, bias, and cross-source evidence at submission.</p>
                             </div>
                             <div class="ai-insights-controls">
                                 <select id="hr-ai-credibility-semester" class="filter-select"></select>
@@ -1083,7 +1083,7 @@
                                     <thead>
                                         <tr>
                                             <th>Evaluation ID</th>
-                                            <th>Student Number</th>
+                                            <th>Evaluator Identity</th>
                                             <th>Professor</th>
                                             <th>Behavior Score</th>
                                             <th>Bias Label</th>
@@ -1355,7 +1355,7 @@
                 </div>
                 <div class="form-group">
                     <label for="professor-employee-id">Employee ID</label>
-                    <input type="text" id="professor-employee-id" name="employeeId" placeholder="e.g., EMP-1001">
+                    <input type="text" id="professor-employee-id" maxlength="24" name="employeeId" placeholder="e.g., EMP-1001">
                 </div>
                 <div class="form-group">
                     <label for="professor-department">Department</label>
@@ -1585,11 +1585,11 @@
         </div>
     </div>
 
-    <script src="../JsScrip/db-data.js?v=20261004a"></script>
-    <script src="../JsScrip/set-calculation.js?v=20260929b"></script>
+    <script src="../JsScrip/db-data.js?v=20261006c&idle=20261007b&behavior=20261007a"></script>
+    <script src="../JsScrip/set-calculation.js?v=20261006cmo"></script>
     <script src="../JsScrip/system-report.js?v=20260907a"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
-    <script src="../JsScrip/hrpanel.js?v=20261005a"></script>
+    <script src="../JsScrip/hrpanel.js?v=20261007behavior4&trend=20261007a"></script>
     <script src="../JsScrip/credibility-review.js"></script>
 </body>
 

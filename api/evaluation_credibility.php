@@ -126,9 +126,12 @@ function calculateEvaluationBehaviorRecords(array $evaluations, ?string $onlyId 
         foreach ($records as $j => $candidate) {
             if ($i === $j || $r['cohort'] !== $candidate['cohort']) continue;
             $same = $r['actor'] !== '' && $r['actor'] === $candidate['actor'];
-            if (!$same && ($r['target'] !== $candidate['target'] || (!$r['fast'] && !$candidate['fast']))) continue;
             $key = $same ? 'same' : 'cross'; $sim = credibilitySimilarity($r, $candidate);
             foreach (['rating', 'comment'] as $kind) {
+                // Reused comments are independent evidence, even across offerings
+                // or normal completion times. Keep rating comparisons scoped.
+                if ($kind === 'rating' && !$same
+                    && ($r['target'] !== $candidate['target'] || (!$r['fast'] && !$candidate['fast']))) continue;
                 $o = $kind . 'Overlap'; $s = $kind . 'Similarity';
                 if ($sim[$o] > $best[$key][$o] || ($sim[$o] === $best[$key][$o] && $sim[$s] > $best[$key][$s])) {
                     $best[$key][$o] = $sim[$o]; $best[$key][$s] = $sim[$s];
@@ -156,6 +159,8 @@ function calculateEvaluationBehaviorRecords(array $evaluations, ?string $onlyId 
             $flags[] = 'Very rapid completion: under 2 seconds per rated question';
         }
         $results[(string) $r['evaluation']['id']] = ['score' => $score, 'flags' => $flags,
+            'ratingRepetitiveFlag' => $ratingFlag, 'commentRepetitiveFlag' => $commentFlag,
+            'repetitiveFlag' => $ratingFlag || $commentFlag,
             'requiresSpeedReview' => $veryRapid,
             'speedRisk' => $r['speedRisk'], 'uniformityRisk' => $r['uniformRisk'], 'repetitionRisk' => $repetition,
             'fastThreshold' => $r['timed'] ? ($thresholds[$r['cohort']] ?? null) : null];
@@ -350,6 +355,27 @@ function buildProfessorAnalyticsEligibleEvaluations(PDO $pdo, array $actor, stri
         && resolveStoredUserIdNumber($e['targetProfessorId'] ?? $e['evaluateeUserId'] ?? '') === $id));
 }
 
+function collectProfessorAnalyticsCommentTexts(array $evaluation): array {
+    $texts = array_values(is_array($evaluation['qualitative'] ?? null) ? $evaluation['qualitative'] : []);
+    if (!$texts) {
+        foreach ($evaluation['qualitativeResponses'] ?? [] as $response) {
+            $texts[] = is_array($response)
+                ? ($response['text'] ?? $response['answer'] ?? $response['comment'] ?? $response['response'] ?? '')
+                : $response;
+        }
+    }
+    // Historical payloads may use aliases for their general comment. Preserve
+    // every distinct value without counting copies of the same field twice.
+    $generalSeen = [];
+    foreach (['comments', 'comment', 'feedback'] as $field) {
+        $text = normalizeBiasDetectionText($evaluation[$field] ?? '');
+        if ($text === '' || isset($generalSeen[$text])) continue;
+        $generalSeen[$text] = true;
+        $texts[] = $text;
+    }
+    return $texts;
+}
+
 // Reuse the existing PHP SET implementation; this constructs inputs, not AI output.
 function buildProfessorAnalyticsAuthoritativePayload(PDO $pdo, array $actor, array $request): array {
     require_once __DIR__ . '/faculty_report_helper.php';
@@ -373,10 +399,10 @@ function buildProfessorAnalyticsAuthoritativePayload(PDO $pdo, array $actor, arr
     $averages = ['student'=>isset($set['overall_set_rating']) ? round($set['overall_set_rating']/20, 2) : null, 'professor'=>null, 'supervisor'=>null];
     $counts = ['student'=>0, 'professor'=>0, 'supervisor'=>0];
     $raters = ['professor'=>[], 'supervisor'=>[]]; $ratings = ['professor'=>[], 'supervisor'=>[]];
-    $comments = []; $dedupe = [];
+    $comments = [];
     $evaluationCounts = ['student'=>0,'professor'=>0,'supervisor'=>0];
     $distributionScores = ['student'=>[],'professor'=>[],'supervisor'=>[]]; $allRatings = [];
-    // Same source order, date/text deduplication, 700 character input and 240 comment cap as the existing browser builder.
+    // Every nonempty response contributes, including matching feedback from different evaluators.
     foreach (['student','peer','supervisor'] as $type) foreach ($evaluations as $e) {
         if (credibilityEvaluationType($e) !== $type) continue;
         $source = $type === 'peer' ? 'professor' : $type;
@@ -389,27 +415,11 @@ function buildProfessorAnalyticsAuthoritativePayload(PDO $pdo, array $actor, arr
             if ($rater !== '') $raters[$source][$rater] = true;
             foreach ($e['ratings'] ?? [] as $v) if (is_numeric($v)) $ratings[$source][] = max(1,min(5,(float)$v));
         }
-        $texts = array_merge(array_values($e['qualitative'] ?? []), [$e['comments'] ?? '']);
-        if ($panelRole === 'admin') $texts = [implode(' | ', array_filter(array_map('trim', $texts), fn($v) => $v !== ''))];
-        if ($panelRole === 'vpaa') {
-            $texts = [$e['comments'] ?? '', $e['comment'] ?? '', $e['feedback'] ?? ''];
-            foreach ($e['qualitativeResponses'] ?? [] as $v) $texts[] = is_array($v) ? ($v['text'] ?? $v['answer'] ?? $v['comment'] ?? $v['response'] ?? '') : $v;
-            $texts = array_merge($texts, array_values($e['qualitative'] ?? []));
-        }
+        $texts = collectProfessorAnalyticsCommentTexts($e);
         foreach ($texts as $text) {
             $text = trim((string) $text); if ($text === '') continue;
             $counts[$source]++;
             $text = preg_replace('/\s+/', ' ', $text);
-            $length = function_exists('mb_strlen') ? mb_strlen($text) : strlen($text);
-            if ($length > 700) {
-                $limit = $panelRole === 'vpaa' ? 700 : 699;
-                $text = function_exists('mb_substr') ? mb_substr($text,0,$limit) : substr($text,0,$limit);
-                if ($panelRole !== 'vpaa') $text = rtrim($text) . '…';
-            }
-            $date = substr((string) ($e['submittedAt'] ?? ''),0,10);
-            $key = $source . '|' . strtolower($text) . '|' . $date;
-            if ($panelRole !== 'vpaa' && isset($dedupe[$key])) continue;
-            $dedupe[$key] = true;
             $comments[] = ['id'=>$professorId . '_' . (count($comments)+1), 'source'=>['student'=>'Student to Professor','professor'=>'Professor to Professor','supervisor'=>'Supervisor to Professor'][$source], 'text'=>$text];
         }
     }
@@ -440,7 +450,7 @@ function buildProfessorAnalyticsAuthoritativePayload(PDO $pdo, array $actor, arr
     $responseRate = $totalRaters ? round($totalEvaluated/$totalRaters*100,$panelRole==='vpaa' ? 0 : 2) : ($panelRole==='vpaa' ? 0 : null);
     if ($responseRate !== null && $responseRate > 100) $responseRate = null;
     return ['professor'=>['id'=>$professorId,'name'=>$professor['name'],'semester'=>$semester], 'semesterId'=>$semester,
-        'comments'=>array_slice($comments,0,240), 'metrics'=>['overallRating'=>$overall, 'combinedAverage'=>$combined,
+        'comments'=>$comments, 'metrics'=>['overallRating'=>$overall, 'combinedAverage'=>$combined,
             'responseRate'=>$responseRate, 'totalEvaluations'=>$totalEvaluated,
             'averagesBySource'=>$averages,'countsBySource'=>$counts]];
 }

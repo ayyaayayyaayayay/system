@@ -244,8 +244,10 @@
                 || String(left.courseOfferingId).localeCompare(String(right.courseOfferingId));
         });
 
-        const available = scorableRegistered > 0;
-        const partial = available && excludedClassCount > 0;
+        // Annex C requires the entire registered population in the denominator.
+        // Without an average for every enrolled class, the overall SET is unknown.
+        const available = totalRegistered > 0 && excludedClassCount === 0;
+        const partial = scorableRegistered > 0 && excludedClassCount > 0;
         return {
             byOffering,
             registered: totalRegistered,
@@ -256,8 +258,8 @@
             validRatingCount: totalValidRatings,
             totalWeightedScore: available ? totalWeightedScore : null,
             totalWeightedScorePercent: available ? totalWeightedScore * 20 : null,
-            averageRating: available ? totalWeightedScore / scorableRegistered : null,
-            averageRatingPercent: available ? (totalWeightedScore / scorableRegistered) * 20 : null,
+            averageRating: available ? totalWeightedScore / totalRegistered : null,
+            averageRatingPercent: available ? (totalWeightedScore / totalRegistered) * 20 : null,
             scorableRegistered,
             excludedRegistered,
             registeredClassCount,

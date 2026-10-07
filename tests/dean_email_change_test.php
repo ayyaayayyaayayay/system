@@ -40,7 +40,7 @@ foreach ([$deanHtml, $coordinatorHtml] as $html) {
     );
     deanEmailAssert(
         str_contains($html, 'db-data.js?v=20261004a')
-            && str_contains($html, 'daenpanel.js?v=20261004a'),
+            && str_contains($html, 'daenpanel.js?v=20261006cmo'),
         'The account-action scripts must be cache-busted.'
     );
 }

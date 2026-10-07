@@ -55,13 +55,14 @@ trustedOtpAssert(
 );
 trustedOtpAssert(
     str_contains($migration, "purpose ENUM('device_verification', 'failed_login')")
-        && str_contains($login, "\$purpose = \$failedLoginOtpRequired ? 'failed_login' : 'device_verification'")
+        && str_contains($login, "\$purpose = 'device_verification';")
+        && str_contains($login, "issueLoginOtpChallenge(\$pdo, \$user, 'failed_login'")
         && str_contains($login, 'getTrustedDeviceOtpEnabled($pdo) && !$deviceTrusted'),
     'First/new-device and failed-login OTP reasons are not independently enforced.'
 );
 trustedOtpAssert(
     strpos($login, 'verifyPasswordForLogin($password') < strpos($login, 'issueLoginOtpChallenge(' . "\n    \$pdo,\n    \$user,\n    \$purpose"),
-    'An OTP can be issued before the submitted password is verified.'
+    'A device-verification OTP can be issued before the submitted password is verified.'
 );
 trustedOtpAssert(
     str_contains($login, 'consumed_at = :at')
@@ -121,12 +122,14 @@ try {
     $securitySeed->execute([':user_id' => $fixtureUserId]);
     $recordFailure = $pdo->prepare(
         'UPDATE user_auth_security
-         SET failed_password_count = LEAST(65535, failed_password_count + 1),
-             failed_login_otp_required = IF(failed_password_count + 1 >= 3, 1, failed_login_otp_required)
+         SET failed_login_otp_required = IF(failed_password_count + 1 >= 3, 1, failed_login_otp_required),
+             failed_password_count = LEAST(65535, failed_password_count + 1)
          WHERE user_id = :user_id'
     );
     for ($attempt = 0; $attempt < 3; $attempt++) {
         $recordFailure->execute([':user_id' => $fixtureUserId]);
+        $required = (int) $pdo->query('SELECT failed_login_otp_required FROM user_auth_security WHERE user_id = ' . $fixtureUserId)->fetchColumn();
+        trustedOtpAssert($required === ($attempt === 2 ? 1 : 0), 'Failed-login OTP must begin on the third incorrect password.');
     }
     $securityState = $pdo->query(
         'SELECT failed_password_count, failed_login_otp_required

@@ -108,9 +108,28 @@ try {
     $vpaaInput=buildProfessorAnalyticsAuthoritativePayload($db,['id'=>'u1','role'=>'vpaa'],$panelRequest);
     credAssert($hrInput['metrics']['averagesBySource']['student']===3.15 && $adminInput['metrics']['averagesBySource']['student']===3.15,'HR/Admin SET input formula changed.');
     credAssert($vpaaInput['metrics']['averagesBySource']['student']===3.13 && $vpaaInput['metrics']['overallRating']===3.2,'VPAA distribution/overall input formula changed.');
-    credAssert(count($hrInput['comments'])===7 && count($adminInput['comments'])===7 && count($vpaaInput['comments'])===8,'Panel comment deduplication changed.');
+    credAssert(count($hrInput['comments'])===8 && count($adminInput['comments'])===8 && count($vpaaInput['comments'])===8,'Every panel must retain repeated feedback from different evaluators.');
     credAssert(!str_contains(json_encode($vpaaInput),'UNIQUE_'),'VPAA input leaked excluded comments.');
     $db->rollBack();
+    // Exercise complete authoritative inputs above the old per-source/total limits.
+    $db->beginTransaction();
+    try {
+        $allCommentInsert=$db->prepare("INSERT INTO evaluations(id,semester_id,questionnaire_id,evaluation_type_id,evaluator_user_id,evaluatee_user_id,course_offering_id,general_comments,status,credibility_status) VALUES(?,1,?,?,?,2,?,?,'submitted','AUTO_ACCEPTED')");
+        $fullText=str_repeat('Complete evaluator feedback. ',40).'TAIL_MUST_REACH_ANALYTICS';
+        foreach ([1,2,3] as $type) for ($index=0;$index<300;$index++) {
+            $evaluatorId=4000+$type*300+$index;
+            $insertUser->execute([$evaluatorId,$type===1?2:($type===2?3:4),1,1,'All Feedback Fixture '.$evaluatorId,'all-feedback-'.$evaluatorId.'@example.invalid','unused-test-credential']);
+            $allCommentInsert->execute([3000+$type*300+$index,$type,$type,$evaluatorId,$type===1?1:null,$fullText]);
+        }
+        $db->prepare('INSERT INTO evaluation_responses(evaluation_id,question_id,text_value,display_order) VALUES(3300,11,?,1)')->execute([$fullText.' QUALITATIVE_TAIL']);
+        foreach ([$hr,['id'=>'u1','role'=>'admin'],['id'=>'u1','role'=>'vpaa']] as $actor) {
+            $fullInput=buildProfessorAnalyticsAuthoritativePayload($db,$actor,$panelRequest);
+            credAssert(count($fullInput['comments'])===909,'Authoritative input lost comments above the old 240 limit for '.$actor['role'].': '.count($fullInput['comments']).' '.json_encode($fullInput['metrics']['countsBySource']));
+            credAssert($fullInput['metrics']['countsBySource']===['student'=>309,'professor'=>300,'supervisor'=>300],'Authoritative source counts do not represent all feedback.');
+            credAssert(in_array($fullText.' QUALITATIVE_TAIL',array_column($fullInput['comments'],'text'),true),'The full qualitative response was truncated.');
+            credAssert(!str_contains(json_encode($fullInput),'UNIQUE_'),'Full-comment analytics leaked pending/rejected evidence.');
+        }
+    } finally { $db->rollBack(); }
     $queue=listEvaluationCredibilityReviews($db,$hr,[]);
     credAssert($queue['counts']['PENDING_HR_REVIEW']===1 && $queue['total']===10 && $queue['eligible']===8,'Incorrect persistent queue counts.');
     $detail=getEvaluationCredibilityDetail($db,$hr,9);
@@ -242,6 +261,17 @@ try {
     credAssert($response['status']===403,'Missing CSRF not denied.');
     $response=credHttp('listCredibilityReviews',['filters'=>[]],$sessions['hr']);
     credAssert($response['status']===200 && isset($response['body']['counts']),'HR queue failed: '.$response['raw']);
+    $beforeBehaviorRun = $db->query('SELECT id,behavior_score,credibility_score,credibility_status FROM evaluations ORDER BY id')->fetchAll();
+    $response=credHttp('analyzeEvaluationBehavior',['filters'=>['semesterId'=>'cred-test','limit'=>1]],$sessions['hr']);
+    credAssert($response['status']===200 && count($response['body']['evaluations'])>1,'HR behavior run failed or was truncated: '.$response['raw']);
+    foreach ($response['body']['evaluations'] as $row) {
+        credAssert($row['semesterId']==='cred-test' && $row['evaluationType']==='student','Behavior run included another semester or source.');
+        credAssert(isset($row['behaviorRepetition']['commentRepetitiveFlag']), 'Behavior run did not include independent comment checks.');
+        credAssert($row['campusSlug']==='cred-main', 'Behavior run crossed the HR campus scope.');
+    }
+    credAssert($beforeBehaviorRun===$db->query('SELECT id,behavior_score,credibility_score,credibility_status FROM evaluations ORDER BY id')->fetchAll(),'Running behavior analysis changed official scores or decisions.');
+    $response=credHttp('analyzeEvaluationBehavior',['filters'=>[]],$sessions['student']);
+    credAssert($response['status']===403, 'Student was allowed to run HR behavior analysis.');
     $response=credHttp('getCredibilityReview',['evaluationId'=>150],$sessions['hr']);
     credAssert($response['status']===200 && !str_contains($response['raw'],'evaluatorUserId'),'HTTP detail failed anonymity.');
     $response=credHttp('reviewCredibilityEvaluations',['evaluationIds'=>[150],'decision'=>'accept'],$sessions['hr']);

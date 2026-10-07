@@ -3067,12 +3067,11 @@ function renderQuestionHTML(question, index) {
         const isBaseRequired = !!question.required;
         const hasExceptionReporting = !!question.exceptionReporting;
         const isInitiallyRequired = isBaseRequired;
-        const maxLength = Math.max(1, parseInt(question.maxLength, 10) || 500);
         const requiredMarker = `<span class="question-required-star" style="color:red;${isInitiallyRequired ? '' : ' display:none;'}">*</span>`;
         return `
             <div class="question-group">
                 <label class="question-label" for="${questionIdAttr}">${index}. ${questionText} ${requiredMarker}</label>
-                <textarea id="${questionIdAttr}" name="${questionIdAttr}" class="form-textarea" rows="4" maxlength="${maxLength}" placeholder="Your answer..." ${isInitiallyRequired ? 'required' : ''} data-base-required="${isBaseRequired ? '1' : '0'}" data-exception-reporting="${hasExceptionReporting ? '1' : '0'}"></textarea>
+                <textarea id="${questionIdAttr}" name="${questionIdAttr}" class="form-textarea" rows="4" data-word-limit="400" placeholder="Your answer..." ${isInitiallyRequired ? 'required' : ''} data-base-required="${isBaseRequired ? '1' : '0'}" data-exception-reporting="${hasExceptionReporting ? '1' : '0'}"></textarea>
             </div>
         `;
     }
@@ -3195,7 +3194,8 @@ function applyExceptionReportingRequirements(options) {
             textarea.removeAttribute('required');
         }
 
-        const validationMessage = validateExceptionReportingTextValue(textarea.value, shouldRequire);
+        const validationMessage = EvaluationTextLimits.getValidationMessage(textarea)
+            || validateExceptionReportingTextValue(textarea.value, shouldRequire);
         textarea.setCustomValidity(validationMessage);
         if (validationMessage && !firstInvalidField) {
             firstInvalidField = textarea;
@@ -3256,7 +3256,6 @@ function setupSectionFlow() {
             if (!validateCurrentStep()) return;
             persistEvaluationDraft({ silent: true, source: 'step-nav' });
             goToSectionStep(evaluationSectionFlow.activeIndex + 1);
-            window.scrollTo(0, 0);
         };
     }
 
@@ -3268,6 +3267,7 @@ function goToSectionStep(index) {
     if (!steps.length) return;
 
     const maxIndex = steps.length - 1;
+    const previousIndex = evaluationSectionFlow.activeIndex;
     evaluationSectionFlow.activeIndex = Math.max(0, Math.min(index, maxIndex));
 
     steps.forEach((step, stepIndex) => {
@@ -3291,6 +3291,7 @@ function goToSectionStep(index) {
     if (backBtn) backBtn.disabled = isFirst;
     if (nextBtn) nextBtn.style.display = isLast ? 'none' : 'inline-flex';
     if (submitBtn) submitBtn.style.display = isLast ? 'inline-flex' : 'none';
+    if (evaluationSectionFlow.activeIndex !== previousIndex) window.scrollTo(0, 0);
 }
 
 function toggleStepInputs(stepElement, enabled) {
@@ -3307,6 +3308,7 @@ function validateCurrentStep() {
     if (!applyExceptionReportingRequirements({ report: true, scopeRoot: currentStep })) {
         return false;
     }
+    if (!EvaluationTextLimits.validateAll(currentStep, true)) return false;
 
     const requiredFields = Array.from(currentStep.querySelectorAll('input[required], textarea[required], select[required]'));
     for (const field of requiredFields) {
@@ -3452,8 +3454,8 @@ async function handleChangePassword() {
         return;
     }
 
-    if (newPassword.length > 255) {
-        setChangePasswordFeedback('New password must not exceed 255 characters.', 'error');
+    if (newPassword.length > 32) {
+        setChangePasswordFeedback('New password must not exceed 32 characters.', 'error');
         return;
     }
 
@@ -3840,6 +3842,7 @@ function handleFormSubmission() {
     }
 
     // Validate form
+    EvaluationTextLimits.validateAll(form);
     if (!form.checkValidity()) {
         const firstInvalid = form.querySelector(':invalid');
         if (firstInvalid) {

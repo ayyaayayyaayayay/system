@@ -451,7 +451,7 @@
                             <div class="form-group">
                                 <label for="currentPassword">Current Password</label>
                                 <div class="password-field">
-                                    <input type="password" id="currentPassword" name="currentPassword"
+                                    <input type="password" id="currentPassword" maxlength="32" name="currentPassword"
                                         class="form-select" placeholder="Enter current password"
                                         autocomplete="current-password" required>
                                     <button type="button" class="toggle-password" data-target="currentPassword"
@@ -465,7 +465,7 @@
                                 <div class="password-field">
                                     <input type="password" id="newPassword" name="newPassword" class="form-select"
                                         placeholder="Enter new password" autocomplete="new-password"
-                                        minlength="8" maxlength="255" required>
+                                        minlength="8" maxlength="32" required>
                                     <button type="button" class="toggle-password" data-target="newPassword"
                                         aria-label="Show password">
                                         <i class="fas fa-eye"></i>
@@ -477,7 +477,7 @@
                                 <div class="password-field">
                                     <input type="password" id="confirmPassword" name="confirmPassword"
                                         class="form-select" placeholder="Re-enter new password"
-                                        autocomplete="new-password" minlength="8" maxlength="255" required>
+                                        autocomplete="new-password" minlength="8" maxlength="32" required>
                                     <button type="button" class="toggle-password" data-target="confirmPassword"
                                         aria-label="Show password">
                                         <i class="fas fa-eye"></i>
@@ -547,10 +547,11 @@
             <div class="history-modal-body" id="historyModalBody"></div>
         </div>
     </div>
-    <script src="../JsScrip/db-data.js?v=20261004a"></script>
+    <script src="../JsScrip/db-data.js?v=20261006cleanup&idle=20261007b"></script>
     <script src="../JsScrip/system-report.js?v=20260907a"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
-    <script src="../JsScrip/studentpanel.js?v=20261004a"></script>
+    <script src="../JsScrip/evaluation-text-limits.js?v=20261007words400"></script>
+    <script src="../JsScrip/studentpanel.js?v=20261007words400&flow=20261007"></script>
 </body>
 
 </html>

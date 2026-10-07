@@ -4000,6 +4000,57 @@ textarea.reminder-template-control {
     margin-bottom: 24px;
 }
 
+.hr-panel .ai-insights-section > .section-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 24px;
+}
+
+.hr-panel .ai-insights-section > .section-header > .section-title {
+    display: block;
+    min-width: 0;
+    margin-bottom: 0;
+}
+
+.hr-panel .ai-insights-section > .section-header > .section-title h2 {
+    margin: 0 0 8px;
+    line-height: 1.35;
+}
+
+.hr-panel .ai-insights-section > .section-header > .section-title p {
+    max-width: 680px;
+    margin: 0;
+    font-weight: 400;
+    line-height: 1.5;
+}
+
+.hr-panel .ai-insights-section > .section-header > .ai-insights-controls {
+    width: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+}
+
+@media (max-width: 1200px) {
+    .hr-panel .ai-insights-section > .section-header {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 16px;
+    }
+
+    .hr-panel .ai-insights-section > .section-header > .ai-insights-controls {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+}
+
+@media (max-width: 640px) {
+    .hr-panel .ai-insights-section > .section-header > .ai-insights-controls {
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+    }
+}
+
 .ai-insights-controls {
     display: flex;
     align-items: center;
@@ -7784,4 +7835,43 @@ textarea.reminder-template-control {
     .cred-review-score-grid,.cred-review-component-grid,.cred-review-timing > div { grid-template-columns:1fr; }
     .cred-review-dialog-actions { padding:14px 18px; }
     .cred-review-dialog-actions button { flex:1 1 0; min-width:0; }
+}
+
+/* Dashboard charts must size from the phone viewport, not canvas content. */
+@media (max-width: 640px) {
+    .hr-panel #dashboard-view .evaluation-type-section,
+    .hr-panel #dashboard-view .evaluation-type-section > .section-card,
+    .hr-panel #dashboard-view .charts-grid,
+    .hr-panel #dashboard-view .charts-grid > .chart-container {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+
+    .hr-panel #dashboard-view .charts-grid {
+        grid-template-columns: minmax(0, 1fr) !important;
+        gap: 12px;
+    }
+
+    .hr-panel #dashboard-view .charts-grid > .chart-container {
+        padding: 14px 10px;
+        overflow: hidden;
+    }
+
+    .hr-panel #dashboard-view .charts-grid canvas {
+        display: block;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0;
+        height: 250px !important;
+        min-height: 0 !important;
+        max-height: 250px !important;
+    }
+
+    .hr-panel #dashboard-view .chart-title,
+    .hr-panel #dashboard-view .chart-subtitle {
+        max-width: 100%;
+        overflow-wrap: anywhere;
+    }
 }

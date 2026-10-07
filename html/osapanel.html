@@ -435,7 +435,7 @@
                             <div class="form-field">
                                 <label for="currentPassword">Current Password</label>
                                 <div class="input-with-icon">
-                                    <input type="password" id="currentPassword" name="currentPassword"
+                                    <input type="password" id="currentPassword" maxlength="32" name="currentPassword"
                                         autocomplete="current-password" required>
                                     <button type="button" class="eye-toggle" data-target="currentPassword"
                                         aria-label="Toggle current password visibility">
@@ -446,7 +446,7 @@
                             <div class="form-field">
                                 <label for="newPassword">New Password</label>
                                 <div class="input-with-icon">
-                                    <input type="password" id="newPassword" name="newPassword"
+                                    <input type="password" id="newPassword" minlength="8" maxlength="32" name="newPassword"
                                         placeholder="Enter new password" autocomplete="new-password" required>
                                     <button type="button" class="eye-toggle" data-target="newPassword"
                                         aria-label="Toggle new password visibility">
@@ -458,7 +458,7 @@
                             <div class="form-field">
                                 <label for="confirmPassword">Confirm New Password</label>
                                 <div class="input-with-icon">
-                                    <input type="password" id="confirmPassword" name="confirmPassword"
+                                    <input type="password" id="confirmPassword" minlength="8" maxlength="32" name="confirmPassword"
                                         placeholder="Re-enter new password" autocomplete="new-password" required>
                                     <button type="button" class="eye-toggle" data-target="confirmPassword"
                                         aria-label="Toggle confirm password visibility">
@@ -504,10 +504,10 @@
         </div>
     </div>
 
-    <script src="../JsScrip/db-data.js?v=20261004a"></script>
+    <script src="../JsScrip/db-data.js?v=20261004a&idle=20261007b"></script>
     <script src="../JsScrip/system-report.js?v=20260907a"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
-    <script src="../JsScrip/osapanel.js?v=20261001a"></script>
+    <script src="../JsScrip/osapanel.js?v=20261006limits"></script>
 </body>
 
 </html>

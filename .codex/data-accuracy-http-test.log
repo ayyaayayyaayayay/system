@@ -1,0 +1,1905 @@
+[Tue Oct  6 20:21:20 2026] PHP 8.2.12 Development Server (http://127.0.0.1:18979) started
+[Tue Oct  6 20:21:20 2026] 127.0.0.1:64826 Accepted
+[Tue Oct  6 20:21:20 2026] 127.0.0.1:64826 [401]: GET /api/data_accuracy.php
+[Tue Oct  6 20:21:20 2026] 127.0.0.1:64826 Closing
+[Tue Oct  6 20:21:20 2026] 127.0.0.1:64828 Accepted
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64828 [403]: GET /api/data_accuracy.php
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64828 Closing
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64830 Accepted
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64830 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64830 Closing
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64832 Accepted
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64832 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64832 Closing
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64835 Accepted
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64835 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64835 Closing
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64837 Accepted
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64837 [409]: POST /api/data_accuracy.php
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64837 Closing
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64839 Accepted
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64839 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64839 Closing
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64841 Accepted
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64841 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64841 Closing
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64845 Accepted
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64845 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64845 Closing
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64847 Accepted
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64847 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64847 Closing
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64850 Accepted
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64850 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64850 Closing
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64852 Accepted
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64852 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64852 Closing
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64855 Accepted
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64855 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64855 Closing
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64857 Accepted
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64857 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64857 Closing
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64859 Accepted
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64859 [200]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64859 Closing
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64861 Accepted
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64861 [403]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64861 Closing
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64863 Accepted
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64863 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64863 Closing
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64865 Accepted
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64865 [409]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 20:21:21 2026] 127.0.0.1:64865 Closing
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64867 Accepted
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64867 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64867 Closing
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64869 Accepted
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64869 [409]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64869 Closing
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64871 Accepted
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64871 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64871 Closing
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64873 Accepted
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64873 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64873 Closing
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64875 Accepted
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64875 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64875 Closing
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64877 Accepted
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64877 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64877 Closing
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64879 Accepted
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64879 [200]: POST /api/login.php
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64879 Closing
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64881 Accepted
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64881 [401]: GET /api/data_accuracy.php
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64881 Closing
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64883 Accepted
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64883 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64883 Closing
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64885 Accepted
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64885 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64885 Closing
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64887 Accepted
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64887 [200]: POST /api/app_state.php?action=analyzeEvaluationExplainability
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64887 Closing
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64889 Accepted
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64889 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64889 Closing
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64891 Accepted
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64891 [200]: POST /api/app_state.php?action=analyzeBiasComments
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64891 Closing
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64893 Accepted
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64893 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64893 Closing
+[Tue Oct  6 20:21:22 2026] 127.0.0.1:64895 Accepted
+[Tue Oct  6 20:21:23 2026] 127.0.0.1:64895 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:21:23 2026] 127.0.0.1:64895 Closing
+[Tue Oct  6 20:31:24 2026] PHP 8.2.12 Development Server (http://127.0.0.1:18979) started
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56738 Accepted
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56738 [401]: GET /api/data_accuracy.php
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56738 Closing
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56740 Accepted
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56740 [403]: GET /api/data_accuracy.php
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56740 Closing
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56742 Accepted
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56742 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56742 Closing
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56744 Accepted
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56744 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56744 Closing
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56746 Accepted
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56746 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56746 Closing
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56748 Accepted
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56748 [409]: POST /api/data_accuracy.php
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56748 Closing
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56750 Accepted
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56750 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56750 Closing
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56752 Accepted
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56752 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56752 Closing
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56754 Accepted
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56754 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56754 Closing
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56756 Accepted
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56756 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 20:31:24 2026] 127.0.0.1:56756 Closing
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56758 Accepted
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56758 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56758 Closing
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56760 Accepted
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56760 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56760 Closing
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56762 Accepted
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56762 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56762 Closing
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56764 Accepted
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56764 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56764 Closing
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56766 Accepted
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56766 [200]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56766 Closing
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56768 Accepted
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56768 [403]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56768 Closing
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56770 Accepted
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56770 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56770 Closing
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56772 Accepted
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56772 [409]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56772 Closing
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56774 Accepted
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56774 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56774 Closing
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56776 Accepted
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56776 [409]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56776 Closing
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56778 Accepted
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56778 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56778 Closing
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56780 Accepted
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56780 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56780 Closing
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56782 Accepted
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56782 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56782 Closing
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56784 Accepted
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56784 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56784 Closing
+[Tue Oct  6 20:31:25 2026] 127.0.0.1:56786 Accepted
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56786 [200]: POST /api/login.php
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56786 Closing
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56788 Accepted
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56788 [401]: GET /api/data_accuracy.php
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56788 Closing
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56790 Accepted
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56790 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56790 Closing
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56792 Accepted
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56792 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56792 Closing
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56794 Accepted
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56794 [200]: POST /api/app_state.php?action=analyzeEvaluationExplainability
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56794 Closing
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56796 Accepted
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56796 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56796 Closing
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56798 Accepted
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56798 [200]: POST /api/app_state.php?action=analyzeBiasComments
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56798 Closing
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56800 Accepted
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56800 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56800 Closing
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56802 Accepted
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56802 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 20:31:26 2026] 127.0.0.1:56802 Closing
+[Tue Oct  6 21:16:46 2026] PHP 8.2.12 Development Server (http://127.0.0.1:18979) started
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61528 Accepted
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61528 [401]: GET /api/data_accuracy.php
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61528 Closing
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61530 Accepted
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61530 [403]: GET /api/data_accuracy.php
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61530 Closing
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61532 Accepted
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61532 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61532 Closing
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61534 Accepted
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61534 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61534 Closing
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61536 Accepted
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61536 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61536 Closing
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61538 Accepted
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61538 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61538 Closing
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61540 Accepted
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61540 [409]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61540 Closing
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61542 Accepted
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61542 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61542 Closing
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61544 Accepted
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61544 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61544 Closing
+[Tue Oct  6 21:16:46 2026] 127.0.0.1:61546 Accepted
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61546 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61546 Closing
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61548 Accepted
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61548 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61548 Closing
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61550 Accepted
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61550 [403]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61550 Closing
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61552 Accepted
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61552 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61552 Closing
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61554 Accepted
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61554 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61554 Closing
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61556 Accepted
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61556 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61556 Closing
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61558 Accepted
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61558 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61558 Closing
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61560 Accepted
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61560 [200]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61560 Closing
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61562 Accepted
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61562 [403]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61562 Closing
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61564 Accepted
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61564 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61564 Closing
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61566 Accepted
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61566 [409]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61566 Closing
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61568 Accepted
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61568 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61568 Closing
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61570 Accepted
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61570 [409]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61570 Closing
+[Tue Oct  6 21:16:47 2026] 127.0.0.1:61572 Accepted
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61572 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61572 Closing
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61574 Accepted
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61574 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61574 Closing
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61576 Accepted
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61576 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61576 Closing
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61578 Accepted
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61578 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61578 Closing
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61580 Accepted
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61580 [200]: POST /api/login.php
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61580 Closing
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61582 Accepted
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61582 [401]: GET /api/data_accuracy.php
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61582 Closing
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61584 Accepted
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61584 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61584 Closing
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61586 Accepted
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61586 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61586 Closing
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61588 Accepted
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61588 [200]: POST /api/app_state.php?action=analyzeEvaluationExplainability
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61588 Closing
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61590 Accepted
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61590 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61590 Closing
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61592 Accepted
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61592 [200]: POST /api/app_state.php?action=analyzeBiasComments
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61592 Closing
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61594 Accepted
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61594 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61594 Closing
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61596 Accepted
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61596 [200]: POST /api/app_state.php?action=analyzeEvaluationExplainability
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61596 Closing
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61598 Accepted
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61598 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61598 Closing
+[Tue Oct  6 21:16:48 2026] 127.0.0.1:61600 Accepted
+[Tue Oct  6 21:16:49 2026] 127.0.0.1:61600 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:49 2026] 127.0.0.1:61600 Closing
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:64907 Accepted
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:64907 [200]: GET /html/mainpage.html?accuracyTrial=1&accuracyRole=student
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:64907 Closing
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:62394 Accepted
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:65364 Accepted
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:52749 Accepted
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:62394 [200]: GET /css/panel-theme.css?v=20260824a
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:65364 [200]: GET /css/mainpage.css?v=20261003a
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:52749 [200]: GET /JsScrip/db-data.js?v=20261004a
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:62394 Closing
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:65364 Closing
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:59703 Accepted
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:52749 Closing
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:59703 [200]: GET /JsScrip/mainpage.js?v=20261006accuracy4
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:59703 Closing
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:63446 Accepted
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:63446 [200]: GET /design/main.back.jpg
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:63446 Closing
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:57830 Accepted
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:57830 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791292610401&_background=1
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:57830 Closing
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:53833 Accepted
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:53833 [200]: GET /api/login.php?action=session&_ts=1791292610412
+[Tue Oct  6 21:16:50 2026] 127.0.0.1:53833 Closing
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:63161 Accepted
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:63161 [200]: GET /favicon.ico
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:63161 Closing
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:54493 Accepted
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:54493 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:54493 Closing
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:62919 Accepted
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:62919 [200]: GET /html/data-accuracy.html?trial=TRIAL-e34e330c43d113fc108ea90a
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:62919 Closing
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:64859 Accepted
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:64859 [200]: GET /JsScrip/data-accuracy.js?v=20261006roles
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:64859 Closing
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:63218 Accepted
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:63218 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:63218 Closing
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:49930 Accepted
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:49930 [200]: GET /favicon.ico
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:49930 Closing
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:59515 Accepted
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:59515 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:59515 Closing
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:55800 Accepted
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:55800 [200]: GET /api/login.php?action=session
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:55800 Closing
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:62285 Accepted
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:62285 [200]: POST /api/login.php
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:62285 Closing
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:56646 Accepted
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:56646 [200]: GET /html/mainpage.html?accuracyTrial=1&accuracyRole=student&logged_out=1
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:56646 Closing
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:53996 Accepted
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:53996 [200]: GET /css/panel-theme.css?v=20260824a
+[Tue Oct  6 21:16:51 2026] 127.0.0.1:53996 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:51778 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:65125 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:51778 [200]: GET /css/mainpage.css?v=20261003a
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:65125 [200]: GET /JsScrip/db-data.js?v=20261004a
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:51778 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:50304 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:65125 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:50304 [200]: GET /JsScrip/mainpage.js?v=20261006accuracy4
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:50304 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:65227 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:65227 [401]: GET /api/app_state.php?action=bootstrap&_ts=1791292612011&_background=1
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:65227 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:58350 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:58350 [200]: GET /design/main.back.jpg
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:58350 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:65446 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:65446 [200]: GET /favicon.ico
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:65446 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:52157 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:52157 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:52157 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:52158 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:52158 [401]: GET /api/login.php?action=session
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:52158 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:49786 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:49786 [200]: GET /html/mainpage.html?accuracyTrial=1&accuracyRole=student
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:49786 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:58942 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:58942 [200]: GET /css/panel-theme.css?v=20260824a
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:58942 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:62600 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:62600 [200]: GET /css/mainpage.css?v=20261003a
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:62600 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:56995 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:59318 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:56995 [200]: GET /JsScrip/db-data.js?v=20261004a
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:59318 [200]: GET /JsScrip/mainpage.js?v=20261006accuracy4
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:56995 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:59318 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:54203 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:54203 [200]: GET /design/main.back.jpg
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:54203 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:63847 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:63847 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791292612155&_background=1
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:63847 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:62421 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:62421 [200]: GET /api/login.php?action=session&_ts=1791292612157
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:62421 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:59451 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:59451 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:59451 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:60738 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:60738 [200]: GET /favicon.ico
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:60738 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:57661 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:57661 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:57661 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:51798 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:51798 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:51798 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:51088 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:51088 [200]: GET /html/studentpanel.html
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:51088 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:59463 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:59463 [200]: GET /css/panel-theme.css?v=20260907a
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:59463 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:56580 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:55007 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:62797 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:56580 [200]: GET /css/studentpanel.css?v=20260925c
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:55007 [200]: GET /JsScrip/db-data.js?v=20261006trace
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:62797 [200]: GET /JsScrip/system-report.js?v=20260907a
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:59759 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:56580 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:62797 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:55007 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:59759 [200]: GET /JsScrip/panel-branding.js?v=20260802b
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:59759 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:58048 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:58048 [200]: GET /JsScrip/studentpanel.js?v=20261006d
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:58048 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:49844 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:49844 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791292612442&_background=1
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:49844 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:53932 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:53932 [200]: GET /api/login.php?action=session&_ts=1791292612452
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:53932 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:61850 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:61850 [200]: POST /api/app_state.php?action=listStudentEvaluationProofRequests&_background=1
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:61850 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:50452 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:63128 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:50452 [200]: GET /favicon.ico
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:63128 [200]: POST /api/app_state.php?action=listOsaStudentClearances&_background=1
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:63128 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:50452 Closing
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:64855 Accepted
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:64855 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:16:52 2026] 127.0.0.1:64855 Closing
+[Tue Oct  6 21:16:54 2026] 127.0.0.1:54743 Accepted
+[Tue Oct  6 21:16:54 2026] 127.0.0.1:54743 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:16:54 2026] 127.0.0.1:54743 Closing
+[Tue Oct  6 21:16:54 2026] 127.0.0.1:52165 Accepted
+[Tue Oct  6 21:16:54 2026] 127.0.0.1:52165 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:54 2026] 127.0.0.1:52165 Closing
+[Tue Oct  6 21:16:54 2026] 127.0.0.1:61947 Accepted
+[Tue Oct  6 21:16:54 2026] 127.0.0.1:61947 [200]: GET /favicon.ico
+[Tue Oct  6 21:16:54 2026] 127.0.0.1:61947 Closing
+[Tue Oct  6 21:16:57 2026] 127.0.0.1:63231 Accepted
+[Tue Oct  6 21:16:57 2026] 127.0.0.1:63231 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:57 2026] 127.0.0.1:63231 Closing
+[Tue Oct  6 21:16:57 2026] 127.0.0.1:56740 Accepted
+[Tue Oct  6 21:16:57 2026] 127.0.0.1:56740 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:16:57 2026] 127.0.0.1:56740 Closing
+[Tue Oct  6 21:16:57 2026] 127.0.0.1:64836 Accepted
+[Tue Oct  6 21:16:57 2026] 127.0.0.1:64836 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:16:57 2026] 127.0.0.1:64836 Closing
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:63388 Accepted
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:63388 [200]: GET /html/data-accuracy.html
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:63388 Closing
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:58644 Accepted
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:58644 [200]: GET /JsScrip/data-accuracy.js?v=20261006roles
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:58644 Closing
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:58716 Accepted
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:58716 [401]: GET /api/data_accuracy.php
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:58716 Closing
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:54328 Accepted
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:54328 [200]: GET /favicon.ico
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:54328 Closing
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:61791 Accepted
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:61791 [401]: GET /api/login.php?action=session
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:61791 Closing
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:63908 Accepted
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:63908 [200]: GET /html/mainpage.html?accuracyTrial=1&accuracyRole=student&logged_out=1
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:63908 Closing
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:62440 Accepted
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:62440 [200]: GET /css/panel-theme.css?v=20260824a
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:61927 Accepted
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:62440 Closing
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:64314 Accepted
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:61927 [200]: GET /css/mainpage.css?v=20261003a
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:64314 [200]: GET /JsScrip/db-data.js?v=20261004a
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:61927 Closing
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:60846 Accepted
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:64314 Closing
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:60846 [200]: GET /JsScrip/mainpage.js?v=20261006accuracy4
+[Tue Oct  6 21:16:58 2026] 127.0.0.1:60846 Closing
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:60102 Accepted
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:60102 [401]: GET /api/app_state.php?action=bootstrap&_ts=1791292619339&_background=1
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:60102 Closing
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:52801 Accepted
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:52801 [200]: GET /design/main.back.jpg
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:52801 Closing
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:49779 Accepted
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:49779 [200]: GET /favicon.ico
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:49779 Closing
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:64457 Accepted
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:64457 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:64457 Closing
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:55974 Accepted
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:55974 [200]: GET /html/mainpage.html?accuracyTrial=1&accuracyRole=student
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:55974 Closing
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:62580 Accepted
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:62580 [200]: GET /css/panel-theme.css?v=20260824a
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:62580 Closing
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:62762 Accepted
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:62762 [200]: GET /css/mainpage.css?v=20261003a
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:62762 Closing
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:53759 Accepted
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:50860 Accepted
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:53759 [200]: GET /JsScrip/db-data.js?v=20261004a
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:50860 [200]: GET /JsScrip/mainpage.js?v=20261006accuracy4
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:53759 Closing
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:50860 Closing
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:59965 Accepted
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:59965 [200]: GET /design/main.back.jpg
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:59965 Closing
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:55299 Accepted
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:55299 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791292619868&_background=1
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:55299 Closing
+[Tue Oct  6 21:16:59 2026] 127.0.0.1:56242 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:56242 [200]: GET /api/login.php?action=session&_ts=1791292619870
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:56242 Closing
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:65472 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:65472 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:65472 Closing
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:56487 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:56487 [200]: GET /favicon.ico
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:56487 Closing
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:53019 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:53019 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:53019 Closing
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:60768 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:60768 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:60768 Closing
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:54385 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:54385 [200]: GET /html/studentpanel.html
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:54385 Closing
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:59708 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:59708 [200]: GET /css/panel-theme.css?v=20260907a
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:59708 Closing
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:53157 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:50716 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:49320 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:53157 [200]: GET /css/studentpanel.css?v=20260925c
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:50716 [200]: GET /JsScrip/db-data.js?v=20261006trace
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:49320 [200]: GET /JsScrip/system-report.js?v=20260907a
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:53157 Closing
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:59489 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:49320 Closing
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:50716 Closing
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:59489 [200]: GET /JsScrip/panel-branding.js?v=20260802b
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:59489 Closing
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:57423 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:57423 [200]: GET /JsScrip/studentpanel.js?v=20261006d
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:57423 Closing
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:65151 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:65151 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791292620138&_background=1
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:65151 Closing
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:49200 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:49200 [200]: GET /api/login.php?action=session&_ts=1791292620147
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:49200 Closing
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:62919 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:62919 [200]: POST /api/app_state.php?action=listStudentEvaluationProofRequests&_background=1
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:62919 Closing
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:62910 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:54071 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:62910 [200]: POST /api/app_state.php?action=listOsaStudentClearances&_background=1
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:62910 Closing
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:54071 [200]: GET /favicon.ico
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:54071 Closing
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:63531 Accepted
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:63531 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:17:00 2026] 127.0.0.1:63531 Closing
+[Tue Oct  6 21:17:02 2026] 127.0.0.1:51108 Accepted
+[Tue Oct  6 21:17:02 2026] 127.0.0.1:51108 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:17:02 2026] 127.0.0.1:51108 Closing
+[Tue Oct  6 21:17:02 2026] 127.0.0.1:57035 Accepted
+[Tue Oct  6 21:17:02 2026] 127.0.0.1:57035 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:17:02 2026] 127.0.0.1:57035 Closing
+[Tue Oct  6 21:17:02 2026] 127.0.0.1:50691 Accepted
+[Tue Oct  6 21:17:02 2026] 127.0.0.1:50691 [200]: GET /favicon.ico
+[Tue Oct  6 21:17:02 2026] 127.0.0.1:50691 Closing
+[Tue Oct  6 21:17:03 2026] 127.0.0.1:50443 Accepted
+[Tue Oct  6 21:17:03 2026] 127.0.0.1:50443 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 21:17:03 2026] 127.0.0.1:50443 Closing
+[Tue Oct  6 21:17:04 2026] 127.0.0.1:49673 Accepted
+[Tue Oct  6 21:17:04 2026] 127.0.0.1:49673 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:17:04 2026] 127.0.0.1:49673 Closing
+[Tue Oct  6 21:17:04 2026] 127.0.0.1:64218 Accepted
+[Tue Oct  6 21:17:04 2026] 127.0.0.1:64218 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:17:04 2026] 127.0.0.1:64218 Closing
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:55527 Accepted
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:55527 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:55527 Closing
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:49784 Accepted
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:49784 [200]: GET /favicon.ico
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:49784 Closing
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:61265 Accepted
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:61265 [200]: GET /html/mainpage.html
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:61265 Closing
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:64826 Accepted
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:57049 Accepted
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:62627 Accepted
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:64826 [200]: GET /css/panel-theme.css?v=20260824a
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:57049 [200]: GET /css/mainpage.css?v=20261003a
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:62627 [200]: GET /JsScrip/db-data.js?v=20261004a
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:64826 Closing
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:57049 Closing
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:64165 Accepted
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:62627 Closing
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:64165 [200]: GET /JsScrip/mainpage.js?v=20261006accuracy4
+[Tue Oct  6 21:17:05 2026] 127.0.0.1:64165 Closing
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:62801 Accepted
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:62801 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791292626256&_background=1
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:62801 Closing
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:58342 Accepted
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:55644 Accepted
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:58342 [200]: GET /design/main.back.jpg
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:55644 [200]: GET /api/login.php?action=session&_ts=1791292626296
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:55644 Closing
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:58342 Closing
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:51674 Accepted
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:51674 [200]: GET /html/studentpanel.html
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:51674 Closing
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:64583 Accepted
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:64583 [200]: GET /css/panel-theme.css?v=20260907a
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:64583 Closing
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:54660 Accepted
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:55139 Accepted
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:63961 Accepted
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:54660 [200]: GET /css/studentpanel.css?v=20260925c
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:55139 [200]: GET /JsScrip/db-data.js?v=20261006trace
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:63961 [200]: GET /JsScrip/system-report.js?v=20260907a
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:54660 Closing
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:59181 Accepted
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:55139 Closing
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:63961 Closing
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:59181 [200]: GET /JsScrip/panel-branding.js?v=20260802b
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:59181 Closing
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:57171 Accepted
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:57171 [200]: GET /JsScrip/studentpanel.js?v=20261006d
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:57171 Closing
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:58121 Accepted
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:58121 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791292626460&_background=1
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:58121 Closing
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:51597 Accepted
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:51597 [200]: GET /api/login.php?action=session&_ts=1791292626469
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:51597 Closing
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:61667 Accepted
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:61667 [200]: POST /api/app_state.php?action=listStudentEvaluationProofRequests&_background=1
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:61667 Closing
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:51994 Accepted
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:51994 [200]: POST /api/app_state.php?action=listOsaStudentClearances&_background=1
+[Tue Oct  6 21:17:06 2026] 127.0.0.1:51994 Closing
+[Tue Oct  6 21:17:07 2026] 127.0.0.1:59097 Accepted
+[Tue Oct  6 21:17:07 2026] 127.0.0.1:59097 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:17:07 2026] 127.0.0.1:59097 Closing
+[Tue Oct  6 21:17:07 2026] 127.0.0.1:61652 Accepted
+[Tue Oct  6 21:17:07 2026] 127.0.0.1:61652 [200]: GET /favicon.ico
+[Tue Oct  6 21:17:07 2026] 127.0.0.1:61652 Closing
+[Tue Oct  6 21:17:07 2026] 127.0.0.1:55695 Accepted
+[Tue Oct  6 21:17:07 2026] 127.0.0.1:55695 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:17:07 2026] 127.0.0.1:55695 Closing
+[Tue Oct  6 21:17:07 2026] 127.0.0.1:51137 Accepted
+[Tue Oct  6 21:17:07 2026] 127.0.0.1:51137 [200]: GET /html/data-accuracy.html?trial=TRIAL-e34e330c43d113fc108ea90a
+[Tue Oct  6 21:17:07 2026] 127.0.0.1:51137 Closing
+[Tue Oct  6 21:17:07 2026] 127.0.0.1:55517 Accepted
+[Tue Oct  6 21:17:07 2026] 127.0.0.1:55517 [200]: GET /JsScrip/data-accuracy.js?v=20261006roles
+[Tue Oct  6 21:17:07 2026] 127.0.0.1:55517 Closing
+[Tue Oct  6 21:17:07 2026] 127.0.0.1:65165 Accepted
+[Tue Oct  6 21:17:08 2026] 127.0.0.1:65165 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:17:08 2026] 127.0.0.1:65165 Closing
+[Tue Oct  6 21:17:08 2026] 127.0.0.1:52392 Accepted
+[Tue Oct  6 21:17:08 2026] 127.0.0.1:52392 [200]: GET /favicon.ico
+[Tue Oct  6 21:17:08 2026] 127.0.0.1:52392 Closing
+[Tue Oct  6 21:17:08 2026] 127.0.0.1:57205 Accepted
+[Tue Oct  6 21:17:08 2026] 127.0.0.1:57205 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:17:08 2026] 127.0.0.1:57205 Closing
+[Tue Oct  6 21:17:08 2026] 127.0.0.1:59833 Accepted
+[Tue Oct  6 21:17:08 2026] 127.0.0.1:59833 [200]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 21:17:08 2026] 127.0.0.1:59833 Closing
+[Tue Oct  6 21:17:08 2026] 127.0.0.1:54615 Accepted
+[Tue Oct  6 21:17:08 2026] 127.0.0.1:54615 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:17:08 2026] 127.0.0.1:54615 Closing
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:55685 Accepted
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:55685 [200]: GET /html/data-accuracy.html?trial=TRIAL-e34e330c43d113fc108ea90a
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:55685 Closing
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:53139 Accepted
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:53139 [200]: GET /JsScrip/data-accuracy.js?v=20261006roles
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:53139 Closing
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:49177 Accepted
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:49177 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:49177 Closing
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:50868 Accepted
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:50868 [200]: GET /favicon.ico
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:50868 Closing
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:58363 Accepted
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:58363 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:58363 Closing
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:57773 Accepted
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:57773 [200]: GET /api/login.php?action=session
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:57773 Closing
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:55141 Accepted
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:55141 [200]: POST /api/login.php
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:55141 Closing
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:57608 Accepted
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:57608 [200]: GET /html/mainpage.html?accuracyTrial=1&accuracyRole=hr&logged_out=1
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:57608 Closing
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:62804 Accepted
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:62804 [200]: GET /css/panel-theme.css?v=20260824a
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:62804 Closing
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:63573 Accepted
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:63608 Accepted
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:63573 [200]: GET /css/mainpage.css?v=20261003a
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:63608 [200]: GET /JsScrip/db-data.js?v=20261004a
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:63573 Closing
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:50276 Accepted
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:63608 Closing
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:50276 [200]: GET /JsScrip/mainpage.js?v=20261006accuracy4
+[Tue Oct  6 21:17:09 2026] 127.0.0.1:50276 Closing
+[Tue Oct  6 21:17:10 2026] 127.0.0.1:52416 Accepted
+[Tue Oct  6 21:17:10 2026] 127.0.0.1:52416 [401]: GET /api/app_state.php?action=bootstrap&_ts=1791292630009&_background=1
+[Tue Oct  6 21:17:10 2026] 127.0.0.1:52416 Closing
+[Tue Oct  6 21:17:10 2026] 127.0.0.1:54333 Accepted
+[Tue Oct  6 21:17:10 2026] 127.0.0.1:54333 [200]: GET /design/main.back.jpg
+[Tue Oct  6 21:17:10 2026] 127.0.0.1:54333 Closing
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:62625 Accepted
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:62625 [200]: GET /favicon.ico
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:62625 Closing
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:51362 Accepted
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:51362 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:51362 Closing
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:54689 Accepted
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:54689 [200]: GET /html/mainpage.html?accuracyTrial=1&accuracyRole=hr
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:54689 Closing
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:57577 Accepted
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:57577 [200]: GET /css/panel-theme.css?v=20260824a
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:57577 Closing
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:59876 Accepted
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:50889 Accepted
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:59876 [200]: GET /css/mainpage.css?v=20261003a
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:50889 [200]: GET /JsScrip/db-data.js?v=20261004a
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:59876 Closing
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:52886 Accepted
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:50889 Closing
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:52886 [200]: GET /JsScrip/mainpage.js?v=20261006accuracy4
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:52886 Closing
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:60677 Accepted
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:60677 [200]: GET /design/main.back.jpg
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:60677 Closing
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:62367 Accepted
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:62367 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791292631435&_background=1
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:62367 Closing
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:59621 Accepted
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:59621 [200]: GET /api/login.php?action=session&_ts=1791292631436
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:59621 Closing
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:61213 Accepted
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:61213 [200]: GET /html/data-accuracy.html
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:61213 Closing
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:59339 Accepted
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:59339 [200]: GET /JsScrip/data-accuracy.js?v=20261006roles
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:59339 Closing
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:64174 Accepted
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:64174 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:64174 Closing
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:53351 Accepted
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:53351 [200]: GET /favicon.ico
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:53351 Closing
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:52642 Accepted
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:52642 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:52642 Closing
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:65345 Accepted
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:65345 [200]: GET /favicon.ico
+[Tue Oct  6 21:17:11 2026] 127.0.0.1:65345 Closing
+[Tue Oct  6 21:17:12 2026] 127.0.0.1:51243 Accepted
+[Tue Oct  6 21:17:12 2026] 127.0.0.1:51243 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:17:12 2026] 127.0.0.1:51243 Closing
+[Tue Oct  6 21:17:12 2026] 127.0.0.1:61162 Accepted
+[Tue Oct  6 21:17:12 2026] 127.0.0.1:61162 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:17:12 2026] 127.0.0.1:61162 Closing
+[Tue Oct  6 21:19:03 2026] PHP 8.2.12 Development Server (http://127.0.0.1:18979) started
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52276 Accepted
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52276 [401]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52276 Closing
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52278 Accepted
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52278 [403]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52278 Closing
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52280 Accepted
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52280 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52280 Closing
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52282 Accepted
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52282 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52282 Closing
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52284 Accepted
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52284 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52284 Closing
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52286 Accepted
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52286 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52286 Closing
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52288 Accepted
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52288 [409]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52288 Closing
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52290 Accepted
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52290 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52290 Closing
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52292 Accepted
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52292 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52292 Closing
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52294 Accepted
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52294 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52294 Closing
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52296 Accepted
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52296 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52296 Closing
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52298 Accepted
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52298 [403]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52298 Closing
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52300 Accepted
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52300 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52300 Closing
+[Tue Oct  6 21:19:04 2026] 127.0.0.1:52302 Accepted
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52302 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52302 Closing
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52304 Accepted
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52304 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52304 Closing
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52306 Accepted
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52306 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52306 Closing
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52308 Accepted
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52308 [200]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52308 Closing
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52310 Accepted
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52310 [403]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52310 Closing
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52312 Accepted
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52312 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52312 Closing
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52314 Accepted
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52314 [409]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52314 Closing
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52316 Accepted
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52316 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52316 Closing
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52318 Accepted
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52318 [409]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52318 Closing
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52320 Accepted
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52320 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52320 Closing
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52322 Accepted
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52322 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52322 Closing
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52324 Accepted
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52324 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52324 Closing
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52326 Accepted
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52326 [403]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52326 Closing
+[Tue Oct  6 21:19:05 2026] 127.0.0.1:52328 Accepted
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52328 [200]: POST /api/login.php
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52328 Closing
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52330 Accepted
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52330 [401]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52330 Closing
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52332 Accepted
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52332 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52332 Closing
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52334 Accepted
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52334 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52334 Closing
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52336 Accepted
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52336 [200]: POST /api/app_state.php?action=analyzeEvaluationExplainability
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52336 Closing
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52338 Accepted
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52338 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52338 Closing
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52340 Accepted
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52340 [200]: POST /api/app_state.php?action=analyzeBiasComments
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52340 Closing
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52342 Accepted
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52342 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52342 Closing
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52344 Accepted
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52344 [200]: POST /api/app_state.php?action=analyzeEvaluationExplainability
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52344 Closing
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52346 Accepted
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52346 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52346 Closing
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52348 Accepted
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52348 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:06 2026] 127.0.0.1:52348 Closing
+[Tue Oct  6 21:19:07 2026] 127.0.0.1:60111 Accepted
+[Tue Oct  6 21:19:07 2026] 127.0.0.1:60111 [200]: GET /html/mainpage.html?accuracyTrial=1&accuracyRole=student
+[Tue Oct  6 21:19:07 2026] 127.0.0.1:60111 Closing
+[Tue Oct  6 21:19:07 2026] 127.0.0.1:52786 Accepted
+[Tue Oct  6 21:19:07 2026] 127.0.0.1:60451 Accepted
+[Tue Oct  6 21:19:07 2026] 127.0.0.1:59717 Accepted
+[Tue Oct  6 21:19:07 2026] 127.0.0.1:60451 [200]: GET /css/panel-theme.css?v=20260824a
+[Tue Oct  6 21:19:07 2026] 127.0.0.1:52786 [200]: GET /css/mainpage.css?v=20261003a
+[Tue Oct  6 21:19:07 2026] 127.0.0.1:59717 [200]: GET /JsScrip/db-data.js?v=20261004a
+[Tue Oct  6 21:19:07 2026] 127.0.0.1:60451 Closing
+[Tue Oct  6 21:19:07 2026] 127.0.0.1:52786 Closing
+[Tue Oct  6 21:19:07 2026] 127.0.0.1:53985 Accepted
+[Tue Oct  6 21:19:07 2026] 127.0.0.1:59717 Closing
+[Tue Oct  6 21:19:07 2026] 127.0.0.1:53985 [200]: GET /JsScrip/mainpage.js?v=20261006accuracy4
+[Tue Oct  6 21:19:07 2026] 127.0.0.1:53985 Closing
+[Tue Oct  6 21:19:07 2026] 127.0.0.1:56990 Accepted
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:56990 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791292747915&_background=1
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:56990 Closing
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:54864 Accepted
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:65530 Accepted
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:54864 [200]: GET /design/main.back.jpg
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:65530 [200]: GET /api/login.php?action=session&_ts=1791292747976
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:65530 Closing
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:54864 Closing
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:52043 Accepted
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:52043 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:52043 Closing
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:59835 Accepted
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:59835 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:59835 Closing
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:65320 Accepted
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:65320 [200]: POST /api/login.php?_heartbeat=1
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:65320 Closing
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:50617 Accepted
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:50617 [200]: GET /html/data-accuracy.html?trial=TRIAL-564d66e61b6d91a9cd536b88
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:50617 Closing
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:58425 Accepted
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:58425 [200]: GET /JsScrip/data-accuracy.js?v=20261006roles
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:58425 Closing
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:54473 Accepted
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:54473 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:54473 Closing
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:51895 Accepted
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:51895 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:51895 Closing
+[Tue Oct  6 21:19:08 2026] 127.0.0.1:53840 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:53840 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:53840 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56333 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56333 [200]: GET /api/login.php?action=session
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56333 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:60018 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:60018 [200]: POST /api/login.php
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:60018 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:63292 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:63292 [200]: GET /html/mainpage.html?accuracyTrial=1&accuracyRole=student&logged_out=1
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:63292 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56754 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56754 [200]: GET /css/panel-theme.css?v=20260824a
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56754 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:49990 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:64911 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:49990 [200]: GET /css/mainpage.css?v=20261003a
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:64911 [200]: GET /JsScrip/db-data.js?v=20261004a
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:49990 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:64911 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:52020 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:52020 [200]: GET /JsScrip/mainpage.js?v=20261006accuracy4
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:52020 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:50132 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:50132 [401]: GET /api/app_state.php?action=bootstrap&_ts=1791292749332&_background=1
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:50132 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:63523 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:63523 [200]: GET /design/main.back.jpg
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:63523 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:53883 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:53883 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:53883 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56960 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56960 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56960 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56961 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56961 [401]: GET /api/login.php?action=session
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56961 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:50736 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:50736 [200]: GET /html/mainpage.html?accuracyTrial=1&accuracyRole=student
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:50736 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56636 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56636 [200]: GET /css/panel-theme.css?v=20260824a
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56636 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:61388 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:64669 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:61373 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:61388 [200]: GET /css/mainpage.css?v=20261003a
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:64669 [200]: GET /JsScrip/db-data.js?v=20261004a
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:61373 [200]: GET /JsScrip/mainpage.js?v=20261006accuracy4
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:61388 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:61373 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:64669 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:60398 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:60398 [200]: GET /design/main.back.jpg
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:60398 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:58605 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:58605 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791292749470&_background=1
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:58605 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:64699 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:64699 [200]: GET /api/login.php?action=session&_ts=1791292749473
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:64699 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:53883 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:53883 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:53883 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:65310 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:65310 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:65310 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:54036 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:54036 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:54036 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:52478 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:52478 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:52478 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:54399 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:54399 [200]: GET /html/studentpanel.html
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:54399 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:63078 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:57468 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:64601 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:57569 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:63078 [200]: GET /css/panel-theme.css?v=20260907a
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:57468 [200]: GET /css/studentpanel.css?v=20260925c
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:64601 [200]: GET /JsScrip/db-data.js?v=20261006trace
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:57569 [200]: GET /JsScrip/system-report.js?v=20260907a
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:63078 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:61253 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:57468 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:64601 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:57569 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:61253 [200]: GET /JsScrip/panel-branding.js?v=20260802b
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:61253 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:64658 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:64658 [200]: GET /JsScrip/studentpanel.js?v=20261006d
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:64658 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:55328 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:55328 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791292749725&_background=1
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:55328 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:51270 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:51270 [200]: GET /api/login.php?action=session&_ts=1791292749736
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:51270 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:60367 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:60367 [200]: POST /api/app_state.php?action=listStudentEvaluationProofRequests&_background=1
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:60367 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56063 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:62027 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56063 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:62027 [200]: POST /api/app_state.php?action=listOsaStudentClearances&_background=1
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:62027 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:56063 Closing
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:52711 Accepted
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:52711 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:19:09 2026] 127.0.0.1:52711 Closing
+[Tue Oct  6 21:19:11 2026] 127.0.0.1:62572 Accepted
+[Tue Oct  6 21:19:11 2026] 127.0.0.1:62572 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:11 2026] 127.0.0.1:62572 Closing
+[Tue Oct  6 21:19:11 2026] 127.0.0.1:61170 Accepted
+[Tue Oct  6 21:19:11 2026] 127.0.0.1:61170 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:11 2026] 127.0.0.1:61170 Closing
+[Tue Oct  6 21:19:11 2026] 127.0.0.1:60444 Accepted
+[Tue Oct  6 21:19:11 2026] 127.0.0.1:60444 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:11 2026] 127.0.0.1:60444 Closing
+[Tue Oct  6 21:19:14 2026] 127.0.0.1:59196 Accepted
+[Tue Oct  6 21:19:14 2026] 127.0.0.1:59196 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:14 2026] 127.0.0.1:59196 Closing
+[Tue Oct  6 21:19:14 2026] 127.0.0.1:56673 Accepted
+[Tue Oct  6 21:19:14 2026] 127.0.0.1:56673 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:14 2026] 127.0.0.1:56673 Closing
+[Tue Oct  6 21:19:14 2026] 127.0.0.1:53267 Accepted
+[Tue Oct  6 21:19:14 2026] 127.0.0.1:53267 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:14 2026] 127.0.0.1:53267 Closing
+[Tue Oct  6 21:19:15 2026] 127.0.0.1:64885 Accepted
+[Tue Oct  6 21:19:15 2026] 127.0.0.1:64885 [200]: GET /html/data-accuracy.html
+[Tue Oct  6 21:19:15 2026] 127.0.0.1:64885 Closing
+[Tue Oct  6 21:19:15 2026] 127.0.0.1:58645 Accepted
+[Tue Oct  6 21:19:15 2026] 127.0.0.1:58645 [200]: GET /JsScrip/data-accuracy.js?v=20261006roles
+[Tue Oct  6 21:19:15 2026] 127.0.0.1:58645 Closing
+[Tue Oct  6 21:19:15 2026] 127.0.0.1:49808 Accepted
+[Tue Oct  6 21:19:15 2026] 127.0.0.1:49808 [401]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:15 2026] 127.0.0.1:49808 Closing
+[Tue Oct  6 21:19:15 2026] 127.0.0.1:60518 Accepted
+[Tue Oct  6 21:19:15 2026] 127.0.0.1:60518 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:15 2026] 127.0.0.1:60518 Closing
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:49157 Accepted
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:49157 [401]: GET /api/login.php?action=session
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:49157 Closing
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:54283 Accepted
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:54283 [200]: GET /html/mainpage.html?accuracyTrial=1&accuracyRole=student&logged_out=1
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:54283 Closing
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:55692 Accepted
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:55692 [200]: GET /css/panel-theme.css?v=20260824a
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:51514 Accepted
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:55692 Closing
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:51015 Accepted
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:51514 [200]: GET /css/mainpage.css?v=20261003a
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:51015 [200]: GET /JsScrip/db-data.js?v=20261004a
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:51514 Closing
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:62068 Accepted
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:51015 Closing
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:62068 [200]: GET /JsScrip/mainpage.js?v=20261006accuracy4
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:62068 Closing
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:62282 Accepted
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:62282 [401]: GET /api/app_state.php?action=bootstrap&_ts=1791292756551&_background=1
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:62282 Closing
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:62563 Accepted
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:62563 [200]: GET /design/main.back.jpg
+[Tue Oct  6 21:19:16 2026] 127.0.0.1:62563 Closing
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:57363 Accepted
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:57363 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:57363 Closing
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:51885 Accepted
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:51885 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:51885 Closing
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:54585 Accepted
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:54585 [200]: GET /html/mainpage.html?accuracyTrial=1&accuracyRole=student
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:54585 Closing
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:50074 Accepted
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:50074 [200]: GET /css/panel-theme.css?v=20260824a
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:50074 Closing
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:61892 Accepted
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:52076 Accepted
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:61892 [200]: GET /css/mainpage.css?v=20261003a
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:52076 [200]: GET /JsScrip/db-data.js?v=20261004a
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:61892 Closing
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:51527 Accepted
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:52076 Closing
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:51527 [200]: GET /JsScrip/mainpage.js?v=20261006accuracy4
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:51527 Closing
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:52227 Accepted
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:52227 [200]: GET /design/main.back.jpg
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:52227 Closing
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:63831 Accepted
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:63831 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791292757836&_background=1
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:63831 Closing
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:50649 Accepted
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:50649 [200]: GET /api/login.php?action=session&_ts=1791292757839
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:50649 Closing
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:64729 Accepted
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:64729 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:64729 Closing
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:58716 Accepted
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:58716 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:58716 Closing
+[Tue Oct  6 21:19:17 2026] 127.0.0.1:53191 Accepted
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:53191 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:53191 Closing
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:59318 Accepted
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:59318 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:59318 Closing
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:59612 Accepted
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:59612 [200]: GET /html/studentpanel.html
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:59612 Closing
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:58275 Accepted
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:58275 [200]: GET /css/panel-theme.css?v=20260907a
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:58275 Closing
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:51411 Accepted
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:52004 Accepted
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:63149 Accepted
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:51411 [200]: GET /css/studentpanel.css?v=20260925c
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:52004 [200]: GET /JsScrip/db-data.js?v=20261006trace
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:63149 [200]: GET /JsScrip/system-report.js?v=20260907a
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:51411 Closing
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:62155 Accepted
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:63149 Closing
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:52004 Closing
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:62155 [200]: GET /JsScrip/panel-branding.js?v=20260802b
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:62155 Closing
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:51993 Accepted
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:51993 [200]: GET /JsScrip/studentpanel.js?v=20261006d
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:51993 Closing
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:49942 Accepted
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:49942 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791292758081&_background=1
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:49942 Closing
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:64029 Accepted
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:64029 [200]: GET /api/login.php?action=session&_ts=1791292758090
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:64029 Closing
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:56281 Accepted
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:56281 [200]: POST /api/app_state.php?action=listStudentEvaluationProofRequests&_background=1
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:56281 Closing
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:56739 Accepted
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:49731 Accepted
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:56739 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:49731 [200]: POST /api/app_state.php?action=listOsaStudentClearances&_background=1
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:49731 Closing
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:56739 Closing
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:49671 Accepted
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:49671 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:19:18 2026] 127.0.0.1:49671 Closing
+[Tue Oct  6 21:19:20 2026] 127.0.0.1:55691 Accepted
+[Tue Oct  6 21:19:20 2026] 127.0.0.1:55691 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:20 2026] 127.0.0.1:55691 Closing
+[Tue Oct  6 21:19:20 2026] 127.0.0.1:51050 Accepted
+[Tue Oct  6 21:19:20 2026] 127.0.0.1:51050 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:20 2026] 127.0.0.1:51050 Closing
+[Tue Oct  6 21:19:20 2026] 127.0.0.1:57146 Accepted
+[Tue Oct  6 21:19:20 2026] 127.0.0.1:57146 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:20 2026] 127.0.0.1:57146 Closing
+[Tue Oct  6 21:19:21 2026] 127.0.0.1:61665 Accepted
+[Tue Oct  6 21:19:21 2026] 127.0.0.1:61665 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 21:19:21 2026] 127.0.0.1:61665 Closing
+[Tue Oct  6 21:19:22 2026] 127.0.0.1:59364 Accepted
+[Tue Oct  6 21:19:22 2026] 127.0.0.1:59364 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:22 2026] 127.0.0.1:59364 Closing
+[Tue Oct  6 21:19:22 2026] 127.0.0.1:55199 Accepted
+[Tue Oct  6 21:19:22 2026] 127.0.0.1:55199 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:22 2026] 127.0.0.1:55199 Closing
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:52557 Accepted
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:52557 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:52557 Closing
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:60044 Accepted
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:60044 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:60044 Closing
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:59854 Accepted
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:59854 [200]: GET /html/mainpage.html
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:59854 Closing
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:62982 Accepted
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:62982 [200]: GET /css/panel-theme.css?v=20260824a
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:62982 Closing
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:60506 Accepted
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:59189 Accepted
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:60506 [200]: GET /css/mainpage.css?v=20261003a
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:59189 [200]: GET /JsScrip/db-data.js?v=20261004a
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:60506 Closing
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:57790 Accepted
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:59189 Closing
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:57790 [200]: GET /JsScrip/mainpage.js?v=20261006accuracy4
+[Tue Oct  6 21:19:23 2026] 127.0.0.1:57790 Closing
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:62894 Accepted
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:62894 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791292764027&_background=1
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:62894 Closing
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:55695 Accepted
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:51872 Accepted
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:55695 [200]: GET /design/main.back.jpg
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:51872 [200]: GET /api/login.php?action=session&_ts=1791292764068
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:51872 Closing
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:55695 Closing
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:49283 Accepted
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:49283 [200]: GET /html/studentpanel.html
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:49283 Closing
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:60524 Accepted
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:60524 [200]: GET /css/panel-theme.css?v=20260907a
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:60524 Closing
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:52919 Accepted
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:63808 Accepted
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:58371 Accepted
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:52919 [200]: GET /css/studentpanel.css?v=20260925c
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:52919 Closing
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:63808 [200]: GET /JsScrip/db-data.js?v=20261006trace
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:58371 [200]: GET /JsScrip/system-report.js?v=20260907a
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:63808 Closing
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:58371 Closing
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:58432 Accepted
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:58432 [200]: GET /JsScrip/panel-branding.js?v=20260802b
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:58432 Closing
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:55320 Accepted
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:55320 [200]: GET /JsScrip/studentpanel.js?v=20261006d
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:55320 Closing
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:55681 Accepted
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:55681 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791292764184&_background=1
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:55681 Closing
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:50464 Accepted
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:50464 [200]: GET /api/login.php?action=session&_ts=1791292764191
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:50464 Closing
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:58482 Accepted
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:58482 [200]: POST /api/app_state.php?action=listStudentEvaluationProofRequests&_background=1
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:58482 Closing
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:55319 Accepted
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:55319 [200]: POST /api/app_state.php?action=listOsaStudentClearances&_background=1
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:55319 Closing
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:54521 Accepted
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:54521 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:54521 Closing
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:62099 Accepted
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:62099 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:62099 Closing
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:54227 Accepted
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:54227 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:19:24 2026] 127.0.0.1:54227 Closing
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:54675 Accepted
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:54675 [200]: GET /html/data-accuracy.html?trial=TRIAL-564d66e61b6d91a9cd536b88
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:54675 Closing
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:61044 Accepted
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:61044 [200]: GET /JsScrip/data-accuracy.js?v=20261006roles
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:61044 Closing
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:50784 Accepted
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:50784 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:50784 Closing
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:58179 Accepted
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:58179 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:58179 Closing
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:49826 Accepted
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:49826 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:49826 Closing
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:65489 Accepted
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:65489 [200]: POST /api/app_state.php?action=runDataAccuracySummary
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:65489 Closing
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:62331 Accepted
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:62331 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:25 2026] 127.0.0.1:62331 Closing
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:56440 Accepted
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:56440 [200]: GET /html/data-accuracy.html?trial=TRIAL-564d66e61b6d91a9cd536b88
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:56440 Closing
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:56342 Accepted
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:56342 [200]: GET /JsScrip/data-accuracy.js?v=20261006roles
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:56342 Closing
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:63052 Accepted
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:63052 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:63052 Closing
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:51688 Accepted
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:51688 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:51688 Closing
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:60622 Accepted
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:60622 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:60622 Closing
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:55325 Accepted
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:55325 [200]: GET /api/login.php?action=session
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:55325 Closing
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:57644 Accepted
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:57644 [200]: POST /api/login.php
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:57644 Closing
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:56906 Accepted
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:56906 [200]: GET /html/mainpage.html?accuracyTrial=1&accuracyRole=hr&logged_out=1
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:56906 Closing
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:62657 Accepted
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:62657 [200]: GET /css/panel-theme.css?v=20260824a
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:62657 Closing
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:55982 Accepted
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:55407 Accepted
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:55982 [200]: GET /css/mainpage.css?v=20261003a
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:55407 [200]: GET /JsScrip/db-data.js?v=20261004a
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:55982 Closing
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:55251 Accepted
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:55407 Closing
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:55251 [200]: GET /JsScrip/mainpage.js?v=20261006accuracy4
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:55251 Closing
+[Tue Oct  6 21:19:26 2026] 127.0.0.1:62607 Accepted
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:62607 [401]: GET /api/app_state.php?action=bootstrap&_ts=1791292766989&_background=1
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:62607 Closing
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:54253 Accepted
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:54253 [200]: GET /design/main.back.jpg
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:54253 Closing
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:52179 Accepted
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:52179 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:52179 Closing
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:58732 Accepted
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:58732 [200]: GET /design/favicon-32x32.png
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:58732 Closing
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:50442 Accepted
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:50442 [200]: GET /html/mainpage.html?accuracyTrial=1&accuracyRole=hr
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:50442 Closing
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:58788 Accepted
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:58788 [200]: GET /css/panel-theme.css?v=20260824a
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:58788 Closing
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:59398 Accepted
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:53065 Accepted
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:64815 Accepted
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:59398 [200]: GET /css/mainpage.css?v=20261003a
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:53065 [200]: GET /JsScrip/db-data.js?v=20261004a
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:64815 [200]: GET /JsScrip/mainpage.js?v=20261006accuracy4
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:59398 Closing
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:64815 Closing
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:53065 Closing
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:64626 Accepted
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:64626 [200]: GET /design/main.back.jpg
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:64626 Closing
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:54804 Accepted
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:54804 [200]: GET /api/app_state.php?action=bootstrap&_ts=1791292767821&_background=1
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:54804 Closing
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:58370 Accepted
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:58370 [200]: GET /api/login.php?action=session&_ts=1791292767823
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:58370 Closing
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:52553 Accepted
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:52553 [200]: GET /html/data-accuracy.html
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:52553 Closing
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:59178 Accepted
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:59178 [200]: GET /JsScrip/data-accuracy.js?v=20261006roles
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:59178 Closing
+[Tue Oct  6 21:19:27 2026] 127.0.0.1:63539 Accepted
+[Tue Oct  6 21:19:28 2026] 127.0.0.1:63539 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:28 2026] 127.0.0.1:63539 Closing
+[Tue Oct  6 21:19:28 2026] 127.0.0.1:58081 Accepted
+[Tue Oct  6 21:19:28 2026] 127.0.0.1:58081 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:28 2026] 127.0.0.1:58081 Closing
+[Tue Oct  6 21:19:28 2026] 127.0.0.1:51589 Accepted
+[Tue Oct  6 21:19:28 2026] 127.0.0.1:51589 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:28 2026] 127.0.0.1:51589 Closing
+[Tue Oct  6 21:19:28 2026] 127.0.0.1:55658 Accepted
+[Tue Oct  6 21:19:28 2026] 127.0.0.1:55658 [200]: GET /favicon.ico
+[Tue Oct  6 21:19:28 2026] 127.0.0.1:55658 Closing
+[Tue Oct  6 21:19:29 2026] 127.0.0.1:59347 Accepted
+[Tue Oct  6 21:19:29 2026] 127.0.0.1:59347 [200]: GET /api/data_accuracy.php
+[Tue Oct  6 21:19:29 2026] 127.0.0.1:59347 Closing
+[Tue Oct  6 21:19:29 2026] 127.0.0.1:64767 Accepted
+[Tue Oct  6 21:19:29 2026] 127.0.0.1:64767 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 21:19:29 2026] 127.0.0.1:64767 Closing
+[Tue Oct  6 22:09:12 2026] PHP 8.2.12 Development Server (http://127.0.0.1:18979) started
+[Tue Oct  6 22:09:14 2026] 127.0.0.1:49785 Accepted
+[Tue Oct  6 22:09:14 2026] 127.0.0.1:49785 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:14 2026] 127.0.0.1:49785 Closing
+[Tue Oct  6 22:09:14 2026] 127.0.0.1:49787 Accepted
+[Tue Oct  6 22:09:14 2026] 127.0.0.1:49787 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:14 2026] 127.0.0.1:49787 Closing
+[Tue Oct  6 22:09:14 2026] 127.0.0.1:49789 Accepted
+[Tue Oct  6 22:09:14 2026] 127.0.0.1:49789 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:14 2026] 127.0.0.1:49789 Closing
+[Tue Oct  6 22:09:14 2026] 127.0.0.1:49791 Accepted
+[Tue Oct  6 22:09:14 2026] 127.0.0.1:49791 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:14 2026] 127.0.0.1:49791 Closing
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49793 Accepted
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49793 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49793 Closing
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49795 Accepted
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49795 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49795 Closing
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49797 Accepted
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49797 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49797 Closing
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49799 Accepted
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49799 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49799 Closing
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49801 Accepted
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49801 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49801 Closing
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49803 Accepted
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49803 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49803 Closing
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49805 Accepted
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49805 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49805 Closing
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49807 Accepted
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49807 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49807 Closing
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49809 Accepted
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49809 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49809 Closing
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49811 Accepted
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49811 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49811 Closing
+[Tue Oct  6 22:09:15 2026] 127.0.0.1:49813 Accepted
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:49813 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:49813 Closing
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:49815 Accepted
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:49815 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:49815 Closing
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:49817 Accepted
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:49817 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:49817 Closing
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59954 Accepted
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59954 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59954 Closing
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59956 Accepted
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59956 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59956 Closing
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59958 Accepted
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59958 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59958 Closing
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59960 Accepted
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59960 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59960 Closing
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59962 Accepted
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59962 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59962 Closing
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59964 Accepted
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59964 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59964 Closing
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59966 Accepted
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59966 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59966 Closing
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59968 Accepted
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59968 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59968 Closing
+[Tue Oct  6 22:09:16 2026] 127.0.0.1:59970 Accepted
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59970 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59970 Closing
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59972 Accepted
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59972 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59972 Closing
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59974 Accepted
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59974 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59974 Closing
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59976 Accepted
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59976 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59976 Closing
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59978 Accepted
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59978 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59978 Closing
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59980 Accepted
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59980 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59980 Closing
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59982 Accepted
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59982 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59982 Closing
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59984 Accepted
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59984 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59984 Closing
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59986 Accepted
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59986 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59986 Closing
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59988 Accepted
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59988 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59988 Closing
+[Tue Oct  6 22:09:17 2026] 127.0.0.1:59990 Accepted
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:59990 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:59990 Closing
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:59992 Accepted
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:59992 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:59992 Closing
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:59994 Accepted
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:59994 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:59994 Closing
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:59996 Accepted
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:59996 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:59996 Closing
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:59998 Accepted
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:59998 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:59998 Closing
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:60000 Accepted
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:60000 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:60000 Closing
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:60002 Accepted
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:60002 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:60002 Closing
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:60004 Accepted
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:60004 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:60004 Closing
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:60006 Accepted
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:60006 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:60006 Closing
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:60008 Accepted
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:60008 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:60008 Closing
+[Tue Oct  6 22:09:18 2026] 127.0.0.1:60010 Accepted
+[Tue Oct  6 22:09:19 2026] 127.0.0.1:60010 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:19 2026] 127.0.0.1:60010 Closing
+[Tue Oct  6 22:09:19 2026] 127.0.0.1:60012 Accepted
+[Tue Oct  6 22:09:19 2026] 127.0.0.1:60012 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:19 2026] 127.0.0.1:60012 Closing
+[Tue Oct  6 22:09:19 2026] 127.0.0.1:60014 Accepted
+[Tue Oct  6 22:09:19 2026] 127.0.0.1:60014 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:19 2026] 127.0.0.1:60014 Closing
+[Tue Oct  6 22:09:19 2026] 127.0.0.1:60016 Accepted
+[Tue Oct  6 22:09:19 2026] 127.0.0.1:60016 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:19 2026] 127.0.0.1:60016 Closing
+[Tue Oct  6 22:09:19 2026] 127.0.0.1:60018 Accepted
+[Tue Oct  6 22:09:19 2026] 127.0.0.1:60018 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:19 2026] 127.0.0.1:60018 Closing
+[Tue Oct  6 22:09:19 2026] 127.0.0.1:60020 Accepted
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60020 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60020 Closing
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60022 Accepted
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60022 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60022 Closing
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60024 Accepted
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60024 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60024 Closing
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60026 Accepted
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60026 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60026 Closing
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60028 Accepted
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60028 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60028 Closing
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60030 Accepted
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60030 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60030 Closing
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60032 Accepted
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60032 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60032 Closing
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60034 Accepted
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60034 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60034 Closing
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60036 Accepted
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60036 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60036 Closing
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60038 Accepted
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60038 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:20 2026] 127.0.0.1:60038 Closing
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60040 Accepted
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60040 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60040 Closing
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60042 Accepted
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60042 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60042 Closing
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60044 Accepted
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60044 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60044 Closing
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60046 Accepted
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60046 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60046 Closing
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60048 Accepted
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60048 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60048 Closing
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60050 Accepted
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60050 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60050 Closing
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60052 Accepted
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60052 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60052 Closing
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60054 Accepted
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60054 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60054 Closing
+[Tue Oct  6 22:09:21 2026] 127.0.0.1:60056 Accepted
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60056 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60056 Closing
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60058 Accepted
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60058 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60058 Closing
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60060 Accepted
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60060 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60060 Closing
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60062 Accepted
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60062 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60062 Closing
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60064 Accepted
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60064 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60064 Closing
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60066 Accepted
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60066 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60066 Closing
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60068 Accepted
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60068 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60068 Closing
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60070 Accepted
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60070 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60070 Closing
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60072 Accepted
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60072 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60072 Closing
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60074 Accepted
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60074 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60074 Closing
+[Tue Oct  6 22:09:22 2026] 127.0.0.1:60076 Accepted
+[Tue Oct  6 22:09:23 2026] 127.0.0.1:60076 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:09:23 2026] 127.0.0.1:60076 Closing
+[Tue Oct  6 22:09:23 2026] 127.0.0.1:60078 Accepted
+[Tue Oct  6 22:09:23 2026] 127.0.0.1:60078 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:09:23 2026] 127.0.0.1:60078 Closing
+[Tue Oct  6 22:10:02 2026] PHP 8.2.12 Development Server (http://127.0.0.1:18979) started
+[Tue Oct  6 22:10:04 2026] 127.0.0.1:58622 Accepted
+[Tue Oct  6 22:10:04 2026] 127.0.0.1:58622 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:04 2026] 127.0.0.1:58622 Closing
+[Tue Oct  6 22:10:04 2026] 127.0.0.1:58624 Accepted
+[Tue Oct  6 22:10:04 2026] 127.0.0.1:58624 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:04 2026] 127.0.0.1:58624 Closing
+[Tue Oct  6 22:10:04 2026] 127.0.0.1:58626 Accepted
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58626 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58626 Closing
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58628 Accepted
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58628 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58628 Closing
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58633 Accepted
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58633 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58633 Closing
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58635 Accepted
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58635 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58635 Closing
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58637 Accepted
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58637 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58637 Closing
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58639 Accepted
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58639 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58639 Closing
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58641 Accepted
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58641 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58641 Closing
+[Tue Oct  6 22:10:05 2026] 127.0.0.1:58643 Accepted
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58643 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58643 Closing
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58648 Accepted
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58648 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58648 Closing
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58651 Accepted
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58651 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58651 Closing
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58653 Accepted
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58653 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58653 Closing
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58655 Accepted
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58655 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58655 Closing
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58657 Accepted
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58657 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58657 Closing
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58659 Accepted
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58659 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58659 Closing
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58661 Accepted
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58661 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58661 Closing
+[Tue Oct  6 22:10:06 2026] 127.0.0.1:58666 Accepted
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58666 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58666 Closing
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58668 Accepted
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58668 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58668 Closing
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58670 Accepted
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58670 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58670 Closing
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58672 Accepted
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58672 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58672 Closing
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58674 Accepted
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58674 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58674 Closing
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58676 Accepted
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58676 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58676 Closing
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58681 Accepted
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58681 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58681 Closing
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58683 Accepted
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58683 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58683 Closing
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58685 Accepted
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58685 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58685 Closing
+[Tue Oct  6 22:10:07 2026] 127.0.0.1:58687 Accepted
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58687 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58687 Closing
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58689 Accepted
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58689 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58689 Closing
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58691 Accepted
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58691 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58691 Closing
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58693 Accepted
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58693 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58693 Closing
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58695 Accepted
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58695 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58695 Closing
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58703 Accepted
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58703 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58703 Closing
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58705 Accepted
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58705 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58705 Closing
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58707 Accepted
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58707 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58707 Closing
+[Tue Oct  6 22:10:08 2026] 127.0.0.1:58709 Accepted
+[Tue Oct  6 22:10:09 2026] 127.0.0.1:58709 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:09 2026] 127.0.0.1:58709 Closing
+[Tue Oct  6 22:10:09 2026] 127.0.0.1:58711 Accepted
+[Tue Oct  6 22:10:09 2026] 127.0.0.1:58711 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:09 2026] 127.0.0.1:58711 Closing
+[Tue Oct  6 22:10:09 2026] 127.0.0.1:58713 Accepted
+[Tue Oct  6 22:10:09 2026] 127.0.0.1:58713 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:09 2026] 127.0.0.1:58713 Closing
+[Tue Oct  6 22:10:09 2026] 127.0.0.1:58715 Accepted
+[Tue Oct  6 22:10:09 2026] 127.0.0.1:58715 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:09 2026] 127.0.0.1:58715 Closing
+[Tue Oct  6 22:10:09 2026] 127.0.0.1:58720 Accepted
+[Tue Oct  6 22:10:09 2026] 127.0.0.1:58720 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:09 2026] 127.0.0.1:58720 Closing
+[Tue Oct  6 22:10:09 2026] 127.0.0.1:58725 Accepted
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58725 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58725 Closing
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58728 Accepted
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58728 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58728 Closing
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58730 Accepted
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58730 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58730 Closing
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58732 Accepted
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58732 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58732 Closing
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58734 Accepted
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58734 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58734 Closing
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58739 Accepted
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58739 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58739 Closing
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58741 Accepted
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58741 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58741 Closing
+[Tue Oct  6 22:10:10 2026] 127.0.0.1:58743 Accepted
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58743 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58743 Closing
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58745 Accepted
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58745 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58745 Closing
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58750 Accepted
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58750 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58750 Closing
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58752 Accepted
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58752 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58752 Closing
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58754 Accepted
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58754 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58754 Closing
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58756 Accepted
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58756 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58756 Closing
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58758 Accepted
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58758 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58758 Closing
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58760 Accepted
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58760 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58760 Closing
+[Tue Oct  6 22:10:11 2026] 127.0.0.1:58762 Accepted
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58762 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58762 Closing
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58764 Accepted
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58764 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58764 Closing
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58766 Accepted
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58766 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58766 Closing
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58768 Accepted
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58768 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58768 Closing
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58770 Accepted
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58770 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58770 Closing
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58772 Accepted
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58772 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58772 Closing
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58774 Accepted
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58774 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58774 Closing
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58776 Accepted
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58776 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58776 Closing
+[Tue Oct  6 22:10:12 2026] 127.0.0.1:58778 Accepted
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58778 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58778 Closing
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58780 Accepted
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58780 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58780 Closing
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58782 Accepted
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58782 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58782 Closing
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58784 Accepted
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58784 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58784 Closing
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58786 Accepted
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58786 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58786 Closing
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58788 Accepted
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58788 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58788 Closing
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58790 Accepted
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58790 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58790 Closing
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58792 Accepted
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58792 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58792 Closing
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58794 Accepted
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58794 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58794 Closing
+[Tue Oct  6 22:10:13 2026] 127.0.0.1:58796 Accepted
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58796 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58796 Closing
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58798 Accepted
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58798 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58798 Closing
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58800 Accepted
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58800 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58800 Closing
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58802 Accepted
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58802 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58802 Closing
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58804 Accepted
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58804 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58804 Closing
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58806 Accepted
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58806 [200]: POST /api/app_state.php?action=recordStudentDataPrivacyConsent
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58806 Closing
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58808 Accepted
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58808 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58808 Closing
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58810 Accepted
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58810 [200]: POST /api/app_state.php?action=addEvaluation
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58810 Closing
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58812 Accepted
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58812 [200]: POST /api/data_accuracy.php
+[Tue Oct  6 22:10:14 2026] 127.0.0.1:58812 Closing

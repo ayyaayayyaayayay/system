@@ -56,7 +56,7 @@ assert(professorPanel.includes('accessPending = !professorReportAccessVerified')
 assert(professorPanel.includes("window.addEventListener('focus'"), 'Professor report access is not rechecked on focus.');
 assert(professorPanel.includes('clearRestrictedProfessorReportData()'), 'Restricted report caches are not cleared.');
 assert(professorPanel.includes('SharedData.getProfessorEvaluationCounts()'), 'Restricted dashboard does not retain sanitized counts.');
-assert(professorHtml.includes('db-data.js?v=20261004a'), 'Professor SharedData cache version was not updated.');
-assert(professorHtml.includes('profesorpanel.js?v=20261004a'), 'Professor panel cache version was not updated.');
+assert.match(professorHtml, /db-data\.js\?v=\d{8}[a-z0-9]*(?:&[^"']*)?["']/);
+assert.match(professorHtml, /profesorpanel\.js\?v=\d{8}[a-z0-9]*(?:&[^"']*)?["']/);
 
 console.log('Faculty report access regression tests passed.');

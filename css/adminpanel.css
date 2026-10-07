@@ -3914,6 +3914,8 @@ input:checked+.slider:before {
 }
 
 .org-section {
+  /* Keep expanded groups inside the scroll area instead of clipping their controls. */
+  flex-shrink: 0;
   background: var(--bg-secondary);
   border-radius: 16px;
   box-shadow: var(--shadow-md);
@@ -9758,5 +9760,87 @@ body.admin-panel #admin-user-pagination:empty {
   body.admin-panel #hr-professors-view .professor-toolbar .professor-search {
     min-width: 0;
     width: 100%;
+  }
+}
+
+/* Keep dashboard cards and settings controls within a phone viewport. */
+@media (max-width: 640px) {
+  body.admin-panel #dashboard-view .dashboard-grid,
+  body.admin-panel #dashboard-view .charts-section,
+  body.admin-panel #dashboard-view .overview-cards,
+  body.admin-panel #system-view .system-settings-content {
+    min-width: 0;
+    width: 100%;
+  }
+
+  body.admin-panel #dashboard-view .admin-section,
+  body.admin-panel #dashboard-view .overview-card,
+  body.admin-panel #system-view .settings-group {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  body.admin-panel #dashboard-view .section-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  body.admin-panel #dashboard-view .section-title,
+  body.admin-panel #dashboard-view .section-title h2,
+  body.admin-panel #dashboard-view .section-title p {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  body.admin-panel #dashboard-view .section-title h2 {
+    flex-wrap: wrap;
+    overflow-wrap: anywhere;
+  }
+
+  body.admin-panel #dashboard-view .dashboard-activity-section .btn-cancel {
+    width: 100%;
+    white-space: normal;
+  }
+
+  body.admin-panel #dashboard-view .dashboard-activity-section .activity-list {
+    max-height: none;
+    overflow: visible;
+  }
+
+  body.admin-panel #dashboard-view .dashboard-activity-section .activity-item {
+    align-items: flex-start;
+    height: auto;
+  }
+
+  body.admin-panel #dashboard-view .dashboard-activity-section .activity-icon {
+    flex: 0 0 40px;
+  }
+
+  body.admin-panel #dashboard-view .dashboard-activity-section .activity-content {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  body.admin-panel #system-view .setting-item:not(.toggle) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  body.admin-panel #system-view .setting-item input[type="text"],
+  body.admin-panel #system-view .setting-item input[type="email"],
+  body.admin-panel #system-view .setting-item select {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  body.admin-panel #system-view .setting-item.toggle > :first-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 }
