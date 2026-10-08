@@ -5180,6 +5180,7 @@ function refreshProfessorReportAccessState() {
     }
 
     const previousAccess = getProfessorFacultyReportAccessState();
+    const previouslyVerified = professorReportAccessVerified;
     const previouslyEnabled = previousAccess.enabled !== false && previousAccess.evaluationPeriodsComplete !== false;
     professorReportAccessRefreshPromise = SharedData.refreshFacultyReportAccess()
         .then(async access => {
@@ -5189,10 +5190,16 @@ function refreshProfessorReportAccessState() {
                 clearRestrictedProfessorReportData();
             }
             if (
-                previouslyEnabled !== currentlyEnabled
+                (!previouslyVerified || previouslyEnabled !== currentlyEnabled)
                 && typeof SharedData.refreshEvaluations === 'function'
             ) {
                 await SharedData.refreshEvaluations({});
+            }
+            // The pending access check clears report data even when bootstrap
+            // already says access is enabled. Rebuild after verification so the
+            // unlocked page does not retain that empty context and summary.
+            if (currentlyEnabled) {
+                refreshProfessorPanelData({ preserveSelection: true });
             }
             applyReportBlackout();
             return access;

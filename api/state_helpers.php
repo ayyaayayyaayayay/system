@@ -11920,7 +11920,7 @@ function generateDeanProgramPeerAssignmentsSnapshot(PDO $pdo, $deanUserId, $prog
     }
     $activeCoordinator = resolveActiveCoordinatorScopeRowByProgramId($pdo, (int) $program['id']);
     if ($activeCoordinator) {
-        throw new RuntimeException('This program is assigned to an active Program Coordinator. Dean peer assignment generation is read-only for this program.');
+        throw new InvalidArgumentException('The system detected an active Program Coordinator for this program. Only the Program Coordinator can generate its peer assignments.');
     }
 
     $professors = fetchActiveProfessorsForPeerProgramSnapshot(
