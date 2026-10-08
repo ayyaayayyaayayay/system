@@ -14,6 +14,8 @@ The best practical deployment target for the current codebase is:
 - Outbound HTTPS for OpenAI API calls
 - Outbound SMTP for production mail delivery
 
+Set the MySQL/MariaDB server's `max_allowed_packet` to `5M`. Profile photos are stored as database BLOBs and the app accepts images up to 2 MB; XAMPP's `1M` default can disconnect the database connection during upload. For XAMPP, set `max_allowed_packet=5M` under `[mysqld]` in `C:\xampp\mysql\bin\my.ini`. Restart MySQL to apply it, or run `SET GLOBAL max_allowed_packet = 5242880;` as a database administrator to apply it immediately to new connections while keeping the config change for future restarts.
+
 For most deployments, a quality shared hosting plan with cPanel, cron, SSL, and SSH is enough.
 
 Use a VPS instead only if you want full server control, custom monitoring, or higher traffic headroom.
@@ -305,13 +307,61 @@ Schedule it daily at `02:00` Manila time. The job emits machine-readable JSON an
 
 Every restoration test decrypts to a new private temporary directory and never points at production. If the database account has `CREATE`/`DROP` database privileges, the service restores to a random `naap_restore_test_*` database, verifies the complete table inventory, required application tables, readable tables, and recorded row counts, and drops the database in `finally` cleanup. Without those privileges it clearly records `integrity_only`: full AES-GCM authentication, TAR and manifest validation, SQL presence/schema inventory, per-file SHA-256 checks, and PDF header checks. This fallback is useful but is not equivalent to an actual SQL import.
 
-Production restore has no browser or scheduled endpoint. It is available only through the guarded CLI command and requires a successful isolated-database preflight, a fresh safety backup, a private maintenance lock, and exact confirmation:
+Production restore is available through the Admin upload interface and the guarded CLI command. Both require a successful isolated-database preflight, a fresh safety backup, a private maintenance lock, and exact confirmation. The CLI command is:
 
 ```text
 C:\xampp\php\php.exe api\restore_backup.php --backup=BKP-... --production --confirm=RESTORE-PRODUCTION:BKP-...
 ```
 
 If the safety backup fails, restoration stops. The exceptional override additionally requires both `--allow-no-safety-backup` and `--confirm-no-safety=RESTORE-WITHOUT-SAFETY:BKP-...`. Treat that override as a last-resort disaster-recovery procedure. The faculty-paper directory is staged and checksum-verified before activation, and the previous directory is preserved with a `.pre-restore-*` suffix for rollback. The selected artifact and fresh safety-backup history are preserved after the database import. If restoration fails after production has been touched, the private maintenance lock intentionally remains active; use the reported safety backup for recovery before removing the lock.
+
+### Upload and restore a downloaded backup in the Admin page
+
+Open Admin System Settings and find **Encrypted Backup**. Under **Upload & Restore Backup**, choose a downloaded `.naapbak` file and click **Upload & Verify**. The original backup encryption key must already be configured on the server. PHP's upload and POST limits apply (XAMPP currently allows about 40 MB); larger backups can use CLI recovery.
+
+The file is kept in private server storage, authenticated, and trial-restored into a disposable database. After the trial succeeds, the page shows the backup ID, creation time, file size, table count, and document count. Review those details, check the acknowledgement that current data/documents will be replaced, type the displayed `RESTORE BKP-...` phrase exactly, and click **Restore Backup**.
+
+Browser recovery always creates a fresh safety backup, repeats verification and the isolated trial import, restores the selected snapshot, and invalidates all restored active sessions. The Admin is signed out and shown a sign-in link. Browser recovery has no option to bypass the safety backup. If the database is missing or login is unavailable, use the CLI disaster-recovery commands below instead.
+
+The upload endpoint requires an active database-verified Admin session and a CSRF token. Reviews are bound to that session, expire after 15 minutes, pin the encrypted file checksum, and are consumed when restoration starts. Cancelling removes the staged upload. Expired staged files are pruned during subsequent uploads. Uploaded keys or user-supplied server paths are not accepted. Restoration errors after live data has been touched leave maintenance active for server recovery.
+
+### Recover from a downloaded backup after database loss
+
+Downloaded `.naapbak` files can be restored without a `backup_runs` record, even when the target database is completely empty or missing. No new database migration is required. The CLI recovery path also works when the Admin page and login are unavailable. Keep the downloaded file and its **original backup encryption key** separately in secure storage; a newly generated key cannot decrypt an older backup.
+
+From `C:\xampp\htdocs\system`, first verify the downloaded file offline:
+
+```powershell
+C:\xampp\php\php.exe api\restore_backup.php --file="C:\Recovery\download.naapbak" --key-file="C:\Recovery\original-backup.key" --verify
+```
+
+This authenticates the encrypted archive, checks its manifest, entry checksums, and SQL inventory, and prints `result.backupCode`. It does not connect to MySQL. The key file must contain the original Base64-encoded 32-byte backup key and remain outside the application/web root. An explicit `--key-file` takes precedence over the current environment key. Omit that option if the original key is already correctly configured.
+
+Next, test a complete import into a disposable database:
+
+```powershell
+C:\xampp\php\php.exe api\restore_backup.php --file="C:\Recovery\download.naapbak" --key-file="C:\Recovery\original-backup.key" --test
+```
+
+MySQL must be running and the configured database account must have `CREATE`/`DROP` database privileges. The test does not require the current application database or backup history. It checks table inventory and recorded row counts, then removes the temporary database. Production recovery always repeats this isolated import before changing live data.
+
+To deliberately replace the target database and persistent files with this backup, substitute the verified code for `BKP-...`:
+
+```powershell
+C:\xampp\php\php.exe api\restore_backup.php --file="C:\Recovery\download.naapbak" --key-file="C:\Recovery\original-backup.key" --production --confirm=RESTORE-PRODUCTION:BKP-...
+```
+
+The target is the configured `NAAP_DB_NAME` (default `naap_evaluation_system`), not a name inferred from the downloaded filename. Connection settings use the same `NAAP_DB_HOST`, `NAAP_DB_PORT`, `NAAP_DB_USER`, and `NAAP_DB_PASS` variables as the application. A missing target database is recreated only during confirmed recovery. An encrypted copy is retained in private server storage, and its backup-history record is reconstructed after the SQL import. The original downloaded file is never modified.
+
+If the target database is gone or empty, a fresh safety backup cannot be created. For that disaster-recovery case, additionally supply both exact override flags:
+
+```powershell
+C:\xampp\php\php.exe api\restore_backup.php --file="C:\Recovery\download.naapbak" --key-file="C:\Recovery\original-backup.key" --production --confirm=RESTORE-PRODUCTION:BKP-... --allow-no-safety-backup --confirm-no-safety=RESTORE-WITHOUT-SAFETY:BKP-...
+```
+
+The original key, authenticated archive, successful isolated import, and production confirmation are still required. Verification/refused restores clean up decrypted temporary files. If a restore fails after live data has been touched, maintenance remains active as in the history-based workflow above.
+
+Run `php tests/backup_file_recovery_integration_test.php` against a development MySQL server to test offline CLI verification, original-key selection, confirmations, disposable imports, recovery into missing/empty databases, safety backups, restored PDFs/history, and existing CLI compatibility. The test uses randomly named disposable databases and temporary storage.
 
 Same-server retention is not offsite disaster protection. Regularly use the Admin-only one-use download to copy encrypted `.naapbak` artifacts to controlled offsite storage, and protect the corresponding key independently.
 

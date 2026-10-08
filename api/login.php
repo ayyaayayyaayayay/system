@@ -110,6 +110,7 @@ const LOGIN_OTP_EXPIRY_SECONDS = 600; // 10 minutes
 const PASSWORD_RESET_EXPIRY_SECONDS = 1800; // 30 minutes
 const LOGIN_TRUSTED_DEVICE_COOKIE_PREFIX = 'naap_trusted_device_';
 const LOGIN_TRUSTED_DEVICE_TTL_SECONDS = 7776000; // 90 days
+const LOGIN_OTP_RESET_DEVICE_SESSION_KEY = 'otp_verified_reset_device';
 
 function normalizeLoginIdentityToken($value) {
     return strtolower(trim((string) $value));
@@ -184,6 +185,19 @@ function readLoginDeviceToken(int $userId): string {
 
 function hashLoginDeviceToken(string $token): string {
     return hash('sha256', "naap-trusted-device-v1\0" . $token);
+}
+
+function getVerifiedPasswordResetDeviceHash(int $userId, string $tokenHash, int $now): string {
+    $verification = $_SESSION[LOGIN_OTP_RESET_DEVICE_SESSION_KEY] ?? null;
+    $deviceToken = readLoginDeviceToken($userId);
+    if (!is_array($verification) || $deviceToken === ''
+        || (int) ($verification['user_id'] ?? 0) !== $userId
+        || (int) ($verification['expires_at'] ?? 0) <= $now
+        || !hash_equals((string) ($verification['token_hash'] ?? ''), $tokenHash)
+        || !hash_equals((string) ($verification['device_token_hash'] ?? ''), hashLoginDeviceToken($deviceToken))) {
+        return '';
+    }
+    return hashLoginDeviceToken($deviceToken);
 }
 
 function setLoginDeviceCookie(int $userId, string $token, int $now): void {
@@ -907,6 +921,8 @@ function handlePasswordResetConsume(PDO $pdo, array $body) {
     $hashedPassword = normalizeUserPasswordForStorage($newPassword);
     $usedAt = formatPasswordResetMysqlDateTime($now);
     $record = null;
+    $verifiedDeviceHash = '';
+    startNaapSession();
 
     try {
         $pdo->beginTransaction();
@@ -976,6 +992,19 @@ function handlePasswordResetConsume(PDO $pdo, array $body) {
         persistLoginSecurityRecordSnapshot($pdo, $record['user_id'], []);
         revokeTrustedDevicesSnapshot($pdo, $record['user_id'], $usedAt);
 
+        // The recovery code has already verified this browser. Remember it only
+        // after the matching, one-use password reset is completed successfully.
+        $verifiedDeviceHash = getVerifiedPasswordResetDeviceHash((int) $record['user_id'], $tokenHash, $now);
+        if ($verifiedDeviceHash !== '') {
+            trustLoginDevice($pdo, (int) $record['user_id'], $verifiedDeviceHash, $now);
+            $verified = $pdo->prepare(
+                'UPDATE user_auth_security
+                 SET first_otp_verified_at = COALESCE(first_otp_verified_at, :verified_at)
+                 WHERE user_id = :user_id'
+            );
+            $verified->execute([':verified_at' => $nowMysql, ':user_id' => (int) $record['user_id']]);
+        }
+
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
@@ -988,6 +1017,11 @@ function handlePasswordResetConsume(PDO $pdo, array $body) {
             get_class($e) . ': ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine(),
             $e
         );
+    }
+
+    unset($_SESSION[LOGIN_OTP_RESET_DEVICE_SESSION_KEY]);
+    if ($verifiedDeviceHash !== '') {
+        setLoginDeviceCookie((int) $record['user_id'], readLoginDeviceToken((int) $record['user_id']), $now);
     }
 
     logPasswordResetEvent(
@@ -1143,6 +1177,7 @@ if ($action === 'verifyotp') {
     }
 
     $deviceHash = hashLoginDeviceToken($deviceToken);
+    startNaapSession();
     $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare(
@@ -1214,6 +1249,12 @@ if ($action === 'verifyotp') {
                 formatPasswordResetMysqlDateTime($now + PASSWORD_RESET_EXPIRY_SECONDS)
             );
             $pdo->commit();
+            $_SESSION[LOGIN_OTP_RESET_DEVICE_SESSION_KEY] = [
+                'user_id' => $userId,
+                'token_hash' => hash('sha256', $resetToken),
+                'device_token_hash' => $deviceHash,
+                'expires_at' => $now + PASSWORD_RESET_EXPIRY_SECONDS,
+            ];
             logPasswordResetEvent($pdo, $user, 'Password Reset Requested', 'Email OTP verification authorized a password reset after three failed password attempts.');
             sendJson([
                 'success' => true,

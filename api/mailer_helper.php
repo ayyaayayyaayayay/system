@@ -232,6 +232,7 @@ function credentialMailerSendCredentials(array $smtpConfig, array $payload): voi
         . '<li><strong>' . $safeIdentifierLabel . ':</strong> ' . $safeIdentifier . '</li>'
         . '<li><strong>Password:</strong> ' . $safePassword . '</li>'
         . '</ul>'
+        . '<p>Log in to the NAAP Evaluation System: <a href="https://naapevaluation.com">https://naapevaluation.com</a></p>'
         . '<p>Please log in and change your password immediately after first sign-in.</p>';
 
     $textBody = "Hello " . ($recipientName !== '' ? $recipientName : $recipientEmail) . ",\n\n"
@@ -239,6 +240,7 @@ function credentialMailerSendCredentials(array $smtpConfig, array $payload): voi
         . "Role: {$roleLabel}\n"
         . "{$identifierLabel}: {$identifierValue}\n"
         . "Password: {$password}\n\n"
+        . "Log in to the NAAP Evaluation System: https://naapevaluation.com\n\n"
         . "Please log in and change your password immediately after first sign-in.\n";
 
     try {

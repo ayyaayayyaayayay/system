@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/../api/backup_service.php';
+require_once __DIR__ . '/../api/backup_file_recovery.php';
 
 function backupTestAssert(bool $condition, string $message): void
 {
@@ -166,6 +166,39 @@ try {
         'key_fingerprint' => naapBackupKeyFingerprint($key),
     ], $verifyRoot, $key);
     backupTestAssert(($verified['manifest']['database']['tables'][0] ?? '') === 'fixture', 'Manifest verification failed.');
+
+    // Downloaded artifacts can be authenticated without any PDO/history record.
+    $download = $testRoot . DIRECTORY_SEPARATOR . 'downloaded backup (1).naapbak';
+    copy($manifestArtifact, $download);
+    $fromFile = naapBackupRecoverDownloadedFile($download, ['mode' => 'verify']);
+    backupTestAssert($fromFile['backupCode'] === 'BKP-TEST-MANIFEST', 'File recovery did not read its authenticated backup code.');
+    backupTestAssert($fromFile['status'] === 'verified', 'File recovery verification failed.');
+    backupTestAssert(hash_file('sha256', $download) === $encryption['artifact_sha256'], 'File recovery changed the download.');
+    backupTestAssert(count(glob($storageRoot . DIRECTORY_SEPARATOR . '.file-recovery' . DIRECTORY_SEPARATOR . '*') ?: []) === 0, 'File recovery leaked decrypted files.');
+    foreach ([$tamperedPath, $truncatedPath, $sourcePath, $testRoot . '/missing.naapbak'] as $badFile) {
+        backupTestExpectFailure(
+            static fn () => naapBackupRecoverDownloadedFile($badFile, ['mode' => 'verify']),
+            'File recovery accepted a corrupted, non-backup, or missing artifact.'
+        );
+    }
+    backupTestPutEnv('NAAP_BACKUP_ENCRYPTION_KEY', base64_encode(random_bytes(32)));
+    backupTestExpectFailure(
+        static fn () => naapBackupRecoverDownloadedFile($download, ['mode' => 'verify']),
+        'File recovery accepted the wrong key.'
+    );
+    backupTestPutEnv('NAAP_BACKUP_ENCRYPTION_KEY', $encodedKey);
+    backupTestExpectFailure(
+        static fn () => naapBackupRecoverDownloadedFile($download, ['mode' => 'production', 'confirm' => 'RESTORE-PRODUCTION:OTHER']),
+        'File recovery accepted confirmation for another backup.'
+    );
+    backupTestExpectFailure(
+        static fn () => naapBackupRecoverDownloadedFile($download, [
+            'mode' => 'production', 'confirm' => 'RESTORE-PRODUCTION:BKP-TEST-MANIFEST',
+            'expectedArtifactHash' => str_repeat('0', 64),
+        ]),
+        'Recovery accepted a file that did not match its review checksum.'
+    );
+    backupTestAssert(!naapBackupMaintenanceIsActive(), 'A rejected confirmation activated maintenance.');
 
     $failedExportPath = $workRoot . DIRECTORY_SEPARATOR . 'failed-export.sql';
     $unsupportedPdo = new PDO('sqlite::memory:');

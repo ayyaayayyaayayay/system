@@ -205,7 +205,7 @@ async function freePort() {
         assert.equal(state.activeSession, false);
         assert.equal(state.otpRequired, false);
         assert.equal(state.failedCount, 0);
-        assert.equal(state.trustedDevices, 0);
+        assert.equal(state.trustedDevices, 1, 'Completing recovery must remember only the browser that verified the OTP.');
         assert.equal(state.loginChallenges, 0);
         assert.equal(state.unusedTokens, 0);
         const reuse = await request({action:'resetPassword',token:verified.data.resetToken,newPassword:'AnotherPassword8'});
@@ -226,9 +226,152 @@ async function freePort() {
         assert.equal(deviceVerified.data.success, true);
         assert.equal(deviceVerified.data.role, 'professor', 'Device-verification OTP must retain its normal sign-in behavior.');
         assert.equal(deviceVerified.data.passwordResetRequired, undefined);
+
+        // A non-admin must not be asked for a second OTP after recovering on this browser.
+        await request({action:'logout'});
+        runPhp(`require 'api/db.php';
+            $pdo->exec('DELETE FROM authentication_rate_events');
+            $pdo->exec('UPDATE users SET active_session_token_hash = NULL, active_session_started_at = NULL, active_session_last_seen_at = NULL WHERE id = 2');`, httpEnv);
+        let recovery;
+        for (let attempt = 0; attempt < 3; attempt++) {
+            recovery = await request({action:'login',username:'DEVICE-2',password:'WrongPassword8'});
+        }
+        assert.equal(recovery.data.otpReason, 'failed_login');
+        const recoveryCode = messages.at(-1).match(/password recovery code is:\s*(\d{6})/i)[1];
+        const recovered = await request({action:'verifyOtp',username:'DEVICE-2',otpChallengeId:recovery.data.otpChallengeId,otpCode:recoveryCode});
+        assert.equal(recovered.data.passwordResetRequired, true);
+        const saved = await request({action:'resetPassword',token:recovered.data.resetToken,newPassword:'DeviceNewPass8'});
+        assert.equal(saved.status, 200);
+        const messageCount = messages.length;
+        const recoveredLogin = await request({action:'login',username:'DEVICE-2',password:'DeviceNewPass8'});
+        assert.equal(recoveredLogin.status, 200, 'The correct password after OTP recovery must sign in without reopening OTP.');
+        assert.equal(recoveredLogin.data.role, 'professor');
+        assert.equal(recoveredLogin.data.otpRequired, undefined);
+        assert.equal(messages.length, messageCount, 'The already verified browser must not receive another code.');
+        await request({action:'logout'});
+        const unverifiedBrowser = await request({action:'login',username:'DEVICE-2',password:'DeviceNewPass8'}, false);
+        assert.equal(unverifiedBrowser.data.otpReason, 'device_verification', 'Other browsers must still verify their device.');
+
+        runPhp(`require 'api/db.php'; require 'api/state_helpers.php';
+            ensureRoleLookupSeed($pdo);
+            $role = $pdo->query("SELECT id FROM roles WHERE code = 'osa'")->fetchColumn();
+            $pdo->prepare("INSERT INTO users (id, role_id, campus_id, name, email, password, status) VALUES (3, :role, 1, 'Admin Help Fixture', 'old-email@example.invalid', :password, 'active')")->execute([':role' => $role, ':password' => password_hash('HelpOriginal8', PASSWORD_BCRYPT)]);
+            $pdo->exec("INSERT INTO staff_profiles (user_id, employee_id) VALUES (3, 'HELP-3')");
+            $pdo->exec('DELETE FROM authentication_rate_events');`, httpEnv);
+        let helpAccount = {id:'u3', name:'Admin Help Fixture', email:'old-email@example.invalid', role:'osa', campus:'villamor', employeeId:'HELP-3', status:'active'};
+        function saveHelpAccount(patch, batch = false) {
+            const candidate = {...helpAccount, ...patch};
+            const encoded = Buffer.from(JSON.stringify(candidate)).toString('base64');
+            runPhp(`require 'api/db.php'; require 'api/state_helpers.php';
+                $user = json_decode(base64_decode('${encoded}'), true);
+                $options = ['activity_actor' => ['id' => 'u1', 'role' => 'admin'], 'activity_action' => 'User Updated'];
+                ${batch ? 'persistUsersSnapshotBatch($pdo, [$user], $options);' : 'updateUserSnapshot($pdo, 3, $user, $options);'}`, httpEnv);
+            delete candidate.password;
+            helpAccount = candidate;
+        }
+        function helpState() {
+            return JSON.parse(runPhp(`require 'api/db.php';
+                $row = $pdo->query('SELECT failed_password_count, failed_login_otp_required FROM user_auth_security WHERE user_id = 3')->fetch();
+                echo json_encode([
+                    'failedCount' => (int) $row['failed_password_count'], 'otpRequired' => (bool) $row['failed_login_otp_required'],
+                    'pendingChallenges' => (int) $pdo->query('SELECT COUNT(*) FROM login_otp_challenges WHERE user_id = 3 AND consumed_at IS NULL AND invalidated_at IS NULL')->fetchColumn(),
+                    'unusedTokens' => (int) $pdo->query('SELECT COUNT(*) FROM password_reset_tokens WHERE user_id = 3 AND used_at IS NULL')->fetchColumn()
+                ]);`, httpEnv));
+        }
+        async function lockHelpAccount() {
+            runPhp(`require 'api/db.php'; $pdo->exec('DELETE FROM authentication_rate_events');`, httpEnv);
+            let challenge;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                challenge = await request({action:'login',username:'HELP-3',password:'WrongPassword8'});
+            }
+            assert.equal(challenge.data.otpReason, 'failed_login');
+            return challenge;
+        }
+
+        // Expiration must not prevent an administrator from resetting the account.
+        const expired = await lockHelpAccount();
+        runPhp(`require 'api/db.php';
+            $pdo->exec('UPDATE login_otp_challenges SET expires_at = DATE_SUB(NOW(), INTERVAL 1 DAY) WHERE user_id = 3');
+            $pdo->exec("INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (3, REPEAT('c', 64), DATE_ADD(NOW(), INTERVAL 1 DAY))");`, httpEnv);
+        saveHelpAccount({password:'AdminReplace8'});
+        assert.deepEqual(helpState(), {failedCount:0, otpRequired:false, pendingChallenges:0, unusedTokens:0});
+        const stale = await request({action:'verifyOtp',username:'HELP-3',otpChallengeId:expired.data.otpChallengeId,otpCode:'123456'});
+        assert.equal(stale.data.otpChallengeEnded, true);
+        const afterAdminReset = await request({action:'login',username:'HELP-3',password:'AdminReplace8'});
+        assert.equal(afterAdminReset.data.otpReason, 'device_verification', 'An admin reset clears failed-login recovery while retaining new-device verification.');
+        const helpDeviceCode = messages.at(-1).match(/verification code is:\s*(\d{6})/i)[1];
+        const helpVerified = await request({action:'verifyOtp',username:'HELP-3',otpChallengeId:afterAdminReset.data.otpChallengeId,otpCode:helpDeviceCode});
+        assert.equal(helpVerified.data.role, 'osa');
+        await request({action:'logout'});
+
+        // Explicitly saving the same password is still an administrator recovery action.
+        runPhp(`require 'api/db.php'; $pdo->exec('UPDATE user_auth_security SET failed_password_count = 3, failed_login_otp_required = 1 WHERE user_id = 3');`, httpEnv);
+        saveHelpAccount({password:'AdminReplace8'});
+        assert.equal(helpState().otpRequired, false);
+        assert.equal(helpState().failedCount, 0);
+
+        // An email-only correction must replace codes and reset links sent to the old address.
+        const oldEmailChallenge = await lockHelpAccount();
+        const oldEmailCode = messages.at(-1).match(/password recovery code is:\s*(\d{6})/i)[1];
+        runPhp(`require 'api/db.php';
+            $pdo->exec("INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (3, REPEAT('d', 64), DATE_ADD(NOW(), INTERVAL 1 DAY))");`, httpEnv);
+        saveHelpAccount({email:'corrected-email@example.invalid'});
+        assert.deepEqual(helpState(), {failedCount:3, otpRequired:true, pendingChallenges:0, unusedTokens:0});
+        const oldEmailVerify = await request({action:'verifyOtp',username:'HELP-3',otpChallengeId:oldEmailChallenge.data.otpChallengeId,otpCode:oldEmailCode});
+        assert.equal(oldEmailVerify.data.otpChallengeEnded, true, 'A code sent to the previous email must no longer verify.');
+        const corrected = await request({action:'login',username:'HELP-3',password:'AdminReplace8'});
+        assert.equal(corrected.data.otpReason, 'failed_login');
+        assert.notEqual(corrected.data.otpChallengeId, oldEmailChallenge.data.otpChallengeId);
+        assert.match(messages.at(-1), /corrected-email@example\.invalid/, 'The replacement recovery code must be sent to the corrected address.');
+        const correctedCode = messages.at(-1).match(/password recovery code is:\s*(\d{6})/i)[1];
+        const correctedVerified = await request({action:'verifyOtp',username:'HELP-3',otpChallengeId:corrected.data.otpChallengeId,otpCode:correctedCode});
+        const correctedReset = await request({action:'resetPassword',token:correctedVerified.data.resetToken,newPassword:'CorrectedPass8'});
+        assert.equal(correctedReset.status, 200);
+        const correctedLogin = await request({action:'login',username:'HELP-3',password:'CorrectedPass8'});
+        assert.equal(correctedLogin.status, 200, 'Recovery after an admin email correction must not loop back to OTP.');
+        await request({action:'logout'});
+
+        // Bulk administration must apply the same recovery cleanup as individual edits.
+        await lockHelpAccount();
+        saveHelpAccount({password:'BulkReplace8', email:'bulk-email@example.invalid'}, true);
+        assert.deepEqual(helpState(), {failedCount:0, otpRequired:false, pendingChallenges:0, unusedTokens:0});
+
+        // Ordinary edits must preserve recovery, and a failed save must roll back cleanup.
+        await lockHelpAccount();
+        saveHelpAccount({name:'Admin Help Fixture Edited'});
+        const beforeFailedSave = helpState();
+        assert.equal(beforeFailedSave.otpRequired, true);
+        assert.equal(beforeFailedSave.pendingChallenges, 1);
+        assert.throws(() => saveHelpAccount({password:'RollbackPass8', email:'failed-save@example.invalid', employmentType:'invalid-type'}), /Employment type/);
+        assert.deepEqual(helpState(), beforeFailedSave, 'Failed profile validation must roll back password changes and OTP cleanup together.');
+        const unchanged = JSON.parse(runPhp(`require 'api/db.php';
+            $row = $pdo->query('SELECT email, password FROM users WHERE id = 3')->fetch();
+            echo json_encode(['email' => $row['email'], 'passwordWorks' => password_verify('BulkReplace8', $row['password'])]);`, httpEnv));
+        assert.deepEqual(unchanged, {email:'bulk-email@example.invalid', passwordWorks:true});
+
+        // Possessing a reset token and device cookie without the verifying session
+        // must not grant device trust to another browser.
+        runPhp(`require 'api/db.php';
+            $pdo->prepare("INSERT INTO users (id, role_id, campus_id, name, email, password, status) VALUES (4, 2, 1, 'Binding Fixture', 'binding@example.invalid', :password, 'active')")->execute([':password' => password_hash('BindingPass8', PASSWORD_BCRYPT)]);
+            $pdo->exec("INSERT INTO staff_profiles (user_id, employee_id) VALUES (4, 'BINDING-4')");
+            $pdo->exec('DELETE FROM authentication_rate_events');`, httpEnv);
+        let bindingChallenge;
+        for (let attempt = 0; attempt < 3; attempt++) {
+            bindingChallenge = await request({action:'login',username:'BINDING-4',password:'WrongPassword8'});
+        }
+        const bindingCode = messages.at(-1).match(/password recovery code is:\s*(\d{6})/i)[1];
+        const bindingVerified = await request({action:'verifyOtp',username:'BINDING-4',otpChallengeId:bindingChallenge.data.otpChallengeId,otpCode:bindingCode});
+        assert.equal(bindingVerified.data.passwordResetRequired, true);
+        const transferredReset = await fetch(url, {method:'POST', headers:{
+            'Content-Type':'application/json', Cookie:cookies.get('naap_trusted_device_4'),
+        }, body:JSON.stringify({action:'resetPassword',token:bindingVerified.data.resetToken,newPassword:'BindingNew8'})});
+        assert.equal(transferredReset.status, 200);
+        assert.equal(Number(runPhp(`require 'api/db.php'; echo $pdo->query('SELECT COUNT(*) FROM trusted_devices WHERE user_id = 4 AND revoked_at IS NULL')->fetchColumn();`, httpEnv)), 0, 'Device trust must require the original OTP-verifying session, matching token, and device cookie.');
+        const bindingLogin = await request({action:'login',username:'BINDING-4',password:'BindingNew8'});
+        assert.equal(bindingLogin.data.otpReason, 'device_verification');
         const audit = spawnSync(php, ['tests/audit_trail_test.php'], { cwd: root, env: httpEnv, encoding: 'utf8' });
         assert.equal(audit.status, 0, audit.stderr || audit.stdout);
-        console.log('Password recovery HTTP tests passed: Forgot Password reset links, third-failure OTP, verified OTP reset authorization, replay rejection, and normal device sign-in.');
+        console.log('Password recovery HTTP tests passed: reset links, OTP recovery without repeated verification, admin password/email corrections, bulk recovery cleanup, expired-code rejection, and new-device verification.');
         console.log(audit.stdout.trim());
     } finally {
         if (server && server.exitCode === null) { server.kill(); await new Promise(resolve => server.once('exit', resolve)); }

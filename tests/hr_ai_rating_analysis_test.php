@@ -36,6 +36,7 @@ function sanitizeExplainabilityText($value, $maxLength = 300)
 }
 
 require_once __DIR__ . '/../api/evaluation_bias_rules.php';
+require_once __DIR__ . '/../api/ai_comment_filter.php';
 
 function normalizeExplainabilitySourceLabel($value)
 {

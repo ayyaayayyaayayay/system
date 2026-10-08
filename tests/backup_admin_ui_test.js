@@ -12,8 +12,22 @@ function assert(condition, message) {
 assert(html.includes('id="backup-management-group"'), 'Backup management card is missing.');
 assert(html.includes('id="backup-history-body"'), 'Backup history table is missing.');
 assert(html.includes('id="backup-last-24-btn"'), 'Manual backup action is missing.');
-assert(html.includes('adminpanel.js?v=20261006cmo'), 'Admin backup JavaScript cache-buster is stale.');
-assert(html.includes('adminpanel.css?v=20261006a'), 'Admin backup CSS cache-buster is stale.');
+// These are the minimum asset versions containing the backup UI, not exact
+// versions: later releases must continue to pass this regression check.
+function assertAssetVersion(assetPath, minimumVersion, label) {
+    const baseUrl = 'http://localhost/system/html/';
+    const assetUrl = new URL(assetPath, baseUrl);
+    const references = Array.from(html.matchAll(/\b(?:src|href)=["']([^"']+)["']/g),
+        match => new URL(match[1], baseUrl));
+    const reference = references.find(url => url.pathname === assetUrl.pathname);
+    const version = reference && reference.searchParams.get('v');
+    assert(version && /^\d{8}[a-z0-9]*$/i.test(version)
+        && version.toLowerCase() >= minimumVersion.toLowerCase(),
+        `${label} cache-buster is missing or stale.`);
+}
+
+assertAssetVersion('../JsScrip/adminpanel.js', '20261006cmo', 'Admin backup JavaScript');
+assertAssetVersion('../css/adminpanel.css', '20261006a', 'Admin backup CSS');
 
 assert(script.includes("requestBackupApi('create'"), 'Manual backup button is not connected to the backend.');
 assert(script.includes("requestBackupApi('test'"), 'Restoration test action is not connected to the backend.');

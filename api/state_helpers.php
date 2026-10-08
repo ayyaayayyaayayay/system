@@ -452,6 +452,26 @@ function getDefaultEvalPeriods() {
     ];
 }
 
+function haveProfessorReportEvaluationPeriodsEnded(array $periods, ?DateTimeImmutable $today = null): bool
+{
+    $timezone = new DateTimeZone('Asia/Manila');
+    $todayYmd = ($today ?? getAuthoritativePhilippineDateTime())->setTimezone($timezone)->format('Y-m-d');
+    foreach (array_keys(getDefaultEvalPeriods()) as $type) {
+        $period = is_array($periods[$type] ?? null) ? $periods[$type] : [];
+        $startRaw = trim((string) ($period['start'] ?? ''));
+        $endRaw = trim((string) ($period['end'] ?? ''));
+        $start = DateTimeImmutable::createFromFormat('!Y-m-d', $startRaw, $timezone);
+        $end = DateTimeImmutable::createFromFormat('!Y-m-d', $endRaw, $timezone);
+        // A saved start date can be moved after an already passed close date.
+        // Report release follows the close date, as the dashboard's Closed status does.
+        if (!$start || !$end || $start->format('Y-m-d') !== $startRaw
+            || $end->format('Y-m-d') !== $endRaw || $todayYmd <= $endRaw) {
+            return false;
+        }
+    }
+    return true;
+}
+
 function isProfessorFacultyPaperLockedForEvaluationWindow($startValue, $endValue, ?DateTimeImmutable $today = null): bool
 {
     $timezone = new DateTimeZone('Asia/Manila');
@@ -2079,7 +2099,9 @@ function persistUsersSnapshot(PDO $pdo, array $users, array $options = []) {
                 false
             );
             $passwordValue = (string) $passwordResolution['storedPassword'];
-            $passwordChanged = !empty($passwordResolution['changed']);
+            $passwordProvided = (string) $passwordResolution['plainPassword'] !== '';
+            $emailChanged = $existingRecord
+                && normalizeLookupValue($existingRecord['email'] ?? '') !== normalizeLookupValue($email);
 
             $params = [
                 ':role_id' => $roleLookup[$roleCode],
@@ -2106,7 +2128,10 @@ function persistUsersSnapshot(PDO $pdo, array $users, array $options = []) {
                 continue;
             }
 
-            if ($existingRecord && ($passwordChanged || $params[':status'] !== 'active')) {
+            if ($emailChanged) {
+                invalidateUserRecoveryChallengesSnapshot($pdo, $userId);
+            }
+            if ($existingRecord && ($passwordProvided || $params[':status'] !== 'active')) {
                 revokeTrustedDevicesSnapshot($pdo, $userId);
                 if ($params[':status'] !== 'active') {
                     $clearSession = $pdo->prepare(
@@ -2377,6 +2402,9 @@ function persistUsersSnapshotBatch(PDO $pdo, array $users, array $options = []) 
             $passwordValue = (string) $passwordResolution['storedPassword'];
             $credentialPassword = (string) $passwordResolution['plainPassword'];
             $credentialSource = (string) $passwordResolution['source'];
+            $passwordProvided = $credentialPassword !== '';
+            $emailChanged = $existingRecord
+                && normalizeLookupValue($existingRecord['email'] ?? '') !== normalizeLookupValue($email);
 
             $params = [
                 ':role_id' => $roleLookup[$roleCode],
@@ -2410,14 +2438,19 @@ function persistUsersSnapshotBatch(PDO $pdo, array $users, array $options = []) 
                     throw new RuntimeException('User could not be saved.');
                 }
 
-                if ($existingRecord && $params[':status'] !== 'active') {
+                if ($emailChanged) {
+                    invalidateUserRecoveryChallengesSnapshot($pdo, $userId);
+                }
+                if ($existingRecord && ($passwordProvided || $params[':status'] !== 'active')) {
                     revokeTrustedDevicesSnapshot($pdo, $userId);
-                    $clearSession = $pdo->prepare(
-                        'UPDATE users SET active_session_token_hash = NULL,
-                         active_session_started_at = NULL, active_session_last_seen_at = NULL
-                         WHERE id = :id'
-                    );
-                    $clearSession->execute([':id' => $userId]);
+                    if ($params[':status'] !== 'active') {
+                        $clearSession = $pdo->prepare(
+                            'UPDATE users SET active_session_token_hash = NULL,
+                             active_session_started_at = NULL, active_session_last_seen_at = NULL
+                             WHERE id = :id'
+                        );
+                        $clearSession->execute([':id' => $userId]);
+                    }
                 }
 
                 $profileMaps = is_array($existingMaps['profileIdentity'] ?? null)
@@ -3099,7 +3132,32 @@ function addSemesterSnapshot(PDO $pdo, $value, $label, array $actorUser = []) {
     }
 }
 
+function validateEvalPeriods(array $periods): void {
+    foreach ($periods as $type => $period) {
+        if (!is_array($period)) {
+            throw new InvalidArgumentException('Invalid evaluation period.');
+        }
+        foreach (['start', 'end'] as $field) {
+            $value = $period[$field] ?? '';
+            if ($value === '') continue;
+            if (!is_string($value)) {
+                throw new InvalidArgumentException('Evaluation period dates must use YYYY-MM-DD format.');
+            }
+            $date = DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+            if (!$date || $date->format('Y-m-d') !== $value) {
+                throw new InvalidArgumentException('Evaluation period dates must be valid dates in YYYY-MM-DD format.');
+            }
+        }
+        $start = $period['start'] ?? '';
+        $end = $period['end'] ?? '';
+        if ($start !== '' && $end !== '' && $end < $start) {
+            throw new InvalidArgumentException('End date cannot be earlier than start date (' . $type . ').');
+        }
+    }
+}
+
 function persistEvalPeriods(PDO $pdo, array $periods, array $actorUser = []) {
+    validateEvalPeriods($periods);
     $beforePeriods = buildEvalPeriodsSnapshot($pdo);
     $pdo->beginTransaction();
     try {
@@ -10146,10 +10204,13 @@ function resolveFacultyReportAccessScopeRow(PDO $pdo, array $actorUser) {
 }
 
 function getFacultyReportAccessSnapshot(PDO $pdo, array $actorUser) {
+    $evaluationPeriodsComplete = bootstrapNormalizePlainToken($actorUser['role'] ?? '') !== 'professor'
+        || haveProfessorReportEvaluationPeriodsEnded(buildEvalPeriodsSnapshot($pdo));
     $scope = resolveFacultyReportAccessScopeRow($pdo, $actorUser);
     if (!$scope) {
         return [
             'enabled' => true,
+            'evaluationPeriodsComplete' => $evaluationPeriodsComplete,
             'departmentCode' => '',
             'updatedAt' => '',
         ];
@@ -10172,6 +10233,7 @@ function getFacultyReportAccessSnapshot(PDO $pdo, array $actorUser) {
 
     return [
         'enabled' => !$row || !empty($row['reports_enabled']),
+        'evaluationPeriodsComplete' => $evaluationPeriodsComplete,
         'departmentCode' => (string) ($scope['department_code'] ?? ''),
         'updatedAt' => $row ? (string) ($row['updated_at'] ?? '') : '',
     ];
@@ -10182,7 +10244,7 @@ function isProfessorFacultyReportAccessEnabled(PDO $pdo, array $actorUser) {
         return true;
     }
     $snapshot = getFacultyReportAccessSnapshot($pdo, $actorUser);
-    return !empty($snapshot['enabled']);
+    return !empty($snapshot['enabled']) && !empty($snapshot['evaluationPeriodsComplete']);
 }
 
 function persistDepartmentFacultyReportAccessSnapshot(PDO $pdo, array $deanUser, $enabled) {
@@ -15057,6 +15119,32 @@ function maskLoginSecurityEmail($email) {
     return $maskedLocal . '@' . $domain;
 }
 
+function invalidateUserRecoveryChallengesSnapshot(PDO $pdo, $userIdToken, $invalidatedAt = ''): void {
+    $userId = resolveStoredUserIdNumber($userIdToken);
+    if ($userId <= 0) {
+        return;
+    }
+    $timestamp = trim((string) $invalidatedAt);
+    if ($timestamp === '') {
+        $timestamp = getAuthoritativePhilippineDateTime()->format('Y-m-d H:i:s');
+    }
+    if (tableExistsInCurrentSchema($pdo, 'login_otp_challenges')) {
+        $invalidate = $pdo->prepare(
+            'UPDATE login_otp_challenges
+             SET invalidated_at = :invalidated_at
+             WHERE user_id = :user_id AND consumed_at IS NULL AND invalidated_at IS NULL'
+        );
+        $invalidate->execute([':invalidated_at' => $timestamp, ':user_id' => $userId]);
+    }
+    if (tableExistsInCurrentSchema($pdo, 'password_reset_tokens')) {
+        $invalidateTokens = $pdo->prepare(
+            'UPDATE password_reset_tokens SET used_at = :used_at
+             WHERE user_id = :user_id AND used_at IS NULL'
+        );
+        $invalidateTokens->execute([':used_at' => $timestamp, ':user_id' => $userId]);
+    }
+}
+
 function revokeTrustedDevicesSnapshot(PDO $pdo, $userIdToken, $revokedAt = '') {
     $userId = resolveStoredUserIdNumber($userIdToken);
     if ($userId <= 0 || !tableExistsInCurrentSchema($pdo, 'trusted_devices')) {
@@ -15080,14 +15168,7 @@ function revokeTrustedDevicesSnapshot(PDO $pdo, $userIdToken, $revokedAt = '') {
     ]);
     $revokedCount = $stmt->rowCount();
 
-    if (tableExistsInCurrentSchema($pdo, 'login_otp_challenges')) {
-        $invalidate = $pdo->prepare(
-            'UPDATE login_otp_challenges
-             SET invalidated_at = :invalidated_at
-             WHERE user_id = :user_id AND consumed_at IS NULL AND invalidated_at IS NULL'
-        );
-        $invalidate->execute([':invalidated_at' => $timestamp, ':user_id' => $userId]);
-    }
+    invalidateUserRecoveryChallengesSnapshot($pdo, $userId, $timestamp);
     if (tableExistsInCurrentSchema($pdo, 'user_auth_security')) {
         $clearFailures = $pdo->prepare(
             'UPDATE user_auth_security
@@ -17059,6 +17140,12 @@ function persistUserProfileImageBinary(PDO $pdo, $userId, $binaryData, $mimeType
     $normalizedMimeType = normalizeProfileImageMimeType($mimeType);
     if ($normalizedMimeType === '') {
         $normalizedMimeType = $inspected['mime'];
+    }
+
+    // Check before sending the BLOB: oversized packets can close the connection.
+    $packetLimit = (int) $pdo->query('SELECT @@SESSION.max_allowed_packet')->fetchColumn();
+    if ($packetLimit > 0 && strlen($imageBinary) + 1024 >= $packetLimit) {
+        throw new RuntimeException('This image is too large for the database to save. Please choose a smaller image.');
     }
 
     $stmt = $pdo->prepare(

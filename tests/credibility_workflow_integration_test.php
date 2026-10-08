@@ -108,7 +108,8 @@ try {
     $vpaaInput=buildProfessorAnalyticsAuthoritativePayload($db,['id'=>'u1','role'=>'vpaa'],$panelRequest);
     credAssert($hrInput['metrics']['averagesBySource']['student']===3.15 && $adminInput['metrics']['averagesBySource']['student']===3.15,'HR/Admin SET input formula changed.');
     credAssert($vpaaInput['metrics']['averagesBySource']['student']===3.13 && $vpaaInput['metrics']['overallRating']===3.2,'VPAA distribution/overall input formula changed.');
-    credAssert(count($hrInput['comments'])===8 && count($adminInput['comments'])===8 && count($vpaaInput['comments'])===8,'Every panel must retain repeated feedback from different evaluators.');
+    credAssert(count($hrInput['comments'])===6 && count($adminInput['comments'])===6 && count($vpaaInput['comments'])===6,'Every panel must exclude both copies of repeated feedback.');
+    credAssert(!str_contains(json_encode($hrInput),'Repeated accepted comment') && $hrInput['commentFilter']['excludedCount']===2,'Repeated comments entered authoritative AI inputs.');
     credAssert(!str_contains(json_encode($vpaaInput),'UNIQUE_'),'VPAA input leaked excluded comments.');
     $db->rollBack();
     // Exercise complete authoritative inputs above the old per-source/total limits.
@@ -124,8 +125,8 @@ try {
         $db->prepare('INSERT INTO evaluation_responses(evaluation_id,question_id,text_value,display_order) VALUES(3300,11,?,1)')->execute([$fullText.' QUALITATIVE_TAIL']);
         foreach ([$hr,['id'=>'u1','role'=>'admin'],['id'=>'u1','role'=>'vpaa']] as $actor) {
             $fullInput=buildProfessorAnalyticsAuthoritativePayload($db,$actor,$panelRequest);
-            credAssert(count($fullInput['comments'])===909,'Authoritative input lost comments above the old 240 limit for '.$actor['role'].': '.count($fullInput['comments']).' '.json_encode($fullInput['metrics']['countsBySource']));
-            credAssert($fullInput['metrics']['countsBySource']===['student'=>309,'professor'=>300,'supervisor'=>300],'Authoritative source counts do not represent all feedback.');
+            credAssert(count($fullInput['comments'])===9,'Authoritative input must exclude the 900 repeated comments for '.$actor['role'].': '.count($fullInput['comments']));
+            credAssert($fullInput['metrics']['countsBySource']===['student'=>9,'professor'=>0,'supervisor'=>0],'Authoritative source counts must describe non-repetitive feedback.');
             credAssert(in_array($fullText.' QUALITATIVE_TAIL',array_column($fullInput['comments'],'text'),true),'The full qualitative response was truncated.');
             credAssert(!str_contains(json_encode($fullInput),'UNIQUE_'),'Full-comment analytics leaked pending/rejected evidence.');
         }
@@ -295,6 +296,23 @@ try {
     $events=$db->query("SELECT event_code FROM activity_log WHERE event_code LIKE 'evaluation.credibility.%'")->fetchAll(PDO::FETCH_COLUMN);
     credAssert(in_array('evaluation.credibility.accept',$events,true) && in_array('evaluation.credibility.reject',$events,true) && in_array('evaluation.credibility.bulk_accept',$events,true),'Review audit events missing.');
     credAssert(in_array('evaluation.credibility.flagged',$events,true),'Automatic flag audit event missing.');
+    // A client sending only one copy cannot bypass repetition checks against SQL.
+    $sessions['professor']=credSession($db,2,'professor');
+    $repeatSentinel='REPETITIVE_PROVIDER_BLOCK_SENTINEL';
+    $insert->execute([350,37,$repeatSentinel,'AUTO_ACCEPTED',85]);
+    $insert->execute([351,38,$repeatSentinel,'AUTO_ACCEPTED',85]);
+    $summaryResponse=credHttp('summarizeFeedbackComments',['payload'=>[
+        'semesterId'=>'cred-test','comments'=>[['id'=>'browser-only-one-copy','text'=>$repeatSentinel]]
+    ]],$sessions['professor']);
+    credAssert($summaryResponse['status']===200 && $summaryResponse['body']['summary']['total']===0
+        && $summaryResponse['body']['summary']['excludedRepetitiveComments']===1,'SQL cohort repetition did not block the professor summary: '.$summaryResponse['raw']);
+    $db->exec("UPDATE evaluations SET general_comments='FLAGGED_SINGLE_PROVIDER_BLOCK_SENTINEL',
+        credibility_components=JSON_OBJECT('behaviorDetails',JSON_OBJECT('commentRepetitiveFlag',TRUE)) WHERE id=350");
+    $summaryResponse=credHttp('summarizeFeedbackComments',['payload'=>[
+        'semesterId'=>'cred-test','comments'=>[['id'=>'untrusted-client','text'=>'FLAGGED_SINGLE_PROVIDER_BLOCK_SENTINEL','commentRepetitiveFlag'=>false]]
+    ]],$sessions['professor']);
+    credAssert($summaryResponse['status']===200 && $summaryResponse['body']['summary']['total']===0
+        && $summaryResponse['body']['summary']['excludedRepetitiveComments']===1,'Client metadata bypassed the stored comment repetition flag: '.$summaryResponse['raw']);
     if (in_array('--browser', $argv, true)) {
         for ($id=200;$id<210;$id++) $insert->execute([$id,6+$id-200,'Browser review fixture','PENDING_HR_REVIEW',65]);
         $node=proc_open(['node',__DIR__.'/credibility_review_browser_test.js'],[0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']],$nodePipes,dirname(__DIR__));

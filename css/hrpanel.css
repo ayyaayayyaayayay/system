@@ -294,6 +294,10 @@ body {
     background: #ffffff;
 }
 
+.user-pagination:empty {
+    display: none;
+}
+
 .pagination-summary {
     color: #475569;
     font-size: 0.9rem;

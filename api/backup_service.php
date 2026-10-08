@@ -1489,8 +1489,18 @@ function naapBackupVerifyArtifact(array $run, string $workDir, ?string $key = nu
     if ($fingerprint !== '' && !hash_equals($fingerprint, naapBackupKeyFingerprint($key))) {
         throw naapBackupException('The configured backup key does not match this artifact.');
     }
+    return naapBackupVerifyArtifactFile($artifactPath, $workDir, $key, $run);
+}
+
+// Authenticated file verification can also run without database history.
+function naapBackupVerifyArtifactFile(string $artifactPath, string $workDir, string $key, array $run = []): array
+{
     $tarPath = $workDir . DIRECTORY_SEPARATOR . 'decrypted.tar';
-    $header = naapBackupDecryptArtifact($artifactPath, $tarPath, $key, (string) $run['backup_code']);
+    $header = naapBackupDecryptArtifact($artifactPath, $tarPath, $key, (string) ($run['backup_code'] ?? ''));
+    $backupCode = (string) ($header['backup_code'] ?? '');
+    if (preg_match('/^BKP-[A-Za-z0-9-]{1,60}$/', $backupCode) !== 1) {
+        throw naapBackupException('The authenticated backup code is invalid.');
+    }
     $extractRoot = naapBackupEnsureDirectory($workDir . DIRECTORY_SEPARATOR . 'extracted', $workDir);
     $tarEntries = naapBackupExtractTar($tarPath, $extractRoot);
     if (!isset($tarEntries['manifest.json'])) {
@@ -1501,7 +1511,7 @@ function naapBackupVerifyArtifact(array $run, string $workDir, ?string $key = nu
     if (!is_array($manifest)
         || (string) ($manifest['format'] ?? '') !== 'naap-encrypted-backup'
         || (int) ($manifest['format_version'] ?? 0) !== NAAP_BACKUP_FORMAT_VERSION
-        || !hash_equals((string) $run['backup_code'], (string) ($manifest['backup_code'] ?? ''))) {
+        || !hash_equals($backupCode, (string) ($manifest['backup_code'] ?? ''))) {
         throw naapBackupException('The backup manifest is invalid.');
     }
     $manifestHash = hash('sha256', $manifestRaw);
@@ -2430,20 +2440,44 @@ function naapBackupRestoreProduction(PDO $pdo, string $backupCode, array $actor 
     }
     $storageRoot = naapBackupGetStorageRoot(false);
     $lock = naapBackupAcquireOperationLock($storageRoot);
-    $workRoot = naapBackupEnsureDirectory($storageRoot . DIRECTORY_SEPARATOR . '.restore-production', $storageRoot);
-    $workDir = naapBackupEnsureDirectory($workRoot . DIRECTORY_SEPARATOR . strtolower($backupCode) . '-' . bin2hex(random_bytes(4)), $workRoot);
+    $workDir = '';
+    try {
+        $workRoot = naapBackupEnsureDirectory($storageRoot . DIRECTORY_SEPARATOR . '.restore-production', $storageRoot);
+        $workDir = naapBackupEnsureDirectory($workRoot . DIRECTORY_SEPARATOR . strtolower($backupCode) . '-' . bin2hex(random_bytes(4)), $workRoot);
+        $verified = naapBackupVerifyArtifact($run, $workDir);
+        return naapBackupApplyVerifiedProduction($pdo, $run, $verified, $storageRoot, $workDir, $actor, $preservedRuns);
+    } finally {
+        try {
+            if ($workDir !== '') naapBackupRemoveTree($workDir, $storageRoot);
+        } finally {
+            naapBackupReleaseOperationLock($lock);
+        }
+    }
+}
+
+// Callers authenticate the artifact and hold the operation lock before applying it.
+function naapBackupApplyVerifiedProduction(?PDO $pdo, array $run, array $verified, string $storageRoot, string $workDir, array $actor = [], array $preservedRuns = [], bool $invalidateSessions = false): array
+{
+    $backupCode = (string) $run['backup_code'];
     $maintenanceFile = '';
     $facultyStaging = '';
     $productionTouched = false;
     $restoreCompleted = false;
     try {
-        $verified = naapBackupVerifyArtifact($run, $workDir);
         $facultyRoot = naapFacultyPaperGetStorageRoot(true);
         $facultyStaging = naapBackupStageFacultyFiles($verified, $facultyRoot);
         $maintenanceFile = naapBackupCreateMaintenanceLock($storageRoot, $backupCode);
         $productionTouched = true;
-        naapBackupResetDatabase($pdo);
         $config = naapBackupDatabaseConfig();
+        if ($pdo === null) {
+            // Disaster recovery may start with the entire target database missing.
+            naapBackupOpenServerPdo()->exec(
+                'CREATE DATABASE IF NOT EXISTS ' . naapBackupQuoteIdentifier((string) $config['name'])
+                . ' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+            );
+            $pdo = naapBackupOpenDatabasePdo((string) $config['name']);
+        }
+        naapBackupResetDatabase($pdo);
         $method = (string) ($verified['manifest']['database']['export_method'] ?? 'pdo');
         if ($method === 'mysqldump') {
             naapBackupImportNative((string) $config['name'], $verified['database_path'], $workDir);
@@ -2453,6 +2487,7 @@ function naapBackupRestoreProduction(PDO $pdo, string $backupCode, array $actor 
         }
         $restoredPdo = naapBackupOpenDatabasePdo((string) $config['name']);
         $databaseVerification = naapBackupValidateRestoredDatabase($restoredPdo, $verified['manifest']);
+        naapBackupRequireSchema($restoredPdo);
         naapBackupPreserveRunAfterRestore($restoredPdo, $run);
         foreach ($preservedRuns as $preservedRun) {
             if (is_array($preservedRun) && ($preservedRun['backup_code'] ?? '') !== ($run['backup_code'] ?? '')) {
@@ -2466,8 +2501,11 @@ function naapBackupRestoreProduction(PDO $pdo, string $backupCode, array $actor 
             $restoredPdo,
             $actor,
             'Production Backup Restored',
-            'Production was deliberately restored from verified encrypted backup ' . $backupCode . ' using the guarded CLI workflow.'
+            'Production was deliberately restored from verified encrypted backup ' . $backupCode . ' using the guarded recovery workflow.'
         );
+        if ($invalidateSessions) {
+            $restoredPdo->exec('UPDATE users SET active_session_token_hash = NULL, active_session_started_at = NULL, active_session_last_seen_at = NULL');
+        }
         $restoreCompleted = true;
         return [
             'backupCode' => $backupCode,
@@ -2482,7 +2520,5 @@ function naapBackupRestoreProduction(PDO $pdo, string $backupCode, array $actor 
         if ($facultyStaging !== '' && is_dir($facultyStaging)) {
             naapBackupRemoveTree($facultyStaging, dirname($facultyStaging));
         }
-        naapBackupReleaseOperationLock($lock);
-        naapBackupRemoveTree($workDir, $storageRoot);
     }
 }

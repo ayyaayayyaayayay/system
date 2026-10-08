@@ -10478,12 +10478,46 @@ function setupEvalPeriods() {
         });
     }
 
+    function validatePeriod(type) {
+        const startEl = document.getElementById(type + '-start');
+        const endEl = document.getElementById(type + '-end');
+        if (!startEl || !endEl) return true;
+
+        startEl.max = endEl.value || '';
+        endEl.min = startEl.value || '';
+        const reversed = startEl.value && endEl.value && endEl.value < startEl.value;
+        endEl.setCustomValidity(reversed ? 'End date cannot be earlier than start date.' : '');
+        return startEl.validity.valid && endEl.validity.valid;
+    }
+
     loadEvalPeriods();
+    PERIOD_TYPES.forEach(type => {
+        const startEl = document.getElementById(type + '-start');
+        const endEl = document.getElementById(type + '-end');
+        validatePeriod(type);
+        [startEl, endEl].forEach(input => {
+            if (!input) return;
+            input.addEventListener('input', () => validatePeriod(type));
+            input.addEventListener('change', () => {
+                if (!validatePeriod(type)) endEl.reportValidity();
+            });
+        });
+    });
 
     // Wire up Save Evaluation Periods button
     const saveBtn = document.getElementById('save-eval-periods-btn');
     if (saveBtn) {
         saveBtn.addEventListener('click', () => {
+            for (const type of PERIOD_TYPES) {
+                if (!validatePeriod(type)) {
+                    const startEl = document.getElementById(type + '-start');
+                    const endEl = document.getElementById(type + '-end');
+                    const invalidEl = endEl && !endEl.validity.valid ? endEl : startEl;
+                    invalidEl.reportValidity();
+                    invalidEl.focus();
+                    return;
+                }
+            }
             const periods = {};
             PERIOD_TYPES.forEach(type => {
                 const startEl = document.getElementById(type + '-start');

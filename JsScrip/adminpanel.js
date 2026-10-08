@@ -6202,6 +6202,7 @@ function setupSecuritySettings() {
             downloadEncryptedBackup(backupId, button);
         }
     });
+    setupBackupUploadUI();
     backupManagementReady = true;
     loadBackupHistory();
 }
@@ -6218,7 +6219,7 @@ function getBackupSession() {
     return SharedData.getSession ? SharedData.getSession() : null;
 }
 
-async function requestBackupApi(action, payload = {}) {
+async function requestBackupApi(action, payload = {}, endpoint = 'backup_api.php') {
     let session = getBackupSession();
     if ((!session || !session.csrfToken) && SharedData.refreshSession) {
         await SharedData.refreshSession();
@@ -6226,14 +6227,15 @@ async function requestBackupApi(action, payload = {}) {
     }
     const csrfToken = String(session && session.csrfToken || '').trim();
     if (!csrfToken) throw new Error('Authentication token is not ready. Please refresh and sign in again.');
-    const response = await fetch(`../api/backup_api.php?action=${encodeURIComponent(action)}`, {
+    const multipart = payload instanceof FormData;
+    const response = await fetch(`../api/${endpoint}?action=${encodeURIComponent(action)}`, {
         method: 'POST',
         credentials: 'same-origin',
         headers: {
-            'Content-Type': 'application/json',
+            ...(multipart ? {} : { 'Content-Type': 'application/json' }),
             'X-CSRF-Token': csrfToken,
         },
-        body: JSON.stringify(payload || {}),
+        body: multipart ? payload : JSON.stringify(payload || {}),
     });
     const text = await response.text();
     let data = {};
@@ -6245,9 +6247,153 @@ async function requestBackupApi(action, payload = {}) {
     if (!response.ok || data.success !== true) {
         const error = new Error(String(data.error || text || `Backup request failed with status ${response.status}`));
         error.status = response.status;
+        error.reviewConsumed = data.reviewConsumed === true;
+        error.maintenanceMayRemainActive = data.maintenanceMayRemainActive === true;
         throw error;
     }
     return data;
+}
+
+function requestBackupUploadApi(action, payload = {}) {
+    return requestBackupApi(action, payload, 'backup_upload_api.php');
+}
+
+function setupBackupUploadUI() {
+    const fileInput = document.getElementById('backup-upload-file');
+    const uploadBtn = document.getElementById('backup-upload-btn');
+    const reviewEl = document.getElementById('backup-upload-review');
+    const ack = document.getElementById('backup-restore-ack');
+    const confirmation = document.getElementById('backup-restore-confirmation');
+    const restoreBtn = document.getElementById('backup-restore-btn');
+    const cancelBtn = document.getElementById('backup-upload-cancel-btn');
+    const feedback = document.getElementById('backup-upload-feedback');
+    const signIn = document.getElementById('backup-restore-signin');
+    if (!fileInput || !uploadBtn || !reviewEl || !ack || !confirmation || !restoreBtn || !cancelBtn || !feedback) return;
+    let review = null;
+    let busy = false;
+    let expired = false;
+    let expiryTimer = null;
+
+    const setFeedback = (message, type = '') => {
+        feedback.textContent = message;
+        feedback.className = 'system-health-feedback' + (type ? ' ' + type : '');
+    };
+    const refreshButtons = () => {
+        fileInput.disabled = busy;
+        uploadBtn.disabled = busy || !fileInput.files || !fileInput.files.length;
+        restoreBtn.disabled = busy || expired || !review || !ack.checked
+            || confirmation.value !== `RESTORE ${review.backupCode}`;
+        cancelBtn.disabled = busy;
+        ack.disabled = busy;
+        confirmation.disabled = busy;
+    };
+    const clearReview = () => {
+        if (expiryTimer) clearTimeout(expiryTimer);
+        expiryTimer = null;
+        review = null;
+        expired = false;
+        reviewEl.hidden = true;
+        ack.checked = false;
+        confirmation.value = '';
+        refreshButtons();
+    };
+    fileInput.addEventListener('change', () => {
+        clearReview();
+        if (signIn) signIn.hidden = true;
+        setFeedback('');
+    });
+    ack.addEventListener('change', refreshButtons);
+    confirmation.addEventListener('input', refreshButtons);
+    uploadBtn.addEventListener('click', async () => {
+        if (busy || backupOperationInFlight) return;
+        const file = fileInput.files && fileInput.files[0];
+        if (!file || !file.name.toLowerCase().endsWith('.naapbak') || !file.size) {
+            setFeedback('Select a non-empty .naapbak backup file.', 'error');
+            return;
+        }
+        clearReview();
+        busy = true;
+        backupOperationInFlight = true;
+        refreshButtons();
+        uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Verifying...';
+        setFeedback('Uploading, verifying the encryption, and testing restoration. Please keep this page open.');
+        try {
+            const form = new FormData();
+            form.append('backup', file);
+            const response = await requestBackupUploadApi('upload', form);
+            review = response.review;
+            if (!review || review.testStatus !== 'passed' || !review.token || !review.backupCode) {
+                throw new Error('The server did not confirm a verified backup and a successful restoration test.');
+            }
+            const setText = (id, text) => { const element = document.getElementById(id); if (element) element.textContent = text; };
+            setText('backup-upload-name', review.filename);
+            setText('backup-upload-code', review.backupCode);
+            setText('backup-upload-created', formatBackupTimestamp(review.createdAt));
+            setText('backup-upload-contents', `${review.tableCount} tables, ${review.fileCount} documents ? ${formatBackupBytes(review.sizeBytes)}`);
+            setText('backup-restore-phrase', `RESTORE ${review.backupCode}`);
+            reviewEl.hidden = false;
+            setFeedback('Backup verified. Restoration test passed. Review the details below before restoring.', 'success');
+            expiryTimer = setTimeout(() => {
+                expired = true;
+                refreshButtons();
+                setFeedback('The backup review expired. Upload the file again before restoring.', 'error');
+            }, (Number(review.expiresInSeconds) || 900) * 1000);
+        } catch (error) {
+            clearReview();
+            setFeedback(error.message || 'Backup upload failed.', 'error');
+        } finally {
+            busy = false;
+            backupOperationInFlight = false;
+            uploadBtn.innerHTML = '<i class="fas fa-upload" aria-hidden="true"></i> Upload & Verify';
+            refreshButtons();
+        }
+    });
+    cancelBtn.addEventListener('click', async () => {
+        if (busy || backupOperationInFlight) return;
+        busy = true;
+        backupOperationInFlight = true;
+        refreshButtons();
+        try {
+            await requestBackupUploadApi('cancel');
+            clearReview();
+            fileInput.value = '';
+            setFeedback('Uploaded backup removed.');
+        } catch (error) {
+            setFeedback(error.message || 'Could not cancel the upload.', 'error');
+        } finally {
+            busy = false;
+            backupOperationInFlight = false;
+            refreshButtons();
+        }
+    });
+    restoreBtn.addEventListener('click', async () => {
+        if (busy || backupOperationInFlight || expired || !review || !ack.checked
+            || confirmation.value !== `RESTORE ${review.backupCode}`) return;
+        busy = true;
+        backupOperationInFlight = true;
+        refreshButtons();
+        restoreBtn.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Restoring...';
+        setFeedback('Creating a safety backup and restoring your data. Keep this page open until restoration finishes.');
+        try {
+            await requestBackupUploadApi('restore', { token: review.token, acknowledged: ack.checked, confirmation: confirmation.value });
+            clearReview();
+            fileInput.value = '';
+            if (SharedData.clearSession) SharedData.clearSession({ localOnly: true });
+            if (signIn) signIn.hidden = false;
+            setFeedback('Backup restored successfully. A safety backup was saved. Sign in again to use the restored system.', 'success');
+        } catch (error) {
+            if (error.reviewConsumed) clearReview();
+            setFeedback(error.maintenanceMayRemainActive
+                ? 'Restoration stopped and the system remains in maintenance mode. Contact the server administrator to recover using the safety backup.'
+                : error.message || 'Restoration failed.', 'error');
+        } finally {
+            busy = false;
+            backupOperationInFlight = false;
+            restoreBtn.innerHTML = '<i class="fas fa-undo" aria-hidden="true"></i> Restore Backup';
+            refreshButtons();
+        }
+    });
+    refreshButtons();
 }
 
 function normalizeBackupBadgeStatus(backup) {
@@ -13433,12 +13579,46 @@ function setupEvalPeriods() {
         });
     }
 
+    function validatePeriod(type) {
+        const startEl = document.getElementById(type + '-start');
+        const endEl = document.getElementById(type + '-end');
+        if (!startEl || !endEl) return true;
+
+        startEl.max = endEl.value || '';
+        endEl.min = startEl.value || '';
+        const reversed = startEl.value && endEl.value && endEl.value < startEl.value;
+        endEl.setCustomValidity(reversed ? 'End date cannot be earlier than start date.' : '');
+        return startEl.validity.valid && endEl.validity.valid;
+    }
+
     loadEvalPeriods();
+    PERIOD_TYPES.forEach(type => {
+        const startEl = document.getElementById(type + '-start');
+        const endEl = document.getElementById(type + '-end');
+        validatePeriod(type);
+        [startEl, endEl].forEach(input => {
+            if (!input) return;
+            input.addEventListener('input', () => validatePeriod(type));
+            input.addEventListener('change', () => {
+                if (!validatePeriod(type)) endEl.reportValidity();
+            });
+        });
+    });
 
     // Wire up Save Evaluation Periods button
     const saveBtn = document.getElementById('save-eval-periods-btn');
     if (saveBtn) {
         saveBtn.addEventListener('click', () => {
+            for (const type of PERIOD_TYPES) {
+                if (!validatePeriod(type)) {
+                    const startEl = document.getElementById(type + '-start');
+                    const endEl = document.getElementById(type + '-end');
+                    const invalidEl = endEl && !endEl.validity.valid ? endEl : startEl;
+                    invalidEl.reportValidity();
+                    invalidEl.focus();
+                    return;
+                }
+            }
             const periods = {};
             PERIOD_TYPES.forEach(type => {
                 const startEl = document.getElementById(type + '-start');

@@ -1883,9 +1883,9 @@ async function handleActionButton(actionTitle) {
         const reportGate = resolveReportsGateState();
         if (reportGate.locked) {
             const unlockText = reportGate.endDate
-                ? formatDisplayDate(reportGate.endDate)
-                : 'after the Student to Professor evaluation end date is configured';
-            alert('Evaluation reports are not available yet. Reports will unlock on ' + unlockText + '.');
+                ? `The latest scheduled end date is ${formatDisplayDate(reportGate.endDate)}.`
+                : 'All evaluation period dates must be configured first.';
+            alert('Evaluation reports are available only after the student, peer, and supervisor evaluation periods have all ended. ' + unlockText);
             return;
         }
         switchView('reports');
@@ -2826,16 +2826,14 @@ async function renderProfessorFacultyPaperList() {
         const isSelected = professorPanelState.facultyPaper.selectedId === paper.id;
         const statusLabel = resolvePaperStatusLabel(paper.status);
         const recipient = sanitizePaperTextValueClient(paper.recipient_name || paper.recipient_dean_name || '');
-        const recipientRole = String(paper.recipient_role || '').trim().toLowerCase();
-        const recipientLabel = recipientRole === 'procoor' ? 'Recipient Coordinator' : 'Recipient Dean';
-        const recipientText = recipient || '-';
+        const recipientText = recipient || (String(paper.status || '').trim().toLowerCase() === 'draft' ? 'Assigned when sent' : '-');
         return `
             <tr data-paper-id="${escapeHTML(String(paper.id || ''))}" class="${isSelected ? 'faculty-paper-row-active' : ''}">
                 <td data-label="Paper ID">${escapeHTML(String(paper.id || 'N/A'))}</td>
                 <td data-label="Semester">${escapeHTML(String(paper.semester_label || 'N/A'))}</td>
                 <td data-label="Load">${escapeHTML(getFacultyPaperLoadTypeLabel(paper.load_type || paper.loadType))}</td>
                 <td data-label="Status">${escapeHTML(statusLabel)}</td>
-                <td data-label="${escapeHTML(recipientLabel)}">${escapeHTML(recipientText)}</td>
+                <td data-label="Supervisor">${escapeHTML(recipientText)}</td>
                 <td data-label="Updated">${escapeHTML(normalizePaperTimestamp(paper.updated_at))}</td>
                 <td data-label="Actions"><button type="button" class="btn-submit faculty-paper-open-btn" data-paper-open="${escapeHTML(String(paper.id || ''))}">Open</button></td>
             </tr>
@@ -2977,8 +2975,7 @@ function handleViewDetails(subject) {
  */
 function updateSummaryCards(overrideTotals) {
     let stats = overrideTotals || getFacultySummaryTotals();
-    const reportAccess = getProfessorFacultyReportAccessState();
-    if (reportAccess.enabled === false && SharedData && typeof SharedData.getProfessorEvaluationCounts === 'function') {
+    if (resolveReportsGateState().locked && SharedData && typeof SharedData.getProfessorEvaluationCounts === 'function') {
         const counts = SharedData.getProfessorEvaluationCounts() || {};
         stats = {
             received: Number(counts.received) || 0,
@@ -5092,21 +5089,26 @@ function parseDateBoundary(dateString, boundary) {
 }
 
 function resolveEvaluationWindowGateState() {
-    const studentPeriod = SharedData.getEvalPeriodDates('student-professor') || { start: '', end: '' };
-    const startDate = parseDateBoundary(studentPeriod.start, 'start');
-    const endDate = parseDateBoundary(studentPeriod.end, 'end');
-    const hasValidDates = !!(startDate && endDate);
+    const periods = ['student-professor', 'professor-professor', 'supervisor-professor'].map(type => (
+        SharedData.getEvalPeriodDates(type) || { start: '', end: '' }
+    ));
+    const hasValidDates = periods.every(period => {
+        const start = parseDateBoundary(period.start, 'start');
+        const end = parseDateBoundary(period.end, 'end');
+        const validDate = (raw, parsed) => parsed && /^\d{4}-\d{2}-\d{2}$/.test(String(raw || ''))
+            && new Date(parsed.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10) === raw;
+        // Report release follows the close date even if a saved start date is later.
+        return !!(validDate(period.start, start) && validDate(period.end, end));
+    });
     const todayYmd = SharedData.getCurrentPhilippineDateYmd();
-
-    const isPeriodOpen = hasValidDates && SharedData.isEvalPeriodOpen('student-professor');
-    const hasPeriodEnded = hasValidDates && todayYmd !== '' && todayYmd > String(studentPeriod.end || '');
-    const locked = !hasValidDates || isPeriodOpen || !hasPeriodEnded;
+    const hasPeriodEnded = hasValidDates && todayYmd !== ''
+        && periods.every(period => todayYmd > String(period.end));
 
     return {
-        locked,
+        locked: !hasPeriodEnded,
         hasValidDates,
-        startDate: studentPeriod.start || '',
-        endDate: studentPeriod.end || '',
+        startDate: hasValidDates ? periods.map(period => period.start).sort()[0] : '',
+        endDate: hasValidDates ? periods.map(period => period.end).sort().pop() : '',
     };
 }
 
@@ -5123,7 +5125,7 @@ function resolveReportsGateState() {
     const departmentRestricted = access.enabled === false;
     const accessPending = !professorReportAccessVerified;
     return Object.assign({}, periodGate, {
-        locked: periodGate.locked || departmentRestricted || accessPending,
+        locked: periodGate.locked || access.evaluationPeriodsComplete === false || departmentRestricted || accessPending,
         departmentRestricted,
         accessPending,
         departmentCode: String(access.departmentCode || '').trim(),
@@ -5177,12 +5179,13 @@ function refreshProfessorReportAccessState() {
         return professorReportAccessRefreshPromise;
     }
 
-    const previouslyEnabled = getProfessorFacultyReportAccessState().enabled !== false;
+    const previousAccess = getProfessorFacultyReportAccessState();
+    const previouslyEnabled = previousAccess.enabled !== false && previousAccess.evaluationPeriodsComplete !== false;
     professorReportAccessRefreshPromise = SharedData.refreshFacultyReportAccess()
         .then(async access => {
-            const currentlyEnabled = !access || access.enabled !== false;
+            const currentlyEnabled = !!access && access.enabled !== false && access.evaluationPeriodsComplete !== false;
             professorReportAccessVerified = true;
-            if (access && access.enabled === false) {
+            if (!currentlyEnabled) {
                 clearRestrictedProfessorReportData();
             }
             if (
@@ -5220,7 +5223,7 @@ function setFacultyPaperNavVisibility(locked) {
 function getFacultyPaperGateMessage() {
     const gate = resolveFacultyPaperGateState();
     const unlockText = gate.endDate ? formatDisplayDate(gate.endDate) : 'the configured close date';
-    return `Faculty Paper is unavailable while Student to Professor evaluation is still open. It will unlock after ${unlockText}.`;
+    return `Faculty Paper is unavailable until the student, peer, and supervisor evaluation periods have all ended. It will unlock after ${unlockText}.`;
 }
 
 function setDashboardReportActionVisibility(locked) {
@@ -5280,7 +5283,7 @@ function setupReportGateSync() {
 }
 
 /**
- * Apply report availability based on Student to Professor evaluation period
+ * Apply report availability after all evaluation periods have ended.
  */
 function applyReportBlackout() {
     const account = resolveActiveProfessorAccount(professorPanelState.context);
@@ -5318,7 +5321,7 @@ function applyReportBlackout() {
         contentEl.style.display = locked ? 'none' : 'block';
     }
 
-    if (gate.departmentRestricted) {
+    if (locked) {
         clearRestrictedProfessorReportData();
         const counts = SharedData && typeof SharedData.getProfessorEvaluationCounts === 'function'
             ? SharedData.getProfessorEvaluationCounts()

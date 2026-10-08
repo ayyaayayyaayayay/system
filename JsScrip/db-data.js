@@ -5052,6 +5052,7 @@ const SharedData = (() => {
         const source = value && typeof value === 'object' ? value : {};
         return {
             enabled: source.enabled !== false,
+            evaluationPeriodsComplete: source.evaluationPeriodsComplete !== false,
             departmentCode: String(source.departmentCode || '').trim(),
             updatedAt: String(source.updatedAt || '').trim(),
         };

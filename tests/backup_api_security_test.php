@@ -28,6 +28,14 @@ backupApiTestAssert(str_contains($scheduler, "naapBackupCreate(\$pdo, 'scheduled
 backupApiTestAssert(str_contains($scheduler, 'naapBackupRunRestoreTest'), 'Scheduler does not run restoration tests.');
 backupApiTestAssert(str_contains($restore, "'production'"), 'Production restore is missing its production flag.');
 backupApiTestAssert(str_contains($restore, "'RESTORE-PRODUCTION:'"), 'Production restore is missing exact confirmation.');
-backupApiTestAssert(!str_contains($api, 'naapBackupRestoreProduction'), 'A browser API can invoke production restoration.');
+backupApiTestAssert(!str_contains($api, 'naapBackupRestoreProduction'), 'The general backup API must not invoke production restoration.');
+
+$upload = (string) file_get_contents(__DIR__ . '/../api/backup_upload_api.php');
+$uploadService = (string) file_get_contents(__DIR__ . '/../api/backup_upload_service.php');
+backupApiTestAssert(str_contains($upload, 'requireNaapAuthenticatedSession($pdo, true)') && str_contains($upload, 'r.code AS role'), 'Upload recovery must verify the Admin role in the database.');
+backupApiTestAssert(str_contains($upload, 'requireNaapCsrfToken();'), 'Upload/restore API is missing CSRF enforcement.');
+backupApiTestAssert(str_contains($upload, "'RESTORE ' . \$code") && str_contains($upload, "['acknowledged']"), 'Browser restore lacks typed confirmation and acknowledgement.');
+backupApiTestAssert(str_contains($upload, 'expectedArtifactHash') && str_contains($uploadService, 'NAAP_BACKUP_UPLOAD_TTL'), 'Uploaded backup reviews must pin the artifact and expire.');
+backupApiTestAssert(!str_contains($upload, 'allowNoSafetyBackup') && str_contains($upload, 'invalidateSessions'), 'Browser restore must preserve safety backups and invalidate old sessions.');
 
 echo "Backup API authentication, Admin RBAC, CSRF, ticket, scheduler, and restore-guard contracts passed.\n";

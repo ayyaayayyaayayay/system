@@ -35,7 +35,8 @@ function requestGeminiGenerateContent($prompt, $key, $model, $timeout, $schema, 
 $comments = [];
 foreach (['Student to Professor','Professor to Professor','Supervisor to Professor'] as $label) {
     for ($i=0; $i<300; $i++) {
-        $comments[] = ['id'=>'feedback-' . count($comments), 'source'=>$label, 'text'=>"Helpful full feedback $label number $i. Tail evidence $i."];
+        $distinctWords = implode(' ', array_map(fn($part)=>'detail'.$part, str_split(hash('sha256', $label.'|'.$i), 4)));
+        $comments[] = ['id'=>'feedback-' . count($comments), 'source'=>$label, 'text'=>"Helpful full feedback $label number $i. Tail evidence $i. $distinctWords"];
     }
 }
 $longComment = str_repeat('Malinaw ang pagtuturo. ', 80) . '完整反馈 telescope-tail-evidence';
@@ -46,9 +47,10 @@ foreach (['Student to Professor','Student to Professor','Professor to Professor'
 $payload = ['professor'=>['id'=>'u42','name'=>'Fixture Professor','semester'=>'all'], 'comments'=>$comments,
     'metrics'=>['averagesBySource'=>['student'=>4,'professor'=>4,'supervisor'=>4],'totalEvaluations'=>900]];
 $normalized = normalizeExplainabilityPayload($payload);
-allCommentsAssert(count($normalized['comments']) === 904, 'Normalization still limits the comment count.');
+allCommentsAssert(count($normalized['comments']) === 901, 'Unique comments must remain above the old count limit; all repeated copies must be excluded.');
+allCommentsAssert($normalized['commentFilter']['excludedCount'] === 3, 'Expected all three repeated feedback entries to be excluded.');
 allCommentsAssert($normalized['comments'][900]['text'] === $longComment, 'Long or Unicode feedback was truncated.');
-allCommentsAssert($normalized['metrics']['countsBySource'] === ['student'=>303,'professor'=>301,'supervisor'=>300], 'Source counts must include every response and preserve supervisors.');
+allCommentsAssert($normalized['metrics']['countsBySource'] === ['student'=>301,'professor'=>300,'supervisor'=>300], 'Source counts must describe eligible comment evidence and preserve unique supervisors.');
 allCommentsAssert(normalizeExplainabilitySourceLabel('Admin to Professor') === 'Supervisor to Professor', 'Admin feedback must use the supervisor source.');
 allCommentsAssert(collectProfessorAnalyticsCommentTexts([
     'qualitative'=>['q1'=>'Repeated answer','q2'=>'Repeated answer'],
@@ -71,14 +73,13 @@ foreach ($normalized['comments'] as $row) {
 ksort($represented);
 ksort($original);
 allCommentsAssert($represented === $original, 'Prompt compression must exactly represent every comment and its frequency.');
-allCommentsAssert(array_sum($represented) === 904, 'Prompt still samples or discards comments.');
-allCommentsAssert($input['totalComments'] === 904, 'The prompt must expose the full dataset size.');
-allCommentsAssert($represented['Student to Professor|The same helpful feedback.'] === 2, 'Matching feedback from two evaluators lost its frequency.');
-allCommentsAssert($represented['Professor to Professor|The same helpful feedback.'] === 1, 'Compression mixed different sources.');
+allCommentsAssert(array_sum($represented) === 901, 'Prompt must retain all non-repetitive comments.');
+allCommentsAssert($input['totalComments'] === 901, 'The prompt must expose its filtered dataset size.');
+allCommentsAssert(!str_contains(json_encode($represented),'The same helpful feedback.'), 'Repeated feedback reached the outgoing model input.');
 
 $repeated = array_fill(0, 1000, ['source'=>'Student to Professor','text'=>str_repeat('Helpful complete feedback. ', 12)]);
 $compressed = buildExplainabilityGeminiCommentSet($repeated);
-allCommentsAssert(count($compressed) === 1 && $compressed[0]['occurrences'] === 1000, 'Repeated feedback was not compressed with its full frequency.');
+allCommentsAssert(count($compressed) === 0, 'Repeated feedback must be excluded rather than compressed and sent.');
 allCommentsAssert(strlen(json_encode($compressed)) < strlen(json_encode($repeated))/100, 'Prompt compression did not meaningfully reduce repeated input.');
 
 $db = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC]);
@@ -88,7 +89,8 @@ putenv('NAAP_OPENAI_API_KEY=fixture-key-no-network');
 try {
     $first = analyzeEvaluationExplainabilitySnapshot($db, $payload);
     allCommentsAssert(count($requests) === 1 && empty($first['cached']), 'The first analysis must execute the AI request.');
-    allCommentsAssert($first['insight']['stats']['totalComments'] === 904, 'Result totals still omit feedback.');
+    allCommentsAssert($first['insight']['stats']['totalComments'] === 901 && $first['insight']['stats']['excludedRepetitiveComments'] === 3, 'Result totals must disclose the filtered comment evidence.');
+    allCommentsAssert(!str_contains($requests[0], 'The same helpful feedback.'), 'Repeated text leaked into an AI provider request.');
     allCommentsAssert(str_contains($requests[0], 'telescope-tail-evidence'), 'The model input lost evidence beyond the old length limit.');
     $second = analyzeEvaluationExplainabilitySnapshot($db, $payload);
     allCommentsAssert(count($requests) === 1 && $second['cached'] === true, 'Identical evidence must reuse its existing AI result.');
@@ -108,7 +110,7 @@ try {
 
     $disabled = analyzeEvaluationExplainabilitySnapshot($db, $changed, false);
     allCommentsAssert($disabled['source'] === 'rule' && count($requests) === 4, 'Disabling panel AI must bypass remote results and the AI cache.');
-    allCommentsAssert($disabled['insight']['stats']['totalComments'] === 903, 'Rule fallback must analyze the full current dataset.');
+    allCommentsAssert($disabled['insight']['stats']['totalComments'] === 901, 'Rule fallback must analyze the full non-repetitive dataset.');
 
     $config = getGeminiRawConfig($db, true);
     $identity = buildExplainabilityCacheIdentity(normalizeExplainabilityPayload($changed), $config);
@@ -128,7 +130,7 @@ try {
     $failAi = true;
     $changed['comments'][0]['text'] = 'Changed feedback for failed provider request.';
     $fallback = analyzeEvaluationExplainabilitySnapshot($db, $changed);
-    allCommentsAssert($fallback['source'] === 'rule' && $fallback['insight']['stats']['totalComments'] === 903, 'A provider failure must retain all-comment rule analysis.');
+    allCommentsAssert($fallback['source'] === 'rule' && $fallback['insight']['stats']['totalComments'] === 901, 'A provider failure must retain non-repetitive rule analysis.');
     $failAi = false;
     analyzeEvaluationExplainabilitySnapshot($db, $changed);
     allCommentsAssert(count($requests) === 7, 'Failed AI requests must not be cached as successful analyses.');
@@ -136,4 +138,4 @@ try {
     putenv($oldKey === false ? 'NAAP_OPENAI_API_KEY' : 'NAAP_OPENAI_API_KEY=' . $oldKey);
 }
 
-echo "All-comment AI analytics, source coverage, lossless compression, and cache tests passed.\n";
+echo "Filtered AI analytics, complete unique source coverage, outgoing request exclusion, and cache tests passed.\n";

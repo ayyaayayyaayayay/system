@@ -10,7 +10,7 @@
     <title>Admin Panel - National Aviation Academy of the Philippines</title>
     <link rel="stylesheet" href="../css/hrpanel.css?v=20260904c">
     <link rel="stylesheet" href="../css/panel-theme.css?v=20260907a">
-    <link rel="stylesheet" href="../css/adminpanel.css?v=20261007a">
+    <link rel="stylesheet" href="../css/adminpanel.css?v=20261008backup">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -824,8 +824,8 @@
                         <div class="settings-group backup-management-group" id="backup-management-group">
                             <div class="backup-management-header">
                                 <div>
-                                    <h3><i class="fas fa-database"></i> Encrypted Backup &amp; Restoration Testing</h3>
-                                    <p class="backup-management-description">Create verified full backups of MySQL data and persistent faculty documents. Production restoration is CLI-only.</p>
+                                    <h3><i class="fas fa-database"></i> Encrypted Backup &amp; Restore</h3>
+                                    <p class="backup-management-description">Create verified backups of your database and faculty documents, or restore a downloaded backup.</p>
                                 </div>
                                 <span class="system-health-status-badge not-run" id="backup-latest-status">Not Run</span>
                             </div>
@@ -861,6 +861,36 @@
                                     <i class="fas fa-lock"></i> Run Encrypted Backup
                                 </button>
                                 <div class="system-health-feedback" id="backup-feedback" aria-live="polite"></div>
+                            </div>
+                            <div class="backup-upload-panel" id="backup-upload-panel">
+                                <h4><i class="fas fa-file-upload" aria-hidden="true"></i> Upload &amp; Restore Backup</h4>
+                                <p>Select a downloaded .naapbak file. It will be verified and tested before you can restore it, using the original encryption key configured on this server.</p>
+                                <label for="backup-upload-file">Backup file</label>
+                                <div class="backup-upload-controls">
+                                    <input type="file" id="backup-upload-file" accept=".naapbak" aria-describedby="backup-upload-feedback">
+                                    <button class="btn-save" id="backup-upload-btn" type="button" disabled><i class="fas fa-upload" aria-hidden="true"></i> Upload &amp; Verify</button>
+                                </div>
+                                <div class="system-health-feedback" id="backup-upload-feedback" role="status" aria-live="polite"></div>
+                                <div class="backup-upload-review" id="backup-upload-review" hidden>
+                                    <h4>Verified backup</h4>
+                                    <dl class="backup-upload-details">
+                                        <div><dt>File</dt><dd id="backup-upload-name"></dd></div>
+                                        <div><dt>Backup ID</dt><dd id="backup-upload-code"></dd></div>
+                                        <div><dt>Created</dt><dd id="backup-upload-created"></dd></div>
+                                        <div><dt>Contents</dt><dd id="backup-upload-contents"></dd></div>
+                                    </dl>
+                                    <p class="backup-restore-notice">Restoring replaces the current database and faculty documents with this backup. A safety backup is created first. All users will need to sign in again afterward.</p>
+                                    <label class="backup-restore-ack"><input type="checkbox" id="backup-restore-ack"> <span>I understand that the current data and documents will be replaced.</span></label>
+                                    <label for="backup-restore-confirmation">Type <strong id="backup-restore-phrase"></strong> to confirm:</label>
+                                    <input type="text" id="backup-restore-confirmation" autocomplete="off" spellcheck="false">
+                                    <div class="backup-upload-actions">
+                                        <button class="backup-restore-button" id="backup-restore-btn" type="button" disabled><i class="fas fa-undo" aria-hidden="true"></i> Restore Backup</button>
+                                        <button class="backup-cancel-button" id="backup-upload-cancel-btn" type="button">Cancel</button>
+                                    </div>
+                                    <small>The verified upload expires after 15 minutes.</small>
+                                </div>
+                                <a class="backup-signin-link" id="backup-restore-signin" href="mainpage.html" hidden>Sign in to the restored system</a>
+                                <small class="backup-upload-help">If database loss prevents you from signing in, use the server recovery tool.</small>
                             </div>
                             <div class="system-health-table-wrap backup-history-wrap">
                                 <h4>Backup History</h4>
@@ -2415,7 +2445,7 @@
     <script src="../JsScrip/system-report.js?v=20260907a"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
     <script src="../JsScrip/vendor/xlsx.full.min.js?v=0.20.3"></script>
-    <script src="../JsScrip/adminpanel.js?v=20261006cmo&email=20261007a&termYears=20261007a&userFilters=20261007b&activation=20261007a"></script>
+    <script src="../JsScrip/adminpanel.js?v=20261008backup&email=20261007a&termYears=20261007a&userFilters=20261007b&activation=20261007a"></script>
 </body>
 
 </html>

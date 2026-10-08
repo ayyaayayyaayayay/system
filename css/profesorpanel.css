@@ -1712,6 +1712,11 @@ body {
     height: 240px;
 }
 
+/* Fit the canvas to this shorter chart instead of the shared 260px minimum. */
+.professor-panel .semestral-trend-chart-container canvas {
+    min-height: 0;
+}
+
 .avg-score {
     color: var(--primary-color);
     font-weight: 700;

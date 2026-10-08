@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/evaluation_bias_rules.php';
+require_once __DIR__ . '/ai_comment_filter.php';
 
 const EVALUATION_CREDIBILITY_THRESHOLD = 70;
 const EVALUATION_ANALYTICS_STATUSES = ['AUTO_ACCEPTED', 'ACCEPTED_BY_HR'];
@@ -219,18 +220,18 @@ function persistEvaluationCredibility(PDO $pdo, int $id, string $semester): void
         if (function_exists('classifyBiasCommentsWithGeminiBatch')) {
             $config = getGeminiRawConfig($pdo, isOpenAiEnabledForPanelRole($pdo, 'hr'));
             if (trim((string) ($config['apiKey'] ?? '')) !== '') {
-                $items = [];
-                foreach (array_merge([$e['comments'] ?? ''], array_values($e['qualitative'] ?? [])) as $text) {
-                    if (trim((string) $text) !== '') $items[] = ['id'=>(string) count($items), 'comment'=>normalizeBiasDetectionText($text)];
-                }
+                $originalItems = buildAiCommentItemsFromEvaluations([$e]);
+                $filtered = filterAiCommentItems($originalItems, buildAiCommentItemsFromEvaluations($cohort));
+                $items = array_map(fn($item)=>['id'=>$item['id'],'comment'=>normalizeBiasDetectionText($item['text'])], $filtered['items']);
+                $response = ['items'=>[]];
                 if ($items) {
                     $response = classifyBiasCommentsWithGeminiBatch($items, $config['apiKey'], $config['model'], max(30000, min(60000, (int) ($config['timeoutMs'] ?? 30000))));
-                    foreach ($items as $item) {
-                        $classified = $response['items'][$item['id']] ?? null;
-                        $biasClassifications[] = is_array($classified)
-                            ? ['label'=>normalizeBiasLabel($classified['label'] ?? ''), 'reason'=>normalizeBiasDetectionText($classified['reason'] ?? ''), 'source'=>'openai']
-                            : classifyBiasCommentByRules($item['comment']);
-                    }
+                }
+                foreach ($originalItems as $item) {
+                    $classified = $response['items'][$item['id']] ?? null;
+                    $biasClassifications[] = is_array($classified)
+                        ? ['label'=>normalizeBiasLabel($classified['label'] ?? ''), 'reason'=>normalizeBiasDetectionText($classified['reason'] ?? ''), 'source'=>'openai']
+                        : classifyBiasCommentByRules($item['text']);
                 }
             }
         }
@@ -349,7 +350,7 @@ function buildProfessorAnalyticsEligibleEvaluations(PDO $pdo, array $actor, stri
     $id = resolveStoredUserIdNumber($professor);
     if ($id <= 0) throw new InvalidArgumentException('Professor reference required.');
     campusAuthorizationAssertResourceAccess($pdo, buildCampusAuthorizationContext($pdo, $actor), 'user', $id, 'professor-analytics');
-    $filters = ['evaluateeUserId'=>$id, 'semesterId'=>$semester, 'analyticsEligible'=>true];
+    $filters = ['evaluateeUserId'=>$id, 'semesterId'=>$semester, 'analyticsEligible'=>true, '_includeBehaviorMeta'=>true];
     $rows = buildEvaluationsSnapshotWithLegacy($pdo, $filters, $filters);
     return array_values(array_filter($rows, fn($e) => isEvaluationEligibleForAnalytics($e)
         && resolveStoredUserIdNumber($e['targetProfessorId'] ?? $e['evaluateeUserId'] ?? '') === $id));
@@ -402,7 +403,7 @@ function buildProfessorAnalyticsAuthoritativePayload(PDO $pdo, array $actor, arr
     $comments = [];
     $evaluationCounts = ['student'=>0,'professor'=>0,'supervisor'=>0];
     $distributionScores = ['student'=>[],'professor'=>[],'supervisor'=>[]]; $allRatings = [];
-    // Every nonempty response contributes, including matching feedback from different evaluators.
+    // Ratings retain every eligible evaluation. Comment evidence is filtered separately.
     foreach (['student','peer','supervisor'] as $type) foreach ($evaluations as $e) {
         if (credibilityEvaluationType($e) !== $type) continue;
         $source = $type === 'peer' ? 'professor' : $type;
@@ -420,8 +421,16 @@ function buildProfessorAnalyticsAuthoritativePayload(PDO $pdo, array $actor, arr
             $text = trim((string) $text); if ($text === '') continue;
             $counts[$source]++;
             $text = preg_replace('/\s+/', ' ', $text);
-            $comments[] = ['id'=>$professorId . '_' . (count($comments)+1), 'source'=>['student'=>'Student to Professor','professor'=>'Professor to Professor','supervisor'=>'Supervisor to Professor'][$source], 'text'=>$text];
+            $comments[] = ['id'=>$professorId . '_' . (count($comments)+1), 'source'=>['student'=>'Student to Professor','professor'=>'Professor to Professor','supervisor'=>'Supervisor to Professor'][$source], 'text'=>$text,
+                'commentRepetitiveFlag'=>aiCommentRepetitionFlag($e)];
         }
+    }
+    $commentFilter = filterAiCommentItems($comments);
+    $comments = $commentFilter['items'];
+    $counts = ['student'=>0, 'professor'=>0, 'supervisor'=>0];
+    foreach ($comments as $comment) {
+        $source = ['Student to Professor'=>'student','Professor to Professor'=>'professor','Supervisor to Professor'=>'supervisor'][$comment['source']];
+        $counts[$source]++;
     }
     foreach ($ratings as $key=>$values) if ($values) $averages[$key] = round(array_sum($values)/count($values),2);
     if ($panelRole === 'vpaa') foreach ($distributionScores as $key=>$values) $averages[$key] = $values ? round(array_sum($values)/count($values),2) : null;
@@ -450,7 +459,8 @@ function buildProfessorAnalyticsAuthoritativePayload(PDO $pdo, array $actor, arr
     $responseRate = $totalRaters ? round($totalEvaluated/$totalRaters*100,$panelRole==='vpaa' ? 0 : 2) : ($panelRole==='vpaa' ? 0 : null);
     if ($responseRate !== null && $responseRate > 100) $responseRate = null;
     return ['professor'=>['id'=>$professorId,'name'=>$professor['name'],'semester'=>$semester], 'semesterId'=>$semester,
-        'comments'=>$comments, 'metrics'=>['overallRating'=>$overall, 'combinedAverage'=>$combined,
+        'comments'=>$comments, 'commentFilter'=>['excludedCount'=>$commentFilter['excludedCount'],'version'=>$commentFilter['version']],
+        'metrics'=>['overallRating'=>$overall, 'combinedAverage'=>$combined,
             'responseRate'=>$responseRate, 'totalEvaluations'=>$totalEvaluated,
             'averagesBySource'=>$averages,'countsBySource'=>$counts]];
 }
