@@ -98,6 +98,53 @@ try {
     // An empty accepted SQL result still must not activate a stale JSON copy.
     setSettingJson($db,'sharedEvaluations',$copies);
     reportMysqlAssert(facultyReportFetchStudentEvaluationsForOfferings($db,$professor,'u2','report-test',[101]) === [], 'Empty accepted SQL results resurrected an excluded legacy duplicate.');
+
+    // A coordinator submission must refresh an already-created draft's SAF.
+    $db->exec("INSERT INTO roles(id,code,label) VALUES(5,'procoor','Program Coordinator')");
+    $db->exec("INSERT INTO users(id,role_id,campus_id,department_id,name,email,password) VALUES(20,5,1,1,'Coordinator Fixture','coordinator@example.invalid','unused-test-credential')");
+    $db->exec("INSERT INTO staff_profiles(user_id,employee_id,program_id) VALUES(20,'COORD-FIXTURE',1)");
+    $db->exec("UPDATE evaluations SET credibility_status='PENDING_HR_REVIEW' WHERE evaluation_type_id=3");
+    $draft = ['id'=>'DRAFT-SAF','professor_user_id'=>'u2','semester_id'=>'report-test','status'=>'draft','set_rating'=>'66.10','saf_rating'=>'N/A','section_c_areas'=>'Professor written recommendation'];
+    reportMysqlAssert(facultyReportRefreshDraftPaperSefRatings($db,[$draft])[0]['saf_rating'] === 'N/A', 'Pending supervisor inputs must remain excluded.');
+    $db->exec("INSERT INTO evaluations(id,semester_id,questionnaire_id,evaluation_type_id,evaluator_user_id,evaluatee_user_id,status,credibility_status) VALUES(50,1,3,3,20,2,'submitted','AUTO_ACCEPTED')");
+    $db->exec('INSERT INTO evaluation_responses(evaluation_id,question_id,rating_value,display_order) VALUES(50,31,4,1)');
+    $coordinatorInputs = facultyReportFetchSupervisorEvaluationsForProfessor($db,$professor,'report-test');
+    reportMysqlAssert(count($coordinatorInputs) === 1 && $coordinatorInputs[0]['evaluatorRole'] === 'procoor', 'Coordinator submission is missing from supervisor inputs.');
+    reportMysqlAssert(facultyReportBuildFacultyPaperSefRating($db,'u2','report-test') === '80.00', 'Coordinator rating is missing from SAF.');
+    $refreshed = facultyReportRefreshDraftPaperSefRatings($db,[$draft, array_replace($draft,['id'=>'SENT-SAF','status'=>'sent','saf_rating'=>'70.00']), array_replace($draft,['id'=>'COMPLETED-SAF','status'=>'completed','saf_rating'=>'75.00'])]);
+    reportMysqlAssert($refreshed[0]['saf_rating'] === '80.00', 'Existing draft kept the stale N/A SAF.');
+    reportMysqlAssert(array_replace($refreshed[0],['saf_rating'=>'N/A']) === $draft, 'Refreshing SAF changed unrelated draft content.');
+    reportMysqlAssert($refreshed[1]['saf_rating'] === '70.00' && $refreshed[2]['saf_rating'] === '75.00', 'Submitted SAF snapshots were rewritten.');
+    $db->exec("INSERT INTO semesters(id,slug,label,academic_year,is_current) VALUES(2,'other-test','Other Semester','2025-2026',0)");
+    reportMysqlAssert(facultyReportRefreshDraftPaperSefRatings($db,[array_replace($draft,['semester_id'=>'other-test'])])[0]['saf_rating'] === 'N/A', 'Draft pulled a coordinator rating from another semester.');
+    reportMysqlAssert(facultyReportRefreshDraftPaperSefRatings($db,[array_replace($draft,['professor_user_id'=>'u3'])])[0]['saf_rating'] === 'N/A', 'Draft pulled another faculty member\'s coordinator rating.');
+    // Excess-load drafts must refresh from their own classes, independently of main load.
+    $db->exec("INSERT INTO course_offerings(id,subject_id,semester_id,professor_id,section_name,load_type) VALUES(102,1,1,2,'EXCESS-A','excess'),(103,1,1,2,'EXCESS-B','excess')");
+    $db->exec("INSERT INTO student_course_enrollments(student_id,course_offering_id,status) VALUES(11,102,'enrolled'),(12,102,'completed')");
+    $legacyExcess = array_replace($historical,['id'=>'legacy-excess-only','studentUserId'=>'u11','courseOfferingId'=>'102','campusConsistent'=>true]);
+    setSettingJson($db,'sharedEvaluations',[$legacyExcess]);
+    $db->exec("UPDATE evaluations SET credibility_status='AUTO_ACCEPTED' WHERE id=11");
+    reportMysqlAssert(facultyReportBuildFacultyPaperSetRating($db,'u2','report-test','excess') === '80.00', 'Main-load SQL evaluations suppressed legacy-only excess-load ratings.');
+    $db->exec("UPDATE evaluations SET credibility_status='PENDING_HR_REVIEW' WHERE id=11");
+    setSettingJson($db,'sharedEvaluations',[]);
+    $db->exec("INSERT INTO evaluations(id,semester_id,questionnaire_id,evaluation_type_id,evaluator_user_id,evaluatee_user_id,course_offering_id,status,credibility_status) VALUES(60,1,1,1,11,2,102,'submitted','AUTO_ACCEPTED')");
+    $db->exec('INSERT INTO evaluation_responses(evaluation_id,question_id,rating_value,display_order) VALUES(60,11,4,1)');
+    $excessDraft = array_replace($draft,['id'=>'EXCESS-DRAFT','load_type'=>'excess','set_rating'=>'N/A']);
+    $mainDraft = array_replace($draft,['id'=>'MAIN-DRAFT','load_type'=>'main','set_rating'=>'95.00']);
+    $sentExcess = array_replace($excessDraft,['id'=>'EXCESS-SENT','status'=>'sent','set_rating'=>'75.00']);
+    $completedExcess = array_replace($excessDraft,['id'=>'EXCESS-COMPLETED','status'=>'completed','set_rating'=>'70.00']);
+    $refreshed = facultyReportRefreshDraftPaperRatings($db,[$mainDraft,$excessDraft,$sentExcess,$completedExcess]);
+    reportMysqlAssert($refreshed[0]['set_rating'] === 'N/A' && $refreshed[1]['set_rating'] === '80.00', 'Draft ratings mixed main and excess loads or retained a stale rating.');
+    reportMysqlAssert(str_contains($refreshed[1]['set_rating_note'], '1 eligible evaluations recorded; 1 of 1 enrolled classes rated.'), 'Excess-load participation was not disclosed.');
+    reportMysqlAssert($refreshed[1]['section_c_areas'] === $excessDraft['section_c_areas'], 'Refreshing SET replaced the professor recommendations.');
+    reportMysqlAssert($refreshed[2] === $sentExcess && $refreshed[3] === $completedExcess, 'Refreshing draft SET changed submitted snapshots.');
+    reportMysqlAssert(facultyReportBuildFacultyPaperSetRating($db,'u2','report-test','excess') === '80.00', 'Excess-load creation calculation lost its accepted evaluation.');
+    $db->exec("INSERT INTO student_course_enrollments(student_id,course_offering_id,status) VALUES(11,103,'enrolled')");
+    $partialDraft = facultyReportRefreshDraftPaperRatings($db,[$excessDraft])[0];
+    reportMysqlAssert($partialDraft['set_rating'] === 'N/A', 'A missing excess-class average was silently excluded from the overall rating.');
+    reportMysqlAssert(str_contains($partialDraft['set_rating_note'], '1 eligible evaluations recorded; 1 of 2 enrolled classes rated.') && str_contains($partialDraft['set_rating_note'], '1 class without valid responses'), 'N/A hides recorded excess-load evaluations or the missing-class reason.');
+    $otherSemesterDraft = facultyReportRefreshDraftPaperRatings($db,[array_replace($excessDraft,['semester_id'=>'other-test'])])[0];
+    reportMysqlAssert($otherSemesterDraft['set_rating'] === 'N/A', 'Excess-load refresh pulled ratings from a different semester.');
     echo "Faculty report eligibility MySQL tests passed ($assertions assertions in an isolated schema).\n";
 } finally {
     $db = null;

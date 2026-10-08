@@ -770,8 +770,10 @@ function facultyReportFetchStudentEvaluationsForOfferings(
             buildEvaluationsSnapshotFromTables($pdo, null, $evaluateeFilters)
         );
     }
+    // Other-load SQL records must not suppress legacy-only responses for this load.
+    $tableList = facultyReportFilterScopedStudentEvaluationsForOfferings($tableList, $professor, $offeringIdSet);
     if (count($tableList) > 0) {
-        return facultyReportFilterScopedStudentEvaluationsForOfferings($tableList, $professor, $offeringIdSet);
+        return $tableList;
     }
 
     return facultyReportFilterLegacyStudentEvaluationsForProfessor(
@@ -1297,6 +1299,58 @@ function facultyReportBuildFacultyPaperSefRating(PDO $pdo, string $professorUser
     }
     $rating = facultyReportBuildSefRating($pdo, $professor, $semesterId);
     return facultyPdfFormatIferRatingValue($rating);
+}
+
+function facultyReportRefreshDraftPaperSefRatings(PDO $pdo, array $papers): array
+{
+    $ratings = [];
+    foreach ($papers as &$paper) {
+        if (!is_array($paper) || strtolower(trim((string) ($paper['status'] ?? ''))) !== 'draft') {
+            continue;
+        }
+        $professorId = facultyReportNormalizeUserIdToken($paper['professor_user_id'] ?? '');
+        $semesterId = trim((string) ($paper['semester_id'] ?? ''));
+        $key = json_encode([$professorId, $semesterId]);
+        if (!array_key_exists($key, $ratings)) {
+            $ratings[$key] = facultyReportBuildFacultyPaperSefRating($pdo, $professorId, $semesterId);
+        }
+        $paper['saf_rating'] = $ratings[$key];
+    }
+    unset($paper);
+    return $papers;
+}
+
+function facultyReportRefreshDraftPaperRatings(PDO $pdo, array $papers): array
+{
+    $papers = facultyReportRefreshDraftPaperSefRatings($pdo, $papers);
+    $summaries = [];
+    foreach ($papers as &$paper) {
+        if (!is_array($paper) || strtolower(trim((string)($paper['status'] ?? ''))) !== 'draft') {
+            continue;
+        }
+        $professorId = facultyReportNormalizeUserIdToken($paper['professor_user_id'] ?? '');
+        $semesterId = trim((string)($paper['semester_id'] ?? ''));
+        $loadType = facultyReportNormalizeLoadType($paper['load_type'] ?? 'main');
+        $key = json_encode([$professorId, $semesterId, $loadType]);
+        if (!array_key_exists($key, $summaries)) {
+            $summaries[$key] = facultyReportBuildSetSummaryRows($pdo, $professorId, $semesterId, $loadType);
+        }
+        $summary = $summaries[$key];
+        $paper['set_rating'] = facultyReportFormatFacultyPaperSetRating($summary);
+        $paper['set_rating_note'] = sprintf(
+            '%d eligible evaluations recorded; %d of %d enrolled classes rated.',
+            $summary['completed_evaluations'],
+            $summary['scorable_class_count'],
+            $summary['registered_class_count']
+        );
+        if ($summary['calculation_note'] !== '') {
+            $paper['set_rating_note'] .= ' ' . $summary['calculation_note'];
+        } elseif ($summary['registered_class_count'] === 0) {
+            $paper['set_rating_note'] .= ' No enrolled classes found for this load and semester.';
+        }
+    }
+    unset($paper);
+    return $papers;
 }
 
 function facultyReportBuildFormattedDate(): string

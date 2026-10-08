@@ -266,8 +266,8 @@ assert(
     'The professor subject rows no longer disclose partial section coverage.'
 );
 assert(
-    professorPanel.includes('previewDraftData ? previewDraftData.set_rating : (paper.set_rating || \'N/A\')'),
-    'Draft faculty-paper previews do not prefer the live scoped SET calculation.'
+    !professorPanel.includes('previewDraftData ? previewDraftData.set_rating'),
+    'Draft faculty-paper previews override the authoritative server SET with browser data.'
 );
 
 const deanPanel = fs.readFileSync(path.join(root, 'JsScrip/daenpanel.js'), 'utf8');

@@ -2787,11 +2787,10 @@ function renderDeanFacultyPaperDetail(paper) {
     if (approvalDatesAutoFillInput) approvalDatesAutoFillInput.checked = resolveDeanFacultyPaperSupervisorDateFlag(paper);
 
     const paperStatusToken = normalizeDeanToken(paper.status);
-    const editable = (SUPERVISOR_ROLE === 'dean' || SUPERVISOR_ROLE === 'procoor') && paperStatusToken === 'sent'
-        ? true
-        : (paper && typeof paper.canCurrentActorEdit === 'boolean'
+    const editable = (paperStatusToken === 'sent' || paperStatusToken === 'completed')
+        && (typeof paper.canCurrentActorEdit === 'boolean'
             ? !!paper.canCurrentActorEdit
-            : paperStatusToken === 'sent');
+            : false);
     if (areasInput) areasInput.disabled = !editable;
     if (activitiesInput) activitiesInput.disabled = !editable;
     if (actionPlanInput) actionPlanInput.disabled = !editable;
@@ -2843,7 +2842,7 @@ function renderDeanFacultyPaperDetail(paper) {
                 approval_dates_auto_fill: facultyDatesAutoFill,
                 approval_supervisor_name_auto_fill: supervisorNameAutoFill,
                 approval_supervisor_date_auto_fill: supervisorDateAutoFill,
-                approval_supervisor_name: paper.approval_supervisor_name || paper.recipient_name || paper.recipient_dean_name || resolveCurrentDeanDisplayName(),
+                approval_supervisor_name: editable ? resolveCurrentDeanDisplayName() : (paper.approval_supervisor_name || paper.recipient_name || paper.recipient_dean_name || ''),
                 approval_supervisor_date_signed: paper.approval_supervisor_date_signed || '',
                 approval_professor_name: paper.approval_professor_name || paper.professor_name || '',
                 approval_date_signed: paper.approval_date_signed || '',
@@ -2876,7 +2875,7 @@ function renderDeanFacultyPaperInbox() {
     deanFacultyPaperState.papers = Array.isArray(papers) ? papers : [];
     const sentPapers = deanFacultyPaperState.papers.filter(paper => normalizeDeanToken(paper && paper.status) === 'sent');
     if (!sentPapers.length) {
-        tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="6">No pending faculty papers assigned.</td></tr>';
+        tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="6">No faculty papers assigned.</td></tr>';
         deanFacultyPaperState.selectedId = '';
         renderDeanFacultyPaperDetail(null);
         return;
@@ -2954,7 +2953,7 @@ function setupDeanFacultyPaperInbox() {
                 }
                 renderDeanFacultyPaperInbox();
                 refreshDeanIferDirectory();
-                alert('Section C saved successfully.');
+                alert('Paper completed successfully and removed from the Faculty Paper Inbox.');
             } catch (error) {
                 alert(error && error.message ? error.message : 'Failed to save Section C.');
             }

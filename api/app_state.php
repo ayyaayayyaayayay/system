@@ -501,10 +501,6 @@ function canDeanEditFacultyPaper(array $paper, $actorUserId, array $actorUser) {
     if (!canDeanViewFacultyPaper($paper, $actorUser)) {
         return false;
     }
-    if (resolveFacultyPaperRecipientRole($paper) === 'procoor') {
-        return false;
-    }
-
     $userId = normalizePaperUserIdToken($actorUserId);
     if ($userId === '') {
         return false;
@@ -534,6 +530,13 @@ function canCoordinatorEditFacultyPaper(array $paper, $actorUserId) {
     return canCoordinatorViewFacultyPaper($paper, $actorUserId);
 }
 
+function canProfessorEditFacultyPaper(array $paper, $actorUserId) {
+    $userId = normalizePaperUserIdToken($actorUserId);
+    return $userId !== ''
+        && normalizePaperUserIdToken($paper['professor_user_id'] ?? '') === $userId
+        && normalizePaperStatusValue($paper['status'] ?? '') === 'draft';
+}
+
 function decorateFacultyPaperForActor(array $paper, $actorRole, array $actorUser = []) {
     $role = normalizeActorRoleToken($actorRole);
     $actorUserId = normalizePaperUserIdToken($actorUser['id'] ?? '');
@@ -543,8 +546,7 @@ function decorateFacultyPaperForActor(array $paper, $actorRole, array $actorUser
     $paper['canCurrentActorEdit'] = false;
 
     if ($role === 'professor') {
-        $paper['canCurrentActorEdit'] = normalizePaperStatusValue($paper['status'] ?? '') === 'draft'
-            && normalizePaperUserIdToken($paper['professor_user_id'] ?? '') === $actorUserId;
+        $paper['canCurrentActorEdit'] = canProfessorEditFacultyPaper($paper, $actorUserId);
     } elseif ($role === 'dean') {
         $paper['canCurrentActorEdit'] = canDeanEditFacultyPaper($paper, $actorUserId, $actorUser);
     } elseif ($role === 'procoor') {
@@ -752,6 +754,7 @@ function listFacultyPapersPageForActor(PDO $pdo, $actorRole, $actorUserId, array
         $sqlFilters['_authorizedCampusId'] = (int) $selection['campusId'];
     }
     $page = fetchFacultyAcknowledgementPaperPage($pdo, $sqlFilters);
+    $page['papers'] = facultyReportRefreshDraftPaperRatings($pdo, $page['papers']);
     $page['papers'] = array_values(array_map(function ($paper) use ($role, $actorUser) {
         return decorateFacultyPaperForActor($paper, $role, $actorUser);
     }, $page['papers']));
@@ -5893,28 +5896,32 @@ try {
                 if ($ownerId === '' || $ownerId !== $actorUserId) {
                     sendJson(['success' => false, 'error' => 'Permission denied for this paper.'], 403);
                 }
-                if ($status !== 'draft') {
-                    sendJson(['success' => false, 'error' => 'Section C can only be edited while the paper is in draft.'], 400);
+                if (!canProfessorEditFacultyPaper($paper, $actorUserId)) {
+                    sendJson(['success' => false, 'error' => 'Professors can only edit Section C while the paper is in draft.'], 400);
                 }
-                $validatedReceipt = findValidatedFacultySectionCAiAuditReceipt(
-                    $pdo,
-                    $aiGenerationAuditId,
-                    $actorUserId,
-                    $paperId
-                );
-                if ($validatedReceipt === null) {
-                    sendJson(['success' => false, 'error' => 'A valid AI generation audit receipt is required.'], 400);
+                if ($aiGenerationAuditId !== '') {
+                    $validatedReceipt = findValidatedFacultySectionCAiAuditReceipt(
+                        $pdo,
+                        $aiGenerationAuditId,
+                        $actorUserId,
+                        $paperId
+                    );
+                    if ($validatedReceipt === null) {
+                        sendJson(['success' => false, 'error' => 'A valid AI generation audit receipt is required.'], 400);
+                    }
+                    $paper['section_c_ai_audit_code'] = $validatedReceipt;
                 }
-                $paper['section_c_ai_audit_code'] = $validatedReceipt;
-                $paper['set_rating'] = facultyReportBuildFacultyPaperSetRating(
-                    $pdo,
-                    $actorUserId,
-                    sanitizePaperTextValue($paper['semester_id'] ?? '', 100),
-                    normalizeCourseOfferingLoadType($paper['load_type'] ?? 'main')
-                );
-                $paper['saf_rating'] = facultyReportBuildFacultyPaperSefRating(
-                    $pdo, $actorUserId, sanitizePaperTextValue($paper['semester_id'] ?? '', 100)
-                );
+                if ($status === 'draft') {
+                    $paper['set_rating'] = facultyReportBuildFacultyPaperSetRating(
+                        $pdo,
+                        $actorUserId,
+                        sanitizePaperTextValue($paper['semester_id'] ?? '', 100),
+                        normalizeCourseOfferingLoadType($paper['load_type'] ?? 'main')
+                    );
+                    $paper['saf_rating'] = facultyReportBuildFacultyPaperSefRating(
+                        $pdo, $actorUserId, sanitizePaperTextValue($paper['semester_id'] ?? '', 100)
+                    );
+                }
             }
 
             $newPdfLogicalPath = '';
@@ -5948,13 +5955,13 @@ try {
             } elseif ($actorRole !== 'professor' && $hasSupervisorAutoFillPayload) {
                 $approvalSupervisorName = '';
                 if ($supervisorNameAutoFill) {
-                    $approvalSupervisorName = resolveFacultyPaperRecipientName($paper);
-                }
-                if ($approvalSupervisorName === '') {
                     $approvalSupervisorName = sanitizePaperTextValue(
                         $authenticatedUser['name'] ?? ($authenticatedUser['fullName'] ?? ''),
                         150
                     );
+                }
+                if ($approvalSupervisorName === '') {
+                    $approvalSupervisorName = resolveFacultyPaperRecipientName($paper);
                 }
                 $paper['approval_supervisor_name_auto_fill'] = $supervisorNameAutoFill;
                 $paper['approval_supervisor_date_auto_fill'] = $supervisorDateAutoFill;
@@ -5967,13 +5974,14 @@ try {
                     || $supervisorNameAutoFill
                     || $supervisorDateAutoFill;
             }
-            if (normalizePaperStatusValue($paper['status'] ?? '') === 'completed') {
-                $paper = facultyPdfPersistPaperVersion($paper, 'completed', $actorRole, $actorUserId);
+            $savedStatus = normalizePaperStatusValue($paper['status'] ?? '');
+            if ($savedStatus === 'sent' || $savedStatus === 'completed') {
+                $paper = facultyPdfPersistPaperVersion($paper, $savedStatus, $actorRole, $actorUserId);
                 $newPdfLogicalPath = trim((string) ($paper['latest_file_path'] ?? ''));
             }
             $savedPaper = upsertFacultyAcknowledgementPaperSnapshot($pdo, $paper);
             $linkedGenerationAuditId = trim((string) ($paper['section_c_ai_audit_code'] ?? ''));
-            if ($actorRole === 'professor') {
+            if ($actorRole === 'professor' && $aiGenerationAuditId !== '') {
                 naapAuditWrite($pdo, [
                     'eventCode' => 'ai.section_c.published',
                     'action' => 'AI Section C Published',
@@ -5984,7 +5992,7 @@ try {
                     'targetId' => $paperId,
                     'relatedAuditId' => $linkedGenerationAuditId,
                 ]);
-            } elseif ($status === 'sent') {
+            } elseif ($actorRole !== 'professor' && $status === 'sent' && $linkedGenerationAuditId !== '') {
                 naapAuditWrite($pdo, [
                     'eventCode' => 'ai.section_c.approved',
                     'action' => 'AI Section C Approved',
@@ -5996,6 +6004,15 @@ try {
                     'relatedAuditId' => $linkedGenerationAuditId,
                 ]);
             }
+            naapAuditWrite($pdo, [
+                'eventCode' => 'faculty.paper.section_c.updated',
+                'action' => 'Faculty Paper Section C Updated',
+                'description' => 'Section C was updated on a faculty acknowledgement paper.',
+                'actor' => $authenticatedUser,
+                'targetType' => 'faculty_paper',
+                'targetId' => $paperId,
+                'relatedAuditId' => $linkedGenerationAuditId,
+            ]);
             $pdo->commit();
             } catch (Throwable $error) {
                 if ($pdo->inTransaction()) {

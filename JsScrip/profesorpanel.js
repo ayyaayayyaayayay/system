@@ -2575,16 +2575,12 @@ function renderProfessorFacultyPaperDetail(paper) {
     card.style.display = 'block';
     const statusToken = normalizeToken(paper.status);
     const draftStatus = statusToken === 'draft';
-    const liveDraftPaperData = draftStatus
-        ? buildFacultyPaperData({
-            semesterId: paper.semester_id || paper.semesterId,
-            semesterLabel: paper.semester_label || paper.semesterLabel,
-            loadType: paper.load_type || paper.loadType,
-        })
-        : null;
-    const displayedSetRating = liveDraftPaperData
-        ? liveDraftPaperData.set_rating
-        : (paper.set_rating || 'N/A');
+    const displayedSetRating = paper.set_rating || 'N/A';
+    const setRatingNote = document.getElementById('fpDetailSetRatingNote');
+    if (setRatingNote) {
+        setRatingNote.textContent = draftStatus ? String(paper.set_rating_note || '') : '';
+        setRatingNote.hidden = !setRatingNote.textContent;
+    }
     if (meta) {
         meta.textContent = `Updated: ${normalizePaperTimestamp(paper.updated_at)}${paper.sent_at ? ` | Sent: ${normalizePaperTimestamp(paper.sent_at)}` : ''}`;
     }
@@ -2611,7 +2607,8 @@ function renderProfessorFacultyPaperDetail(paper) {
     if (approvalNamesAutoFillInput) approvalNamesAutoFillInput.checked = resolveFacultyPaperApprovalFlag(paper, 'approval_names_auto_fill');
     if (approvalDatesAutoFillInput) approvalDatesAutoFillInput.checked = resolveFacultyPaperApprovalFlag(paper, 'approval_dates_auto_fill');
 
-    const sectionCReadOnly = !draftStatus;
+    const sectionCReadOnly = !draftStatus
+        || (typeof paper.canCurrentActorEdit === 'boolean' && !paper.canCurrentActorEdit);
     if (areasInput) areasInput.disabled = sectionCReadOnly;
     if (activitiesInput) activitiesInput.disabled = sectionCReadOnly;
     if (actionPlanInput) actionPlanInput.disabled = sectionCReadOnly;
@@ -2630,7 +2627,7 @@ function renderProfessorFacultyPaperDetail(paper) {
         previewBtn.onclick = async () => {
             const statusToken = normalizeToken(paper.status);
             const actor = getProfessorPaperActor();
-            const shouldUseStored = (statusToken === 'sent' || statusToken === 'completed')
+            const shouldUseStored = sectionCReadOnly && (statusToken === 'sent' || statusToken === 'completed')
                 && String(paper.latest_file_path || '').trim() !== ''
                 && !!actor.actorUserId;
 
@@ -2643,27 +2640,23 @@ function renderProfessorFacultyPaperDetail(paper) {
                 }
             }
 
-            const previewDraftData = statusToken === 'draft'
-                ? buildFacultyPaperData({
-                    semesterId: paper.semester_id || paper.semesterId,
-                    semesterLabel: paper.semester_label || paper.semesterLabel,
-                    loadType: paper.load_type || paper.loadType,
-                })
-                : null;
             await openFacultyAcknowledgementPdf({
                 faculty_name: paper.professor_name || 'N/A',
                 department: paper.department || 'N/A',
                 rank: paper.rank || 'N/A',
                 semester_label: paper.semester_label || 'N/A',
                 load_type: normalizeFacultyPaperLoadType(paper.load_type || paper.loadType),
-                set_rating: previewDraftData ? previewDraftData.set_rating : (paper.set_rating || 'N/A'),
+                set_rating: paper.set_rating || 'N/A',
                 saf_rating: paper.saf_rating || 'N/A',
                 section_c_areas: areasInput ? areasInput.value : (paper.section_c_areas || ''),
                 section_c_activities: activitiesInput ? activitiesInput.value : (paper.section_c_activities || ''),
                 section_c_action_plan: actionPlanInput ? actionPlanInput.value : (paper.section_c_action_plan || ''),
                 approval_names_auto_fill: approvalNamesAutoFillInput ? approvalNamesAutoFillInput.checked : resolveFacultyPaperApprovalFlag(paper, 'approval_names_auto_fill'),
                 approval_dates_auto_fill: approvalDatesAutoFillInput ? approvalDatesAutoFillInput.checked : resolveFacultyPaperApprovalFlag(paper, 'approval_dates_auto_fill'),
+                approval_supervisor_name_auto_fill: !!paper.approval_supervisor_name_auto_fill,
+                approval_supervisor_date_auto_fill: !!paper.approval_supervisor_date_auto_fill,
                 approval_supervisor_name: paper.approval_supervisor_name || paper.recipient_name || paper.recipient_dean_name || '',
+                approval_supervisor_date_signed: paper.approval_supervisor_date_signed || '',
                 approval_professor_name: paper.approval_professor_name || paper.professor_name || '',
                 approval_date_signed: paper.approval_date_signed || '',
             }, `${paper.id || 'faculty_ack'}.pdf`);
@@ -2679,9 +2672,6 @@ function renderProfessorFacultyPaperDetail(paper) {
             }
             try {
                 const aiGenerationAuditId = professorPanelState.facultyPaper.aiAuditReceipts[String(paper.id || '')] || '';
-                if (!aiGenerationAuditId) {
-                    throw new Error('Generate the audited AI Section C recommendation before saving.');
-                }
                 const response = SharedData.saveFacultyPaperSectionC({
                     actor_role: actor.role,
                     actor_user_id: actor.actorUserId,
