@@ -24,6 +24,8 @@ function fixture(term,type) {
     return {...structuredClone(empty), criteriaAverages:[{name:'Teaching effectiveness',average:score}],
         setRows:type === 'student' ? [{seq:1,courseCode:isA ? 'AVT101' : 'TOUR102',yearSection:'BSAT1/1',students:isA ? 40 : 30,averageSetRating:score * 20,weightedSetScore:(isA ? 40 : 30) * score * 20}] : [],
         setTotals:{students:isA ? 40 : 30,weightedScore:isA ? 3600 : 2400,excludedClassCount:0},
+        sefRating:type === 'supervisor' && term !== 'review' ? score * 20 : null,
+        sefUnavailableReason:type === 'supervisor' && term === 'review' ? 'Awaiting HR review' : '',
         breakdownRows:[{required:40,received:2}],comments:[{text:`${term} ${type} feedback`}],
         ratingDistribution:{1:0,2:0,3:0,4:2,5:1},
         totals:{required:type === 'student' ? (isA ? 40 : 30) : 2,received:type === 'supervisor' ? 1 : 2,responseRate:50,averageScore:score}};
@@ -33,7 +35,7 @@ async function main() {
     const start = html.indexOf('<div class="reports-content"');
     const end = html.indexOf('<!-- Faculty Paper View -->',start);
     assert(start >= 0 && end > start);
-    const fixtures = Object.fromEntries(['a','b','empty'].map(term => [term,Object.fromEntries(['student','professor','supervisor'].map(type => [type,fixture(term,type)]))]));
+    const fixtures = Object.fromEntries(['a','b','empty','review'].map(term => [term,Object.fromEntries(['student','professor','supervisor'].map(type => [type,fixture(term,type)]))]));
     const browser = await chromium.launch({channel:'chrome',headless:true});
     try {
         const page = await browser.newPage({viewport:{width:1280,height:1000}});
@@ -88,7 +90,10 @@ async function main() {
                 if (window.control.holdSummaries === query.semesterId && query.evaluationType === 'student') await new Promise(resolve => {window.releaseSummary = resolve;});
                 return structuredClone(fixtures[query.semesterId][query.evaluationType]);
             }
-            async function updateSummaryCards(totals){window.summaryCardScore = totals.averageScore;}
+            async function updateSummaryCards(totals){
+                window.summaryCardScore = totals.averageScore;
+                if (window.control.holdDashboard) await new Promise(resolve => {window.releaseDashboard = resolve;});
+            }
             async function renderSemestralEvaluationTrend(term){window.trendSemester = term;}
             function scheduleProfessorTrendSnapshotRefresh(){}
             function scheduleProfessorReportViewportRefresh(){}
@@ -96,12 +101,12 @@ async function main() {
         ` + ['getEvaluationTypeMeta','escapeHTML','normalizeToken','formatSemesterLabelFromSlug','getSemesterLabelById',
             'cacheProfessorSemesterSnapshot','buildProfessorContextForSemester','renderBreakdownTable','formatProfessorSetValue',
             'renderCriteriaSummary','renderEvaluationCount','computeTotals','initializeReports','initializeStudentCharts',
-            'initializeEvaluationCharts','renderPeerSupervisorAnalytics',
+            'initializeEvaluationCharts','renderPeerSupervisorAnalytics','renderProfessorOverallRatings',
             'resetProfessorSubjectCommentsPanel','setProfessorCommentsListVisibility','setProfessorCommentsAiSummary',
             'fetchSectionSummaryFromSql','classifyFeedbackCommentBiasByRules','getProfessorFeedbackAiSummarySourceNote',
             'refreshProfessorReportAccessState','loadFacultySummary','setProfessorReportsStatus','updateSemesterLabels',
             'setupSemesterFilter'].map(extract).join('\n') + `
-            document.getElementById('semesterFilter').innerHTML = '<option value="a">Semester A</option><option value="b">Semester B</option><option value="empty">Empty Semester</option>';
+            document.getElementById('semesterFilter').innerHTML = '<option value="a">Semester A</option><option value="b">Semester B</option><option value="empty">Empty Semester</option><option value="review">Review Semester</option>';
             professorPanelState.context.evaluations = [{semesterId:'a'}];
             setupSemesterFilter();
             renderBreakdownTable(professorPanelState.summaryByType.student.setRows,'student',professorPanelState.summaryByType.student.setTotals);
@@ -118,16 +123,31 @@ async function main() {
         ), 'Peer and supervisor results must be directly below Faculty Response Rate & Counts');
         assert.equal(await peerRows.first().locator('td').nth(2).textContent(),'3.00');
         assert.equal(await peerRows.last().locator('td').nth(2).textContent(),'4.00');
+        assert.equal(await page.locator('#profOverallSetRating').textContent(),'90.00');
+        assert.equal(await page.locator('#profOverallSefRating').textContent(),'80.00');
+        // Report data must be published together, before unrelated dashboard work resolves.
+        await page.evaluate(() => {window.control.holdDashboard = true;}); await filter.selectOption('b');
+        await page.waitForFunction(() => typeof window.releaseDashboard === 'function');
+        assert((await page.locator('#facultyBreakdownTable tbody').textContent()).includes('TOUR102'));
+        assert.equal(await page.locator('#profOverallSetRating').textContent(),'80.00');
+        assert.equal(await page.locator('#profOverallSefRating').textContent(),'75.00');
+        assert.equal(await peerRows.first().locator('td').nth(2).textContent(),'4.25');
+        await page.evaluate(() => {window.control.holdDashboard = false;window.releaseDashboard();}); await waitReady('b');
+        await filter.selectOption('a'); await waitReady('a');
         // Hold access verification to assert selection is read before any await.
         await page.evaluate(() => {window.control.holdAccess = true;}); await filter.selectOption('b');
         await page.waitForFunction(() => typeof window.releaseAccess === 'function');
         assert.equal(await page.evaluate(() => professorPanelState.currentSelection.semesterId),'b');
         assert.equal(await page.locator('#selectedSemester').textContent(),'Semester B');
         assert(await status.isVisible());
+        assert.equal(await page.locator('#profOverallSetRating').textContent(),'N/A');
+        assert.equal(await page.locator('#profOverallSefRating').textContent(),'N/A');
         await page.evaluate(() => {window.control.holdAccess = false;window.releaseAccess();}); await waitReady('b');
         assert.equal(await filter.inputValue(),'b'); assert.equal(await page.evaluate(() => window.rebuilds),0);
         assert((await page.locator('#facultyBreakdownTable tbody').textContent()).includes('TOUR102'));
         assert.equal(await peerRows.first().locator('td').nth(2).textContent(),'4.25');
+        assert.equal(await page.locator('#profOverallSetRating').textContent(),'80.00');
+        assert.equal(await page.locator('#profOverallSefRating').textContent(),'75.00');
         assert.equal(await peerRows.last().locator('td').nth(2).textContent(),'3.75');
         assert.equal(await page.locator('#peerSupervisorSemester').textContent(),'Semester B');
         await page.waitForFunction(() => window.chartValues.studentBarChart[0] === 4);
@@ -150,13 +170,25 @@ async function main() {
         assert((await page.locator('#facultyBreakdownTable tbody').textContent()).includes('No evaluation data'));
         assert.equal(await peerRows.first().locator('td').nth(2).textContent(),'N/A');
         assert.equal(await peerRows.last().locator('td').nth(3).textContent(),'No responses');
+        assert.equal(await page.locator('#profOverallSetRating').textContent(),'N/A');
+        assert.equal(await page.locator('#profOverallSefRating').textContent(),'N/A');
+        await filter.selectOption('review'); await waitReady('review');
+        assert.equal(await page.locator('#profOverallSetRating').textContent(),'80.00');
+        assert.equal(await page.locator('#profOverallSefRating').textContent(),'N/A');
+        assert.equal(await peerRows.last().locator('td').nth(2).textContent(),'N/A');
+        assert.equal(await peerRows.last().locator('td').nth(3).textContent(),'Awaiting HR review');
+        assert(await page.locator('#profOverallRatingsStatus').isVisible());
+        assert((await page.locator('#profOverallRatingsStatus').textContent()).includes('Awaiting HR review'));
         // Failure is visible and Retry reuses the selected semester.
         await page.evaluate(() => {window.control.failSnapshots = true;}); await filter.selectOption('a');
         await page.waitForFunction(() => !document.getElementById('professorReportsRetry').hidden);
         assert((await status.textContent()).includes('Unable to load results for Semester A'));
+        assert.equal(await page.locator('#profOverallSetRating').textContent(),'N/A');
+        assert.equal(await page.locator('#profOverallSefRating').textContent(),'N/A');
         assert.equal(await peerRows.first().locator('td').nth(2).textContent(),'N/A');
         await page.evaluate(() => {window.control.failSnapshots = false;}); await page.locator('#professorReportsRetry').click(); await waitReady('a');
         assert((await page.locator('#facultyBreakdownTable tbody').textContent()).includes('AVT101'));
+        assert(await page.locator('#profOverallRatingsStatus').isHidden());
         assert.equal(await peerRows.first().locator('td').nth(2).textContent(),'3.00');
         const output = path.join(root,'output','professor-semester-analytics');fs.mkdirSync(output,{recursive:true});
         await page.locator('#peerSupervisorAnalytics').screenshot({path:path.join(output,'desktop.png')});

@@ -838,6 +838,40 @@ body {
     line-height: 1.5;
 }
 
+.prof-overall-ratings-wrap {
+    margin-top: 18px;
+    margin-bottom: 0;
+}
+
+.prof-overall-ratings-table {
+    table-layout: fixed;
+}
+
+.prof-overall-ratings-table tbody th,
+.prof-overall-ratings-table tbody td {
+    padding: 16px;
+    font-size: 13px;
+    font-weight: 700;
+    text-align: left;
+    background: #f9fafb;
+    border-bottom: none;
+}
+
+.prof-overall-ratings-note {
+    margin-top: 10px;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+@media (max-width: 640px), (max-width: 1000px) and (orientation: landscape) {
+    .professor-panel .prof-overall-ratings-table tbody th {
+        display: block;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border-color);
+    }
+}
+
 .prof-report-status {
     display: flex;
     flex-wrap: wrap;

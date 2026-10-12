@@ -70,6 +70,20 @@ vm.runInContext(['normalizeToken', 'normalizeUserIdToken', 'clampNumber', 'getEv
 
 async function main() {
     const summary = await calculationContext.fetchFacultySummaryFromSql({context, semesterId:'term', evaluationType:'student'});
+    const supervisorContext = {...context,lookupMaps:{byId:{}},evaluations:[
+        evaluation(20,null,'Supervisor feedback',{evaluatorRole:'supervisor',credibilityStatus:'AUTO_ACCEPTED',ratings:{q1:4.6}}),
+        evaluation(21,null,'Other professor',{evaluatorRole:'supervisor',credibilityStatus:'AUTO_ACCEPTED',evaluateeUserId:'u501',ratings:{q1:1}}),
+        evaluation(22,null,'Historical supervisor',{evaluatorRole:'supervisor',credibilityStatus:'AUTO_ACCEPTED',semesterId:'old',ratings:{q1:2}}),
+        evaluation(23,null,'Draft supervisor',{evaluatorRole:'supervisor',credibilityStatus:'AUTO_ACCEPTED',status:'draft',ratings:{q1:1}}),
+    ]};
+    const sefSummary = await calculationContext.fetchFacultySummaryFromSql({context:supervisorContext,semesterId:'term',evaluationType:'supervisor'});
+    assert.equal(sefSummary.sefRating,92,'SEF must use only valid submitted supervisor ratings for the selected professor and semester.');
+    const pendingContext = {...supervisorContext,evaluations:[evaluation(24,null,'Pending supervisor',{
+        evaluatorRole:'supervisor',credibilityStatus:'PENDING_HR_REVIEW',ratings:{q1:4,q2:2,q3:2}})]};
+    const pendingSummary = await calculationContext.fetchFacultySummaryFromSql({context:pendingContext,semesterId:'term',evaluationType:'supervisor'});
+    assert.equal(pendingSummary.totals.averageScore.toFixed(2),'2.67');
+    assert.equal(pendingSummary.sefRating,null);
+    assert.equal(pendingSummary.sefUnavailableReason,'Awaiting HR review');
     assert.equal(summary.setRows.length, 6);
     assert.deepEqual(Array.from(summary.setRows, row => row.seq), [1,2,3,4,5,6]);
     assert.equal(summary.setRows.filter(row => row.courseCode === 'AVT101').length, 3);
@@ -119,6 +133,7 @@ async function main() {
                 summaryByType:{student:${JSON.stringify(summary)},professor:{comments:[{text:'Peer comment'}]},supervisor:{comments:[{text:'Supervisor comment'}]}}
             };
             window.completeSummary = ${JSON.stringify(complete)};
+            window.supervisorExampleSef = ${SetCalculation.calculateSupervisorSefRating([{status:'submitted',credibilityStatus:'AUTO_ACCEPTED',ratings:[4,2,2]}])};
             window.aiRequests = []; window.aiMode = 'deferred';
             const SharedData = {
                 prepareFeedbackSummaryComments, buildFeedbackTeachingImprovements,
@@ -132,10 +147,11 @@ async function main() {
                 }
             };
         ` + ['escapeHTML','normalizeToken','getEvaluationTypeMeta','renderBreakdownTable','formatProfessorSetValue',
-            'setupProfessorSubjectComments','setProfessorCommentsAiSummary','getProfessorFeedbackAiSummarySourceNote',
+            'setupProfessorSubjectComments','setProfessorCommentsAiSummary','getProfessorFeedbackAiSummarySourceNote','renderProfessorOverallRatings',
             'classifyFeedbackCommentBiasByRules','setProfessorCommentsListVisibility','detectStudentCommentTopics',
             'buildStudentFeedbackAiSummary','resetProfessorSubjectCommentsPanel','fetchSectionSummaryFromSql'].map(extract).join('\n') + `
             renderBreakdownTable(professorPanelState.summaryByType.student.setRows,'student',professorPanelState.summaryByType.student.setTotals);
+            renderProfessorOverallRatings();
             setupProfessorSubjectComments(); resetProfessorSubjectCommentsPanel();
             document.getElementById('semesterFilter').innerHTML = '<option value="term">Fixture Semester</option>';
             document.getElementById('selectedSemester').textContent = 'Fixture Semester';
@@ -147,6 +163,21 @@ async function main() {
         const close = page.locator('#profSubjectCommentsClose');
         const aiSummary = page.locator('#profSubjectCommentsAiSummary');
         const note = page.locator('#profSetCalculationNote');
+        const setOverall = page.locator('#profOverallSetRating');
+        const sefOverall = page.locator('#profOverallSefRating');
+        assert.equal(await setOverall.textContent(),'N/A');assert.equal(await sefOverall.textContent(),'N/A');
+        await page.evaluate(()=>renderProfessorOverallRatings({student:{setTotals:{students:100,weightedScore:9004,excludedClassCount:0}},supervisor:{sefRating:92}}));
+        assert.equal(await setOverall.textContent(),'90.04');assert.equal(await sefOverall.textContent(),'92.00');
+        // Same totals as the reported issue; use the unrounded supervisor mean.
+        await page.evaluate(()=>renderProfessorOverallRatings({student:{setTotals:{students:81,weightedScore:5354.11,excludedClassCount:0}},supervisor:{sefRating:window.supervisorExampleSef}}));
+        assert.equal(await setOverall.textContent(),'66.10');assert.equal(await sefOverall.textContent(),'53.33');
+        await page.evaluate(()=>renderProfessorOverallRatings({student:{setTotals:{students:3,weightedScore:270.125,excludedClassCount:0}},supervisor:{sefRating:null}}));
+        assert.equal(await setOverall.textContent(),'90.04');assert.equal(await sefOverall.textContent(),'N/A');
+        await page.evaluate(()=>renderProfessorOverallRatings({student:{setTotals:{students:100,weightedScore:9004,excludedClassCount:1}},supervisor:{sefRating:92}}));
+        assert.equal(await setOverall.textContent(),'N/A');assert.equal(await sefOverall.textContent(),'92.00');
+        await page.evaluate(()=>renderProfessorOverallRatings({}));
+        assert.equal(await setOverall.textContent(),'N/A');assert.equal(await sefOverall.textContent(),'N/A');
+        await page.evaluate(()=>renderProfessorOverallRatings({student:{setTotals:{students:100,weightedScore:9004,excludedClassCount:0}},supervisor:{sefRating:92}}));
         const waitForText = text => page.waitForFunction(text => document.getElementById('profSubjectCommentsList').textContent.includes(text),text);
         assert.equal(await table.locator('thead th').count(),6);
         assert.equal(await table.locator('tbody tr').count(),6);

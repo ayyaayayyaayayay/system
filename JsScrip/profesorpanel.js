@@ -31,6 +31,7 @@ const PROFESSOR_PANEL_EMPTY_SUMMARY = {
     breakdownRows: [],
     setRows: [],
     setTotals: { students: 0, weightedScore: null, excludedClassCount: 0 },
+    sefRating: null,
     ratingDistribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
     comments: [],
     commentBuckets: {},
@@ -1394,9 +1395,31 @@ function setupProfessorViewportRefresh() {
  */
 function initializeReports() {
     renderPeerSupervisorAnalytics();
+    renderProfessorOverallRatings();
     setTimeout(() => {
         initializeStudentCharts();
     }, 50);
+}
+
+function renderProfessorOverallRatings(summaries = professorPanelState.summaryByType) {
+    const setEl = document.getElementById('profOverallSetRating');
+    const sefEl = document.getElementById('profOverallSefRating');
+    if (!setEl || !sefEl) return;
+    const totals = summaries.student && summaries.student.setTotals || {};
+    const students = Number(totals.students || 0);
+    const weighted = totals.weightedScore;
+    const set = students > 0 && !Number(totals.excludedClassCount || 0)
+        && weighted !== null && weighted !== undefined && Number.isFinite(Number(weighted))
+        ? Number(weighted) / students : null;
+    setEl.textContent = formatProfessorSetValue(set);
+    sefEl.textContent = formatProfessorSetValue(summaries.supervisor && summaries.supervisor.sefRating);
+    const reason = String(summaries.supervisor && summaries.supervisor.sefUnavailableReason || '');
+    sefEl.title = reason;
+    const statusEl = document.getElementById('profOverallRatingsStatus');
+    if (statusEl) {
+        statusEl.textContent = reason ? `SEF unavailable: ${reason}.` : '';
+        statusEl.hidden = !reason;
+    }
 }
 
 function renderPeerSupervisorAnalytics() {
@@ -1408,13 +1431,15 @@ function renderPeerSupervisorAnalytics() {
     ].map(source => {
         const summary = professorPanelState.summaryByType[source.type] || PROFESSOR_PANEL_EMPTY_SUMMARY;
         const received = Number(summary.totals && summary.totals.received || 0);
-        const average = summary.totals && summary.totals.averageScore;
+        const average = source.type === 'supervisor' && Object.prototype.hasOwnProperty.call(summary, 'sefRating')
+            ? (summary.sefRating === null ? null : summary.sefRating / 20)
+            : summary.totals && summary.totals.averageScore;
         const available = average !== null && average !== undefined && Number.isFinite(Number(average));
         return `<tr>
             <td data-label="Evaluation">${source.label}</td>
             <td data-label="Evaluations Received">${received.toLocaleString('en-US')}</td>
             <td data-label="Average Rating (1–5)">${available ? Number(average).toFixed(2) : 'N/A'}</td>
-            <td data-label="Status">${received === 0 ? 'No responses' : available ? 'Available' : 'No valid ratings'}</td>
+            <td data-label="Status">${escapeHTML(received === 0 ? 'No responses' : available ? 'Available' : summary.sefUnavailableReason || 'No valid ratings')}</td>
         </tr>`;
     }).join('');
 }
@@ -3806,9 +3831,9 @@ async function loadFacultySummary(selection = {}) {
         renderCriteriaSummary([]);
         renderBreakdownTable([], evaluationType);
         renderEvaluationCount([], unlinkedSummary.totals);
+        initializeReports();
         (await updateSummaryCards(unlinkedSummary.totals));
         if (requestId !== professorReportSelectionRequestId) return false;
-        initializeReports();
         resetProfessorSubjectCommentsPanel();
         (await renderSemestralEvaluationTrend(semesterId));
         return;
@@ -3825,9 +3850,11 @@ async function loadFacultySummary(selection = {}) {
     renderBreakdownTable(evaluationType === 'student' ? activeSummary.setRows : activeSummary.breakdownRows,
         evaluationType, activeSummary.setTotals);
     renderEvaluationCount(activeSummary.breakdownRows, activeSummary.totals);
+    // Publish all report results from the same committed snapshot before
+    // dashboard account checks can yield or trigger another refresh.
+    initializeReports();
     (await updateSummaryCards(activeSummary.totals));
     if (requestId !== professorReportSelectionRequestId) return false;
-    initializeReports();
     resetProfessorSubjectCommentsPanel();
     (await renderSemestralEvaluationTrend(semesterId));
     if (requestId !== professorReportSelectionRequestId) return false;
@@ -3857,6 +3884,7 @@ function setupSemesterFilter() {
             evaluationType: 'student',
         };
         resetProfessorSubjectCommentsPanel(true);
+        renderProfessorOverallRatings({});
         professorTrendSnapshotRequestId += 1;
 
         updateSemesterLabels(label, 'Student Evaluation');
@@ -3900,9 +3928,9 @@ function setupSemesterFilter() {
             renderBreakdownTable([], 'student');
             renderCriteriaSummary([]);
             renderEvaluationCount([], { received: 0, required: 0 });
+            initializeReports();
             await updateSummaryCards(PROFESSOR_PANEL_EMPTY_SUMMARY.totals);
             if (requestId !== professorReportSelectionRequestId) return;
-            initializeReports();
             const trendStatus = document.getElementById('semestralTrendStatus');
             const trendDelta = document.getElementById('semestralTrendDelta');
             const trendBody = document.getElementById('semestralTrendTableBody');
@@ -4401,12 +4429,29 @@ async function fetchFacultySummaryFromSql(query) {
         ? (studentSetMetrics ? studentSetMetrics.averageRating : null)
         : computeAverageRatingFromEvaluations(matchedEvaluations);
     const responseRate = requiredTotal ? Math.round((receivedTotal / requiredTotal) * 100) : 0;
+    const sefRating = evaluationType === 'supervisor'
+        ? window.SetCalculation.calculateSupervisorSefRating(matchedEvaluations) : null;
+    let sefUnavailableReason = '';
+    if (evaluationType === 'supervisor' && sefRating === null) {
+        const submitted = matchedEvaluations.filter(item => normalizeToken(item && item.status) === 'submitted');
+        if (!submitted.length) {
+            sefUnavailableReason = 'No submitted supervisor evaluations';
+        } else if (submitted.some(item => (item.credibilityStatus || item.credibility_status) === 'PENDING_HR_REVIEW')) {
+            sefUnavailableReason = 'Awaiting HR review';
+        } else if (submitted.some(item => !(item.credibilityStatus || item.credibility_status))) {
+            sefUnavailableReason = 'Supervisor evaluation approval status is unavailable';
+        } else {
+            sefUnavailableReason = 'No valid approved supervisor ratings';
+        }
+    }
 
     return {
         criteriaAverages,
         breakdownRows,
         setRows,
         setTotals,
+        sefRating,
+        sefUnavailableReason,
         ratingDistribution,
         comments: allComments,
         commentBuckets,
@@ -5192,6 +5237,7 @@ function clearRestrictedProfessorReportData() {
     renderEvaluationCount([], { received: 0, required: 0 });
     initializeStudentCharts();
     renderPeerSupervisorAnalytics();
+    renderProfessorOverallRatings();
     const trendStatus = document.getElementById('semestralTrendStatus');
     const trendDelta = document.getElementById('semestralTrendDelta');
     const trendTableBody = document.getElementById('semestralTrendTableBody');

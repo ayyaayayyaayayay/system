@@ -252,7 +252,7 @@ institutionCalculators.forEach(calculate => {
 ].forEach(([htmlPath, scriptPath]) => {
     const html = fs.readFileSync(path.join(root, htmlPath), 'utf8');
     const script = fs.readFileSync(path.join(root, scriptPath), 'utf8');
-    assert(html.includes('set-calculation.js?v=20261006cmo'), `${htmlPath} does not load the shared SET calculator.`);
+    assert(/set-calculation\.js\?v=\d{8}[a-z0-9]+/.test(html), `${htmlPath} does not load the shared SET calculator.`);
     assert(script.includes('SetCalculation.calculateProfessorSetMetrics'), `${scriptPath} does not use the shared SET calculator.`);
 });
 
@@ -281,4 +281,16 @@ assert(
     'The dean Faculty Response Rate & Counts table still renders the partial-section badge.'
 );
 
-console.log('SET calculation JavaScript tests passed.');
+const supervisorForm = (ratings, extra = {}) => ({status:'submitted',credibilityStatus:'AUTO_ACCEPTED',ratings,...extra});
+assert.strictEqual(SetCalculation.calculateSupervisorSefRating([supervisorForm(Array(15).fill(4.6))]).toFixed(2),'92.00');
+assert.strictEqual(SetCalculation.calculateSupervisorSefRating([supervisorForm([5]),supervisorForm([3,3,3])]),80,
+    'SEF must average questionnaire means instead of weighting longer forms more heavily.');
+assert.strictEqual(SetCalculation.calculateSupervisorSefRating([supervisorForm(['4.6',0,6,'invalid',true,[],null])]),92);
+assert.strictEqual(SetCalculation.calculateSupervisorSefRating([]),null);
+assert.strictEqual(SetCalculation.calculateSupervisorSefRating([supervisorForm([0,6,'invalid'])]),null);
+assert.strictEqual(SetCalculation.calculateSupervisorSefRating([supervisorForm([5],{status:'draft'})]),null);
+assert.strictEqual(SetCalculation.calculateSupervisorSefRating([supervisorForm([5],{credibilityStatus:'PENDING_HR_REVIEW'})]),null);
+assert.strictEqual(SetCalculation.calculateSupervisorSefRating([supervisorForm([5],{credibilityStatus:'REJECTED_BY_HR'})]),null);
+assert.strictEqual(SetCalculation.calculateSupervisorSefRating([supervisorForm([4],{credibilityStatus:undefined,credibility_status:'ACCEPTED_BY_HR'})]),80);
+
+console.log('SET and SEF calculation JavaScript tests passed.');

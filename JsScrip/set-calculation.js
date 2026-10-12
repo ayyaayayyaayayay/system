@@ -270,8 +270,29 @@
         };
     }
 
+    // Same questionnaire-weighted 100-point SEF used by faculty-report exports.
+    function calculateSupervisorSefRating(evaluations) {
+        const averages = [];
+        (Array.isArray(evaluations) ? evaluations : []).forEach(function (evaluation) {
+            if (!evaluation || !isSubmittedEvaluation(evaluation)) return;
+            const credibility = evaluation.credibilityStatus || evaluation.credibility_status;
+            if (!['AUTO_ACCEPTED', 'ACCEPTED_BY_HR'].includes(credibility)) return;
+            const ratings = evaluation.ratings && typeof evaluation.ratings === 'object'
+                ? Object.values(evaluation.ratings) : [];
+            const valid = ratings.filter(function (value) {
+                return typeof value === 'number'
+                    || (typeof value === 'string' && /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(value.trim()));
+            }).map(Number).filter(function (value) {
+                return Number.isFinite(value) && value >= 1 && value <= 5;
+            });
+            if (valid.length) averages.push(valid.reduce(function (sum, value) { return sum + value; }, 0) / valid.length * 20);
+        });
+        return averages.length ? averages.reduce(function (sum, value) { return sum + value; }, 0) / averages.length : null;
+    }
+
     return {
         calculateProfessorSetMetrics,
+        calculateSupervisorSefRating,
         questionnaireAverage,
         isEligibleEnrollmentStatus,
     };

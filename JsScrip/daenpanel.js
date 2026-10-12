@@ -1931,9 +1931,8 @@ function initializeStudentCharts() {
     if (pieCtx) {
         window.studentPieChartInstance = window.AppChartDesign.renderRatingDistributionChart(pieCtx, {
             ratingDistribution: distribution,
-            averageRating: summary.averageRating === null
-                ? null
-                : Number(summary.averageRating || (summary.totals && summary.totals.averageScore) || 0)
+            // The displayed responses have an average even when overall SET is unavailable.
+            averageRating: summary.ratingDistributionAverage
         });
     }
 }
