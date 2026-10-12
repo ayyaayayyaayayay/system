@@ -1,4 +1,5 @@
 'use strict';
+const { findSourceMarker } = require('./helpers/js-source');
 // Uses the project's existing test-only Playwright installation.
 const { chromium } = require('../.codex/credibility-ui-test/node_modules/playwright');
 const assert = require('node:assert/strict');
@@ -29,7 +30,7 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
             vm.createContext(sandbox);
             for (const name of ['normalize' + prefix + 'HistoricalTrendScore','format' + prefix + 'HistoricalTrendScore','format' + prefix + 'HistoricalTrendDelta']) {
                 const start = source.indexOf('function ' + name + '(');
-                const end = source.indexOf('\nfunction ', start + 1);
+                const end = findSourceMarker(source, '\nfunction ', start + 1);
                 vm.runInContext(source.slice(start, end < 0 ? source.length : end), sandbox);
             }
             const start = source.indexOf('<div class="historical-trend-table-wrap">');

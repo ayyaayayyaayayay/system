@@ -95,6 +95,7 @@ function buildVpaaContext(enrollmentStatus = 'enrolled') {
     };
     const context = {
         SharedData,
+        AppLoadingOverlay: { run: async (_message, callback) => callback() },
         document: {
             getElementById: getNode,
             querySelector: () => null,

@@ -48,8 +48,8 @@ hrEmailAssert(
 );
 hrEmailAssert(
     str_contains($dbData, 'function changeOwnEmailAsync')
-        && str_contains($html, 'db-data.js?v=20261006c')
-        && str_contains($html, 'hrpanel.js?v=20261006cmo'),
+        && preg_match('/db-data\.js\?[^"\']*loading=20261010b/', $html) === 1
+        && preg_match('/hrpanel\.js\?[^"\']*loading=20261010b/', $html) === 1,
     'The updated HR email scripts must be available and cache-busted.'
 );
 

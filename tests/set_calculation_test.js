@@ -1,3 +1,4 @@
+const { findSourceMarker } = require('./helpers/js-source');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -208,7 +209,7 @@ function panelFunction(relativePath, name, dependencies = {}) {
     const source = fs.readFileSync(path.join(root, relativePath), 'utf8');
     const start = source.indexOf(`function ${name}(`);
     assert(start >= 0, `Missing ${name}`);
-    const next = source.indexOf('\nfunction ', start + 1);
+    const next = findSourceMarker(source, '\nfunction ', start + 1);
     const sandbox = { window: { SetCalculation }, ...dependencies };
     vm.runInNewContext(source.slice(start, next < 0 ? undefined : next), sandbox);
     return sandbox[name];
@@ -256,14 +257,14 @@ institutionCalculators.forEach(calculate => {
 });
 
 const professorPanel = fs.readFileSync(path.join(root, 'JsScrip/profesorpanel.js'), 'utf8');
-assert(professorPanel.includes('sections rated'), 'The professor panel does not disclose partial section coverage.');
+assert(professorPanel.includes('Weighted SET total is N/A:'), 'The professor panel does not explain unavailable SET totals.');
 assert(
     !professorPanel.includes('Partial &middot; ${scorableClassCount}/${registeredClassCount} sections rated'),
     'The professor dashboard still renders the overall partial-section badge.'
 );
 assert(
-    professorPanel.includes('Partial &middot; ${ratedSections}/${coverageTotal} sections rated'),
-    'The professor subject rows no longer disclose partial section coverage.'
+    professorPanel.includes('Averages are required for all enrolled sections.'),
+    'The professor SET table no longer discloses missing enrolled-section averages.'
 );
 assert(
     !professorPanel.includes('previewDraftData ? previewDraftData.set_rating'),

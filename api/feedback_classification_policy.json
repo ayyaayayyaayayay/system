@@ -1,0 +1,155 @@
+{
+  "version": "multilingual-feedback-v1",
+  "labels": [
+    "Constructive",
+    "Positive",
+    "Neutral",
+    "Critical",
+    "Biased"
+  ],
+  "rules": {
+    "Biased": [
+      "\\b(?:professor|prof|teacher|instructor|sir|ma am|maam|mam|guro|he|she|you|siya|ka) (?:(?:is|are|looks|look|ay|po|opo|so|very|really|extremely|such|a|an|talaga|ang|napaka|not|never|hindi|di|isn t|is not) )*(?:stupid|dumb|idiot|useless|incompetent|ugly|pangit|hideous|unattractive|bobo|gago|tanga|inutil|epal|walang kwenta|trash|a joke)\\b",
+      "\\b(?:stupid|dumb|idiot|useless|incompetent|ugly|pangit|hideous|unattractive|bobo|gago|tanga|inutil|epal|walang kwenta|trash|a joke) (?:po |opo |na |ang |si |ni |yung |itong |ng |naman si )*(?:professor|prof|teacher|instructor|sir|ma am|maam|mam|guro|he|she|you|siya|ka)\\b",
+      "\\b(?:fuck you|tangina mo|putang ina mo|putangina mo|gago ka|bobo ka|tanga ka)\\b",
+      "\\b(?:fuck|putangina|tangina|fucking) (?:this |that |the |si |mo |po |our )*(?:professor|prof|teacher|instructor|sir|ma am|maam|mam|guro|he|she|you|siya|ka)\\b",
+      "\\b(?:professor|prof|teacher|instructor|sir|ma am|maam|mam|guro|he|she|you|siya|ka) (?:is |ay )?(?:a |such a )?(?:piece of shit|waste of space|disgusting looking)\\b",
+      "\\b(?:i hate|we hate|hate ko|hate namin) (?:this |the |our |si |ang )*(?:professor|prof|teacher|instructor|sir|ma am|maam|mam|guro|he|she|you|siya|ka)\\b",
+      "^(?:po )?(?:bobo|gago|tanga|idiot|useless|walang kwenta|stupid)(?: po)?$",
+      "\\b(?:professor|prof|teacher|instructor|sir|ma am|maam) sucks\\b"
+    ],
+    "Discriminatory": [
+      "\\b(?:professor|prof|teacher|instructor|sir|ma am|maam|mam|guro|he|she|you|siya|ka) (?:should not|shouldn t|must not|cannot|can t) teach because (?:he|she|they) (?:is|are) (?:a woman|female|gay|disabled|muslim)\\b",
+      "\\b(?:bawal|hindi dapat) (?:magturo|mag teach) (?:ang |siya kasi |siya dahil )?(?:babae|bakla|muslim)\\b"
+    ],
+    "Constructive": [
+      "\\b(?:should|could|needs? to|please|pls|plz|kindly|sana|dapat|paki|pakisuyo|pwede po bang|puwede po bang|pwede bang|puwede bang|pde po bang|pwedeng|mas okay kung|mas ok kung|mas maganda kung|would help to|would be better to) (?:po |naman |sana |si sir |si ma am |ang prof |na |hindi |di |not |you |he |she |the professor |the instructor )*(?:explain|provide|give|clarify|improve|use|add|reduce|slow|avoid|stop|include|prepare|be more|make|magbigay|mag bigay|dagdagan|dagdag|bawasan|bagalan|linawin|ipaliwanag|magpaliwanag|mag explain|mag discuss|mag discuss|i explain|i discuss|magturo|mag turo|gumamit|gawing|mas maraming|mas malinaw|mas mabagal|more examples|more guidance|clearer instructions)\\b",
+      "\\b(?:more|additional) (?:worked )?(?:examples|guidance|feedback|explanations|practice|learning materials) (?:please|pls|plz|would help|would be helpful|are needed|is needed)\\b",
+      "\\b(?:need|needs|want|request) (?:po |namin |ko |ng |nang |a |some )*(?:more|clearer|better|additional) (?:examples|guidance|instructions|explanations|feedback|pacing|materials)\\b",
+      "\\b(?:please |pls |paki)?(?:pakilinaw|pakibagalan|pakidagdagan|pakibawasan|pakipaliwanag|paki explain|paki provide|paki bigay)\\b",
+      "\\b(?:magbigay|dagdagan|bawasan|bagalan|linawin|ipaliwanag) (?:po |naman |pa |ng |ang |yung )*(?:halimbawa|examples|instructions|pacing|discussion|lesson|lessons|gawain|workload|feedback)\\b",
+      "\\b(?:sana|dapat) (?:po |naman |ay |na )*(?:may|merong|magkaroon ng) (?:mas |more |additional )?(?:examples|halimbawa|guidance|feedback|explanation|paliwanag)\\b",
+      "\\b(?:don t|do not|stop) (?:just |only )?(?:assign|assigning|give|giving|rely on|rush|skip)\\b",
+      "\\b(?:sana|dapat|mas okay kung|mas maganda kung) (?:po |naman |ay |na )*(?:mas malinaw|mas mabagal|hindi puro|di puro) (?:po |ang |yung |na |lang )*(?:paliwanag|explanation|discussion|instructions|reporting|report|chatgpt)\\b",
+      "^(?:please |pls |plz )?(?:give|provide|explain|clarify|add|reduce|slow down|improve) (?:po |us |the |some |more |worked |clearer |additional )*(?:examples|guidance|feedback|lessons|lesson|rubric|instructions|workload|pacing|teaching|slides|materials)\\b",
+      "^(?:more|additional|clearer|better) (?:worked )?(?:examples|guidance|instructions|explanations|feedback|pacing|materials)(?: po| please| pls)?$",
+      "\\b(?:mas okay kung|mas ok kung|mas maganda kung|sana|dapat) (?:po |naman |na )*(?:may|merong|magkaroon ng) (?:mas |more |additional |malinaw na )?(?:examples|halimbawa|guidance|feedback|explanation|paliwanag|rubrics|instructions)\\b",
+      "\\b(?:sana|dapat) (?:po |siya |sya |ay )*(?:hindi|di) (?:po |siya |sya |palaging |laging )*(?:late|absent)\\b"
+    ],
+    "Critical": [
+      "\\b(?:unclear|confusing|unprepared|unfair|frustrating|frustrated|disappointing|disappointed|nakakainis|nakakafrustrate|nakakalito|magulo|malabo|mabilis masyado|sobrang bilis|sobrang dami)\\b",
+      "\\b(?:rarely|barely|never|seldom) (?:explains?|teaches?|provides? feedback)\\b",
+      "\\b(?:too fast|too much homework|too much workload|relies too much on chatgpt|rely too much on chatgpt|teaching ourselves|teach ourselves|students are the ones reporting|students are the ones teaching)\\b",
+      "\\b(?:student reporting|assigned as student reports|puro reporting|puro report|puro chatgpt|kami lang nagtuturo|kami lang nagrereport|kami kami lang|reporting lang|chatgpt lang)\\b",
+      "\\b(?:pangit|ugly|stupid|terrible|awful|walang kwenta) (?:ang |ng |yung |the |na )*(?:slides|materials|instructions|lecture|lesson|lessons|pagtuturo|paliwanag|discussion)\\b",
+      "\\b(?:slides|materials|instructions|lecture|lesson|lessons|pagtuturo|paliwanag|discussion) (?:are |is |ay |ang |very |so |napaka |talagang )*(?:ugly|pangit|terrible|awful|confusing|stupid|walang kwenta)\\b",
+      "\\b(?:laging late|palaging late|always late|frequently late|often late|rarely available|doesn t teach anything|does not teach anything)\\b",
+      "\\b(?:calls?|called) (?:us|students|the students) (?:stupid|dumb|idiots|bobo|tanga)\\b",
+      "\\b(?:pagtuturo|teaching|paliwanag|explanation|instructions|discussion|grading|grades|rubric|materials|slides) (?:is |are |ay |ang |po |very |so |sobrang )*(?:poor|bad|terrible|awful|confusing|unclear|unfair|malabo|magulo|pangit|useless)\\b",
+      "\\b(?:pangit|malabo|magulo|mabilis|nakakalito) (?:po |siya |talaga )*(?:magturo|magpaliwanag|mag explain)\\b",
+      "\\b(?:laging|palaging|madalas) (?:po |siya |sya )?absent\\b",
+      "\\b(?:ang|sobrang|masyadong) (?:bilis|bagal)\\b"
+    ],
+    "Positive": [
+      "\\b(?:explains?|teaches?) (?:the |our |difficult |complex )*(?:lessons|topics|concepts)? ?(?:very |really |so )?(?:well|clearly)\\b",
+      "\\b(?:clear|helpful|excellent|great|effective|engaging|good|nice|patient|approachable|organized|knowledgeable) (?:and |very |classroom )*(?:teaching|teacher|professor|prof|instructor|lessons|discussions|explanations|examples|feedback|guidance|materials)\\b",
+      "\\b(?:professor|prof|teacher|instructor|sir|ma am|maam|mam|guro|he|she|you|siya|ka) (?:is |are |ay |very |so |really |po |both )*(?:patient|approachable|helpful|excellent|great|kind|knowledgeable|magaling|mabait|mahusay)\\b",
+      "\\b(?:malinaw|maayos|magaling|mahusay) (?:po |talaga |siya )*(?:magpaliwanag|magturo|ang paliwanag|ang pagtuturo|ang explanation|ang discussion)\\b",
+      "\\b(?:magaling|mabait|mahusay|approachable|patient) (?:po |talaga |ang |si |naman si )*(?:sir|ma am|maam|mam|prof|professor|guro|instructor)\\b",
+      "\\b(?:thank you|thanks|salamat|appreciate) (?:po |sir |ma am |for |sa )*(?:teaching|help|guidance|pagtuturo|tulong|paliwanag|effort)\\b",
+      "\\b(?:madaling|daling) (?:po )?(?:maintindihan|intindihin)\\b",
+      "^(?:excellent|great|good|nice|salamat|thank you|thanks|magaling|mahusay)(?: po)?$",
+      "\\b(?:sobrang|super|ang) (?:galing|husay) (?:po |naman |talaga )?(?:niya|ni sir|ni ma am|ni prof|magturo|magpaliwanag)\\b",
+      "\\b(?:thank you|thanks|salamat) (?:po |very much |so much )*(?:sir|ma am|maam|mam|prof|professor|teacher)\\b",
+      "\\b(?:very |so |really )?(?:helpful|patient|approachable) (?:and )?(?:helpful|patient|approachable)\\b"
+    ],
+    "CriticalNegative": [
+      "\\b(?:not|never|no|without|doesn t|does not|isn t|is not|aren t|are not|hindi|di|wala|walang|kulang|kulang sa) (?:po |siya |sya |kami |ko |namin |ako |talaga |masyadong |proper |any |enough |really |even |clear |clearer |malinaw |nag |mag )*(?:teach|teaches|teaching|explain|explains|explaining|provide|provides|explanation|guidance|instructions|feedback|learning|helpful|organized|patient|approachable|interesting|engaging|effective|prepared|malinaw|maintindihan|naiintindihan|nagtuturo|nag tuturo|magturo|mag turo|nagpapaliwanag|nag explain|nag eexplain|magpaliwanag|paliwanag|matuto|natututo|magaling|maayos|tinuturo|nagbibigay|makasunod)\\b",
+      "\\b(?:wala|walang|kulang) (?:po |kaming |kami |ng |sa )*(?:natutunan|natututunan|halimbawa|examples|guidance|feedback)\\b",
+      "\\b(?:no|zero) effort (?:in |sa )?(?:teaching|pagtuturo|explaining)\\b",
+      "\\b(?:hindi|di|d) (?:po |kami |ko |namin )*(?:gets|get|maintindihan)\\b"
+    ]
+  },
+  "reasons": {
+    "Constructive": "Requests a specific improvement to teaching or classroom support.",
+    "Positive": "Expresses praise or appreciation for teaching or support.",
+    "Neutral": "No clear praise, teaching concern, improvement request, or personal attack.",
+    "Critical": "Expresses a teaching concern or dissatisfaction without an actionable suggestion.",
+    "Biased": "Contains a direct personal insult, abusive attack, or discriminatory remark."
+  },
+  "topics": [
+    {
+      "label": "learning materials",
+      "keywords": [
+        "materials",
+        "material",
+        "module",
+        "modules",
+        "handout",
+        "handouts",
+        "slides",
+        "resources",
+        "references",
+        "kagamitan"
+      ]
+    },
+    {
+      "label": "lesson explanations",
+      "keywords": [
+        "explain",
+        "explains",
+        "explanation",
+        "explanations",
+        "clarify",
+        "clearer",
+        "understand",
+        "paliwanag",
+        "ipaliwanag",
+        "magpaliwanag",
+        "malinaw",
+        "maintindihan",
+        "nagpapaliwanag",
+        "nag eexplain"
+      ]
+    },
+    {
+      "label": "examples and practice",
+      "keywords": [
+        "example",
+        "examples",
+        "sample",
+        "samples",
+        "halimbawa",
+        "practice",
+        "pagsasanay"
+      ]
+    },
+    {
+      "label": "class pacing",
+      "keywords": [
+        "pace",
+        "pacing",
+        "fast",
+        "rushed",
+        "bilis",
+        "mabilis",
+        "mabagal",
+        "bagalan"
+      ]
+    },
+    {
+      "label": "class discussion and participation",
+      "keywords": [
+        "interactive",
+        "discussion",
+        "discussions",
+        "engaging",
+        "participate",
+        "interaction",
+        "reporting",
+        "talakayan",
+        "nagrereport"
+      ]
+    }
+  ]
+}

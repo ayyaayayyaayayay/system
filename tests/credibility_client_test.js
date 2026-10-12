@@ -1,4 +1,5 @@
 'use strict';
+const { findSourceMarker } = require('./helpers/js-source');
 const assert = require('assert');
 const fs = require('fs');
 const vm = require('vm');
@@ -7,7 +8,7 @@ function extract(file, name) {
     const source = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
     const start = source.indexOf('function ' + name + '(');
     assert(start >= 0, name);
-    const end = source.indexOf('\nfunction ', start + 1);
+    const end = findSourceMarker(source, '\nfunction ', start + 1);
     return source.slice(start, end < 0 ? source.length : end);
 }
 const saved = new Map();

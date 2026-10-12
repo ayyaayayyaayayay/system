@@ -1,4 +1,5 @@
 'use strict';
+const { findSourceMarker } = require('./helpers/js-source');
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -6,8 +7,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '..', 'JsScrip', 'hrpanel.js'), 'utf8');
 function between(start, end) {
-    const from = source.indexOf(start);
-    const to = source.indexOf(end, from + start.length);
+    const from = findSourceMarker(source, start);
+    const to = findSourceMarker(source, end, from + start.length);
     assert.ok(from >= 0 && to > from);
     return source.slice(from, to);
 }
@@ -46,6 +47,7 @@ const sandbox = {
 };
 vm.createContext(sandbox);
 vm.runInContext([
+    between('function runHrWithGlobalLoading(', '\nfunction runAiBiasDetection('),
     'let hrBehaviorAnalysisHasRun = false; let hrBehaviorAnalysisSnapshot = null; let hrBehaviorAnalysisRequestId = 0;',
     between('function normalizeHrToken(', '\nfunction getHrQuestionnaireTypeCode('),
     between('function isHrEvaluationInSemester(', '\nfunction buildHrEvaluationContext('),
@@ -85,7 +87,7 @@ const surveys = [65, 64].map((behaviorScore, index) => ({
     assert.match(elements['hr-ai-submission-body'].innerHTML, /Yes \(comments\)/);
     assert.doesNotMatch(elements['hr-ai-submission-body'].innerHTML, /Yes \(ratings/);
     assert.match(elements['hr-ai-student-aggregate-body'].innerHTML, /<td>2<\/td>/);
-    sandbox.renderAiInsightsBehaviorAnalysis({ silent: true });
+    await sandbox.renderAiInsightsBehaviorAnalysis({ silent: true });
     assert.match(elements['hr-ai-submission-body'].innerHTML, /db-eval-4/, 'Rerender must retain the fetched snapshot.');
 
     const stale = sandbox.runAiBehaviorAnalysis();
@@ -130,6 +132,32 @@ const surveys = [65, 64].map((behaviorScore, index) => ({
     resolveFetch(surveys);
     await failedCredibilityPrint;
     assert.equal(printCount, 1, 'Do not print when credibility loading fails.');
+    let loading = false;
+    let finishRendering;
+    let pausedOnce = false;
+    sandbox.window = { AppLoadingOverlay: {
+        show() {}, hide() {},
+        async run(_message, callback) {
+            loading = true;
+            try { return await callback(); } finally { loading = false; }
+        },
+        async mapAsync(rows, callback) {
+            if (!pausedOnce) {
+                pausedOnce = true;
+                await new Promise(resolve => { finishRendering = resolve; });
+            }
+            return rows.map(callback);
+        },
+    } };
+    const rendering = sandbox.runAiBehaviorAnalysis();
+    resolveFetch(surveys);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(loading, true, 'Loading must continue after the transport finishes.');
+    assert.equal(elements['hr-run-behavior-analysis-btn'].disabled, true);
+    finishRendering();
+    assert.equal(await rendering, true);
+    assert.equal(loading, false);
+    assert.equal(elements['hr-run-behavior-analysis-btn'].disabled, false);
     const html = fs.readFileSync(path.join(__dirname, '..', 'html', 'hrpanel.html'), 'utf8');
     const aggregate = html.slice(html.indexOf('<h3>Student Aggregate Scores</h3>'), html.indexOf('<h3>Submission-Level Analysis</h3>'));
     assert.match(aggregate, /<th>Anonymous Student Group<\/th>/);

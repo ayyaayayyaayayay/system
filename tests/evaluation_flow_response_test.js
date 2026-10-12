@@ -1,4 +1,5 @@
 'use strict';
+const { findSourceMarker } = require('./helpers/js-source');
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -6,8 +7,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 const read = file => fs.readFileSync(path.join(__dirname, '..', 'JsScrip', file), 'utf8');
 function between(source, start, end) {
-    const first = source.indexOf(start);
-    const last = source.indexOf(end, first + start.length);
+    const first = findSourceMarker(source, start);
+    const last = findSourceMarker(source, end, first + start.length);
     assert.ok(first >= 0 && last > first, `Missing function: ${start}`);
     return source.slice(first, last);
 }
@@ -122,6 +123,9 @@ async function testSubmission(file, supervisor) {
     context.EvaluationTextLimits = context.window.EvaluationTextLimits;
     vm.runInContext(between(read(file), 'async function handlePeerEvaluation(', '\n}\n') + '\n}', context);
     let task = context.handlePeerEvaluation();
+    assert.equal(form.dataset.checkingSubmission, 'true', 'Validation must suppress duplicate clicks too.');
+    await context.handlePeerEvaluation();
+    for (let index = 0; index < 20 && requests === 0; index++) await Promise.resolve();
     assert.equal(submit.disabled, true);
     assert.equal(submit.textContent, 'Submitting...');
     assert.equal(requests, 1);
@@ -140,6 +144,7 @@ async function testSubmission(file, supervisor) {
 
     save = pending();
     task = context.handlePeerEvaluation();
+    for (let index = 0; index < 20 && requests < 2; index++) await Promise.resolve();
     assert.equal(requests, 2, 'The user must be able to retry a failed request.');
     resolveSave({ id: 'saved-evaluation' });
     await task;

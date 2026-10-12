@@ -1,19 +1,19 @@
 // Professor Panel JavaScript - Dashboard Functionality
 
 // Wait for DOM to be fully loaded
-document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', async function () {
     // Check authentication
-    if (!checkAuthentication()) {
+    if (!(await checkAuthentication())) {
         redirectToLogin();
         return;
     }
 
-    if (!enforceActiveProfessorAccount({ inline: false })) {
+    if (!(await enforceActiveProfessorAccount({ inline: false }))) {
         return;
     }
 
     // Initialize the dashboard
-    initializeDashboard();
+    (await initializeDashboard());
 });
 
 let peerSectionFlow = {
@@ -29,6 +29,8 @@ let professorAccountExitInProgress = false;
 const PROFESSOR_PANEL_EMPTY_SUMMARY = {
     criteriaAverages: [],
     breakdownRows: [],
+    setRows: [],
+    setTotals: { students: 0, weightedScore: null, excludedClassCount: 0 },
     ratingDistribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
     comments: [],
     commentBuckets: {},
@@ -63,6 +65,8 @@ const professorPanelState = {
 };
 
 let professorReportSelectionRequestId = 0;
+let professorFeedbackRequestId = 0;
+let professorFeedbackFiltersLoading = false;
 let professorTrendSnapshotRequestId = 0;
 let professorTrendRefreshTimer = 0;
 let professorReportAccessRefreshPromise = null;
@@ -239,10 +243,10 @@ function buildProfessorContextRecord(source) {
     };
 }
 
-function resolveActiveProfessorAccount(contextInput) {
+async function resolveActiveProfessorAccount(contextInput) {
     const context = contextInput && typeof contextInput === 'object'
         ? contextInput
-        : (professorPanelState.context || buildProfessorPanelContext());
+        : (professorPanelState.context || (await buildProfessorPanelContext()));
     const session = context && context.session ? context.session : (getUserSession() || {});
     const sessionProfessor = buildProfessorUserFromSession(session);
     const professor = buildProfessorContextRecord(context && context.professor)
@@ -435,13 +439,13 @@ function collectEvaluationComments(evaluation) {
         : {};
 
     Object.values(qualitative).forEach(value => {
-        const text = String(value || '').trim();
-        if (!text) return;
+        const text = String(value || '');
+        if (!text.trim()) return;
         items.push(text);
     });
 
-    const comments = String(evaluation && evaluation.comments || '').trim();
-    if (comments) items.push(comments);
+    const comments = String(evaluation && evaluation.comments || '');
+    if (comments.trim()) items.push(comments);
 
     return items;
 }
@@ -463,7 +467,7 @@ function computeAverageRatingFromEvaluations(evaluations) {
     return count ? (total / count) : null;
 }
 
-function buildProfessorPanelContext() {
+async function buildProfessorPanelContext() {
     const users = SharedData.getUsers ? SharedData.getUsers() : [];
     const subjectManagement = SharedData.getSubjectManagement ? SharedData.getSubjectManagement() : { offerings: [], enrollments: [] };
     const evaluations = SharedData.getEvaluations ? SharedData.getEvaluations() : [];
@@ -487,7 +491,7 @@ function buildProfessorPanelContext() {
 
     if (linked && SharedData.listProfessorPeerAssignmentsCurrent) {
         try {
-            const response = SharedData.listProfessorPeerAssignmentsCurrent({});
+            const response = (await SharedData.listProfessorPeerAssignmentsCurrent({}));
             if (response && typeof response === 'object') {
                 peerAssignmentsResponse = Object.assign({}, peerAssignmentsResponse, response);
                 peerAssignmentsLoaded = true;
@@ -544,8 +548,8 @@ function buildProfessorPanelContext() {
  * Check if user is authenticated and is a professor
  * @returns {boolean} - True if user is authenticated as professor
  */
-function checkAuthentication() {
-    const session = SharedData.requireSession('professor');
+async function checkAuthentication() {
+    const session = (await SharedData.requireSession('professor'));
     if (!session) {
         return false;
     }
@@ -600,10 +604,10 @@ function resolveCurrentProfessorUserAnyStatus(sessionInput) {
     return buildProfessorUserFromSession(session, { includeInactive: true });
 }
 
-function enforceActiveProfessorAccount(options = {}) {
+async function enforceActiveProfessorAccount(options = {}) {
     const cfg = options || {};
-    const context = cfg.context || professorPanelState.context || buildProfessorPanelContext();
-    const account = resolveActiveProfessorAccount(context);
+    const context = cfg.context || professorPanelState.context || (await buildProfessorPanelContext());
+    const account = (await resolveActiveProfessorAccount(context));
 
     if (account.linked) {
         return true;
@@ -642,13 +646,13 @@ function redirectToLogin() {
 /**
  * Initialize the professor dashboard
  */
-function initializeDashboard() {
+async function initializeDashboard() {
     setupNavigation();
     setupLogout();
     setupMobileDrawer();
     setupProfessorViewportRefresh();
     setupHeaderPanels();
-    applyReportBlackout();
+    (await applyReportBlackout());
     setupReportGateSync();
     setupActionButtons();
     setupProfessorHeroActions();
@@ -656,7 +660,7 @@ function initializeDashboard() {
     setupSemesterFilter();
     setupProfessorSubjectComments();
     setupProfilePhotoUpload();
-    setupPeerEvaluationForm();
+    (await setupPeerEvaluationForm());
     setupProfileActions();
     setupChangeEmailForm();
     setupChangePasswordForm();
@@ -664,8 +668,8 @@ function initializeDashboard() {
     setupFacultyPaperWorkflow();
     initializeReports();
     setupProfessorDataSync();
-    refreshProfessorPanelData({ preserveSelection: false });
-    refreshProfessorReportAccessState();
+    (await refreshProfessorPanelData({ preserveSelection: false }));
+    (await refreshProfessorReportAccessState());
     showProfessorLoginAnnouncements();
 }
 
@@ -728,8 +732,8 @@ function renderAnnouncementPanels(context) {
     });
 }
 
-function renderProfileViewModel(context, semesterLabel) {
-    const account = resolveActiveProfessorAccount(context);
+async function renderProfileViewModel(context, semesterLabel) {
+    const account = (await resolveActiveProfessorAccount(context));
     const profileContext = account.context || context || {};
     const professor = account.professor || (profileContext && profileContext.professor ? profileContext.professor : null);
     const linked = !!(account.linked && professor);
@@ -831,7 +835,7 @@ function refreshProfessorProfilePhotoPreview(photo, options) {
             delete preview.dataset.profilePhotoRetry;
         }
         preview.dataset.profilePhotoCurrent = resolvedPhoto;
-        preview.onerror = function () {
+        preview.onerror = async function () {
             const cfg = options && typeof options === 'object' ? options : {};
             const canRetry = cfg.retry !== false
                 && !/^data:/i.test(resolvedPhoto)
@@ -842,7 +846,7 @@ function refreshProfessorProfilePhotoPreview(photo, options) {
             if (canRetry) {
                 preview.dataset.profilePhotoRetry = resolvedPhoto;
                 try {
-                    const refreshedSession = SharedData.refreshSession(true);
+                    const refreshedSession = (await SharedData.refreshSession(true, { background: true }));
                     if (refreshedSession && refreshedSession.isAuthenticated === true) {
                         const retryPhoto = appendProfessorProfilePhotoCacheBust(resolveProfessorProfilePhoto(professorPanelState.context));
                         if (retryPhoto) {
@@ -924,8 +928,8 @@ function getEvaluationPeriodCountdown(typeKey, label) {
     };
 }
 
-function buildPendingProfessorTargets(context) {
-    const account = resolveActiveProfessorAccount(context);
+async function buildPendingProfessorTargets(context) {
+    const account = (await resolveActiveProfessorAccount(context));
     const activeContext = account.context || context;
     if (!activeContext || !account.linked || !activeContext.professor) return [];
     const pendingAssignments = Array.isArray(activeContext.pendingPeerAssignments)
@@ -960,13 +964,13 @@ function renderDashboardDeadlineCountdown() {
     `).join('');
 }
 
-function openPeerEvaluationForTarget(targetProfessorId) {
+async function openPeerEvaluationForTarget(targetProfessorId) {
     const targetId = normalizeUserIdToken(targetProfessorId);
 
-    switchView('peerEvaluation');
+    (await switchView('peerEvaluation'));
     updateNavigation('peerEvaluation');
 
-    const context = professorPanelState.context || buildProfessorPanelContext();
+    const context = professorPanelState.context || (await buildProfessorPanelContext());
     populatePeerProfessorOptions(context);
 
     const select = document.getElementById('peerProfessor');
@@ -982,15 +986,15 @@ function openPeerEvaluationForTarget(targetProfessorId) {
     }
 
     select.dispatchEvent(new Event('change', { bubbles: true }));
-    refreshPeerTargetLockState();
+    (await refreshPeerTargetLockState());
 }
 
-function renderDashboardPendingTasks(context) {
+async function renderDashboardPendingTasks(context) {
     const listEl = document.getElementById('pending-tasks-list');
     const badgeEl = document.getElementById('pending-tasks-count');
     if (!listEl || !badgeEl) return;
 
-    const account = resolveActiveProfessorAccount(context);
+    const account = (await resolveActiveProfessorAccount(context));
     const activeContext = account.context || context;
     if (!activeContext || !account.linked || !activeContext.professor) {
         badgeEl.textContent = '0';
@@ -999,7 +1003,7 @@ function renderDashboardPendingTasks(context) {
     }
 
     const peerPeriodOpen = SharedData.isEvalPeriodOpen('professor-professor');
-    const pendingTargets = buildPendingProfessorTargets(activeContext);
+    const pendingTargets = (await buildPendingProfessorTargets(activeContext));
     const visiblePending = peerPeriodOpen ? pendingTargets : [];
     badgeEl.textContent = String(visiblePending.length);
 
@@ -1030,54 +1034,53 @@ function renderDashboardPendingTasks(context) {
     `).join('');
 
     listEl.querySelectorAll('[data-task-action="peerEvaluation"]').forEach(button => {
-        button.addEventListener('click', () => {
+        button.addEventListener('click', async () => {
             const index = Number(button.getAttribute('data-task-index'));
             const task = Number.isInteger(index) && index >= 0 ? pendingSlice[index] : null;
-            openPeerEvaluationForTarget(task && task.id ? task.id : '');
+            (await openPeerEvaluationForTarget(task && task.id ? task.id : ''));
         });
     });
 }
 
-function renderDashboardSupportWidgets(context) {
+async function renderDashboardSupportWidgets(context) {
     renderDashboardDeadlineCountdown();
-    renderDashboardPendingTasks(context || professorPanelState.context || buildProfessorPanelContext());
+    (await renderDashboardPendingTasks(context || professorPanelState.context || (await buildProfessorPanelContext())));
 }
 
 function setProfessorActionsEnabled(enabled) {
     const isEnabled = !!enabled;
     const peerSelect = document.getElementById('peerProfessor');
     const peerSubmit = document.querySelector('#peerEvaluationForm .btn-submit');
-    const evalFilter = document.getElementById('evaluationTypeFilter');
     const semFilter = document.getElementById('semesterFilter');
     const reportBtn = document.querySelector('.action-card .btn-action');
     const createDraftBtn = document.getElementById('facultyPaperCreateDraftBtn');
 
     if (peerSelect) peerSelect.disabled = !isEnabled;
     if (peerSubmit) peerSubmit.disabled = !isEnabled;
-    if (evalFilter) evalFilter.disabled = !isEnabled;
     if (semFilter) semFilter.disabled = !isEnabled;
     if (reportBtn && !isEnabled) reportBtn.disabled = true;
     if (createDraftBtn) createDraftBtn.disabled = !isEnabled;
 }
 
-function refreshProfessorPanelData(options = {}) {
+async function refreshProfessorPanelData(options = {}) {
+    if (professorFeedbackFiltersLoading) return;
+    const requestId = professorReportSelectionRequestId;
     const preserveSelection = !!options.preserveSelection;
-    let context = buildProfessorPanelContext();
+    let context = (await buildProfessorPanelContext());
     professorPanelState.context = context;
     professorPanelState.linked = !!context.linked;
 
-    if (!enforceActiveProfessorAccount({ inline: false, context })) {
+    if (!(await enforceActiveProfessorAccount({ inline: false, context }))) {
         return;
     }
-    const account = resolveActiveProfessorAccount(context);
+    const account = (await resolveActiveProfessorAccount(context));
+    if (requestId !== professorReportSelectionRequestId) return;
 
     const semesterId = preserveSelection && professorPanelState.currentSelection.semesterId
         ? professorPanelState.currentSelection.semesterId
         : findCurrentSemesterId(context.semesterList, context.currentSemester);
     const semesterLabel = getSemesterLabelById(semesterId, context.semesterList);
-    const evaluationType = preserveSelection && professorPanelState.currentSelection.evaluationType
-        ? professorPanelState.currentSelection.evaluationType
-        : 'student';
+    const evaluationType = 'student';
 
     cacheProfessorContextSemesterSnapshot(context, context.currentSemester);
     const semesterContext = buildProfessorContextForSemester(context, semesterId);
@@ -1094,25 +1097,23 @@ function refreshProfessorPanelData(options = {}) {
 
     loadUserInfo(context);
     renderAnnouncementPanels(context);
-    renderProfileViewModel(context, semesterLabel);
+    (await renderProfileViewModel(context, semesterLabel));
+    if (requestId !== professorReportSelectionRequestId) return;
     populateSemesterFilterOptions(context, semesterId);
-    const evalFilter = document.getElementById('evaluationTypeFilter');
-    if (evalFilter && Array.from(evalFilter.options).some(opt => opt.value === evaluationType)) {
-        evalFilter.value = evaluationType;
-    }
     populatePeerProfessorOptions(context);
-    loadFacultySummary({ semesterId, evaluationType });
+    (await loadFacultySummary({ semesterId, evaluationType }));
+    if (requestId !== professorReportSelectionRequestId) return;
     initializeReports();
     setProfessorActionsEnabled(account.linked);
-    applyReportBlackout();
-    renderDashboardSupportWidgets(context);
-    renderProfessorFacultyPaperList();
+    (await applyReportBlackout());
+    (await renderDashboardSupportWidgets(context));
+    (await renderProfessorFacultyPaperList());
 
     const peerView = document.getElementById('peerEvaluationView');
     if (peerView && peerView.style.display === 'block') {
-        loadDynamicPeerQuestionnaire();
+        (await loadDynamicPeerQuestionnaire());
     }
-    refreshPeerTargetLockState();
+    (await refreshPeerTargetLockState());
 }
 
 /**
@@ -1193,7 +1194,7 @@ function setupNavigation() {
                 await refreshProfessorReportAccessState();
                 if (resolveReportsGateState().locked) {
                     updateNavigation('dashboard');
-                    switchView('dashboard');
+                    (await switchView('dashboard'));
                     return;
                 }
             }
@@ -1206,7 +1207,7 @@ function setupNavigation() {
 
             // Handle navigation (for future implementation)
             if (view) {
-                handleNavigation(view);
+                (await handleNavigation(view));
                 closeMobileDrawer();
             }
         });
@@ -1217,22 +1218,22 @@ function setupNavigation() {
  * Handle navigation to different sections
  * @param {string} section - Section name
  */
-function handleNavigation(section) {
+async function handleNavigation(section) {
     switch (section) {
         case 'dashboard':
-            switchView('dashboard');
+            (await switchView('dashboard'));
             break;
         case 'peerEvaluation':
-            switchView('peerEvaluation');
+            (await switchView('peerEvaluation'));
             break;
         case 'reports':
-            switchView('reports');
+            (await switchView('reports'));
             break;
         case 'facultyPaper':
-            switchView('facultyPaper');
+            (await switchView('facultyPaper'));
             break;
         case 'profile':
-            switchView('profile');
+            (await switchView('profile'));
             break;
         default:
             break;
@@ -1243,7 +1244,7 @@ function handleNavigation(section) {
  * Switch between dashboard and reports views
  * @param {string} viewName - Name of the view to show ('dashboard' or 'reports')
  */
-function switchView(viewName) {
+async function switchView(viewName) {
     closeMobileDrawer();
     const dashboardView = document.getElementById('dashboardView');
     const peerEvaluationView = document.getElementById('peerEvaluationView');
@@ -1266,7 +1267,7 @@ function switchView(viewName) {
         if (facultyPaperView) facultyPaperView.style.display = 'none';
         if (profileView) profileView.style.display = 'none';
 
-        loadDynamicPeerQuestionnaire();
+        (await loadDynamicPeerQuestionnaire());
 
         window.scrollTo(0, 0);
         closeAllPanels();
@@ -1313,13 +1314,13 @@ function switchView(viewName) {
         if (reportsView) reportsView.style.display = 'none';
         if (facultyPaperView) facultyPaperView.style.display = 'block';
         if (profileView) profileView.style.display = 'none';
-        renderProfessorFacultyPaperList();
+        (await renderProfessorFacultyPaperList());
         window.scrollTo(0, 0);
         closeAllPanels();
         return true;
     } else if (viewName === 'profile') {
-        const context = professorPanelState.context || buildProfessorPanelContext();
-        const account = resolveActiveProfessorAccount(context);
+        const context = professorPanelState.context || (await buildProfessorPanelContext());
+        const account = (await resolveActiveProfessorAccount(context));
         const profileContext = account.context || context;
         const semesterId = professorPanelState.currentSelection.semesterId || (profileContext && profileContext.currentSemester) || '';
         const semesterLabel = professorPanelState.currentSelection.semesterLabel || getSemesterLabelById(semesterId, profileContext && profileContext.semesterList);
@@ -1328,7 +1329,7 @@ function switchView(viewName) {
         if (reportsView) reportsView.style.display = 'none';
         if (facultyPaperView) facultyPaperView.style.display = 'none';
         if (profileView) profileView.style.display = 'block';
-        renderProfileViewModel(profileContext, semesterLabel);
+        (await renderProfileViewModel(profileContext, semesterLabel));
         window.scrollTo(0, 0);
         closeAllPanels();
         return true;
@@ -1342,13 +1343,13 @@ function isProfessorReportsViewActive() {
     return !!(reportsView && reportsView.style.display === 'block');
 }
 
-function refreshProfessorReportViewportLayout() {
+async function refreshProfessorReportViewportLayout() {
     if (!isProfessorReportsViewActive()) return;
 
     const selection = professorPanelState.currentSelection || {};
     const semesterId = String(selection.semesterId || '').trim();
     initializeReports();
-    renderSemestralEvaluationTrend(semesterId);
+    (await renderSemestralEvaluationTrend(semesterId));
 }
 
 function scheduleProfessorReportViewportRefresh(delayMs) {
@@ -1357,12 +1358,12 @@ function scheduleProfessorReportViewportRefresh(delayMs) {
     }
 
     const wait = Number.isFinite(delayMs) ? delayMs : 180;
-    professorViewportRefreshTimer = window.setTimeout(function () {
+    professorViewportRefreshTimer = window.setTimeout(async function () {
         professorViewportRefreshTimer = 0;
         if (!isProfessorReportsViewActive()) return;
 
-        const runRefresh = function () {
-            refreshProfessorReportViewportLayout();
+        const runRefresh = async function () {
+            (await refreshProfessorReportViewportLayout());
         };
 
         if (typeof window.requestAnimationFrame === 'function') {
@@ -1372,7 +1373,7 @@ function scheduleProfessorReportViewportRefresh(delayMs) {
             return;
         }
 
-        runRefresh();
+        (await runRefresh());
     }, wait);
 }
 
@@ -1392,23 +1393,34 @@ function setupProfessorViewportRefresh() {
  * Initialize reports view with charts
  */
 function initializeReports() {
+    renderPeerSupervisorAnalytics();
     setTimeout(() => {
         initializeStudentCharts();
-        initializePeerCharts();
-        initializeSupervisorCharts();
     }, 50);
+}
+
+function renderPeerSupervisorAnalytics() {
+    const body = document.getElementById('peerSupervisorSummaryBody');
+    if (!body) return;
+    body.innerHTML = [
+        { type: 'professor', label: 'Peer-to-Peer Evaluation' },
+        { type: 'supervisor', label: 'Supervisor Evaluation' },
+    ].map(source => {
+        const summary = professorPanelState.summaryByType[source.type] || PROFESSOR_PANEL_EMPTY_SUMMARY;
+        const received = Number(summary.totals && summary.totals.received || 0);
+        const average = summary.totals && summary.totals.averageScore;
+        const available = average !== null && average !== undefined && Number.isFinite(Number(average));
+        return `<tr>
+            <td data-label="Evaluation">${source.label}</td>
+            <td data-label="Evaluations Received">${received.toLocaleString('en-US')}</td>
+            <td data-label="Average Rating (1–5)">${available ? Number(average).toFixed(2) : 'N/A'}</td>
+            <td data-label="Status">${received === 0 ? 'No responses' : available ? 'Available' : 'No valid ratings'}</td>
+        </tr>`;
+    }).join('');
 }
 
 function initializeStudentCharts() {
     initializeEvaluationCharts('student');
-}
-
-function initializePeerCharts() {
-    initializeEvaluationCharts('professor');
-}
-
-function initializeSupervisorCharts() {
-    initializeEvaluationCharts('supervisor');
 }
 
 function initializeEvaluationCharts(type) {
@@ -1535,7 +1547,7 @@ function buildProfessorContextForSemester(baseContext, semesterId) {
 async function refreshProfessorTrendSnapshots(semesterId) {
     if (!SharedData.fetchSubjectManagementSnapshot || !SharedData.fetchEvaluationsSnapshot) return;
 
-    const baseContext = professorPanelState.context || buildProfessorPanelContext();
+    const baseContext = professorPanelState.context || (await buildProfessorPanelContext());
     const windowIds = getSemestralWindowIds(baseContext, semesterId, 4);
     if (!windowIds.length) return;
 
@@ -1559,7 +1571,7 @@ async function refreshProfessorTrendSnapshots(semesterId) {
 
         const selectedId = String(professorPanelState.currentSelection.semesterId || '').trim();
         if (selectedId === String(semesterId || '').trim()) {
-            renderSemestralEvaluationTrend(selectedId);
+            (await renderSemestralEvaluationTrend(selectedId));
         }
     } catch (error) {
         if (requestId === professorTrendSnapshotRequestId) {
@@ -1571,9 +1583,9 @@ async function refreshProfessorTrendSnapshots(semesterId) {
 function scheduleProfessorTrendSnapshotRefresh(semesterId, delayMs = 80) {
     if (professorTrendRefreshTimer) clearTimeout(professorTrendRefreshTimer);
     const id = String(semesterId || '').trim();
-    professorTrendRefreshTimer = window.setTimeout(function () {
+    professorTrendRefreshTimer = window.setTimeout(async function () {
         professorTrendRefreshTimer = 0;
-        refreshProfessorTrendSnapshots(id);
+        (await refreshProfessorTrendSnapshots(id));
     }, Math.max(0, Number(delayMs) || 0));
 }
 
@@ -1596,19 +1608,19 @@ function computeOverallAverageFromSummaries(studentSummary, peerSummary, supervi
     return weightedSum / totalResponses;
 }
 
-function buildSemestralEvaluationTrend(semesterId) {
-    const context = professorPanelState.context || buildProfessorPanelContext();
+async function buildSemestralEvaluationTrend(semesterId) {
+    const context = professorPanelState.context || (await buildProfessorPanelContext());
     const windowIds = getSemestralWindowIds(context, semesterId, 4);
-    const rows = windowIds.map(id => {
+    const rows = await Promise.all(windowIds.map(async id => {
         const semesterContext = buildProfessorContextForSemester(context, id);
         const student = semesterContext
-            ? fetchFacultySummaryFromSql({ semesterId: id, evaluationType: 'student', context: semesterContext })
+            ? (await fetchFacultySummaryFromSql({ semesterId: id, evaluationType: 'student', context: semesterContext }))
             : PROFESSOR_PANEL_EMPTY_SUMMARY;
         const peer = semesterContext
-            ? fetchFacultySummaryFromSql({ semesterId: id, evaluationType: 'professor', context: semesterContext })
+            ? (await fetchFacultySummaryFromSql({ semesterId: id, evaluationType: 'professor', context: semesterContext }))
             : PROFESSOR_PANEL_EMPTY_SUMMARY;
         const supervisor = semesterContext
-            ? fetchFacultySummaryFromSql({ semesterId: id, evaluationType: 'supervisor', context: semesterContext })
+            ? (await fetchFacultySummaryFromSql({ semesterId: id, evaluationType: 'supervisor', context: semesterContext }))
             : PROFESSOR_PANEL_EMPTY_SUMMARY;
         const overall = computeOverallAverageFromSummaries(student, peer, supervisor);
 
@@ -1626,7 +1638,7 @@ function buildSemestralEvaluationTrend(semesterId) {
                 ? Number(supervisor.totals.averageScore)
                 : null,
         };
-    });
+    }));
 
     return rows.filter(item => String(item && item.semesterId || '').trim() !== '');
 }
@@ -1658,13 +1670,13 @@ function renderSemestralTrendChart(rows) {
     });
 }
 
-function renderSemestralEvaluationTrend(semesterId) {
+async function renderSemestralEvaluationTrend(semesterId) {
     const statusEl = document.getElementById('semestralTrendStatus');
     const deltaEl = document.getElementById('semestralTrendDelta');
     const tableBody = document.getElementById('semestralTrendTableBody');
     if (!statusEl || !deltaEl || !tableBody) return;
 
-    const rows = buildSemestralEvaluationTrend(semesterId);
+    const rows = (await buildSemestralEvaluationTrend(semesterId));
     statusEl.classList.remove('improved', 'declined', 'stable');
 
     if (!rows.length) {
@@ -1824,8 +1836,8 @@ function setupProfessorHeroActions() {
     const facultyPaperButton = document.getElementById('heroOpenFacultyPaperBtn');
 
     if (peerButton) {
-        peerButton.addEventListener('click', function () {
-            if (switchView('peerEvaluation') !== false) {
+        peerButton.addEventListener('click', async function () {
+            if ((await switchView('peerEvaluation')) !== false) {
                 updateNavigation('peerEvaluation');
             }
         });
@@ -1834,15 +1846,15 @@ function setupProfessorHeroActions() {
     if (reportsButton) {
         reportsButton.addEventListener('click', async function () {
             await refreshProfessorReportAccessState();
-            if (switchView('reports') !== false) {
+            if ((await switchView('reports')) !== false) {
                 updateNavigation('reports');
             }
         });
     }
 
     if (facultyPaperButton) {
-        facultyPaperButton.addEventListener('click', function () {
-            if (switchView('facultyPaper') !== false) {
+        facultyPaperButton.addEventListener('click', async function () {
+            if ((await switchView('facultyPaper')) !== false) {
                 updateNavigation('facultyPaper');
             }
         });
@@ -1873,7 +1885,7 @@ async function handleActionButton(actionTitle) {
     // Placeholder for future action functionality
     console.log(`Action clicked: ${actionTitle}`);
 
-    if (!resolveActiveProfessorAccount(professorPanelState.context).linked) {
+    if (!(await resolveActiveProfessorAccount(professorPanelState.context)).linked) {
         alert('Your session is not linked to an active professor account.');
         return;
     }
@@ -1888,7 +1900,7 @@ async function handleActionButton(actionTitle) {
             alert('Evaluation reports are available only after the student, peer, and supervisor evaluation periods have all ended. ' + unlockText);
             return;
         }
-        switchView('reports');
+        (await switchView('reports'));
         updateNavigation('reports');
         return;
     }
@@ -1966,8 +1978,8 @@ function setSelectedFacultyPaperLoadType(value) {
 /**
  * Build payload for faculty acknowledgement paper.
  */
-function buildFacultyPaperData(options = {}) {
-    const actor = getProfessorPaperActor();
+async function buildFacultyPaperData(options = {}) {
+    const actor = (await getProfessorPaperActor());
     const context = actor.context;
     const professor = actor.professor || (context && context.professor ? context.professor : null);
     if (!context || !actor.actorUserId || !professor) return null;
@@ -1987,15 +1999,15 @@ function buildFacultyPaperData(options = {}) {
     const loadType = options.loadType
         ? normalizeFacultyPaperLoadType(options.loadType)
         : getSelectedFacultyPaperLoadType();
-    const studentSummary = fetchFacultySummaryFromSql({
+    const studentSummary = (await fetchFacultySummaryFromSql({
         semesterId: requestedSemesterId,
         evaluationType: 'student',
         loadType,
-    });
-    const supervisorSummary = fetchFacultySummaryFromSql({
+    }));
+    const supervisorSummary = (await fetchFacultySummaryFromSql({
         semesterId: requestedSemesterId,
         evaluationType: 'supervisor',
-    });
+    }));
 
     return {
         faculty_name: String(professor.name || '').trim() || 'N/A',
@@ -2184,7 +2196,7 @@ async function openFacultyAcknowledgementPdf(payload, downloadFilename) {
 }
 
 async function openProfessorReportPdf() {
-    const payload = buildFacultyPaperData();
+    const payload = (await buildFacultyPaperData());
     if (!payload) {
         alert('Unable to generate paper because your session is not linked to an active professor account.');
         return;
@@ -2192,9 +2204,9 @@ async function openProfessorReportPdf() {
     await openFacultyAcknowledgementPdf(payload, 'faculty_acknowledgement.pdf');
 }
 
-function getProfessorPaperActor() {
-    const context = professorPanelState.context || buildProfessorPanelContext();
-    const account = resolveActiveProfessorAccount(context);
+async function getProfessorPaperActor() {
+    const context = professorPanelState.context || (await buildProfessorPanelContext());
+    const account = (await resolveActiveProfessorAccount(context));
     const professor = account.professor || (context && context.professor ? context.professor : null);
     const actorUserId = normalizeUserIdToken(account.actorUserId || (professor && professor.id));
     return {
@@ -2205,13 +2217,13 @@ function getProfessorPaperActor() {
     };
 }
 
-function buildFacultyPaperDraftPayload() {
-    const actor = getProfessorPaperActor();
+async function buildFacultyPaperDraftPayload() {
+    const actor = (await getProfessorPaperActor());
     const context = actor.context;
     const professor = actor.professor || (context && context.professor ? context.professor : null);
     if (!context || !professor || !actor.actorUserId) return null;
 
-    const paperData = buildFacultyPaperData();
+    const paperData = (await buildFacultyPaperData());
     if (!paperData) return null;
     const selectedPaper = (professorPanelState.facultyPaper.records || []).find(item =>
         String(item && item.id || '') === String(professorPanelState.facultyPaper.selectedId || '')
@@ -2341,15 +2353,15 @@ function clampFacultyAiComments(comments, maxItems = 120, maxLength = 400) {
     return rows;
 }
 
-function buildFacultySectionCRecommendationContext(paper) {
-    const context = professorPanelState.context || buildProfessorPanelContext();
+async function buildFacultySectionCRecommendationContext(paper) {
+    const context = professorPanelState.context || (await buildProfessorPanelContext());
     const semesterId = String((paper && paper.semester_id) || professorPanelState.currentSelection.semesterId || context.currentSemester || '').trim();
     const loadType = normalizeFacultyPaperLoadType(paper && (paper.load_type || paper.loadType));
-    const studentSummary = fetchFacultySummaryFromSql({
+    const studentSummary = (await fetchFacultySummaryFromSql({
         semesterId,
         evaluationType: 'student',
         loadType,
-    });
+    }));
     const criteriaAverages = Array.isArray(studentSummary && studentSummary.criteriaAverages)
         ? studentSummary.criteriaAverages.map(item => ({
             name: String(item && item.name || '').trim(),
@@ -2401,10 +2413,10 @@ function resolveFacultyRecommendationSourceLabel(source) {
     return 'rule-based logic';
 }
 
-function getProfessorOpenAiPanelAccess() {
+async function getProfessorOpenAiPanelAccess() {
     try {
         if (typeof SharedData !== 'undefined' && typeof SharedData.getOpenAiPanelAccess === 'function') {
-            return SharedData.getOpenAiPanelAccess({ role: 'professor' });
+            return (await SharedData.getOpenAiPanelAccess({ role: 'professor' }));
         }
     } catch (error) {
         console.warn('[ProfessorPanel] Failed to load OpenAI panel access.', error);
@@ -2412,12 +2424,12 @@ function getProfessorOpenAiPanelAccess() {
     return { role: 'professor', enabled: true };
 }
 
-function isProfessorOpenAiPanelEnabled() {
-    const access = getProfessorOpenAiPanelAccess();
+async function isProfessorOpenAiPanelEnabled() {
+    const access = (await getProfessorOpenAiPanelAccess());
     return !access || access.enabled !== false;
 }
 
-function runFacultySectionCAiRecommendation(paper) {
+async function runFacultySectionCAiRecommendation(paper) {
     const aiBtn = document.getElementById('fpDetailAiRecommendBtn');
     const areasInput = document.getElementById('fpSectionCAreasInput');
     const activitiesInput = document.getElementById('fpSectionCActivitiesInput');
@@ -2434,13 +2446,13 @@ function runFacultySectionCAiRecommendation(paper) {
         return;
     }
 
-    const actor = getProfessorPaperActor();
+    const actor = (await getProfessorPaperActor());
     if (!actor.actorUserId) {
         setFacultyPaperAiFeedback('error', 'Unable to resolve your professor account.');
         return;
     }
 
-    const context = buildFacultySectionCRecommendationContext(paper);
+    const context = (await buildFacultySectionCRecommendationContext(paper));
     const hasCriteriaData = Array.isArray(context.criteriaAverages) && context.criteriaAverages.length > 0;
     const hasDetailedData = Array.isArray(context.detailedRows) && context.detailedRows.length > 0;
     const hasCommentData = Array.isArray(context.comments) && context.comments.length > 0;
@@ -2456,18 +2468,18 @@ function runFacultySectionCAiRecommendation(paper) {
     }
     setFacultyPaperAiFeedback('processing', 'Processing...');
 
-    const executeRecommendation = function () {
+    const executeRecommendation = async function () {
         try {
             if (typeof SharedData.generateFacultyPaperSectionCRecommendations !== 'function') {
                 throw new Error('Recommendation API is unavailable.');
             }
 
-            const response = SharedData.generateFacultyPaperSectionCRecommendations({
+            const response = (await SharedData.generateFacultyPaperSectionCRecommendations({
                 actor_role: actor.role,
                 actor_user_id: actor.actorUserId,
                 paper_id: paper.id,
                 context: context,
-            });
+            }));
 
             if (!response || response.success === false) {
                 throw new Error((response && response.error) || 'Failed to generate AI recommendations.');
@@ -2526,18 +2538,21 @@ function runFacultySectionCAiRecommendation(paper) {
         && typeof loadingOverlay.hide === 'function';
 
     if (!canUseOverlay) {
-        executeRecommendation();
+        (await executeRecommendation());
         return;
     }
 
-    loadingOverlay.show('Generating AI recommendations...');
-    setTimeout(function () {
-        try {
-            executeRecommendation();
-        } finally {
-            loadingOverlay.hide();
-        }
-    }, 0);
+    if (typeof loadingOverlay.run === 'function') {
+        return loadingOverlay.run('Generating AI recommendations...', executeRecommendation);
+    }
+    const releaseLoading = loadingOverlay.show('Generating AI recommendations...');
+    await new Promise(function (resolve) { setTimeout(resolve, 0); });
+    try {
+        await executeRecommendation();
+    } finally {
+        if (typeof releaseLoading === 'function') releaseLoading();
+        else loadingOverlay.hide();
+    }
 }
 
 function renderProfessorFacultyPaperDetail(paper) {
@@ -2626,7 +2641,7 @@ function renderProfessorFacultyPaperDetail(paper) {
     if (previewBtn) {
         previewBtn.onclick = async () => {
             const statusToken = normalizeToken(paper.status);
-            const actor = getProfessorPaperActor();
+            const actor = (await getProfessorPaperActor());
             const shouldUseStored = sectionCReadOnly && (statusToken === 'sent' || statusToken === 'completed')
                 && String(paper.latest_file_path || '').trim() !== ''
                 && !!actor.actorUserId;
@@ -2665,14 +2680,14 @@ function renderProfessorFacultyPaperDetail(paper) {
 
     if (saveSectionCBtn) {
         saveSectionCBtn.onclick = async () => {
-            const actor = getProfessorPaperActor();
+            const actor = (await getProfessorPaperActor());
             if (!actor.actorUserId) {
                 alert('Unable to resolve your professor account.');
                 return;
             }
             try {
                 const aiGenerationAuditId = professorPanelState.facultyPaper.aiAuditReceipts[String(paper.id || '')] || '';
-                const response = SharedData.saveFacultyPaperSectionC({
+                const response = (await SharedData.saveFacultyPaperSectionC({
                     actor_role: actor.role,
                     actor_user_id: actor.actorUserId,
                     paper_id: paper.id,
@@ -2684,7 +2699,7 @@ function renderProfessorFacultyPaperDetail(paper) {
                         approval_names_auto_fill: approvalNamesAutoFillInput ? approvalNamesAutoFillInput.checked : false,
                         approval_dates_auto_fill: approvalDatesAutoFillInput ? approvalDatesAutoFillInput.checked : false,
                     }
-                });
+                }));
                 if (!response || response.success === false) {
                     throw new Error((response && response.error) || 'Failed to save Section C.');
                 }
@@ -2703,7 +2718,7 @@ function renderProfessorFacultyPaperDetail(paper) {
                 alert(getFacultyPaperGateMessage());
                 return;
             }
-            const actor = getProfessorPaperActor();
+            const actor = (await getProfessorPaperActor());
             if (!actor.actorUserId) {
                 alert('Unable to resolve your professor account.');
                 return;
@@ -2720,13 +2735,13 @@ function renderProfessorFacultyPaperDetail(paper) {
                 return;
             }
             try {
-                const response = SharedData.sendFacultyPaper({
+                const response = (await SharedData.sendFacultyPaper({
                     actor_role: actor.role,
                     actor_user_id: actor.actorUserId,
                     paper_id: paper.id,
                     approval_names_auto_fill: approvalNamesAutoFillInput ? approvalNamesAutoFillInput.checked : resolveFacultyPaperApprovalFlag(paper, 'approval_names_auto_fill'),
                     approval_dates_auto_fill: approvalDatesAutoFillInput ? approvalDatesAutoFillInput.checked : resolveFacultyPaperApprovalFlag(paper, 'approval_dates_auto_fill'),
-                });
+                }));
                 if (!response || response.success === false) {
                     throw new Error((response && response.error) || 'Failed to send paper.');
                 }
@@ -2740,17 +2755,17 @@ function renderProfessorFacultyPaperDetail(paper) {
 
     if (archiveBtn) {
         archiveBtn.onclick = async () => {
-            const actor = getProfessorPaperActor();
+            const actor = (await getProfessorPaperActor());
             if (!actor.actorUserId) {
                 alert('Unable to resolve your professor account.');
                 return;
             }
             try {
-                const response = SharedData.archiveFacultyPaper({
+                const response = (await SharedData.archiveFacultyPaper({
                     actor_role: actor.role,
                     actor_user_id: actor.actorUserId,
                     paper_id: paper.id,
-                });
+                }));
                 if (!response || response.success === false) {
                     throw new Error((response && response.error) || 'Failed to archive paper.');
                 }
@@ -2763,8 +2778,8 @@ function renderProfessorFacultyPaperDetail(paper) {
     }
 
     if (aiRecommendBtn) {
-        aiRecommendBtn.onclick = () => {
-            runFacultySectionCAiRecommendation(paper);
+        aiRecommendBtn.onclick = async () => {
+            (await runFacultySectionCAiRecommendation(paper));
         };
     }
 }
@@ -2781,7 +2796,7 @@ async function renderProfessorFacultyPaperList() {
         return;
     }
 
-    const actor = getProfessorPaperActor();
+    const actor = (await getProfessorPaperActor());
     if (!actor.context || !actor.actorUserId || !actor.professor) {
         tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="7">Your login is not linked to an active professor account.</td></tr>';
         if (detailCard) detailCard.style.display = 'none';
@@ -2790,7 +2805,7 @@ async function renderProfessorFacultyPaperList() {
 
     let records = [];
     try {
-        records = SharedData.listFacultyPapers(actor.role, actor.actorUserId);
+        records = (await SharedData.listFacultyPapers(actor.role, actor.actorUserId));
     } catch (error) {
         tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="7">Failed to load faculty papers.</td></tr>';
         if (detailCard) detailCard.style.display = 'none';
@@ -2831,11 +2846,11 @@ async function renderProfessorFacultyPaperList() {
     }).join('');
 
     tableBody.querySelectorAll('[data-paper-open]').forEach(button => {
-        button.addEventListener('click', () => {
+        button.addEventListener('click', async () => {
             professorPanelState.facultyPaper.selectedId = button.getAttribute('data-paper-open') || '';
             const selected = records.find(item => String(item.id || '') === professorPanelState.facultyPaper.selectedId) || null;
             renderProfessorFacultyPaperDetail(selected);
-            renderProfessorFacultyPaperList();
+            (await renderProfessorFacultyPaperList());
         });
     });
 
@@ -2853,30 +2868,30 @@ function setupFacultyPaperWorkflow() {
     const tabArchive = document.getElementById('facultyPaperTabArchive');
 
     if (tabActive) {
-        tabActive.addEventListener('click', () => {
+        tabActive.addEventListener('click', async () => {
             professorPanelState.facultyPaper.filter = 'active';
             tabActive.classList.add('active');
             if (tabArchive) tabArchive.classList.remove('active');
-            renderProfessorFacultyPaperList();
+            (await renderProfessorFacultyPaperList());
         });
     }
 
     if (tabArchive) {
-        tabArchive.addEventListener('click', () => {
+        tabArchive.addEventListener('click', async () => {
             professorPanelState.facultyPaper.filter = 'archive';
             tabArchive.classList.add('active');
             if (tabActive) tabActive.classList.remove('active');
-            renderProfessorFacultyPaperList();
+            (await renderProfessorFacultyPaperList());
         });
     }
 
     if (createDraftBtn) {
-        createDraftBtn.addEventListener('click', () => {
+        createDraftBtn.addEventListener('click', async () => {
             if (resolveFacultyPaperGateState().locked) {
                 alert(getFacultyPaperGateMessage());
                 return;
             }
-            const payload = buildFacultyPaperDraftPayload();
+            const payload = (await buildFacultyPaperDraftPayload());
             if (!payload) {
                 alert('Unable to create draft because your session is not linked to an active professor account.');
                 return;
@@ -2894,7 +2909,7 @@ function setupFacultyPaperWorkflow() {
             }
 
             try {
-                const response = SharedData.upsertFacultyPaperDraft(payload);
+                const response = (await SharedData.upsertFacultyPaperDraft(payload));
                 if (!response || response.success === false || !response.paper) {
                     throw new Error((response && response.error) || 'Failed to create draft.');
                 }
@@ -2903,7 +2918,7 @@ function setupFacultyPaperWorkflow() {
                 professorPanelState.facultyPaper.selectedId = response.paper.id || '';
                 if (tabActive) tabActive.classList.add('active');
                 if (tabArchive) tabArchive.classList.remove('active');
-                renderProfessorFacultyPaperList();
+                (await renderProfessorFacultyPaperList());
                 alert('Draft paper is ready.');
             } catch (error) {
                 alert(error && error.message ? error.message : 'Failed to create draft paper.');
@@ -2963,7 +2978,7 @@ function handleViewDetails(subject) {
 /**
  * Update summary cards with dynamic data
  */
-function updateSummaryCards(overrideTotals) {
+async function updateSummaryCards(overrideTotals) {
     let stats = overrideTotals || getFacultySummaryTotals();
     if (resolveReportsGateState().locked && SharedData && typeof SharedData.getProfessorEvaluationCounts === 'function') {
         const counts = SharedData.getProfessorEvaluationCounts() || {};
@@ -2992,17 +3007,17 @@ function updateSummaryCards(overrideTotals) {
         scoreCard.dataset.scorableClassCount = String(Number(stats.scorableClassCount || 0));
         scoreCard.dataset.registeredClassCount = String(Number(stats.registeredClassCount || 0));
     }
-    refreshDashboardAverageScoreVisibility();
+    (await refreshDashboardAverageScoreVisibility());
     if (responseCard) responseCard.textContent = `${stats.responseRate}%`;
 }
 
-function refreshDashboardAverageScoreVisibility() {
+async function refreshDashboardAverageScoreVisibility() {
     const scoreSummaryCard = document.querySelector('.summary-card.score');
     const scoreCard = document.querySelector('.summary-card.score .score-text');
     if (!scoreCard || !scoreSummaryCard) return;
 
     const gate = resolveReportsGateState();
-    const locked = gate.locked || !resolveActiveProfessorAccount(professorPanelState.context).linked;
+    const locked = gate.locked || !(await resolveActiveProfessorAccount(professorPanelState.context)).linked;
     const rawScore = scoreCard.dataset.averageScore;
     const numericScore = rawScore === '' ? NaN : Number(rawScore);
     const registeredClassCount = Number(scoreCard.dataset.registeredClassCount || 0);
@@ -3026,34 +3041,34 @@ function refreshDashboardAverageScoreVisibility() {
 /**
  * Setup peer evaluation form functionality
  */
-function setupPeerEvaluationForm() {
+async function setupPeerEvaluationForm() {
     const form = document.getElementById('peerEvaluationForm');
     const cancelBtn = document.getElementById('cancelPeerBtn');
     const peerSelect = document.getElementById('peerProfessor');
     if (!form) return;
 
-    form.addEventListener('submit', function (e) {
+    form.addEventListener('submit', async function (e) {
         e.preventDefault();
-        handlePeerEvaluation();
+        (await handlePeerEvaluation());
     });
 
     if (peerSelect) {
-        peerSelect.addEventListener('change', function () {
+        peerSelect.addEventListener('change', async function () {
             SharedData.startEvaluationTiming('peer', peerSelect.value, getPeerSemesterId());
-            refreshPeerTargetLockState();
+            (await refreshPeerTargetLockState());
         });
     }
 
     if (cancelBtn) {
-        cancelBtn.addEventListener('click', function () {
+        cancelBtn.addEventListener('click', async function () {
             form.reset();
-            switchView('dashboard');
+            (await switchView('dashboard'));
             updateNavigation('dashboard');
         });
     }
 
-    populatePeerProfessorOptions(professorPanelState.context || buildProfessorPanelContext());
-    refreshPeerTargetLockState();
+    populatePeerProfessorOptions(professorPanelState.context || (await buildProfessorPanelContext()));
+    (await refreshPeerTargetLockState());
 }
 
 function populatePeerProfessorOptions(context) {
@@ -3096,11 +3111,11 @@ function populatePeerProfessorOptions(context) {
 /**
  * Dynamically load and render the Peer Evaluation Questionnaire
  */
-function loadDynamicPeerQuestionnaire() {
+async function loadDynamicPeerQuestionnaire() {
     const container = document.getElementById('dynamic-peer-questions-container');
     if (!container) return;
 
-    if (!resolveActiveProfessorAccount(professorPanelState.context).linked) {
+    if (!(await resolveActiveProfessorAccount(professorPanelState.context)).linked) {
         container.innerHTML = `
             <div class="empty-state" style="text-align: center; padding: 3rem 1rem;">
                 <i class="fas fa-user-lock" style="font-size: 3rem; color: #cbd5e1; margin-bottom: 1rem;"></i>
@@ -3252,7 +3267,7 @@ function loadDynamicPeerQuestionnaire() {
     `;
     container.innerHTML = html;
     setupPeerSectionFlow();
-    refreshPeerTargetLockState();
+    (await refreshPeerTargetLockState());
 }
 
 function normalizePeerLockValue(value) {
@@ -3272,11 +3287,11 @@ function buildPeerEvaluationKey(evaluatorId, semesterId, targetId) {
     ].join('|');
 }
 
-function isPeerTargetLocked(targetId) {
+async function isPeerTargetLocked(targetId) {
     const normalizedTargetId = normalizeUserIdToken(targetId);
     if (!normalizedTargetId) return true;
 
-    const context = professorPanelState.context || buildProfessorPanelContext();
+    const context = professorPanelState.context || (await buildProfessorPanelContext());
     const evaluatorId = context && context.professor
         ? context.professor.id
         : '';
@@ -3314,7 +3329,7 @@ function isPeerTargetLocked(targetId) {
     });
 }
 
-function refreshPeerTargetLockState() {
+async function refreshPeerTargetLockState() {
     const form = document.getElementById('peerEvaluationForm');
     const select = document.getElementById('peerProfessor');
     const submitBtn = form ? form.querySelector('.btn-submit') : null;
@@ -3324,20 +3339,20 @@ function refreshPeerTargetLockState() {
         return;
     }
 
-    if (!resolveActiveProfessorAccount(professorPanelState.context).linked) {
+    if (!(await resolveActiveProfessorAccount(professorPanelState.context)).linked) {
         submitBtn.disabled = true;
         return;
     }
 
     const targetId = String(select.value || '').trim();
     if (!targetId) {
-        const context = professorPanelState.context || buildProfessorPanelContext();
+        const context = professorPanelState.context || (await buildProfessorPanelContext());
         const hasPendingAssignments = Array.isArray(context && context.pendingPeerAssignments) && context.pendingPeerAssignments.length > 0;
         submitBtn.disabled = !hasPendingAssignments;
         return;
     }
 
-    const locked = isPeerTargetLocked(targetId);
+    const locked = (await isPeerTargetLocked(targetId));
     submitBtn.disabled = locked;
 
     if (locked) {
@@ -3535,7 +3550,7 @@ function escapeHTML(str) {
     );
 }
 
-function ensureQuestionnairePrivacyConsentForSubmission(questionnaireType, semesterId, form) {
+async function ensureQuestionnairePrivacyConsentForSubmission(questionnaireType, semesterId, form) {
     const notice = SharedData.getDataPrivacyConsentNotice
         ? SharedData.getDataPrivacyConsentNotice(questionnaireType)
         : null;
@@ -3568,10 +3583,10 @@ function ensureQuestionnairePrivacyConsentForSubmission(questionnaireType, semes
         if (!SharedData.recordStudentDataPrivacyConsent) {
             throw new Error('Privacy consent saving is not available.');
         }
-        SharedData.recordStudentDataPrivacyConsent({
+        (await SharedData.recordStudentDataPrivacyConsent({
             semesterId: semesterId,
             questionnaireType: questionnaireType
-        });
+        }));
         return true;
     } catch (error) {
         showFormMessage(form, error && error.message ? error.message : 'Privacy consent could not be saved. Please try again.', 'error');
@@ -3584,14 +3599,16 @@ function ensureQuestionnairePrivacyConsentForSubmission(questionnaireType, semes
  */
 async function handlePeerEvaluation() {
     const form = document.getElementById('peerEvaluationForm');
-    if (!form || form.dataset.submitting === 'true') return;
+    if (!form || form.dataset.submitting === 'true' || form.dataset.checkingSubmission === 'true') return;
+    form.dataset.checkingSubmission = 'true';
+    try {
 
-    if (!enforceActiveProfessorAccount({ inline: true, form })) {
+    if (!(await enforceActiveProfessorAccount({ inline: true, form }))) {
         return;
     }
 
-    const account = resolveActiveProfessorAccount(professorPanelState.context || buildProfessorPanelContext());
-    const context = account.context || professorPanelState.context || buildProfessorPanelContext();
+    const account = (await resolveActiveProfessorAccount(professorPanelState.context || (await buildProfessorPanelContext())));
+    const context = account.context || professorPanelState.context || (await buildProfessorPanelContext());
 
     if (!account.linked || !context.professor) {
         showFormMessage(form, 'Your login session is not linked to an active professor account.', 'error');
@@ -3613,9 +3630,9 @@ async function handlePeerEvaluation() {
 
     const peerSelect = document.getElementById('peerProfessor');
     const selectedTargetId = String(peerSelect ? peerSelect.value : '').trim();
-    if (selectedTargetId && isPeerTargetLocked(selectedTargetId)) {
+    if (selectedTargetId && (await isPeerTargetLocked(selectedTargetId))) {
         showFormMessage(form, 'You already submitted a peer evaluation for this target this semester.', 'error');
-        refreshPeerTargetLockState();
+        (await refreshPeerTargetLockState());
         return;
     }
 
@@ -3672,7 +3689,7 @@ async function handlePeerEvaluation() {
     const session = getUserSession() || {};
     const semesterId = getPeerSemesterId();
     const targetProfessorId = formData.get('peerProfessor') || '';
-    if (!ensureQuestionnairePrivacyConsentForSubmission('professor-to-professor', semesterId, form)) {
+    if (!(await ensureQuestionnairePrivacyConsentForSubmission('professor-to-professor', semesterId, form))) {
         return;
     }
     const evaluationKey = buildPeerEvaluationKey(context.professor.id, semesterId, targetProfessorId);
@@ -3708,7 +3725,7 @@ async function handlePeerEvaluation() {
         if (submitBtn) submitBtn.disabled = false;
         const message = String(error && error.message || '');
         if (message.toLowerCase().includes('inactive')) {
-            enforceActiveProfessorAccount({ inline: true, form });
+            (await enforceActiveProfessorAccount({ inline: true, form }));
             return;
         }
         showFormMessage(form, message || 'Failed to submit peer evaluation. Please try again.', 'error');
@@ -3719,11 +3736,14 @@ async function handlePeerEvaluation() {
     }
 
     form.reset();
-    refreshPeerTargetLockState();
-    switchView('dashboard');
+    (await refreshPeerTargetLockState());
+    (await switchView('dashboard'));
     updateNavigation('dashboard');
     window.scrollTo(0, 0);
     showFormMessage(document.getElementById('dashboardView'), 'Peer evaluation submitted successfully.', 'success');
+    } finally {
+        delete form.dataset.checkingSubmission;
+    }
 }
 
 /**
@@ -3755,11 +3775,15 @@ function clearFormMessage(form) {
 /**
  * Build summary context for current professor/evaluation type
  */
-function loadFacultySummary(selection = {}) {
-    const account = resolveActiveProfessorAccount(professorPanelState.context || buildProfessorPanelContext());
-    const context = account.context || professorPanelState.context || buildProfessorPanelContext();
+async function loadFacultySummary(selection = {}) {
+    const requestId = selection.requestId ?? professorReportSelectionRequestId;
+    const contextInput = selection.context || professorPanelState.context || (await buildProfessorPanelContext());
+    if (requestId !== professorReportSelectionRequestId) return false;
+    const account = (await resolveActiveProfessorAccount(contextInput));
+    if (requestId !== professorReportSelectionRequestId) return false;
+    const context = account.context || professorPanelState.context || (await buildProfessorPanelContext());
     const semesterId = String(selection.semesterId || professorPanelState.currentSelection.semesterId || context.currentSemester || '').trim();
-    const evaluationType = getEvaluationTypeMeta(selection.evaluationType || professorPanelState.currentSelection.evaluationType || 'student').id;
+    const evaluationType = 'student';
     const semesterLabel = getSemesterLabelById(semesterId, context.semesterList);
     const evalMeta = getEvaluationTypeMeta(evaluationType);
 
@@ -3782,25 +3806,34 @@ function loadFacultySummary(selection = {}) {
         renderCriteriaSummary([]);
         renderBreakdownTable([], evaluationType);
         renderEvaluationCount([], unlinkedSummary.totals);
-        updateSummaryCards(unlinkedSummary.totals);
+        (await updateSummaryCards(unlinkedSummary.totals));
+        if (requestId !== professorReportSelectionRequestId) return false;
+        initializeReports();
         resetProfessorSubjectCommentsPanel();
-        renderSemestralEvaluationTrend(semesterId);
+        (await renderSemestralEvaluationTrend(semesterId));
         return;
     }
 
-    professorPanelState.summaryByType.student = fetchFacultySummaryFromSql({ semesterId, evaluationType: 'student' });
-    professorPanelState.summaryByType.professor = fetchFacultySummaryFromSql({ semesterId, evaluationType: 'professor' });
-    professorPanelState.summaryByType.supervisor = fetchFacultySummaryFromSql({ semesterId, evaluationType: 'supervisor' });
+    const [student, professor, supervisor] = await Promise.all(['student', 'professor', 'supervisor'].map(type =>
+        fetchFacultySummaryFromSql({ semesterId, evaluationType: type, context })
+    ));
+    if (requestId !== professorReportSelectionRequestId) return false;
+    professorPanelState.summaryByType = { student, professor, supervisor };
 
     const activeSummary = professorPanelState.summaryByType[evaluationType] || { ...PROFESSOR_PANEL_EMPTY_SUMMARY };
     renderCriteriaSummary(activeSummary.criteriaAverages);
-    renderBreakdownTable(activeSummary.breakdownRows, evaluationType);
+    renderBreakdownTable(evaluationType === 'student' ? activeSummary.setRows : activeSummary.breakdownRows,
+        evaluationType, activeSummary.setTotals);
     renderEvaluationCount(activeSummary.breakdownRows, activeSummary.totals);
-    updateSummaryCards(activeSummary.totals);
+    (await updateSummaryCards(activeSummary.totals));
+    if (requestId !== professorReportSelectionRequestId) return false;
+    initializeReports();
     resetProfessorSubjectCommentsPanel();
-    renderSemestralEvaluationTrend(semesterId);
+    (await renderSemestralEvaluationTrend(semesterId));
+    if (requestId !== professorReportSelectionRequestId) return false;
     scheduleProfessorTrendSnapshotRefresh(semesterId);
     scheduleProfessorReportViewportRefresh(90);
+    return true;
 }
 
 /**
@@ -3808,36 +3841,37 @@ function loadFacultySummary(selection = {}) {
  */
 function setupSemesterFilter() {
     const filter = document.getElementById('semesterFilter');
-    const evalFilter = document.getElementById('evaluationTypeFilter');
     if (!filter) return;
 
     const applySelection = async () => {
-        await refreshProfessorReportAccessState();
-        if (resolveReportsGateState().locked) {
-            applyReportBlackout();
-            return;
-        }
+        // Read and commit the new value before an access check can rebuild the dropdown.
         const selectedOption = filter.options[filter.selectedIndex];
         const value = String(filter.value || '').trim();
+        if (!value) return;
         const label = selectedOption ? selectedOption.textContent.trim() : getSemesterLabelById(value, []);
-        const evalValue = evalFilter ? String(evalFilter.value || 'student').trim() : 'student';
-        const evalLabel = evalFilter
-            ? (evalFilter.options[evalFilter.selectedIndex]?.textContent || '').trim()
-            : 'Student Evaluation';
         const requestId = ++professorReportSelectionRequestId;
 
         professorPanelState.currentSelection = {
             semesterId: value,
             semesterLabel: label,
-            evaluationType: evalValue,
+            evaluationType: 'student',
         };
+        resetProfessorSubjectCommentsPanel(true);
         professorTrendSnapshotRequestId += 1;
 
-        updateSemesterLabels(label, evalLabel);
-        const fetchSubjectManagement = SharedData.fetchSubjectManagementSnapshot || SharedData.refreshSubjectManagement;
-        const fetchEvaluations = SharedData.fetchEvaluationsSnapshot || SharedData.refreshEvaluations;
-        if (fetchSubjectManagement && fetchEvaluations) {
-            try {
+        updateSemesterLabels(label, 'Student Evaluation');
+        setProfessorReportsStatus(`Loading results for ${label}...`);
+        try {
+            await refreshProfessorReportAccessState();
+            if (requestId !== professorReportSelectionRequestId) return;
+            if (resolveReportsGateState().locked) {
+                (await applyReportBlackout());
+                setProfessorReportsStatus('');
+                return;
+            }
+            const fetchSubjectManagement = SharedData.fetchSubjectManagementSnapshot || SharedData.refreshSubjectManagement;
+            const fetchEvaluations = SharedData.fetchEvaluationsSnapshot || SharedData.refreshEvaluations;
+            if (fetchSubjectManagement && fetchEvaluations) {
                 const [subjectManagement, evaluations] = await Promise.all([
                     fetchSubjectManagement({
                         semesterId: value,
@@ -3848,21 +3882,54 @@ function setupSemesterFilter() {
                 if (requestId !== professorReportSelectionRequestId) return;
 
                 cacheProfessorSemesterSnapshot(value, subjectManagement, evaluations);
-                const baseContext = buildProfessorPanelContext();
-                professorPanelState.context = buildProfessorContextForSemester(baseContext, value) || baseContext;
-            } catch (error) {
+                const baseContext = (await buildProfessorPanelContext());
                 if (requestId !== professorReportSelectionRequestId) return;
-                console.warn('[Professor] Unable to refresh the selected semester SET data.', error);
+                professorPanelState.context = buildProfessorContextForSemester(baseContext, value) || baseContext;
             }
+            if (requestId !== professorReportSelectionRequestId) return;
+            await loadFacultySummary({ semesterId: value, evaluationType: 'student', requestId });
+            if (requestId === professorReportSelectionRequestId) setProfessorReportsStatus('');
+        } catch (error) {
+            if (requestId !== professorReportSelectionRequestId) return;
+            console.warn('[Professor] Unable to refresh the selected semester results.', error);
+            professorPanelState.summaryByType = {
+                student: { ...PROFESSOR_PANEL_EMPTY_SUMMARY },
+                professor: { ...PROFESSOR_PANEL_EMPTY_SUMMARY },
+                supervisor: { ...PROFESSOR_PANEL_EMPTY_SUMMARY },
+            };
+            renderBreakdownTable([], 'student');
+            renderCriteriaSummary([]);
+            renderEvaluationCount([], { received: 0, required: 0 });
+            await updateSummaryCards(PROFESSOR_PANEL_EMPTY_SUMMARY.totals);
+            if (requestId !== professorReportSelectionRequestId) return;
+            initializeReports();
+            const trendStatus = document.getElementById('semestralTrendStatus');
+            const trendDelta = document.getElementById('semestralTrendDelta');
+            const trendBody = document.getElementById('semestralTrendTableBody');
+            if (trendStatus) trendStatus.textContent = 'Unable to load semester results.';
+            if (trendDelta) trendDelta.textContent = 'Retry to load the selected semester and its trend.';
+            if (trendBody) trendBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="5">No data available.</td></tr>';
+            renderSemestralTrendChart([]);
+            resetProfessorSubjectCommentsPanel(true);
+            setProfessorReportsStatus(`Unable to load results for ${label}. Please retry.`, true);
         }
-        if (requestId !== professorReportSelectionRequestId) return;
-        loadFacultySummary({ semesterId: value, evaluationType: evalValue });
     };
 
     filter.addEventListener('change', applySelection);
-    if (evalFilter) {
-        evalFilter.addEventListener('change', applySelection);
+    const retry = document.getElementById('professorReportsRetry');
+    if (retry) retry.addEventListener('click', applySelection);
+}
+
+function setProfessorReportsStatus(message, isError = false) {
+    const status = document.getElementById('professorReportsStatus');
+    const text = document.getElementById('professorReportsStatusText');
+    const retry = document.getElementById('professorReportsRetry');
+    if (status) {
+        status.hidden = !message;
+        status.classList.toggle('error', isError);
     }
+    if (text) text.textContent = message;
+    if (retry) retry.hidden = !isError;
 }
 
 function populateSemesterFilterOptions(context, selectedSemesterId) {
@@ -3898,6 +3965,8 @@ function updateSemesterLabels(label, evaluationLabel) {
     const display = document.getElementById('selectedSemester');
     const summary = document.getElementById('summarySemester');
     const evalDisplay = document.getElementById('selectedEvalType');
+    const peerSupervisorSemester = document.getElementById('peerSupervisorSemester');
+    if (peerSupervisorSemester) peerSupervisorSemester.textContent = label || 'Selected semester';
 
     if (display) {
         display.textContent = label || 'Selected semester';
@@ -3938,7 +4007,7 @@ function setupProfilePhotoUpload() {
         }
     });
 
-    input.addEventListener('change', function () {
+    input.addEventListener('change', async function () {
         const file = input.files && input.files[0];
         if (!file) return;
 
@@ -3962,11 +4031,11 @@ function setupProfilePhotoUpload() {
 
         if (typeof SharedData.uploadProfilePhoto !== 'function') {
             const reader = new FileReader();
-            reader.onload = function () {
+            reader.onload = async function () {
                 preview.src = reader.result;
                 preview.classList.add('active');
                 placeholder.style.display = 'none';
-                SharedData.setProfilePhoto('professor', reader.result);
+                (await SharedData.setProfilePhoto('professor', reader.result));
                 URL.revokeObjectURL(localPreviewUrl);
                 input.value = '';
             };
@@ -3984,7 +4053,7 @@ function setupProfilePhotoUpload() {
         try {
             uploadPromise = typeof SharedData.uploadProfilePhotoAsync === 'function'
                 ? SharedData.uploadProfilePhotoAsync(file, { message: 'Uploading profile photo...' })
-                : Promise.resolve(SharedData.uploadProfilePhoto(file));
+                : Promise.resolve((await SharedData.uploadProfilePhoto(file)));
         } catch (error) {
             handleUploadError(error);
             URL.revokeObjectURL(localPreviewUrl);
@@ -4025,10 +4094,10 @@ function buildInitials(name) {
     return (first + last).toUpperCase();
 }
 
-function fetchFacultySummaryFromSql(query) {
+async function fetchFacultySummaryFromSql(query) {
     const context = query && query.context
         ? query.context
-        : (professorPanelState.context || buildProfessorPanelContext());
+        : (professorPanelState.context || (await buildProfessorPanelContext()));
     const semesterId = String(query && query.semesterId || professorPanelState.currentSelection.semesterId || context.currentSemester || '').trim();
     const evaluationType = getEvaluationTypeMeta(query && query.evaluationType || 'student').id;
     const requestedLoadType = String(query && query.loadType || '').trim();
@@ -4088,6 +4157,10 @@ function fetchFacultySummaryFromSql(query) {
         collectEvaluationComments(evaluation).forEach(text => {
             allComments.push({
                 text,
+                commentRepetitiveFlag: [true, 1, '1'].includes(evaluation && evaluation.commentRepetitiveFlag)
+                    || [true, 1, '1'].includes(evaluation && evaluation.credibilityComponents
+                        && evaluation.credibilityComponents.behaviorDetails && evaluation.credibilityComponents.behaviorDetails.commentRepetitiveFlag)
+                    || [true, 1, '1'].includes(evaluation && evaluation.behaviorRepetition && evaluation.behaviorRepetition.commentRepetitiveFlag),
                 submittedAt: String(evaluation && (evaluation.submittedAt || evaluation.timestamp) || '').trim(),
                 evaluator: String(evaluation && (evaluation.evaluatorName || evaluation.evaluatorUsername || evaluation.evaluatorId) || 'Anonymous').trim() || 'Anonymous',
             });
@@ -4099,6 +4172,8 @@ function fetchFacultySummaryFromSql(query) {
     let requiredTotal = 0;
     let receivedTotal = 0;
     let studentSetMetrics = null;
+    let setRows = [];
+    let setTotals = { students: 0, weightedScore: null, excludedClassCount: 0 };
 
     if (evaluationType === 'student') {
         const groupedBySubject = new Map();
@@ -4123,6 +4198,25 @@ function fetchFacultySummaryFromSql(query) {
         const setMetricsByOffering = new Map(
             studentSetMetrics.byOffering.map(item => [String(item.courseOfferingId), item])
         );
+        setRows = studentSetMetrics.byOffering.map((item, index) => {
+            const offering = context.offeringsById[item.courseOfferingId] || {};
+            const program = String(offering.programCode || '').trim().toUpperCase();
+            const section = String(item.sectionName || '').trim();
+            return {
+                seq: index + 1,
+                courseOfferingId: item.courseOfferingId,
+                courseCode: item.subjectCode || 'N/A',
+                yearSection: `${program}${section}` || 'N/A',
+                students: item.registered,
+                averageSetRating: item.averageRatingPercent,
+                weightedSetScore: item.weightedScorePercent,
+            };
+        });
+        setTotals = {
+            students: studentSetMetrics.registered,
+            weightedScore: studentSetMetrics.totalWeightedScorePercent,
+            excludedClassCount: studentSetMetrics.excludedClassCount,
+        };
         const professorOfferings = (context.offerings || []).filter(offering =>
             normalizeUserIdToken(offering && offering.professorUserId) === professorId &&
             setMetricsByOffering.has(String(offering && offering.id || '').trim()) &&
@@ -4311,6 +4405,8 @@ function fetchFacultySummaryFromSql(query) {
     return {
         criteriaAverages,
         breakdownRows,
+        setRows,
+        setTotals,
         ratingDistribution,
         comments: allComments,
         commentBuckets,
@@ -4352,15 +4448,23 @@ function renderCriteriaSummary(criteria) {
 }
 
 /**
- * Render breakdown table per subject grouping
+ * Render course-offering SET rows or peer/supervisor evaluator rows.
  */
-function renderBreakdownTable(rows, evaluationType = 'student') {
+function renderBreakdownTable(rows, evaluationType = 'student', setTotals = null) {
     const table = document.getElementById('facultyBreakdownTable');
     if (!table) return;
 
     const tbody = table.querySelector('tbody');
     const thead = table.querySelector('thead');
     if (!tbody || !thead) return;
+    const tfoot = table.querySelector('tfoot') || table.createTFoot();
+    tfoot.innerHTML = '';
+    const note = document.getElementById('profSetCalculationNote');
+    if (note) {
+        note.textContent = '';
+        note.hidden = true;
+    }
+    table.classList.toggle('faculty-set-table', evaluationType === 'student');
 
     if (evaluationType !== 'student') {
         thead.innerHTML = `
@@ -4372,16 +4476,17 @@ function renderBreakdownTable(rows, evaluationType = 'student') {
     } else {
         thead.innerHTML = `
             <tr>
-                <th>Subject</th>
-                <th>Section Count</th>
-                <th>Evaluations Received</th>
-                <th>Response Rate</th>
-                <th>Avg Rating</th>
+                <th scope="col">Seq</th>
+                <th scope="col">(1)<br>Course Code</th>
+                <th scope="col">(2)<br>Year/Section</th>
+                <th scope="col">(3)<br>No. of Students</th>
+                <th scope="col">(4)<br>Average SET Rating</th>
+                <th scope="col">(3 × 4)<br>Weighted SET Score</th>
             </tr>
         `;
     }
 
-    const colCount = evaluationType === 'student' ? 5 : 2;
+    const colCount = evaluationType === 'student' ? 6 : 2;
 
     if (!rows.length) {
         tbody.innerHTML = `<tr class="mobile-card-empty-row"><td colspan="${colCount}">No evaluation data available.</td></tr>`;
@@ -4389,40 +4494,50 @@ function renderBreakdownTable(rows, evaluationType = 'student') {
     }
 
     tbody.innerHTML = rows.map(item => {
-        const responseRate = item.required ? Math.round((item.received / item.required) * 100) : 0;
-
         if (evaluationType !== 'student') {
             return `
-                <tr data-required="${item.required || 0}" data-received="${item.received || 0}" data-avg="${item.avgRating}" data-comment-key="${item.rowKey || ''}">
+                <tr data-required="${item.required || 0}" data-received="${item.received || 0}" data-avg="${item.avgRating}" data-comment-key="${escapeHTML(item.rowKey || '')}">
                     <td data-label="Employee Number">${escapeHTML(String(item.employeeId || 'N/A'))}</td>
                     <td data-label="Avg Rating">${item.avgRating !== null && Number.isFinite(Number(item.avgRating)) ? Number(item.avgRating).toFixed(1) : 'N/A'}</td>
                 </tr>
             `;
         }
 
-        const hasAverage = item.avgRating !== null && Number.isFinite(Number(item.avgRating));
-        const coverageTotal = Number(item.registeredSectionCount || 0);
-        const ratedSections = Number(item.ratedSectionCount || 0);
-        const coverageHtml = item.partial
-            ? `<span class="count-pill" title="Overall SET is unavailable until every enrolled section has a valid class average.">Partial &middot; ${ratedSections}/${coverageTotal} sections rated</span>`
-            : item.noResponses
-                ? `<span class="count-pill" title="No valid submitted SET evaluation is available for these sections.">No responses &middot; 0/${coverageTotal} sections rated</span>`
-                : '';
-
         return `
-            <tr data-required="${item.required}" data-received="${item.received}" data-avg="${item.avgRating}" data-comment-key="${item.rowKey || ''}">
-                <td data-label="Subject">${escapeHTML(String(item.subject || 'N/A'))}</td>
-                <td data-label="Section Count">${Number(item.sectionCount || 0)}</td>
-                <td data-label="Evaluations Received"><span class="count-pill">${item.received}/${item.required}</span></td>
-                <td data-label="Response Rate">${responseRate}%</td>
-                <td data-label="Avg Rating">${hasAverage ? Number(item.avgRating).toFixed(1) : 'N/A'}${coverageHtml ? `<br>${coverageHtml}` : ''}</td>
+            <tr>
+                <td data-label="Seq">${Number(item.seq)}</td>
+                <td data-label="Course Code">${escapeHTML(String(item.courseCode || 'N/A'))}</td>
+                <td data-label="Year/Section">${escapeHTML(String(item.yearSection || 'N/A'))}</td>
+                <td data-label="No. of Students">${Number(item.students || 0).toLocaleString('en-US')}</td>
+                <td data-label="Average SET Rating">${formatProfessorSetValue(item.averageSetRating)}</td>
+                <td data-label="Weighted SET Score">${formatProfessorSetValue(item.weightedSetScore)}</td>
             </tr>
         `;
     }).join('');
+
+    if (evaluationType === 'student' && setTotals) {
+        tfoot.innerHTML = `<tr>
+            <th colspan="3" scope="row">TOTAL</th>
+            <td data-label="Total Students">${Number(setTotals.students || 0).toLocaleString('en-US')}</td>
+            <th class="set-score-total-label" scope="row">TOTAL</th>
+            <td data-label="Total Weighted SET Score">${formatProfessorSetValue(setTotals.weightedScore)}</td>
+        </tr>`;
+        if (note && setTotals.excludedClassCount > 0) {
+            const count = Number(setTotals.excludedClassCount);
+            note.textContent = `Weighted SET total is N/A: ${count} enrolled ${count === 1 ? 'section has' : 'sections have'} no valid responses. Averages are required for all enrolled sections.`;
+            note.hidden = false;
+        }
+    }
+}
+
+function formatProfessorSetValue(value) {
+    return value !== null && value !== undefined && Number.isFinite(Number(value))
+        ? Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : 'N/A';
 }
 
 /**
- * Setup section feedback summary per subject/section
+ * Setup general anonymous feedback for the selected evaluation type and semester.
  */
 function setupProfessorSubjectComments() {
     const panel = document.getElementById('profSubjectCommentsPanel');
@@ -4437,17 +4552,19 @@ function setupProfessorSubjectComments() {
     if (!panel || !title || !meta || !list || !aiBtn || !aiSummary || !viewBtn || !closeBtn) return;
 
     function applyAiAccessState() {
-        aiBtn.disabled = false;
+        aiBtn.disabled = professorFeedbackFiltersLoading;
+        viewBtn.disabled = aiBtn.disabled;
         aiBtn.title = '';
-        return true;
+        return !aiBtn.disabled;
     }
 
     closeBtn.addEventListener('click', function () {
-        resetProfessorSubjectCommentsPanel();
+        resetProfessorSubjectCommentsPanel(professorFeedbackFiltersLoading);
         applyAiAccessState();
     });
 
     aiBtn.addEventListener('click', async function () {
+        if (!applyAiAccessState()) return;
         const studentSummary = professorPanelState.summaryByType.student || PROFESSOR_PANEL_EMPTY_SUMMARY;
         const studentItems = Array.isArray(studentSummary.comments) ? studentSummary.comments : [];
         if (!studentItems.length) {
@@ -4455,10 +4572,13 @@ function setupProfessorSubjectComments() {
             return;
         }
 
+        const requestId = ++professorFeedbackRequestId;
         const originalHtml = aiBtn.innerHTML;
         aiBtn.disabled = true;
         aiBtn.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Summarizing...';
         setProfessorCommentsAiSummary('Generating AI summary...', 'info');
+        aiSummary.setAttribute('aria-busy', 'true');
+        setProfessorCommentsListVisibility(false);
 
         try {
             if (typeof SharedData === 'undefined' || typeof SharedData.summarizeFeedbackComments !== 'function') {
@@ -4467,12 +4587,16 @@ function setupProfessorSubjectComments() {
 
             const response = await SharedData.summarizeFeedbackComments({
                 commentLabel: 'student',
+                semesterId: professorPanelState.currentSelection.semesterId,
+                includeTeachingImprovements: true,
                 comments: studentItems.map((item, index) => ({
                     id: String(item && item.id || item && item.key || `student_comment_${index + 1}`),
-                    text: String(item && item.text || '').trim(),
-                })).filter(item => item.text)
+                    text: String(item && item.text || ''),
+                    commentRepetitiveFlag: !!(item && item.commentRepetitiveFlag),
+                })).filter(item => item.text.trim())
             }, { role: 'professor' });
 
+            if (requestId !== professorFeedbackRequestId) return;
             if (response && response.disabled) {
                 const fallbackSummary = buildStudentFeedbackAiSummary(studentItems);
                 setProfessorCommentsAiSummary(fallbackSummary, 'success');
@@ -4489,19 +4613,22 @@ function setupProfessorSubjectComments() {
             const source = normalizeToken(summaryData.source || response.source);
             setProfessorCommentsAiSummary(summaryData, source === 'openai+rule' || source === 'gemini+rule' ? 'warning' : 'success');
         } catch (error) {
+            if (requestId !== professorFeedbackRequestId) return;
             console.error('[ProfessorPanel] Feedback summary failed, using local rule-based summary.', error);
             const fallbackSummary = buildStudentFeedbackAiSummary(studentItems);
             fallbackSummary.source = 'rule';
             setProfessorCommentsAiSummary(fallbackSummary, 'success');
         } finally {
-            aiBtn.innerHTML = originalHtml || '<i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> AI Summarize';
-            applyAiAccessState();
+            if (requestId === professorFeedbackRequestId) {
+                aiBtn.innerHTML = originalHtml || '<i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> AI Summarize';
+                applyAiAccessState();
+            }
         }
 
-        setProfessorCommentsListVisibility(false);
     });
 
     viewBtn.addEventListener('click', function () {
+        if (professorFeedbackFiltersLoading) return;
         const evalType = String(
             professorPanelState.currentSelection && professorPanelState.currentSelection.evaluationType || 'student'
         ).trim() || 'student';
@@ -4509,6 +4636,11 @@ function setupProfessorSubjectComments() {
             professorPanelState.currentSelection && professorPanelState.currentSelection.semesterLabel || ''
         ).trim();
         const evalMeta = getEvaluationTypeMeta(evalType);
+        const requestId = ++professorFeedbackRequestId;
+        aiBtn.innerHTML = '<i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> AI Summarize';
+        aiBtn.disabled = true;
+        setProfessorCommentsListVisibility(true);
+        list.innerHTML = '<li class="faculty-comments-empty">Loading comments...</li>';
 
         if (evalType === 'professor') {
             title.textContent = 'Professor Feedback Summary';
@@ -4519,12 +4651,13 @@ function setupProfessorSubjectComments() {
         }
 
         meta.textContent = evalType === 'student'
-            ? `All anonymized comments (${evalMeta.label}${semesterLabel ? ` • ${semesterLabel}` : ''}).`
+            ? `All anonymized comments (${evalMeta.label} • ${semesterLabel || 'selected semester'}).`
             : `All ${evalMeta.label.toLowerCase()} comments (${semesterLabel || 'selected semester'}).`;
 
         fetchSectionSummaryFromSql({
-            evaluationType: evalType
+            evaluationType: evalType,
         }).then(summaries => {
+            if (requestId !== professorFeedbackRequestId) return;
             professorPanelState.feedbackPanel = {
                 items: Array.isArray(summaries) ? summaries : [],
                 evaluationType: evalType,
@@ -4532,7 +4665,8 @@ function setupProfessorSubjectComments() {
 
             if (!summaries.length) {
                 list.innerHTML = '<li class="faculty-comments-empty">No anonymized feedback available.</li>';
-                setProfessorCommentsAiSummary('No comments loaded in Anonymous Feedback. AI Summarize still summarizes student comments for this semester when available.', 'warning');
+                setProfessorCommentsAiSummary('No comments available for the selected filters.', 'warning');
+                applyAiAccessState();
                 setProfessorCommentsListVisibility(true);
                 return;
             }
@@ -4541,23 +4675,28 @@ function setupProfessorSubjectComments() {
                 '<div class="faculty-comment-text">' + escapeHTML(item.text) + '</div>' +
                 '</li>'
             ).join('');
-            setProfessorCommentsAiSummary('Comments loaded. Press AI Summarize to summarize student comments.', 'info');
+            setProfessorCommentsAiSummary('Comments loaded. Press AI Summarize to summarize student comments for this semester.', 'info');
+            applyAiAccessState();
             setProfessorCommentsListVisibility(true);
         }).catch(() => {
+            if (requestId !== professorFeedbackRequestId) return;
             professorPanelState.feedbackPanel = {
                 items: [],
                 evaluationType: evalType,
             };
             list.innerHTML = '<li class="faculty-comments-empty">Unable to load anonymized feedback.</li>';
             setProfessorCommentsAiSummary('Unable to summarize because feedback could not be loaded.', 'error');
+            applyAiAccessState();
             setProfessorCommentsListVisibility(true);
         });
     });
+    applyAiAccessState();
 }
 
 function setProfessorCommentsAiSummary(message, type = 'info') {
     const summaryEl = document.getElementById('profSubjectCommentsAiSummary');
     if (!summaryEl) return;
+    summaryEl.setAttribute('aria-busy', 'false');
 
     summaryEl.classList.remove('warning', 'error', 'success', 'is-generated');
     if (type === 'warning' || type === 'error' || type === 'success') {
@@ -4565,26 +4704,15 @@ function setProfessorCommentsAiSummary(message, type = 'info') {
     }
 
     if (message && typeof message === 'object') {
-        const topics = Array.isArray(message.topics) ? message.topics : [];
-        const sourceNote = getProfessorFeedbackAiSummarySourceNote(message);
+        const items = typeof professorPanelState !== 'undefined'
+            ? (professorPanelState.summaryByType.student || PROFESSOR_PANEL_EMPTY_SUMMARY).comments : [];
+        const fallback = buildStudentFeedbackAiSummary(items);
         summaryEl.classList.add('is-generated');
-        summaryEl.innerHTML = `
-            <div class="faculty-comments-ai-kicker">AI Summary</div>
-            <div class="faculty-comments-ai-headline">${escapeHTML(message.summaryLine || '')}</div>
-            <div class="faculty-comments-ai-tone">${escapeHTML(message.toneLine || '')}</div>
-            <div class="faculty-comments-ai-stats" aria-label="Feedback classification counts">
-                <span><strong>${Number(message.total || 0)}</strong> Comments</span>
-                <span><strong>${Number(message.constructive || 0)}</strong> Actionable</span>
-                <span><strong>${Number(message.neutral || 0)}</strong> General</span>
-                <span><strong>${Number(message.biased || 0)}</strong> Needs review</span>
-            </div>
-            ${topics.length ? `
-                <div class="faculty-comments-ai-topics">
-                    ${topics.slice(0, 3).map(topic => `<span>${escapeHTML(topic.label)} (${Number(topic.count || 0)})</span>`).join('')}
-                </div>
-            ` : ''}
-            ${sourceNote ? `<div class="faculty-comments-ai-source">${escapeHTML(sourceNote)}</div>` : ''}
-        `;
+        summaryEl.innerHTML = SharedData.renderFeedbackIntelligence(message, {
+            fallback,
+            semesterLabel: typeof professorPanelState !== 'undefined' ? professorPanelState.currentSelection.semesterLabel : '',
+            idPrefix: 'profFeedback',
+        });
         return;
     }
 
@@ -4593,74 +4721,19 @@ function setProfessorCommentsAiSummary(message, type = 'info') {
 
 function getProfessorFeedbackAiSummarySourceNote(message) {
     const source = normalizeToken(message && message.source);
-    const warning = String(message && message.warning || '').trim();
-    if (source === 'openai') {
-        const model = String(message && (message.aiModel || message.model) || '').trim();
-        return model ? `Generated with OpenAI (${model}).` : 'Generated with OpenAI.';
-    }
+    if (source === 'openai' || source === 'gemini') return 'AI generated';
     if (source === 'openai+rule' || source === 'gemini+rule') {
-        return warning || 'Generated with OpenAI and completed with rule fallback.';
+        return 'AI assisted';
     }
-    if (source === 'rule') {
-        return warning || 'Rule-based summary generated.';
-    }
-    return warning;
+    return 'Rule-based';
 }
 
 function classifyFeedbackCommentBiasByRules(text) {
-    const value = String(text || '').trim().replace(/\s+/g, ' ');
-    if (!value) {
-        return { label: 'Neutral' };
-    }
-
-    const lower = value.toLowerCase();
-    const words = lower.split(/\s+/).filter(Boolean);
-    const wordCount = words.length;
-
-    const biasedKeywords = [
-        'hate', 'terror', 'worst', 'stupid', 'dumb', 'useless', 'bobo', 'idiot', 'trash', 'awful', 'pangit',
-        'bwisit', 'gago', 'bobo prof', 'i hate', 'not related', 'irrelevant', 'nonsense',
-    ];
-    for (let i = 0; i < biasedKeywords.length; i += 1) {
-        const keyword = biasedKeywords[i];
-        if (keyword && lower.includes(keyword)) {
-            return { label: 'Biased' };
-        }
-    }
-
-    const constructiveKeywords = [
-        'needs', 'need', 'should', 'improve', 'improvement', 'examples', 'explain', 'explains',
-        'clearer', 'clarify', 'better', 'more', 'less', 'pace', 'feedback',
-    ];
-    let hasConstructiveSignal = false;
-    for (let i = 0; i < constructiveKeywords.length; i += 1) {
-        const keyword = constructiveKeywords[i];
-        if (keyword && lower.includes(keyword)) {
-            hasConstructiveSignal = true;
-            break;
-        }
-    }
-
-    if (hasConstructiveSignal && wordCount >= 4) {
-        return { label: 'Constructive' };
-    }
-
-    const neutralKeywords = ['ok', 'okay', 'fine', 'good', 'nice', 'average', 'pwede'];
-    if (neutralKeywords.includes(lower)) {
-        return { label: 'Neutral' };
-    }
-
-    if (wordCount <= 3) {
-        return { label: 'Neutral' };
-    }
-
-    return { label: 'Neutral' };
+    return SharedData.classifyFeedbackCommentByRules(text);
 }
 
 function getCommentBiasTagClass(label) {
-    if (label === 'Constructive') return 'constructive';
-    if (label === 'Biased') return 'biased';
-    return 'neutral';
+    return ['Constructive', 'Positive', 'Neutral', 'Critical', 'Biased'].includes(label) ? label.toLowerCase() : 'neutral';
 }
 
 function setProfessorCommentsListVisibility(isVisible) {
@@ -4670,75 +4743,40 @@ function setProfessorCommentsListVisibility(isVisible) {
 }
 
 function detectStudentCommentTopics(comments) {
-    const topicRules = [
-        {
-            label: 'lack of learning materials',
-            keywords: ['material', 'materials', 'module', 'modules', 'learning material', 'handout', 'handouts', 'slides', 'references', 'resources'],
-        },
-        {
-            label: 'need clearer explanations',
-            keywords: ['clear', 'clearer', 'clarify', 'explains', 'explain', 'explanation', 'understand'],
-        },
-        {
-            label: 'need more examples',
-            keywords: ['example', 'examples', 'sample', 'samples'],
-        },
-        {
-            label: 'class pace is too fast',
-            keywords: ['pace', 'fast', 'quick', 'rushed'],
-        },
-        {
-            label: 'want more interactive discussions',
-            keywords: ['interactive', 'discussion', 'engaging', 'participate', 'interaction'],
-        },
-    ];
-
-    const counts = topicRules.map(rule => ({ label: rule.label, count: 0 }));
-    comments.forEach(comment => {
-        const lower = String(comment || '').toLowerCase();
-        topicRules.forEach((rule, index) => {
-            const matched = rule.keywords.some(keyword => lower.includes(keyword));
-            if (matched) counts[index].count += 1;
-        });
-    });
-
-    return counts
-        .filter(item => item.count > 0)
-        .sort((a, b) => b.count - a.count);
+    return SharedData.detectFeedbackCommentTopics(comments);
 }
 
 function buildStudentFeedbackAiSummary(items) {
-    const comments = (Array.isArray(items) ? items : [])
-        .map(item => String(item && item.text || '').trim())
-        .filter(Boolean);
+    const prepared = SharedData.prepareFeedbackSummaryComments(items);
+    const comments = prepared.comments
+        .map(item => String(item && item.text || ''))
+        .filter(text => text.trim());
     if (!comments.length) {
         return {
             total: 0,
             constructive: 0,
+            positive: 0,
             neutral: 0,
+            critical: 0,
             biased: 0,
             topics: [],
             summaryLine: 'No student comments available to summarize.',
             toneLine: '',
             source: 'rule',
             warning: '',
+            teachingImprovements: [],
+            availableComments: prepared.available,
+            excludedRepetitiveComments: prepared.excludedRepetitiveComments,
         };
     }
 
-    let constructive = 0;
-    let neutral = 0;
-    let biased = 0;
-    comments.forEach(text => {
-        const label = classifyFeedbackCommentBiasByRules(text).label;
-        if (label === 'Constructive') constructive += 1;
-        else if (label === 'Biased') biased += 1;
-        else neutral += 1;
-    });
+    const counts = { constructive: 0, positive: 0, neutral: 0, critical: 0, biased: 0 };
+    comments.forEach(text => { counts[classifyFeedbackCommentBiasByRules(text).label.toLowerCase()] += 1; });
 
     const topics = detectStudentCommentTopics(comments);
     const top = topics[0] || null;
     const second = topics[1] || null;
-    const threshold = Math.ceil(comments.length * 0.4);
+    const threshold = Math.floor(comments.length / 2) + 1;
 
     let summaryLine = `Summary of ${comments.length} student comments: feedback is varied.`;
     if (top && top.count >= threshold) {
@@ -4749,27 +4787,25 @@ function buildStudentFeedbackAiSummary(items) {
         summaryLine = `Summary of ${comments.length} student comments: a common point is ${top.label}.`;
     }
 
-    let toneLine = 'Overall tone is mostly neutral.';
-    if (constructive >= neutral && constructive >= biased) {
-        toneLine = 'Overall tone is mostly constructive.';
-    } else if (biased > constructive && biased >= neutral) {
-        toneLine = 'Overall tone includes notable biased comments.';
-    }
+    const toneLine = SharedData.getFeedbackClassificationTone(counts);
 
     return {
         total: comments.length,
-        constructive,
-        neutral,
-        biased,
+        ...counts,
         topics,
         summaryLine,
         toneLine,
         source: 'rule',
         warning: '',
+        teachingImprovements: SharedData.buildFeedbackTeachingImprovements(prepared.comments),
+        availableComments: prepared.available,
+        excludedRepetitiveComments: prepared.excludedRepetitiveComments,
     };
 }
 
-function resetProfessorSubjectCommentsPanel() {
+function resetProfessorSubjectCommentsPanel(isLoading = false) {
+    professorFeedbackRequestId += 1;
+    professorFeedbackFiltersLoading = isLoading;
     const title = document.getElementById('profSubjectCommentsTitle');
     const meta = document.getElementById('profSubjectCommentsMeta');
     const list = document.getElementById('profSubjectCommentsList');
@@ -4788,18 +4824,26 @@ function resetProfessorSubjectCommentsPanel() {
         title.textContent = 'Anonymous Feedback';
     }
 
-    meta.textContent = `Press View to load all ${evalMeta.label.toLowerCase()} comments for the selected filters.`;
+    const semester = professorPanelState.currentSelection && professorPanelState.currentSelection.semesterLabel || 'Selected semester';
+    meta.textContent = `${evalMeta.label} · ${semester}. View comments or generate a summary.`;
     list.innerHTML = '<li class="faculty-comments-empty">Press View to load feedback.</li>';
     setProfessorCommentsListVisibility(true);
     professorPanelState.feedbackPanel = {
         items: [],
         evaluationType: evalType,
     };
-    setProfessorCommentsAiSummary('Click AI Summarize after loading comments to generate a summary.', 'info');
+    const viewBtn = document.getElementById('profSubjectCommentsView');
+    const aiBtn = document.getElementById('profSubjectCommentsAiSummarize');
+    if (viewBtn) viewBtn.disabled = isLoading;
+    if (aiBtn) {
+        aiBtn.disabled = isLoading;
+        aiBtn.innerHTML = '<i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> AI Summarize';
+    }
+    setProfessorCommentsAiSummary('Choose AI Summarize for insights or View to read anonymous comments.', 'info');
 }
 
 /**
- * SQL-ready placeholder for section feedback summaries
+ * General anonymous feedback from the currently loaded semester summary.
  */
 function fetchSectionSummaryFromSql(query) {
     const evalType = getEvaluationTypeMeta(query && query.evaluationType || 'student').id;
@@ -4808,10 +4852,10 @@ function fetchSectionSummaryFromSql(query) {
 
     const normalized = comments
         .map(item => ({
-            text: String(item && item.text || '').trim(),
+            text: String(item && item.text || ''),
             submittedAt: String(item && item.submittedAt || '').trim(),
         }))
-        .filter(item => item.text !== '');
+        .filter(item => item.text.trim() !== '');
 
     normalized.sort((a, b) => {
         const aTime = Date.parse(String(a && a.submittedAt || '')) || 0;
@@ -4926,16 +4970,16 @@ function setupChangeEmailForm() {
     const form = document.getElementById('changeEmailForm');
     if (!form) return;
 
-    form.addEventListener('submit', function (e) {
+    form.addEventListener('submit', async function (e) {
         e.preventDefault();
-        handleChangeEmail();
+        (await handleChangeEmail());
     });
 }
 
 /**
  * Placeholder change email handler (SQL-ready)
  */
-function handleChangeEmail() {
+async function handleChangeEmail() {
     const form = document.getElementById('changeEmailForm');
     const currentEmail = document.getElementById('currentEmail').value.trim();
     const newEmail = document.getElementById('newEmail').value.trim();
@@ -4962,7 +5006,7 @@ function handleChangeEmail() {
     }
 
     try {
-        const result = SharedData.changeOwnEmail(currentEmail, newEmail);
+        const result = (await SharedData.changeOwnEmail(currentEmail, newEmail));
         const nextEmail = String(result && result.email || newEmail).trim();
 
         const profileEmail = document.getElementById('profileEmail');
@@ -4992,16 +5036,16 @@ function setupChangePasswordForm() {
     const form = document.getElementById('changePasswordForm');
     if (!form) return;
 
-    form.addEventListener('submit', function (e) {
+    form.addEventListener('submit', async function (e) {
         e.preventDefault();
-        handleChangePassword();
+        (await handleChangePassword());
     });
 }
 
 /**
  * Placeholder change password handler (SQL-ready)
  */
-function handleChangePassword() {
+async function handleChangePassword() {
     const form = document.getElementById('changePasswordForm');
     const currentPassword = document.getElementById('currentPassword').value.trim();
     const newPassword = document.getElementById('newPassword').value.trim();
@@ -5023,7 +5067,7 @@ function handleChangePassword() {
     }
 
     try {
-        SharedData.changeOwnPassword(currentPassword, newPassword);
+        (await SharedData.changeOwnPassword(currentPassword, newPassword));
     } catch (error) {
         console.error('[ProfessorPanel] Failed to update password.', error);
         showFormMessage(form, error && error.message ? error.message : 'Failed to update password.', 'error');
@@ -5147,8 +5191,7 @@ function clearRestrictedProfessorReportData() {
     renderBreakdownTable([], professorPanelState.currentSelection.evaluationType || 'student');
     renderEvaluationCount([], { received: 0, required: 0 });
     initializeStudentCharts();
-    initializePeerCharts();
-    initializeSupervisorCharts();
+    renderPeerSupervisorAnalytics();
     const trendStatus = document.getElementById('semestralTrendStatus');
     const trendDelta = document.getElementById('semestralTrendDelta');
     const trendTableBody = document.getElementById('semestralTrendTableBody');
@@ -5162,8 +5205,7 @@ function clearRestrictedProfessorReportData() {
 
 function refreshProfessorReportAccessState() {
     if (!SharedData || typeof SharedData.refreshFacultyReportAccess !== 'function') {
-        applyReportBlackout();
-        return Promise.resolve(getProfessorFacultyReportAccessState());
+        return Promise.resolve(applyReportBlackout()).then(getProfessorFacultyReportAccessState);
     }
     if (professorReportAccessRefreshPromise) {
         return professorReportAccessRefreshPromise;
@@ -5188,15 +5230,15 @@ function refreshProfessorReportAccessState() {
             // The pending access check clears report data even when bootstrap
             // already says access is enabled. Rebuild after verification so the
             // unlocked page does not retain that empty context and summary.
-            if (currentlyEnabled) {
-                refreshProfessorPanelData({ preserveSelection: true });
+            if (currentlyEnabled && !professorFeedbackFiltersLoading) {
+                (await refreshProfessorPanelData({ preserveSelection: true }));
             }
-            applyReportBlackout();
+            (await applyReportBlackout());
             return access;
         })
-        .catch(error => {
+        .catch(async error => {
             console.warn('[Professor] Unable to refresh faculty report access.', error);
-            applyReportBlackout();
+            (await applyReportBlackout());
             return getProfessorFacultyReportAccessState();
         })
         .finally(() => {
@@ -5252,9 +5294,9 @@ function setupProfessorDataSync() {
         SharedData.KEYS.ANNOUNCEMENTS,
     ]);
 
-    SharedData.onDataChange(function (key) {
+    SharedData.onDataChange(async function (key) {
         if (refreshKeys.has(key)) {
-            refreshProfessorPanelData({ preserveSelection: true });
+            (await refreshProfessorPanelData({ preserveSelection: true }));
             return;
         }
     });
@@ -5263,27 +5305,27 @@ function setupProfessorDataSync() {
 function setupReportGateSync() {
     if (!SharedData || typeof SharedData.onDataChange !== 'function') return;
 
-    SharedData.onDataChange(function (key) {
+    SharedData.onDataChange(async function (key) {
         if (
             key === SharedData.KEYS.EVAL_PERIODS
             || key === SharedData.KEYS.FACULTY_REPORT_ACCESS
             || key === SharedData.KEYS.PROFESSOR_EVALUATION_COUNTS
         ) {
-            applyReportBlackout();
-            renderDashboardSupportWidgets();
+            (await applyReportBlackout());
+            (await renderDashboardSupportWidgets());
         }
     });
 
-    window.addEventListener('focus', function () {
-        refreshProfessorReportAccessState();
+    window.addEventListener('focus', async function () {
+        (await refreshProfessorReportAccessState());
     });
 }
 
 /**
  * Apply report availability after all evaluation periods have ended.
  */
-function applyReportBlackout() {
-    const account = resolveActiveProfessorAccount(professorPanelState.context);
+async function applyReportBlackout() {
+    const account = (await resolveActiveProfessorAccount(professorPanelState.context));
     const hasProfessorAccount = !!account.linked;
     const gate = resolveReportsGateState();
     const paperGate = resolveFacultyPaperGateState();
@@ -5299,7 +5341,7 @@ function applyReportBlackout() {
     setReportsNavVisibility(locked);
     setFacultyPaperNavVisibility(facultyPaperLocked);
     setDashboardReportActionVisibility(locked);
-    refreshDashboardAverageScoreVisibility();
+    (await refreshDashboardAverageScoreVisibility());
     if (createDraftBtn) {
         createDraftBtn.disabled = facultyPaperLocked;
         createDraftBtn.setAttribute('aria-disabled', createDraftBtn.disabled ? 'true' : 'false');
@@ -5324,7 +5366,7 @@ function applyReportBlackout() {
             ? SharedData.getProfessorEvaluationCounts()
             : null;
         if (counts) {
-            updateSummaryCards({
+            (await updateSummaryCards({
                 received: Number(counts.received) || 0,
                 required: Number(counts.required) || 0,
                 responseRate: Number(counts.responseRate) || 0,
@@ -5332,17 +5374,17 @@ function applyReportBlackout() {
                 registeredClassCount: 0,
                 scorableClassCount: 0,
                 partial: false,
-            });
+            }));
         }
     }
 
     if (locked && reportsView && reportsView.style.display === 'block') {
-        switchView('dashboard');
+        (await switchView('dashboard'));
         updateNavigation('dashboard');
     }
 
     if (facultyPaperLocked && facultyPaperView && facultyPaperView.style.display === 'block') {
-        switchView('dashboard');
+        (await switchView('dashboard'));
         updateNavigation('dashboard');
     }
 

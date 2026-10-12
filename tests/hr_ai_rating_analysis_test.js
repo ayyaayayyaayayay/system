@@ -1,4 +1,5 @@
 'use strict';
+const { findSourceMarker } = require('./helpers/js-source');
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -9,9 +10,9 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'JsScrip', 'hrpanel.js
 const html = fs.readFileSync(path.join(__dirname, '..', 'html', 'hrpanel.html'), 'utf8');
 
 function sourceBetween(startMarker, endMarker) {
-    const start = source.indexOf(startMarker);
+    const start = findSourceMarker(source, startMarker);
     assert.notEqual(start, -1, `Missing source marker: ${startMarker}`);
-    const end = source.indexOf(endMarker, start + startMarker.length);
+    const end = findSourceMarker(source, endMarker, start + startMarker.length);
     assert.notEqual(end, -1, `Missing source marker: ${endMarker}`);
     return source.slice(start, end);
 }
@@ -236,7 +237,7 @@ assert.ok(source.includes('Analyzing all eligible ratings and comments...'));
 assert.ok(source.includes('Professor Rating Review'));
 assert.ok(source.includes('escapeHrHtml(ratingReview)'), 'The model-generated rating review must be HTML-escaped.');
 assert.match(html, /hrpanel\.css\?v=\d{8}[a-z0-9]*["']/);
-assert.ok(html.includes('db-data.js?v=20261006c'), 'The shared data cache version was not updated.');
-assert.ok(html.includes('hrpanel.js?v=20261007behavior'), 'The HR analytics script cache version was not updated.');
+assert.match(html, /db-data\.js\?v=20261009multilingual1/, 'The shared loading code must be cache-busted.');
+assert.match(html, /hrpanel\.js\?v=20261009multilingual1/, 'The HR loading code must be cache-busted.');
 
 console.log('HR AI rating analysis tests passed.');

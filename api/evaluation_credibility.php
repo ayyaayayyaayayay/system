@@ -174,7 +174,7 @@ function calculateEvaluationCredibility(array $evaluation, array $cohort, array 
     foreach (array_merge([$evaluation['comments'] ?? ''], array_values($evaluation['qualitative'] ?? [])) as $text) {
         if (trim((string) $text) === '') continue;
         $classified = $biasClassifications[count($biasScores)] ?? classifyBiasCommentByRules($text);
-        $biasScores[] = ['Constructive'=>100, 'Neutral'=>80, 'Biased'=>40][$classified['label']];
+        $biasScores[] = ['Constructive'=>100, 'Positive'=>80, 'Neutral'=>80, 'Critical'=>80, 'Biased'=>40][$classified['label']];
         $biasDetails[] = $classified;
         if ($classified['label'] === 'Biased') $flags[] = $classified['reason'];
     }
@@ -222,7 +222,7 @@ function persistEvaluationCredibility(PDO $pdo, int $id, string $semester): void
             if (trim((string) ($config['apiKey'] ?? '')) !== '') {
                 $originalItems = buildAiCommentItemsFromEvaluations([$e]);
                 $filtered = filterAiCommentItems($originalItems, buildAiCommentItemsFromEvaluations($cohort));
-                $items = array_map(fn($item)=>['id'=>$item['id'],'comment'=>normalizeBiasDetectionText($item['text'])], $filtered['items']);
+                $items = array_map(fn($item)=>['id'=>$item['id'],'comment'=>(string)$item['text']], $filtered['items']);
                 $response = ['items'=>[]];
                 if ($items) {
                     $response = classifyBiasCommentsWithGeminiBatch($items, $config['apiKey'], $config['model'], max(30000, min(60000, (int) ($config['timeoutMs'] ?? 30000))));
@@ -230,7 +230,7 @@ function persistEvaluationCredibility(PDO $pdo, int $id, string $semester): void
                 foreach ($originalItems as $item) {
                     $classified = $response['items'][$item['id']] ?? null;
                     $biasClassifications[] = is_array($classified)
-                        ? ['label'=>normalizeBiasLabel($classified['label'] ?? ''), 'reason'=>normalizeBiasDetectionText($classified['reason'] ?? ''), 'source'=>'openai']
+                        ? ['label'=>normalizeBiasLabel($classified['label'] ?? ''), 'reason'=>normalizeBiasDetectionText($classified['reason'] ?? ''), 'source'=>$classified['source'] ?? 'openai']
                         : classifyBiasCommentByRules($item['text']);
                 }
             }

@@ -1,4 +1,5 @@
 'use strict';
+const { findSourceMarker } = require('./helpers/js-source');
 
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -16,9 +17,9 @@ const sheetJsBytes = fs.readFileSync(sheetJsPath);
 const XLSX = require(sheetJsPath);
 
 function sourceBetween(startMarker, endMarker) {
-    const start = adminSource.indexOf(startMarker);
+    const start = findSourceMarker(adminSource, startMarker);
     assert.notEqual(start, -1, `Missing source marker: ${startMarker}`);
-    const end = adminSource.indexOf(endMarker, start + startMarker.length);
+    const end = findSourceMarker(adminSource, endMarker, start + startMarker.length);
     assert.notEqual(end, -1, `Missing source marker: ${endMarker}`);
     return adminSource.slice(start, end);
 }
@@ -77,7 +78,7 @@ assert.equal(
     'Vendored SheetJS bytes must match the official distribution.'
 );
 assert(adminHtml.includes('xlsx.full.min.js?v=0.20.3'), 'Admin HTML must cache-bust the approved SheetJS release.');
-assert(adminHtml.includes('adminpanel.js?v=20261006cmo'), 'Admin HTML must load the hardened import code.');
+assert(adminHtml.includes('adminpanel.js?v=20261009loading1'), 'Admin HTML must load the updated hardened import code.');
 assert(adminSource.includes('xlsx.full.min.js?v=${SHEETJS_REQUIRED_VERSION}'), 'Worker must load the versioned local asset.');
 assert(adminSource.includes("kind: 'infrastructure'") && adminSource.includes("kind: 'parse'"), 'Worker failures must distinguish infrastructure from parsing errors.');
 assert(!adminSource.includes('parseExcelRowsOnMainThread'), 'Untrusted workbooks must never be parsed on the main UI thread.');
@@ -339,7 +340,7 @@ assert.deepEqual(
     { ...hooks.mapOfferingBulkRow(parsedFixtures.get('subjectassign.xlsx')[0]) },
     {
         semesterSlug: '',
-        campusSlug: 'mactan',
+        campusSlug: 'villamor',
         departmentCode: 'inet',
         programCode: 'BSAET',
         subjectCode: 'AET101',

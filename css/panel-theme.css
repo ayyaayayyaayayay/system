@@ -1132,37 +1132,36 @@ body.osa-panel .sidebar-header .logo-text {
   height: 70px;
   -webkit-animation: hourglassRotate 2s ease-in 0s infinite;
   animation: hourglassRotate 2s ease-in 0s infinite;
-  transform-style: preserve-3d;
-  perspective: 1000px;
+  transform-origin: 50% 50%;
 }
 
 .hourglassContainer div,
 .hourglassContainer div:before,
 .hourglassContainer div:after {
-  transform-style: preserve-3d;
+  transform-style: flat;
 }
 
 @-webkit-keyframes hourglassRotate {
   0% {
-    transform: rotateX(0deg);
+    transform: rotate(0deg);
   }
   50% {
-    transform: rotateX(180deg);
+    transform: rotate(180deg);
   }
   100% {
-    transform: rotateX(180deg);
+    transform: rotate(180deg);
   }
 }
 
 @keyframes hourglassRotate {
   0% {
-    transform: rotateX(0deg);
+    transform: rotate(0deg);
   }
   50% {
-    transform: rotateX(180deg);
+    transform: rotate(180deg);
   }
   100% {
-    transform: rotateX(180deg);
+    transform: rotate(180deg);
   }
 }
 
@@ -1186,11 +1185,11 @@ body.osa-panel .sidebar-header .logo-text {
 }
 
 .hourglassCapTop:before {
-  top: -25px;
+  content: none;
 }
 
 .hourglassCapTop:after {
-  top: -20px;
+  content: none;
 }
 
 .hourglassCapBottom {
@@ -1198,15 +1197,15 @@ body.osa-panel .sidebar-header .logo-text {
 }
 
 .hourglassCapBottom:before {
-  bottom: -25px;
+  content: none;
 }
 
 .hourglassCapBottom:after {
-  bottom: -20px;
+  content: none;
 }
 
 .hourglassGlassTop {
-  transform: rotateX(90deg);
+  display: none;
   position: absolute;
   top: -16px;
   left: 3px;
@@ -1610,7 +1609,16 @@ body.osa-panel .sidebar-header .logo-text {
 .app-loading-overlay {
   position: fixed;
   inset: 0;
-  display: flex;
+  display: none;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 16px;
+  border: 0;
+  box-sizing: border-box;
   align-items: center;
   justify-content: center;
   background: rgba(15, 23, 42, 0.48);
@@ -1618,16 +1626,18 @@ body.osa-panel .sidebar-header .logo-text {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition:
-    opacity 0.18s ease,
-    visibility 0.18s ease;
   z-index: 5000;
 }
 
-.app-loading-overlay.active {
+.app-loading-overlay[open].active {
+  display: flex;
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
+}
+
+.app-loading-overlay::backdrop {
+  background: transparent;
 }
 
 .app-loading-overlay-card {
@@ -1814,5 +1824,17 @@ body.osa-panel .sidebar-header .logo-text {
   .hourglassContainer *::after {
     animation: none !important;
     transition: none !important;
+  }
+
+  .hourglassSand:before {
+    height: 17px;
+    opacity: 1;
+  }
+
+  .hourglassSand:after {
+    top: 45px;
+    width: 38px;
+    height: 10px;
+    opacity: 1;
   }
 }

@@ -1,4 +1,5 @@
 'use strict';
+const { findSourceMarker } = require('./helpers/js-source');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -30,7 +31,7 @@ for (const panel of ['hr', 'vpaa']) {
     for (const name of names) {
         const start = source.indexOf('function ' + name + '(');
         assert(start >= 0, 'Missing function: ' + name);
-        const end = source.indexOf('\nfunction ', start + 1);
+        const end = findSourceMarker(source, '\nfunction ', start + 1);
         vm.runInContext(source.slice(start, end < 0 ? source.length : end), context);
     }
     const build = context[panel === 'hr' ? 'buildProfessorHistoricalTrend' : 'buildVpaaProfessorHistoricalTrend'];

@@ -1,4 +1,5 @@
 'use strict';
+const { findSourceMarker } = require('./helpers/js-source');
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -8,9 +9,9 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '..', 'JsScrip', 'db-data.js'), 'utf8');
 
 function sourceBetween(startMarker, endMarker) {
-    const start = source.indexOf(startMarker);
+    const start = findSourceMarker(source, startMarker);
     assert.notEqual(start, -1, `Missing source marker: ${startMarker}`);
-    const end = source.indexOf(endMarker, start + startMarker.length);
+    const end = findSourceMarker(source, endMarker, start + startMarker.length);
     assert.notEqual(end, -1, `Missing source marker: ${endMarker}`);
     return source.slice(start, end);
 }

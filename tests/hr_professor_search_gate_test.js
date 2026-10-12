@@ -4,15 +4,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { findSourceMarker } = require('./helpers/js-source');
 
 const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'JsScrip', 'hrpanel.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'css', 'hrpanel.css'), 'utf8');
 
 function sourceBetween(text, startMarker, endMarker) {
-    const start = text.indexOf(startMarker);
+    const start = findSourceMarker(text, startMarker);
     assert.notEqual(start, -1, `Missing source marker: ${startMarker}`);
-    const end = text.indexOf(endMarker, start + startMarker.length);
+    const end = findSourceMarker(text, endMarker, start + startMarker.length);
     assert.notEqual(end, -1, `Missing source marker: ${endMarker}`);
     return text.slice(start, end);
 }

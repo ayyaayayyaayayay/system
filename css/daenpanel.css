@@ -1910,6 +1910,7 @@ body {
     flex-wrap: wrap;
 }
 
+.faculty-comments-view,
 .faculty-comments-close {
     padding: 7px 12px;
     font-size: 11px;
@@ -2000,66 +2001,6 @@ body {
     background: #059669;
 }
 
-.faculty-comments-ai-summary.is-generated {
-    padding: 14px 16px 14px 52px;
-}
-
-.faculty-comments-ai-kicker {
-    color: #047857;
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    margin-bottom: 4px;
-    text-transform: uppercase;
-}
-
-.faculty-comments-ai-headline {
-    color: #0f172a;
-    font-size: 14px;
-    font-weight: 800;
-    line-height: 1.45;
-}
-
-.faculty-comments-ai-tone {
-    color: #334155;
-    font-size: 12px;
-    font-weight: 600;
-    margin-top: 4px;
-}
-
-.faculty-comments-ai-stats,
-.faculty-comments-ai-topics {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 10px;
-}
-
-.faculty-comments-ai-stats span,
-.faculty-comments-ai-topics span {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    border: 1px solid rgba(15, 23, 42, 0.08);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.76);
-    color: #1f2937;
-    padding: 5px 9px;
-    font-size: 11px;
-    font-weight: 700;
-}
-
-.faculty-comments-ai-stats strong {
-    color: #047857;
-}
-
-.faculty-comments-ai-source {
-    color: #64748b;
-    font-size: 11px;
-    font-weight: 600;
-    margin-top: 10px;
-}
-
 .faculty-comments-list {
     list-style: none;
     display: flex;
@@ -2109,6 +2050,18 @@ body {
     color: #166534;
     background: #ecfdf5;
     border-color: #bbf7d0;
+}
+
+.faculty-comment-tag.positive {
+    color: #065f46;
+    background: #d1fae5;
+    border-color: #6ee7b7;
+}
+
+.faculty-comment-tag.critical {
+    color: #92400e;
+    background: #fffbeb;
+    border-color: #fcd34d;
 }
 
 .faculty-comment-tag.neutral {
@@ -4189,3 +4142,5 @@ body {
 }
 
 
+
+.faculty-comment-text { white-space: pre-wrap; overflow-wrap: anywhere; }

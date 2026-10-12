@@ -296,6 +296,35 @@ try {
     $events=$db->query("SELECT event_code FROM activity_log WHERE event_code LIKE 'evaluation.credibility.%'")->fetchAll(PDO::FETCH_COLUMN);
     credAssert(in_array('evaluation.credibility.accept',$events,true) && in_array('evaluation.credibility.reject',$events,true) && in_array('evaluation.credibility.bulk_accept',$events,true),'Review audit events missing.');
     credAssert(in_array('evaluation.credibility.flagged',$events,true),'Automatic flag audit event missing.');
+    // Received professor feedback is intentionally locked while evaluation periods are open.
+    // Finish only the isolated fixture's periods before testing the authorized summary cohort.
+    credAssert(!haveProfessorReportEvaluationPeriodsEnded(buildEvalPeriodsSnapshot($db)), 'Open fixture periods unexpectedly unlocked professor feedback.');
+    $db->exec("UPDATE evaluation_periods SET end_date='2020-01-02' WHERE semester_id=1");
+    setSettingJson($db, 'sharedEvalPeriods', array_map(fn($period)=>['start'=>'2020-01-01','end'=>'2020-01-02'], getDefaultEvalPeriods()));
+    credAssert(haveProfessorReportEvaluationPeriodsEnded(buildEvalPeriodsSnapshot($db)), 'Completed fixture periods did not unlock professor feedback.');
+    $multilingual = [
+        [360, 35, "  Sana po\n\tmas maraming halimbawa.  ", 'Constructive'],
+        [361, 36, "Malinaw magpaliwanag si ma\u{2019}am.", 'Positive'],
+        [362, 37, 'Dalawang beses kami nagkaklase kada linggo.', 'Neutral'],
+        [363, 38, 'Hindi malinaw ang instructions po.', 'Critical'],
+        [364, 39, 'Bobo ka, sir. Sana magbigay ng examples.', 'Biased'],
+    ];
+    $db->exec("INSERT INTO course_offerings(subject_id,semester_id,professor_id,section_name) VALUES(1,1,2,'Multilingual')");
+    $multilingualOfferingId=(int)$db->lastInsertId();
+    $multilingualInsert=$db->prepare("INSERT INTO evaluations(id,semester_id,questionnaire_id,evaluation_type_id,evaluator_user_id,evaluatee_user_id,course_offering_id,general_comments,status,credibility_status,credibility_score) VALUES(?,1,1,1,?,2,?,?,'submitted','AUTO_ACCEPTED',85)");
+    foreach ($multilingual as [$id, $studentId, $text, $label]) $multilingualInsert->execute([$id, $studentId, $multilingualOfferingId, $text]);
+    $savedDecisions = $db->query('SELECT id,credibility_status,credibility_score FROM evaluations ORDER BY id')->fetchAll();
+    $biasResponse = credHttp('analyzeBiasComments', ['filters'=>['semesterId'=>'cred-test']], $sessions['hr']);
+    credAssert($biasResponse['status']===200 && $biasResponse['body']['success']===true, 'Multilingual analysis HTTP request failed.');
+    $byComment = [];
+    foreach ($biasResponse['body']['items'] as $item) $byComment[$item['comment']]=$item;
+    foreach ($multilingual as [$id, $studentId, $text, $label]) {
+        credAssert(isset($byComment[$text]) && $byComment[$text]['label']===$label, 'HTTP classification lost original text or label: '.$label);
+        credAssert($byComment[$text]['reason']!=='' && $byComment[$text]['source']==='rule', 'HTTP classification lost English fallback reason or provenance.');
+    }
+    $summary = $biasResponse['body']['summary'];
+    credAssert($summary['total'] === array_sum(array_intersect_key($summary, array_flip(['constructive','positive','neutral','critical','biased']))), 'HTTP five-label counts do not sum to the total.');
+    credAssert($savedDecisions===$db->query('SELECT id,credibility_status,credibility_score FROM evaluations ORDER BY id')->fetchAll(), 'Fresh analysis rewrote saved credibility scores or decisions.');
     // A client sending only one copy cannot bypass repetition checks against SQL.
     $sessions['professor']=credSession($db,2,'professor');
     $repeatSentinel='REPETITIVE_PROVIDER_BLOCK_SENTINEL';

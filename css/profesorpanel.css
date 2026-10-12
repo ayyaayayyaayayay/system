@@ -804,6 +804,118 @@ body {
     background-color: #f9fafb;
 }
 
+.professor-panel .reports-breakdown-table-wrap {
+    overflow-y: auto;
+    max-height: none;
+}
+
+.professor-panel .faculty-set-table th,
+.professor-panel .faculty-set-table td {
+    vertical-align: middle;
+    overflow-wrap: anywhere;
+}
+
+.professor-panel .faculty-set-table thead th {
+    line-height: 1.4;
+}
+
+.professor-panel .faculty-set-table thead th:first-child {
+    white-space: nowrap;
+}
+
+.professor-panel .faculty-set-table tfoot th,
+.professor-panel .faculty-set-table tfoot td {
+    font-weight: 700;
+    background: #f9fafb;
+    border-top: 1px solid var(--border-color);
+    border-bottom: none;
+}
+
+.prof-set-calculation-note {
+    margin-top: 12px;
+    color: #92400e;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.prof-report-status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    color: #475569;
+    font-size: 13px;
+}
+
+.prof-report-status[hidden],
+.prof-report-status button[hidden] {
+    display: none;
+}
+
+.prof-report-status.error {
+    color: #b91c1c;
+}
+
+.peer-supervisor-summary-wrap {
+    margin-bottom: 0;
+}
+
+.professor-panel .faculty-comments-actions button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.professor-panel #profSubjectCommentsPanel {
+    max-height: none;
+    overflow: visible;
+}
+
+.professor-panel #profSubjectCommentsTitle {
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px), (max-width: 1000px) and (orientation: landscape) {
+    .professor-panel .faculty-set-table tfoot {
+        display: block;
+        margin-top: 12px;
+    }
+
+    .professor-panel .faculty-set-table tfoot tr {
+        display: block;
+        border-radius: 16px;
+        overflow: hidden;
+        border: 1px solid var(--border-color);
+    }
+
+    .professor-panel .faculty-set-table tfoot th,
+    .professor-panel .faculty-set-table tfoot td {
+        display: block;
+        width: 100%;
+        border: none;
+        padding: 12px 14px;
+        text-align: left;
+    }
+
+    .professor-panel .faculty-set-table tfoot td {
+        display: grid;
+        grid-template-columns: minmax(0, 112px) minmax(0, 1fr);
+        gap: 12px;
+        border-top: 1px solid #cbd5e1;
+    }
+
+    .professor-panel .faculty-set-table tfoot td::before {
+        content: attr(data-label);
+        color: #475569;
+        font-size: 11px;
+        text-transform: uppercase;
+    }
+
+    .professor-panel .faculty-set-table tfoot .set-score-total-label {
+        display: none;
+    }
+}
+
 .count-pill {
     display: inline-block;
     padding: 4px 10px;
@@ -1937,66 +2049,6 @@ body {
     background: #059669;
 }
 
-.faculty-comments-ai-summary.is-generated {
-    padding: 14px 16px 14px 52px;
-}
-
-.faculty-comments-ai-kicker {
-    color: #047857;
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    margin-bottom: 4px;
-    text-transform: uppercase;
-}
-
-.faculty-comments-ai-headline {
-    color: #0f172a;
-    font-size: 14px;
-    font-weight: 800;
-    line-height: 1.45;
-}
-
-.faculty-comments-ai-tone {
-    color: #334155;
-    font-size: 12px;
-    font-weight: 600;
-    margin-top: 4px;
-}
-
-.faculty-comments-ai-stats,
-.faculty-comments-ai-topics {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 10px;
-}
-
-.faculty-comments-ai-stats span,
-.faculty-comments-ai-topics span {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    border: 1px solid rgba(15, 23, 42, 0.08);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.76);
-    color: #1f2937;
-    padding: 5px 9px;
-    font-size: 11px;
-    font-weight: 700;
-}
-
-.faculty-comments-ai-stats strong {
-    color: #047857;
-}
-
-.faculty-comments-ai-source {
-    color: #64748b;
-    font-size: 11px;
-    font-weight: 600;
-    margin-top: 10px;
-}
-
 .faculty-comments-list {
     list-style: none;
     display: flex;
@@ -2046,6 +2098,18 @@ body {
     color: #166534;
     background: #ecfdf5;
     border-color: #bbf7d0;
+}
+
+.faculty-comment-tag.positive {
+    color: #065f46;
+    background: #d1fae5;
+    border-color: #6ee7b7;
+}
+
+.faculty-comment-tag.critical {
+    color: #92400e;
+    background: #fffbeb;
+    border-color: #fcd34d;
 }
 
 .faculty-comment-tag.neutral {
@@ -3312,3 +3376,5 @@ body {
 
 
 
+
+.faculty-comment-text { white-space: pre-wrap; overflow-wrap: anywhere; }

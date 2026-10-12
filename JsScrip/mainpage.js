@@ -13,15 +13,15 @@ const passwordResetFlowState = {
 const MOBILE_AUTH_BREAKPOINT = 640;
 
 // Wait for DOM to be fully loaded
-document.addEventListener("DOMContentLoaded", function () {
-  initializeLoginPage();
+document.addEventListener("DOMContentLoaded", async function () {
+  (await initializeLoginPage());
 });
 
 /**
  * Initialize the login page
  */
-function initializeLoginPage() {
-  checkExistingSession();
+async function initializeLoginPage() {
+  (await checkExistingSession());
   setupMobileAuthView();
   setupLoginForm();
   setupOtpVerification();
@@ -120,12 +120,13 @@ function showAuthLoading(message) {
     return function () {};
   }
 
-  overlay.show(message || "Signing in...");
+  const release = overlay.show(message || "Signing in...");
   let hidden = false;
   return function () {
     if (hidden) return;
     hidden = true;
-    overlay.hide();
+    if (typeof release === "function") release();
+    else overlay.hide();
   };
 }
 
@@ -743,7 +744,7 @@ function showError(message) {
 /**
  * Check if user is already logged in
  */
-function checkExistingSession() {
+async function checkExistingSession() {
   const params = new URLSearchParams(window.location.search || "");
   if (params.get("reset_token")) return;
   if (params.get("logged_out") === "1") {
@@ -767,7 +768,7 @@ function checkExistingSession() {
   }
 
   try {
-    const session = SharedData.refreshSession(true);
+    const session = (await SharedData.refreshSession(true));
     if (session && session.role) {
       redirectToDashboard(session.role);
     }

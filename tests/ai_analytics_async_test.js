@@ -1,4 +1,5 @@
 'use strict';
+const { findSourceMarker } = require('./helpers/js-source');
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -7,8 +8,8 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const read = name => fs.readFileSync(path.join(root, 'JsScrip', name), 'utf8').replace(/\r\n/g, '\n');
 function between(source, start, end) {
-    const first = source.indexOf(start);
-    const last = source.indexOf(end, first + start.length);
+    const first = findSourceMarker(source, start);
+    const last = findSourceMarker(source, end, first + start.length);
     assert.ok(first >= 0 && last > first, `Missing function boundaries: ${start}`);
     return source.slice(first, last);
 }

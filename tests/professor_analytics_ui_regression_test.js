@@ -1,4 +1,5 @@
 'use strict';
+const { findSourceMarker } = require('./helpers/js-source');
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -20,9 +21,9 @@ const adminHtml = read('html/adminpanel.html');
 const vpaaHtml = read('html/vpaapanel.html');
 
 function sourceBetween(source, startMarker, endMarker) {
-    const start = source.indexOf(startMarker);
+    const start = findSourceMarker(source, startMarker);
     assert.notEqual(start, -1, `Missing source marker: ${startMarker}`);
-    const end = source.indexOf(endMarker, start + startMarker.length);
+    const end = findSourceMarker(source, endMarker, start + startMarker.length);
     assert.notEqual(end, -1, `Missing source marker: ${endMarker}`);
     return source.slice(start, end);
 }
@@ -176,7 +177,7 @@ for (const [panel, html] of [['hr', hrHtml], ['admin', adminHtml], ['vpaa', vpaa
     for (const extension of ['css', 'js']) {
         assert.match(
             html,
-            new RegExp(`${panel}panel\\.${extension}\\?v=\\d{8}[a-z0-9]*["']`),
+            new RegExp(`${panel}panel\\.${extension}\\?v=\\d{8}[a-z0-9]*[^"']*["']`),
             `${panel} analytics ${extension} must retain its cache-busting version.`
         );
     }

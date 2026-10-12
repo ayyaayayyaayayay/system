@@ -1,9 +1,9 @@
 // Admin Panel JavaScript - Dashboard Functionality
 
 // Wait for DOM to be fully loaded
-document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', async function () {
     // Check authentication
-    if (!checkAuthentication()) {
+    if (!(await checkAuthentication())) {
         redirectToLogin();
         return;
     }
@@ -264,8 +264,8 @@ function isHrPhoneViewport() {
  * Check if user is authenticated and is an admin
  * @returns {boolean} - True if user is authenticated as admin
  */
-function checkAuthentication() {
-    const session = SharedData.requireSession();
+async function checkAuthentication() {
+    const session = (await SharedData.requireSession());
     if (!session) {
         return false;
     }
@@ -450,13 +450,13 @@ function renderProfessorDepartmentTabs() {
     // Re-bind listeners for newly generated tabs
     const newTabs = tabsContainer.querySelectorAll('.dept-tab');
     newTabs.forEach(tab => {
-        tab.addEventListener('click', (e) => {
+        tab.addEventListener('click', async (e) => {
             newTabs.forEach(t => t.classList.remove('active'));
             e.currentTarget.classList.add('active');
 
             currentDepartmentFilter = e.currentTarget.getAttribute('data-department');
             hrProfessorPage = 1;
-            refreshHrProfessorListForCurrentFilters(true);
+            await refreshHrProfessorListForCurrentFilters(true);
         });
     });
 }
@@ -689,8 +689,8 @@ function setupAiInsightsView() {
     });
 
     if (behaviorBtn) {
-        behaviorBtn.addEventListener('click', function () {
-            runAiBehaviorAnalysis();
+        behaviorBtn.addEventListener('click', async function () {
+            await runAiBehaviorAnalysis();
         });
     }
 
@@ -701,19 +701,19 @@ function setupAiInsightsView() {
     }
 
     if (discrepancyBtn) {
-        discrepancyBtn.addEventListener('click', function () {
-            runAiDiscrepancyCheck();
+        discrepancyBtn.addEventListener('click', async function () {
+            await runAiDiscrepancyCheck();
         });
     }
     if (credibilityBtn) {
-        credibilityBtn.addEventListener('click', function () {
-            runAiCredibilityAnalysis();
+        credibilityBtn.addEventListener('click', async function () {
+            await runAiCredibilityAnalysis();
         });
     }
 
     if (printBtn) {
-        printBtn.addEventListener('click', function () {
-            runAllAiInsightsThenPrint(printBtn);
+        printBtn.addEventListener('click', async function () {
+            await runAllAiInsightsThenPrint(printBtn);
         });
     }
 
@@ -1224,11 +1224,14 @@ async function runAllAiInsightsThenPrint(printBtn) {
     }
 
     try {
-        if (!await runAiBehaviorAnalysis()) return;
-        await Promise.resolve(runAiBiasDetection());
-        if (!await runAiDiscrepancyCheck()) return;
-        if (!await runAiCredibilityAnalysis()) return;
-        printHrAiInsightsSummary();
+        const ready = await runHrWithGlobalLoading('Preparing AI Insights summary...', async function () {
+            if (!await runAiBehaviorAnalysis()) return false;
+            if (await runAiBiasDetection() === false) return false;
+            if (!await runAiDiscrepancyCheck()) return false;
+            if (!await runAiCredibilityAnalysis()) return false;
+            return true;
+        });
+        if (ready) printHrAiInsightsSummary();
     } catch (error) {
         console.error('[HRPanel] Unable to prepare AI Insights print summary.', error);
         alert('Unable to prepare the AI Insights summary for printing.');
@@ -1320,6 +1323,7 @@ async function runAiBehaviorAnalysis() {
     const feedbackEl = document.getElementById('hr-ai-behavior-feedback');
     const button = document.getElementById('hr-run-behavior-analysis-btn');
     if (!semesterSelect || !feedbackEl) return false;
+    if (button && button.disabled) return false;
 
     const semesterId = String(semesterSelect.value || 'all').trim() || 'all';
     const requestId = ++hrBehaviorAnalysisRequestId;
@@ -1336,40 +1340,42 @@ async function runAiBehaviorAnalysis() {
         button.textContent = 'Loading...';
     }
 
-    try {
-        // HR bootstrap intentionally omits evaluations. Fetch a dedicated snapshot
-        // so unrelated, partial lists in SharedData cannot hide saved submissions.
-        const evaluations = await SharedData.fetchHrBehaviorAnalysis({
-            semesterId,
-            evaluationType: 'student-to-professor',
-            includeRatings: false,
-            includeTextResponses: false,
-            limit: 0,
-            offset: 0,
-        });
-        if (requestId !== hrBehaviorAnalysisRequestId) return false;
-        hrBehaviorAnalysisSnapshot = { semesterId, evaluations };
-        hrBehaviorAnalysisHasRun = true;
-        renderAiInsightsBehaviorAnalysis({ silent: false });
-        return true;
-    } catch (error) {
-        if (requestId !== hrBehaviorAnalysisRequestId) return false;
-        console.error('[HRPanel] Unable to load behavior scores.', error);
-        feedbackEl.textContent = 'Unable to load submitted evaluations. Please try Run Behavior Analysis again.';
-        ['hr-ai-student-aggregate-body', 'hr-ai-submission-body'].forEach(function (id, index) {
-            const body = document.getElementById(id);
-            if (body) renderHrResponsiveTablePrompt(body, index === 0 ? 4 : 6, 'Behavior results could not be loaded.', 'hr-mobile-card-empty--center');
-        });
-        return false;
-    } finally {
-        if (button) {
-            button.disabled = false;
-            button.innerHTML = originalButtonHtml;
+    return runHrWithGlobalLoading('Loading saved behavior scores...', async function () {
+        try {
+            // HR bootstrap intentionally omits evaluations. Fetch a dedicated snapshot
+            // so unrelated, partial lists in SharedData cannot hide saved submissions.
+            const evaluations = await SharedData.fetchHrBehaviorAnalysis({
+                semesterId,
+                evaluationType: 'student-to-professor',
+                includeRatings: false,
+                includeTextResponses: false,
+                limit: 0,
+                offset: 0,
+            });
+            if (requestId !== hrBehaviorAnalysisRequestId) return false;
+            hrBehaviorAnalysisSnapshot = { semesterId, evaluations };
+            hrBehaviorAnalysisHasRun = true;
+            await renderAiInsightsBehaviorAnalysis({ silent: false });
+            return requestId === hrBehaviorAnalysisRequestId;
+        } catch (error) {
+            if (requestId !== hrBehaviorAnalysisRequestId) return false;
+            console.error('[HRPanel] Unable to load behavior scores.', error);
+            feedbackEl.textContent = 'Unable to load submitted evaluations. Please try Run Behavior Analysis again.';
+            ['hr-ai-student-aggregate-body', 'hr-ai-submission-body'].forEach(function (id, index) {
+                const body = document.getElementById(id);
+                if (body) renderHrResponsiveTablePrompt(body, index === 0 ? 4 : 6, 'Behavior results could not be loaded.', 'hr-mobile-card-empty--center');
+            });
+            return false;
+        } finally {
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = originalButtonHtml;
+            }
         }
-    }
+    });
 }
 
-function renderAiInsightsBehaviorAnalysis(options) {
+async function renderAiInsightsBehaviorAnalysis(options) {
     const cfg = options || {};
     const behaviorSemester = document.getElementById('hr-ai-behavior-semester');
     const feedbackEl = document.getElementById('hr-ai-behavior-feedback');
@@ -1378,6 +1384,9 @@ function renderAiInsightsBehaviorAnalysis(options) {
     if (!behaviorSemester || !feedbackEl || !studentBody || !submissionBody) return;
 
     const semesterId = String(behaviorSemester.value || 'all').trim() || 'all';
+    const renderRequestId = hrBehaviorAnalysisRequestId;
+    const isCurrent = () => renderRequestId === hrBehaviorAnalysisRequestId
+        && semesterId === (String(behaviorSemester.value || 'all').trim() || 'all');
     const context = buildHrEvaluationContext();
     if (hrBehaviorAnalysisSnapshot && hrBehaviorAnalysisSnapshot.semesterId === semesterId) {
         context.evaluations = hrBehaviorAnalysisSnapshot.evaluations;
@@ -1392,7 +1401,7 @@ function renderAiInsightsBehaviorAnalysis(options) {
     if (analysis.studentRows.length === 0) {
         renderHrResponsiveTablePrompt(studentBody, 4, 'No student aggregate results available.', 'hr-mobile-card-empty--center');
     } else {
-        const studentRowsHtml = analysis.studentRows.map(function (row) {
+        const studentRowsHtml = (await mapHrAnalysisRows(analysis.studentRows, function (row) {
             const level = getBehaviorRiskLevel(row.averageScore);
             const badgeClass = level === 'High' ? 'high' : (level === 'Medium' ? 'medium' : 'low');
             if (isHrPhoneViewport()) {
@@ -1413,14 +1422,15 @@ function renderAiInsightsBehaviorAnalysis(options) {
                     <td><span class="ai-insights-tag ${badgeClass}">${level}</span></td>
                 </tr>
             `;
-        }).join('');
+        })).join('');
+        if (!isCurrent()) return;
         renderHrResponsiveTableCards(studentBody, 4, studentRowsHtml);
     }
 
     if (analysis.records.length === 0) {
         renderHrResponsiveTablePrompt(submissionBody, 6, 'No submission analysis yet.', 'hr-mobile-card-empty--center');
     } else {
-        const submissionRowsHtml = analysis.records.map(function (record) {
+        const submissionRowsHtml = (await mapHrAnalysisRows(analysis.records, function (record) {
             const fastFlagText = record.timingAvailable ? (record.fastFlag ? 'Yes' : 'No') : 'N/A';
             const repetitionSources = [record.ratingRepetitiveFlag ? 'ratings' : '', record.commentRepetitiveFlag ? 'comments' : ''].filter(Boolean);
             const repetitiveFlagText = record.repetitiveFlag
@@ -1447,7 +1457,8 @@ function renderAiInsightsBehaviorAnalysis(options) {
                     <td>${repetitiveFlagText}</td>
                 </tr>
             `;
-        }).join('');
+        })).join('');
+        if (!isCurrent()) return;
         renderHrResponsiveTableCards(submissionBody, 6, submissionRowsHtml);
     }
 
@@ -1959,7 +1970,7 @@ function countHrEvaluationsByType(context, semesterId, typeKey) {
 function runHrWithGlobalLoading(message, callback) {
     if (typeof callback !== 'function') return Promise.resolve();
 
-    const loadingOverlay = window.AppLoadingOverlay;
+    const loadingOverlay = typeof window !== 'undefined' ? window.AppLoadingOverlay : null;
     const canUseOverlay = loadingOverlay
         && typeof loadingOverlay.show === 'function'
         && typeof loadingOverlay.hide === 'function';
@@ -1972,18 +1983,22 @@ function runHrWithGlobalLoading(message, callback) {
         }
     }
 
-    loadingOverlay.show(message || 'Processing AI request...');
-    return new Promise(function (resolve, reject) {
-        setTimeout(function () {
-            try {
-                resolve(callback());
-            } catch (error) {
-                reject(error);
-            } finally {
-                loadingOverlay.hide();
-            }
-        }, 0);
-    });
+    if (typeof loadingOverlay.run === 'function') {
+        return loadingOverlay.run(message || 'Processing AI request...', callback);
+    }
+    const releaseLoading = loadingOverlay.show(message || 'Processing AI request...');
+    return new Promise(function (resolve) { setTimeout(resolve, 0); })
+        .then(callback).finally(function () {
+            if (typeof releaseLoading === 'function') releaseLoading();
+            else loadingOverlay.hide();
+        });
+}
+
+async function mapHrAnalysisRows(items, callback) {
+    if (typeof window !== 'undefined' && window.AppLoadingOverlay && window.AppLoadingOverlay.mapAsync) {
+        return window.AppLoadingOverlay.mapAsync(items, callback);
+    }
+    return items.map(callback);
 }
 
 function runAiBiasDetection() {
@@ -1993,7 +2008,7 @@ function runAiBiasDetection() {
     const bodyEl = document.getElementById('hr-ai-bias-body');
     const button = document.getElementById('hr-run-bias-detection-btn');
 
-    if (!semesterSelect || !feedbackEl || !summaryEl || !bodyEl || !button) return Promise.resolve(false);
+    if (!semesterSelect || !feedbackEl || !summaryEl || !bodyEl || !button || button.disabled) return Promise.resolve(false);
 
     if (!SharedData.analyzeBiasComments) {
         feedbackEl.style.display = 'block';
@@ -2008,12 +2023,12 @@ function runAiBiasDetection() {
     feedbackEl.style.display = 'block';
     feedbackEl.textContent = 'Analyzing comments...';
 
-    return runHrWithGlobalLoading('Running AI bias detection...', function () {
+    return runHrWithGlobalLoading('Running AI bias detection...', async function () {
         try {
-            const response = SharedData.analyzeBiasComments({
+            const response = (await SharedData.analyzeBiasComments({
                 semesterId: semesterId === 'all' ? '' : semesterId,
                 limit: 400,
-            }, {});
+            }, {}));
             if (!response || response.success !== true) {
                 throw new Error('Bias detection request failed.');
             }
@@ -2022,7 +2037,9 @@ function runAiBiasDetection() {
             const summary = response && response.summary ? response.summary : {};
             const total = Number(summary.total || items.length) || 0;
             const constructive = Number(summary.constructive || 0) || 0;
+            const positive = Number(summary.positive || 0) || 0;
             const neutral = Number(summary.neutral || 0) || 0;
+            const critical = Number(summary.critical || 0) || 0;
             const biased = Number(summary.biased || 0) || 0;
             const source = String(summary.source || 'rule').trim() || 'rule';
             const warning = String(summary.warning || '').trim();
@@ -2032,23 +2049,23 @@ function runAiBiasDetection() {
                 ? ` | OpenAI: ${aiModel || 'unknown'}${aiStatus ? ` (HTTP ${aiStatus})` : ''}`
                 : '';
 
-            summaryEl.textContent = `Total: ${total} | Constructive: ${constructive} | Neutral: ${neutral} | Biased: ${biased} | Source: ${source}${warning ? ` | Note: ${warning}` : ''}${aiMeta}`;
+            summaryEl.textContent = `Total: ${total} | Constructive: ${constructive} | Positive: ${positive} | Neutral: ${neutral} | Critical: ${critical} | Biased: ${biased} | Source: ${source}${warning ? ` | Note: ${warning}` : ''}${aiMeta}`;
             feedbackEl.textContent = '';
             feedbackEl.style.display = 'none';
 
             if (items.length === 0) {
                 renderHrResponsiveTablePrompt(bodyEl, 5, 'No comments to classify.', 'hr-mobile-card-empty--center');
             } else {
-                const rowsHtml = items.map(function (item) {
+                const rowsHtml = (await mapHrAnalysisRows(items, function (item) {
                     const label = String(item.label || 'Neutral').trim() || 'Neutral';
-                    const badgeClass = label === 'Biased' ? 'high' : (label === 'Neutral' ? 'medium' : 'low');
+                    const badgeClass = ['Constructive', 'Positive', 'Neutral', 'Critical', 'Biased'].includes(label) ? 'feedback-' + label.toLowerCase() : 'feedback-neutral';
                     const dateText = formatAiInsightsDate(item.date || item.submittedAt || item.timestamp || '');
                     if (isHrPhoneViewport()) {
                         return `
                             <article class="hr-mobile-data-card">
                                 <div class="hr-mobile-card-title">Bias Detection Result</div>
                                 ${buildHrMobileDataField('Label', `<span class="ai-insights-tag ${badgeClass}">${escapeHrHtml(label)}</span>`)}
-                                ${buildHrMobileDataField('Comment', escapeHrHtml(String(item.comment || '').trim()))}
+                                ${buildHrMobileDataField('Comment', `<span class="feedback-comment-text">${escapeHrHtml(String(item.comment || ''))}</span>`)}
                                 ${buildHrMobileDataField('Reason', escapeHrHtml(String(item.reason || '').trim() || 'No reason provided'))}
                                 ${buildHrMobileDataField('Source', escapeHrHtml(String(item.source || source)))}
                                 ${buildHrMobileDataField('Date', escapeHrHtml(dateText))}
@@ -2057,20 +2074,22 @@ function runAiBiasDetection() {
                     }
                     return `
                         <tr>
-                            <td>${escapeHrHtml(String(item.comment || '').trim())}</td>
+                            <td>${escapeHrHtml(String(item.comment || ''))}</td>
                             <td class="ai-insights-label-cell"><span class="ai-insights-tag ${badgeClass}">${escapeHrHtml(label)}</span></td>
                             <td>${escapeHrHtml(String(item.reason || '').trim() || 'No reason provided')}</td>
                             <td class="ai-insights-source-cell">${escapeHrHtml(String(item.source || source))}</td>
                             <td>${escapeHrHtml(dateText)}</td>
                         </tr>
                     `;
-                }).join('');
+                })).join('');
                 renderHrResponsiveTableCards(bodyEl, 5, rowsHtml);
             }
+            return true;
         } catch (error) {
             console.error('[HRPanel] Bias detection failed.', error);
             feedbackEl.style.display = 'block';
             feedbackEl.textContent = error && error.message ? error.message : 'Bias detection failed.';
+            return false;
         } finally {
             button.disabled = false;
             button.innerHTML = original;
@@ -2107,84 +2126,86 @@ async function runAiDiscrepancyCheck() {
     summaryEl.textContent = 'Loading submitted evaluations...';
     renderHrResponsiveTablePrompt(bodyEl, 6, 'Loading submitted evaluations...', 'hr-mobile-card-empty--center');
 
-    try {
-        const evaluations = await SharedData.fetchEvaluationsSnapshot({
-            semesterId, analyticsEligible: true, includeRatings: true,
-            includeTextResponses: false, limit: 0, offset: 0,
-        });
-        if (requestId !== hrDiscrepancyAnalysisRequestId) return false;
-        // SQL snapshots carry the professor identity. Do not depend on a partial
-        // directory or offering cache to recognize submitted evaluations.
-        const context = mergeHrProfessorUsersIntoContext(buildHrEvaluationContext(), evaluations.map(function (evaluation) {
-            return { id: evaluation.targetProfessorId || evaluation.evaluateeUserId,
-                name: evaluation.targetProfessor || evaluation.professorName || '' };
-        }).filter(function (professor) { return !!professor.id; }));
-        context.evaluations = evaluations;
-        const analysis = analyzeCrossSourceDiscrepancies(context, semesterId, threshold);
-        const studentCount = countHrEvaluationsByType(context, semesterId, 'student');
-        const supervisorCount = countHrEvaluationsByType(context, semesterId, 'supervisor');
-        const displayRows = analysis.flaggedCount > 0
-            ? analysis.rows
-            : (Array.isArray(analysis.reviewedRows) ? analysis.reviewedRows : []);
+    return runHrWithGlobalLoading('Checking cross-source discrepancies...', async function () {
+        try {
+            const evaluations = await SharedData.fetchEvaluationsSnapshot({
+                semesterId, analyticsEligible: true, includeRatings: true,
+                includeTextResponses: false, limit: 0, offset: 0,
+            });
+            if (requestId !== hrDiscrepancyAnalysisRequestId) return false;
+            // SQL snapshots carry the professor identity. Do not depend on a partial
+            // directory or offering cache to recognize submitted evaluations.
+            const context = mergeHrProfessorUsersIntoContext(buildHrEvaluationContext(), evaluations.map(function (evaluation) {
+                return { id: evaluation.targetProfessorId || evaluation.evaluateeUserId,
+                    name: evaluation.targetProfessor || evaluation.professorName || '' };
+            }).filter(function (professor) { return !!professor.id; }));
+            context.evaluations = evaluations;
+            const analysis = analyzeCrossSourceDiscrepancies(context, semesterId, threshold);
+            const studentCount = countHrEvaluationsByType(context, semesterId, 'student');
+            const supervisorCount = countHrEvaluationsByType(context, semesterId, 'supervisor');
+            const displayRows = analysis.flaggedCount > 0
+                ? analysis.rows
+                : (Array.isArray(analysis.reviewedRows) ? analysis.reviewedRows : []);
 
-        summaryEl.textContent = `Reviewed: ${analysis.reviewedCount} | Flagged: ${analysis.flaggedCount} | Threshold: ${analysis.threshold.toFixed(1)}`;
-        if (analysis.flaggedCount > 0) {
-            feedbackEl.textContent = `Discrepancy check completed. ${analysis.flaggedCount} professor(s) flagged for review.`;
-        } else if (analysis.reviewedCount > 0) {
-            feedbackEl.textContent = `Compared ${analysis.reviewedCount} professor(s). No discrepancies exceeded the threshold ${analysis.threshold.toFixed(1)}.`;
-        } else if (analysis.reviewedCount === 0 && studentCount > 0 && supervisorCount === 0) {
-            feedbackEl.textContent = 'No supervisor evaluations found to compare against student ratings in the selected semester.';
-        } else if (analysis.reviewedCount === 0 && studentCount === 0) {
-            feedbackEl.textContent = 'No student evaluations found for the selected semester.';
-        } else {
-            feedbackEl.textContent = 'Student and supervisor ratings are available, but no professor has both sources in the same semester.';
-        }
-
-        if (!displayRows.length) {
-            renderHrResponsiveTablePrompt(bodyEl, 6, 'No comparable student and supervisor ratings for the same professor and semester.', 'hr-mobile-card-empty--center');
-            return true;
-        }
-
-        const rowsHtml = displayRows.map(function (row) {
-            const severityClass = row.severity === 'High'
-                ? 'high'
-                : (row.severity === 'Medium' ? 'medium' : 'low');
-            if (isHrPhoneViewport()) {
-                return `
-                    <article class="hr-mobile-data-card">
-                        <div class="hr-mobile-card-title">${escapeHrHtml(row.professorName)}</div>
-                        ${buildHrMobileDataField('Student Avg', escapeHrHtml(formatAiDiscrepancyAverage(row.studentAvg)))}
-                        ${buildHrMobileDataField('Supervisor Avg', escapeHrHtml(formatAiDiscrepancyAverage(row.supervisorAvg)))}
-                        ${buildHrMobileDataField('Difference', escapeHrHtml(formatAiDiscrepancyDiff(row.supervisorDiff)))}
-                        ${buildHrMobileDataField('Flag Reason', escapeHrHtml(row.flagReason))}
-                        ${buildHrMobileDataField('Severity', `<span class="ai-insights-tag ${severityClass}">${escapeHrHtml(row.severity)}</span>`)}
-                    </article>
-                `;
+            summaryEl.textContent = `Reviewed: ${analysis.reviewedCount} | Flagged: ${analysis.flaggedCount} | Threshold: ${analysis.threshold.toFixed(1)}`;
+            if (analysis.flaggedCount > 0) {
+                feedbackEl.textContent = `Discrepancy check completed. ${analysis.flaggedCount} professor(s) flagged for review.`;
+            } else if (analysis.reviewedCount > 0) {
+                feedbackEl.textContent = `Compared ${analysis.reviewedCount} professor(s). No discrepancies exceeded the threshold ${analysis.threshold.toFixed(1)}.`;
+            } else if (analysis.reviewedCount === 0 && studentCount > 0 && supervisorCount === 0) {
+                feedbackEl.textContent = 'No supervisor evaluations found to compare against student ratings in the selected semester.';
+            } else if (analysis.reviewedCount === 0 && studentCount === 0) {
+                feedbackEl.textContent = 'No student evaluations found for the selected semester.';
+            } else {
+                feedbackEl.textContent = 'Student and supervisor ratings are available, but no professor has both sources in the same semester.';
             }
-            return `
-                <tr>
-                    <td>${escapeHrHtml(row.professorName)}</td>
-                    <td>${escapeHrHtml(formatAiDiscrepancyAverage(row.studentAvg))}</td>
-                    <td>${escapeHrHtml(formatAiDiscrepancyAverage(row.supervisorAvg))}</td>
-                    <td>${escapeHrHtml(formatAiDiscrepancyDiff(row.supervisorDiff))}</td>
-                    <td>${escapeHrHtml(row.flagReason)}</td>
-                    <td><span class="ai-insights-tag ${severityClass}">${escapeHrHtml(row.severity)}</span></td>
-                </tr>
-            `;
-        }).join('');
-        renderHrResponsiveTableCards(bodyEl, 6, rowsHtml);
-    } catch (error) {
-        if (requestId !== hrDiscrepancyAnalysisRequestId) return false;
-        console.error('[HRPanel] Discrepancy check failed.', error);
-        feedbackEl.textContent = 'Unable to load evaluations for the discrepancy check. Please try again.';
-        summaryEl.textContent = 'Discrepancy analysis could not be completed.';
-        renderHrResponsiveTablePrompt(bodyEl, 6, 'Discrepancy results could not be loaded.', 'hr-mobile-card-empty--center');
-        return false;
-    } finally {
-        button.disabled = false;
-        button.innerHTML = original;
-    }
-    return true;
+
+            if (!displayRows.length) {
+                renderHrResponsiveTablePrompt(bodyEl, 6, 'No comparable student and supervisor ratings for the same professor and semester.', 'hr-mobile-card-empty--center');
+                return true;
+            }
+
+            const rowsHtml = (await mapHrAnalysisRows(displayRows, function (row) {
+                const severityClass = row.severity === 'High'
+                    ? 'high'
+                    : (row.severity === 'Medium' ? 'medium' : 'low');
+                if (isHrPhoneViewport()) {
+                    return `
+                        <article class="hr-mobile-data-card">
+                            <div class="hr-mobile-card-title">${escapeHrHtml(row.professorName)}</div>
+                            ${buildHrMobileDataField('Student Avg', escapeHrHtml(formatAiDiscrepancyAverage(row.studentAvg)))}
+                            ${buildHrMobileDataField('Supervisor Avg', escapeHrHtml(formatAiDiscrepancyAverage(row.supervisorAvg)))}
+                            ${buildHrMobileDataField('Difference', escapeHrHtml(formatAiDiscrepancyDiff(row.supervisorDiff)))}
+                            ${buildHrMobileDataField('Flag Reason', escapeHrHtml(row.flagReason))}
+                            ${buildHrMobileDataField('Severity', `<span class="ai-insights-tag ${severityClass}">${escapeHrHtml(row.severity)}</span>`)}
+                        </article>
+                    `;
+                }
+                return `
+                    <tr>
+                        <td>${escapeHrHtml(row.professorName)}</td>
+                        <td>${escapeHrHtml(formatAiDiscrepancyAverage(row.studentAvg))}</td>
+                        <td>${escapeHrHtml(formatAiDiscrepancyAverage(row.supervisorAvg))}</td>
+                        <td>${escapeHrHtml(formatAiDiscrepancyDiff(row.supervisorDiff))}</td>
+                        <td>${escapeHrHtml(row.flagReason)}</td>
+                        <td><span class="ai-insights-tag ${severityClass}">${escapeHrHtml(row.severity)}</span></td>
+                    </tr>
+                `;
+            })).join('');
+            renderHrResponsiveTableCards(bodyEl, 6, rowsHtml);
+        } catch (error) {
+            if (requestId !== hrDiscrepancyAnalysisRequestId) return false;
+            console.error('[HRPanel] Discrepancy check failed.', error);
+            feedbackEl.textContent = 'Unable to load evaluations for the discrepancy check. Please try again.';
+            summaryEl.textContent = 'Discrepancy analysis could not be completed.';
+            renderHrResponsiveTablePrompt(bodyEl, 6, 'Discrepancy results could not be loaded.', 'hr-mobile-card-empty--center');
+            return false;
+        } finally {
+            button.disabled = false;
+            button.innerHTML = original;
+        }
+        return true;
+    });
 }
 
 function resetAiInsightsCredibilityPrompt() {
@@ -2215,80 +2236,82 @@ async function runAiCredibilityAnalysis() {
     summaryEl.textContent = 'Loading submitted evaluations...';
     renderHrResponsiveTablePrompt(bodyEl, 9, 'Loading saved credibility scores...', 'hr-mobile-card-empty--center');
 
-    try {
-        // Include pending submissions so scores needing HR review remain visible.
-        // Fetch directly: the shared HR bootstrap/cache may be empty or partial.
-        const evaluations = await SharedData.fetchEvaluationsSnapshot({
-            semesterId, includeRatings: false, includeTextResponses: false,
-            limit: 0, offset: 0,
-        });
-        if (requestId !== hrCredibilityAnalysisRequestId) return false;
-        const context = buildHrEvaluationContext();
-        context.evaluations = evaluations.filter(function (evaluation) {
-            return normalizeHrToken(evaluation.status) === 'submitted';
-        });
-        const analysis = buildHrPersistedCredibilityAnalysis(context, semesterId);
+    return runHrWithGlobalLoading('Loading saved credibility scores...', async function () {
+        try {
+            // Include pending submissions so scores needing HR review remain visible.
+            // Fetch directly: the shared HR bootstrap/cache may be empty or partial.
+            const evaluations = await SharedData.fetchEvaluationsSnapshot({
+                semesterId, includeRatings: false, includeTextResponses: false,
+                limit: 0, offset: 0,
+            });
+            if (requestId !== hrCredibilityAnalysisRequestId) return false;
+            const context = buildHrEvaluationContext();
+            context.evaluations = evaluations.filter(function (evaluation) {
+                return normalizeHrToken(evaluation.status) === 'submitted';
+            });
+            const analysis = buildHrPersistedCredibilityAnalysis(context, semesterId);
 
-        summaryEl.textContent = `Total: ${analysis.total} | Highly reliable: ${analysis.highlyReliable} | Acceptable: ${analysis.acceptable} | Needs review: ${analysis.needsReview} | Avg score: ${analysis.averageScore.toFixed(1)}`;
-        if (analysis.total === 0) {
-            feedbackEl.textContent = 'No submitted evaluations found for the selected semester.';
-        } else {
-            feedbackEl.textContent = 'Credibility analysis completed. Scores and component flags were saved at submission.';
-        }
-
-        if (!analysis.rows.length) {
-            renderHrResponsiveTablePrompt(bodyEl, 9, 'No evaluations to analyze.', 'hr-mobile-card-empty--center');
-            return true;
-        }
-
-        const rowsHtml = analysis.rows.map(function (row) {
-            const categoryClass = getAiCredibilityCategoryBadgeClass(row.category);
-            if (isHrPhoneViewport()) {
-                return `
-                    <article class="hr-mobile-data-card">
-                        <div class="hr-mobile-card-title">${escapeHrHtml(row.professorName)}</div>
-                        ${buildHrMobileDataField('Evaluation ID', escapeHrHtml(row.evaluationId))}
-                        ${buildHrMobileDataField('Evaluator Identity', escapeHrHtml(row.studentNumber))}
-                        ${buildHrMobileDataField('Behavior Score', escapeHrHtml(formatAiCredibilityComponentValue(row.behaviorScore)))}
-                        ${buildHrMobileDataField('Bias Label', escapeHrHtml(row.biasLabel))}
-                        ${buildHrMobileDataField('Cross-Source Status', escapeHrHtml(row.crossStatus))}
-                        ${buildHrMobileDataField('Credibility Score', row.credibilityScore)}
-                        ${buildHrMobileDataField('Category', `<span class="ai-insights-tag ${categoryClass}">${escapeHrHtml(row.category)}</span>`)}
-                        ${buildHrMobileDataField('Reliability Summary', escapeHrHtml(row.reliabilitySummary))}
-                    </article>
-                `;
+            summaryEl.textContent = `Total: ${analysis.total} | Highly reliable: ${analysis.highlyReliable} | Acceptable: ${analysis.acceptable} | Needs review: ${analysis.needsReview} | Avg score: ${analysis.averageScore.toFixed(1)}`;
+            if (analysis.total === 0) {
+                feedbackEl.textContent = 'No submitted evaluations found for the selected semester.';
+            } else {
+                feedbackEl.textContent = 'Credibility analysis completed. Scores and component flags were saved at submission.';
             }
-            return `
-                <tr>
-                    <td>${escapeHrHtml(row.evaluationId)}</td>
-                    <td>${escapeHrHtml(row.studentNumber)}</td>
-                    <td>${escapeHrHtml(row.professorName)}</td>
-                    <td>${escapeHrHtml(formatAiCredibilityComponentValue(row.behaviorScore))}</td>
-                    <td>${escapeHrHtml(row.biasLabel)}</td>
-                    <td>${escapeHrHtml(row.crossStatus)}</td>
-                    <td>${row.credibilityScore}</td>
-                    <td><span class="ai-insights-tag ${categoryClass}">${escapeHrHtml(row.category)}</span></td>
-                    <td>${escapeHrHtml(row.reliabilitySummary)}</td>
-                </tr>
-            `;
-        }).join('');
-        renderHrResponsiveTableCards(bodyEl, 9, rowsHtml);
-        return true;
 
-    } catch (error) {
-        if (requestId !== hrCredibilityAnalysisRequestId) return false;
-        console.error('[HRPanel] Credibility analysis failed.', error);
-        feedbackEl.textContent = 'Unable to load credibility scores. Please try Run Credibility Analysis again.';
-        summaryEl.textContent = 'Credibility analysis could not be completed.';
-        renderHrResponsiveTablePrompt(bodyEl, 9, 'Credibility scores could not be loaded.', 'hr-mobile-card-empty--center');
-        return false;
-    } finally {
-        button.disabled = false;
-        button.innerHTML = original;
-    }
+            if (!analysis.rows.length) {
+                renderHrResponsiveTablePrompt(bodyEl, 9, 'No evaluations to analyze.', 'hr-mobile-card-empty--center');
+                return true;
+            }
+
+            const rowsHtml = (await mapHrAnalysisRows(analysis.rows, function (row) {
+                const categoryClass = getAiCredibilityCategoryBadgeClass(row.category);
+                if (isHrPhoneViewport()) {
+                    return `
+                        <article class="hr-mobile-data-card">
+                            <div class="hr-mobile-card-title">${escapeHrHtml(row.professorName)}</div>
+                            ${buildHrMobileDataField('Evaluation ID', escapeHrHtml(row.evaluationId))}
+                            ${buildHrMobileDataField('Evaluator Identity', escapeHrHtml(row.studentNumber))}
+                            ${buildHrMobileDataField('Behavior Score', escapeHrHtml(formatAiCredibilityComponentValue(row.behaviorScore)))}
+                            ${buildHrMobileDataField('Bias Label', escapeHrHtml(row.biasLabel))}
+                            ${buildHrMobileDataField('Cross-Source Status', escapeHrHtml(row.crossStatus))}
+                            ${buildHrMobileDataField('Credibility Score', row.credibilityScore)}
+                            ${buildHrMobileDataField('Category', `<span class="ai-insights-tag ${categoryClass}">${escapeHrHtml(row.category)}</span>`)}
+                            ${buildHrMobileDataField('Reliability Summary', escapeHrHtml(row.reliabilitySummary))}
+                        </article>
+                    `;
+                }
+                return `
+                    <tr>
+                        <td>${escapeHrHtml(row.evaluationId)}</td>
+                        <td>${escapeHrHtml(row.studentNumber)}</td>
+                        <td>${escapeHrHtml(row.professorName)}</td>
+                        <td>${escapeHrHtml(formatAiCredibilityComponentValue(row.behaviorScore))}</td>
+                        <td>${escapeHrHtml(row.biasLabel)}</td>
+                        <td>${escapeHrHtml(row.crossStatus)}</td>
+                        <td>${row.credibilityScore}</td>
+                        <td><span class="ai-insights-tag ${categoryClass}">${escapeHrHtml(row.category)}</span></td>
+                        <td>${escapeHrHtml(row.reliabilitySummary)}</td>
+                    </tr>
+                `;
+            })).join('');
+            renderHrResponsiveTableCards(bodyEl, 9, rowsHtml);
+            return true;
+
+        } catch (error) {
+            if (requestId !== hrCredibilityAnalysisRequestId) return false;
+            console.error('[HRPanel] Credibility analysis failed.', error);
+            feedbackEl.textContent = 'Unable to load credibility scores. Please try Run Credibility Analysis again.';
+            summaryEl.textContent = 'Credibility analysis could not be completed.';
+            renderHrResponsiveTablePrompt(bodyEl, 9, 'Credibility scores could not be loaded.', 'hr-mobile-card-empty--center');
+            return false;
+        } finally {
+            button.disabled = false;
+            button.innerHTML = original;
+        }
+    });
 }
 
-function analyzeEvaluationCredibility(contextInput, semesterIdInput) {
+async function analyzeEvaluationCredibility(contextInput, semesterIdInput) {
     const context = contextInput || buildHrEvaluationContext();
     const semesterId = String(semesterIdInput || 'all').trim() || 'all';
 
@@ -2357,10 +2380,10 @@ function analyzeEvaluationCredibility(contextInput, semesterIdInput) {
     const biasItems = [];
     if (typeof SharedData.analyzeBiasComments === 'function') {
         try {
-            const biasResponse = SharedData.analyzeBiasComments({
+            const biasResponse = (await SharedData.analyzeBiasComments({
                 semesterId: semesterId === 'all' ? '' : semesterId,
                 limit: 1000,
-            }, {});
+            }, {}));
             if (biasResponse && biasResponse.success === true) {
                 const source = String(biasResponse.summary && biasResponse.summary.source || '').trim();
                 biasSource = source || 'rule';
@@ -2375,7 +2398,7 @@ function analyzeEvaluationCredibility(contextInput, semesterIdInput) {
     }
 
     const biasBySubmission = {};
-    const biasLabelRank = { Constructive: 1, Neutral: 2, Biased: 3 };
+    const biasLabelRank = { Constructive: 1, Positive: 2, Neutral: 2, Critical: 2, Biased: 3 };
     biasItems.forEach(function (item) {
         const submissionId = String(item && item.submissionId || '').trim();
         if (!submissionId) return;
@@ -2549,6 +2572,8 @@ function computeAiEvaluationAverageRating(evaluation) {
 function normalizeAiCredibilityBiasLabel(value) {
     const raw = String(value || '').trim().toLowerCase();
     if (raw === 'constructive') return 'Constructive';
+    if (raw === 'positive') return 'Positive';
+    if (raw === 'critical') return 'Critical';
     if (raw === 'biased') return 'Biased';
     return 'Neutral';
 }
@@ -3189,7 +3214,7 @@ function loadHrActivityLog() {
         `).join(''));
     };
 
-    const runSearch = () => {
+    const runSearch = async () => {
         const filters = {
             type: normalizeType(typeSelect ? typeSelect.value : 'all'),
             term: String(searchInput ? searchInput.value : '').trim(),
@@ -3199,7 +3224,7 @@ function loadHrActivityLog() {
         };
 
         try {
-            const rows = SharedData.searchActivityLog ? SharedData.searchActivityLog(filters) : [];
+            const rows = SharedData.searchActivityLog ? (await SharedData.searchActivityLog(filters)) : [];
             renderRows(Array.isArray(rows) ? rows : []);
         } catch (error) {
             console.error('[HRPanel] Failed to search activity log.', error);
@@ -3465,7 +3490,7 @@ function openHrAnnouncementComposerModal() {
     if (titleInput) titleInput.focus();
 }
 
-function handleHrAnnouncementComposeSubmit(event) {
+async function handleHrAnnouncementComposeSubmit(event) {
     if (event) event.preventDefault();
 
     const titleInput = document.getElementById('hr-announcement-compose-title');
@@ -3505,7 +3530,7 @@ function handleHrAnnouncementComposeSubmit(event) {
     };
 
     try {
-        SharedData.addAnnouncement({
+        (await SharedData.addAnnouncement({
             title: title,
             message: message,
             audience: audience,
@@ -3514,7 +3539,7 @@ function handleHrAnnouncementComposeSubmit(event) {
             createdByRole: normalizeHrAnnouncementComposerToken(session.role || 'hr') || 'hr',
             createdByUserId: String(session.userId || '').trim(),
             read: false,
-        });
+        }));
         closeHrAnnouncementComposerModal();
         setupNotifications();
         renderHrSystemNotifications();
@@ -3730,7 +3755,7 @@ function setupProfilePhotoUpload() {
         }
     });
 
-    input.addEventListener('change', function () {
+    input.addEventListener('change', async function () {
         const file = input.files && input.files[0];
         if (!file) return;
 
@@ -3754,11 +3779,11 @@ function setupProfilePhotoUpload() {
 
         if (typeof SharedData.uploadProfilePhoto !== 'function') {
             const reader = new FileReader();
-            reader.onload = function () {
+            reader.onload = async function () {
                 preview.src = reader.result;
                 preview.classList.add('active');
                 placeholder.style.display = 'none';
-                SharedData.setProfilePhoto('hr', reader.result);
+                (await SharedData.setProfilePhoto('hr', reader.result));
                 URL.revokeObjectURL(localPreviewUrl);
                 input.value = '';
             };
@@ -3776,7 +3801,7 @@ function setupProfilePhotoUpload() {
         try {
             uploadPromise = typeof SharedData.uploadProfilePhotoAsync === 'function'
                 ? SharedData.uploadProfilePhotoAsync(file, { message: 'Uploading profile photo...' })
-                : Promise.resolve(SharedData.uploadProfilePhoto(file));
+                : Promise.resolve((await SharedData.uploadProfilePhoto(file)));
         } catch (error) {
             handleUploadError(error);
             URL.revokeObjectURL(localPreviewUrl);
@@ -4096,16 +4121,16 @@ function setupChangePasswordForm() {
     const form = document.getElementById('changePasswordForm');
     if (!form) return;
 
-    form.addEventListener('submit', function (e) {
+    form.addEventListener('submit', async function (e) {
         e.preventDefault();
-        handleChangePassword();
+        (await handleChangePassword());
     });
 }
 
 /**
  * Placeholder change password handler (SQL-ready)
  */
-function handleChangePassword() {
+async function handleChangePassword() {
     const form = document.getElementById('changePasswordForm');
     const currentPassword = document.getElementById('currentPassword').value.trim();
     const newPassword = document.getElementById('newPassword').value.trim();
@@ -4127,7 +4152,7 @@ function handleChangePassword() {
     }
 
     try {
-        SharedData.changeOwnPassword(currentPassword, newPassword);
+        (await SharedData.changeOwnPassword(currentPassword, newPassword));
     } catch (error) {
         console.error('[HRPanel] Failed to update password.', error);
         showFormMessage(form, error && error.message ? error.message : 'Failed to update password.', 'error');
@@ -6465,14 +6490,14 @@ function setupHrProfessorFilters() {
     ['professor-status-filter', 'professor-program-filter'].forEach(id => {
         const select = document.getElementById(id);
         if (!select) return;
-        select.addEventListener('change', function () {
+        select.addEventListener('change', async function () {
             hrProfessorPage = 1;
-            refreshHrProfessorListForCurrentFilters(true);
+            await refreshHrProfessorListForCurrentFilters(true);
         });
     });
 }
 
-function runProfessorSearch() {
+async function runProfessorSearch() {
     const searchInput = document.getElementById('professor-search');
     const campusSelect = document.getElementById('professor-campus-filter');
     const submittedTerm = String(searchInput ? searchInput.value : '').trim();
@@ -6483,7 +6508,7 @@ function runProfessorSearch() {
     // Submitting an empty term intentionally requests the full filtered list.
     hasProfessorSearchRun = true;
     hrProfessorPage = 1;
-    refreshHrProfessorListForCurrentFilters(true);
+    await refreshHrProfessorListForCurrentFilters(true);
 }
 
 function clearProfessorSearchFilters() {
@@ -6512,12 +6537,12 @@ function setupProfessorManagement() {
     // Department tabs
     const deptTabs = document.querySelectorAll('.dept-tab');
     deptTabs.forEach(tab => {
-        tab.addEventListener('click', function () {
+        tab.addEventListener('click', async function () {
             deptTabs.forEach(t => t.classList.remove('active'));
             this.classList.add('active');
             currentDepartmentFilter = this.getAttribute('data-department');
             hrProfessorPage = 1;
-            refreshHrProfessorListForCurrentFilters(true);
+            await refreshHrProfessorListForCurrentFilters(true);
         });
     });
 
@@ -6541,21 +6566,21 @@ function setupProfessorManagement() {
                 renderProfessors();
             }
         });
-        searchInput.addEventListener('keydown', function (event) {
+        searchInput.addEventListener('keydown', async function (event) {
             if (event.key === 'Enter') {
                 event.preventDefault();
-                runProfessorSearch();
+                await runProfessorSearch();
             }
         });
     }
 
     const campusSelect = document.getElementById('professor-campus-filter');
     if (campusSelect) {
-        campusSelect.addEventListener('change', function () {
+        campusSelect.addEventListener('change', async function () {
             currentProfessorCampusFilter = normalizeHrToken(this.value) || 'all';
             hrProfessorPage = 1;
             populateHrProfessorProgramFilter();
-            refreshHrProfessorListForCurrentFilters(true);
+            await refreshHrProfessorListForCurrentFilters(true);
         });
     }
 
@@ -6690,14 +6715,14 @@ function renderHrProfessorPagination() {
         prev.addEventListener('click', () => {
             if (!hasPrevious) return;
             hrProfessorPage = page - 1;
-            refreshHrUsersInBackground(true);
+            return refreshHrUsersInBackground(true);
         });
     }
     if (next) {
         next.addEventListener('click', () => {
             if (!hasNext) return;
             hrProfessorPage = page + 1;
-            refreshHrUsersInBackground(true);
+            return refreshHrUsersInBackground(true);
         });
     }
 }
@@ -6901,7 +6926,7 @@ function buildProfessorCardsMarkup(filteredProfessors, studentsEvaluatedCountMap
 function bindProfessorActionButtons(root) {
     const actionButtons = root.querySelectorAll('.action-btn');
     actionButtons.forEach(button => {
-        button.addEventListener('click', function (e) {
+        button.addEventListener('click', async function (e) {
             e.preventDefault();
             e.stopPropagation();
 
@@ -6923,7 +6948,7 @@ function bindProfessorActionButtons(root) {
                     break;
                 case 'analytics':
                     console.log('Calling viewProfessorAnalytics with ID:', professorId);
-                    viewProfessorAnalytics(professorId);
+                    await viewProfessorAnalytics(professorId);
                     break;
                 case 'file':
                     openHrProfessorFileOptions(professorId);
@@ -8167,8 +8192,8 @@ function openHrProfessorSasrFlow(professorId) {
         selectedLoadType: 'main',
         showLoadType: true,
         confirmLabel: 'Download',
-        onConfirm: function (semesterId, loadType) {
-            openHrSasrTemplateDownload(professor, semesterId, loadType);
+        onConfirm: async function (semesterId, loadType) {
+            await openHrSasrTemplateDownload(professor, semesterId, loadType);
         },
     });
 }
@@ -8200,7 +8225,7 @@ function openHrProfessorAcknowledgementFlow(professorId) {
             return buildHrAcknowledgementSemesterChoices(professor, loadType);
         },
         confirmLabel: 'Preview PDF',
-        onConfirm: function (semesterId, loadType) {
+        onConfirm: async function (semesterId, loadType) {
             const selectedLoadType = normalizeHrReportLoadType(loadType);
             const selectedOptions = buildHrAcknowledgementSemesterChoices(professor, selectedLoadType);
             const selected = selectedOptions.find(option => option.id === semesterId);
@@ -8208,7 +8233,7 @@ function openHrProfessorAcknowledgementFlow(professorId) {
                 alert(`Stored ${getHrReportLoadTypeLabel(selectedLoadType).toLowerCase()} acknowledgement PDF is unavailable for this semester.`);
                 return;
             }
-            openHrStoredFacultyPaperPreview(professor, selected.paper);
+            await openHrStoredFacultyPaperPreview(professor, selected.paper);
         },
     });
 }
@@ -9109,8 +9134,8 @@ async function viewProfessorAnalytics(professorId) {
         const aiAnalyticsBtn = content.querySelector('#hr-ai-analytics-btn');
         const aiInsightOutput = content.querySelector('#hr-ai-insight-output');
         if (aiAnalyticsBtn && aiInsightOutput) {
-            aiAnalyticsBtn.addEventListener('click', function () {
-                runHrAiAnalyticsForProfessor(professor.id, currentAnalyticsSemester || normalizedSemester, aiInsightOutput, aiAnalyticsBtn);
+            aiAnalyticsBtn.addEventListener('click', async function () {
+                await runHrAiAnalyticsForProfessor(professor.id, currentAnalyticsSemester || normalizedSemester, aiInsightOutput, aiAnalyticsBtn);
             });
         }
         console.log('Analytics modal displayed');
@@ -9871,7 +9896,7 @@ async function runHrAiAnalyticsForProfessor(professorId, semesterId, outputEl, b
     const canUseOverlay = loadingOverlay
         && typeof loadingOverlay.show === 'function'
         && typeof loadingOverlay.hide === 'function';
-    if (canUseOverlay) loadingOverlay.show('Analyzing all eligible ratings and comments...');
+    const releaseLoading = canUseOverlay ? loadingOverlay.show('Analyzing all eligible ratings and comments...') : null;
 
     try {
         // The server constructs the complete dataset in one request.
@@ -9895,7 +9920,10 @@ async function runHrAiAnalyticsForProfessor(professorId, semesterId, outputEl, b
         console.error('[HR] AI analytics request failed.', error);
         renderHrAiInsightState(outputEl, 'error', error.message || 'Unable to load analytics. Please try again.');
     } finally {
-        if (canUseOverlay) loadingOverlay.hide();
+        if (canUseOverlay) {
+            if (typeof releaseLoading === 'function') releaseLoading();
+            else loadingOverlay.hide();
+        }
         if (btnEl) {
             btnEl.disabled = false;
             btnEl.innerHTML = originalText || 'AI Analytics';
@@ -10507,7 +10535,7 @@ function setupEvalPeriods() {
     // Wire up Save Evaluation Periods button
     const saveBtn = document.getElementById('save-eval-periods-btn');
     if (saveBtn) {
-        saveBtn.addEventListener('click', () => {
+        saveBtn.addEventListener('click', async () => {
             for (const type of PERIOD_TYPES) {
                 if (!validatePeriod(type)) {
                     const startEl = document.getElementById(type + '-start');
@@ -10527,7 +10555,7 @@ function setupEvalPeriods() {
                     end: endEl ? endEl.value : ''
                 };
             });
-            SharedData.setEvalPeriods(periods);
+            (await SharedData.setEvalPeriods(periods));
             alert('Evaluation periods saved successfully!');
         });
     }
@@ -10665,7 +10693,7 @@ function setupSemesterSettings() {
 
     const addTermBtn = document.getElementById('btn-add-term');
     if (addTermBtn) {
-        addTermBtn.addEventListener('click', () => {
+        addTermBtn.addEventListener('click', async () => {
             const startYear = Number(yearStartSelect.value);
             const endYear = Number(yearEndSelect.value);
             const semesterType = semesterTypeSelect.value;
@@ -10691,7 +10719,7 @@ function setupSemesterSettings() {
                 return;
             }
 
-            SharedData.addSemester(value, label);
+            (await SharedData.addSemester(value, label));
             populateDropdown();
             semesterSelect.value = value;
             syncBuilderFromLabel(label);
@@ -10700,13 +10728,13 @@ function setupSemesterSettings() {
 
     const saveBtn = document.getElementById('save-current-semester-btn');
     if (saveBtn) {
-        saveBtn.addEventListener('click', () => {
+        saveBtn.addEventListener('click', async () => {
             const value = semesterSelect.value;
             if (!value) {
                 alert('Please add a semester first.');
                 return;
             }
-            SharedData.setCurrentSemester(value);
+            (await SharedData.setCurrentSemester(value));
             refreshSemesterPicker();
             const label = semesterSelect.options[semesterSelect.selectedIndex].textContent;
             alert('Current semester saved: ' + label + '\nThe system will now operate under this semester.');
@@ -10777,11 +10805,11 @@ function applyQuestionnaireEditMode(editable) {
     refreshCopyQuestionnaireAvailability();
 }
 
-function persistQuestionsData() {
+async function persistQuestionsData() {
     if (!activeSemester) return false;
     collectQuestionnairePrivacySettings();
     questionnairesBySemester[activeSemester] = questionsData;
-    const savedQuestionnaires = SharedData.setQuestionnaires(questionnairesBySemester);
+    const savedQuestionnaires = (await SharedData.setQuestionnaires(questionnairesBySemester));
     if (!savedQuestionnaires) return false;
 
     questionnairesBySemester = savedQuestionnaires;
@@ -11312,7 +11340,7 @@ function getNormalizedQuestionnaireTypeEntry(bucket, type) {
     };
 }
 
-function handleCopyQuestionnaireSubmit(event) {
+async function handleCopyQuestionnaireSubmit(event) {
     event.preventDefault();
     if (!ensureQuestionnaireEditable()) return;
 
@@ -11351,7 +11379,7 @@ function handleCopyQuestionnaireSubmit(event) {
         questionsData = questionnairesBySemester[destinationSemester];
     }
 
-    const savedQuestionnaires = SharedData.setQuestionnaires(questionnairesBySemester);
+    const savedQuestionnaires = (await SharedData.setQuestionnaires(questionnairesBySemester));
     if (!savedQuestionnaires) {
         alert('Questionnaire copy failed. Check Apache/MySQL, then try again.');
         return;
@@ -11455,10 +11483,10 @@ function renderQuestions() {
                         </div>
                     </div>
                     <div class="section-actions">
-                        <button class="action-btn edit" onclick="editSection(${sectionIdLiteral})" title="Edit Section">
+                        <button class="action-btn edit" onclick="return editSection(${sectionIdLiteral})" title="Edit Section">
                             <i class="fas fa-edit"></i>
                         </button>
-                        <button class="action-btn delete" onclick="deleteSection(${sectionIdLiteral})" title="Delete Section">
+                        <button class="action-btn delete" onclick="return deleteSection(${sectionIdLiteral})" title="Delete Section">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
@@ -11483,16 +11511,16 @@ function renderQuestions() {
                         }
                                         </div>
                                         <div class="question-actions">
-                                            <button class="action-btn edit" onclick="editQuestion(${questionIdLiteral})" title="Edit">
+                                            <button class="action-btn edit" onclick="return editQuestion(${questionIdLiteral})" title="Edit">
                                                 <i class="fas fa-edit"></i>
                                             </button>
-                                            <button class="action-btn delete" onclick="deleteQuestion(${questionIdLiteral})" title="Delete">
+                                            <button class="action-btn delete" onclick="return deleteQuestion(${questionIdLiteral})" title="Delete">
                                                 <i class="fas fa-trash"></i>
                                             </button>
-                                            ${idx > 0 ? `<button class="action-btn move-up" onclick="moveQuestion(${questionIdLiteral}, 'up')" title="Move Up">
+                                            ${idx > 0 ? `<button class="action-btn move-up" onclick="return moveQuestion(${questionIdLiteral}, 'up')" title="Move Up">
                                                 <i class="fas fa-arrow-up"></i>
                                             </button>` : ''}
-                                            ${idx < sectionQuestions.length - 1 ? `<button class="action-btn move-down" onclick="moveQuestion(${questionIdLiteral}, 'down')" title="Move Down">
+                                            ${idx < sectionQuestions.length - 1 ? `<button class="action-btn move-down" onclick="return moveQuestion(${questionIdLiteral}, 'down')" title="Move Down">
                                                 <i class="fas fa-arrow-down"></i>
                                             </button>` : ''}
                                         </div>
@@ -11529,10 +11557,10 @@ function renderQuestions() {
                 }
                         </div>
                         <div class="question-actions">
-                            <button class="action-btn edit" onclick="editQuestion(${questionIdLiteral})" title="Edit">
+                            <button class="action-btn edit" onclick="return editQuestion(${questionIdLiteral})" title="Edit">
                                 <i class="fas fa-edit"></i>
                             </button>
-                            <button class="action-btn delete" onclick="deleteQuestion(${questionIdLiteral})" title="Delete">
+                            <button class="action-btn delete" onclick="return deleteQuestion(${questionIdLiteral})" title="Delete">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -11897,7 +11925,7 @@ function moveQuestion(questionId, direction) {
 /**
  * Save questionnaire
  */
-function saveQuestionnaire() {
+async function saveQuestionnaire() {
     if (!ensureQuestionnaireEditable()) return;
     const currentData = questionsData[currentQuestionnaireType] || { sections: [], questions: [] };
     const sections = Array.isArray(currentData.sections) ? currentData.sections : [];
@@ -11907,7 +11935,7 @@ function saveQuestionnaire() {
         return;
     }
 
-    const saved = persistQuestionsData();
+    const saved = (await persistQuestionsData());
     if (saved) {
         alert('Questionnaire saved successfully!');
         return;

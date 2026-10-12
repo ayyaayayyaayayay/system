@@ -25,8 +25,8 @@ function buildAiCommentItemsFromEvaluations(array $evaluations): array {
         $id = (string) ($evaluation['id'] ?? $evaluation['evaluationKey'] ?? 'evaluation-' . $index);
         $texts = []; $seenGeneral = [];
         foreach (['comments','comment','feedback'] as $field) {
-            $text = trim((string)($evaluation[$field] ?? ''));
-            if ($text === '' || isset($seenGeneral[$text])) continue;
+            $text = (string)($evaluation[$field] ?? '');
+            if (trim($text) === '' || isset($seenGeneral[$text])) continue;
             $seenGeneral[$text] = true; $texts[$field] = $text;
         }
         $qualitative = is_array($evaluation['qualitative'] ?? null) ? $evaluation['qualitative'] : [];
@@ -36,8 +36,8 @@ function buildAiCommentItemsFromEvaluations(array $evaluations): array {
                 ? ($response['text'] ?? $response['answer'] ?? $response['comment'] ?? $response['response'] ?? '') : $response;
         }
         foreach ($texts as $field => $text) {
-            $text = trim((string) $text);
-            if ($text === '') continue;
+            $text = (string) $text;
+            if (trim($text) === '') continue;
             $items[] = ['id' => $id . ':' . $field, 'submissionId' => $id, 'text' => $text,
                 'commentRepetitiveFlag' => aiCommentRepetitionFlag($evaluation)];
         }

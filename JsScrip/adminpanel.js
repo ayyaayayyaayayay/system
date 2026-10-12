@@ -1,7 +1,7 @@
 // Admin Panel JavaScript - Dashboard Functionality
 
-document.addEventListener('DOMContentLoaded', function () {
-    initializeAdminPanel();
+document.addEventListener('DOMContentLoaded', async function () {
+    (await initializeAdminPanel());
 });
 
 let activeUserSearchTerm = '';
@@ -336,8 +336,8 @@ let campusData = SharedData.getCampuses();
 /**
  * Initialize the admin panel
  */
-function initializeAdminPanel() {
-    if (!checkAuthentication()) {
+async function initializeAdminPanel() {
+    if (!(await checkAuthentication())) {
         return;
     }
     setupNavigation();
@@ -354,7 +354,7 @@ function initializeAdminPanel() {
     setupUserCardActions();
     setupEditUserModal();
     loadDashboardData();
-    loadUsersByOrganization();
+    await loadUsersByOrganization();
     setupQuickActions();
     setupDashboardHeroActions();
     setupAnnouncementComposer();
@@ -364,22 +364,22 @@ function initializeAdminPanel() {
     if (window.StudentEvaluationReminderSettings) {
         window.StudentEvaluationReminderSettings.setup();
     }
-    setupSecuritySettings();
+    (await setupSecuritySettings());
     setupSystemHealthVerification();
-    setupCredentialDistributor();
+    (await setupCredentialDistributor());
     setupCredentialTestSmtpComposer();
-    setupGeminiConfig();
+    (await setupGeminiConfig());
     setupAdminProfilePhotoUpload();
     setupAdminProfileActions();
     setupAdminChangeEmailForm();
     setupAdminProfilePasswordForm();
     setupBulkRegister();
-    setupSubjectManagement();
+    await setupSubjectManagement();
     initializeHrFeatures();
     setupSemesterSettings();
     renderProfessorDepartmentOptions();
     renderProfessorDepartmentTabs();
-    switchToView('dashboard');
+    (await switchToView('dashboard'));
 }
 
 /**
@@ -481,8 +481,8 @@ function renderProfessorDepartmentTabs() {
 /**
  * Check if user is authenticated as admin
  */
-function checkAuthentication() {
-    const session = SharedData.requireSession('admin');
+async function checkAuthentication() {
+    const session = (await SharedData.requireSession('admin'));
     if (!session) {
         window.location.href = 'mainpage.html';
         return false;
@@ -502,10 +502,10 @@ function setupNavigation() {
     const navLinks = document.querySelectorAll('.nav-link[data-view]');
 
     navLinks.forEach(link => {
-        link.addEventListener('click', (e) => {
+        link.addEventListener('click', async (e) => {
             e.preventDefault();
             const viewId = link.getAttribute('data-view');
-            switchToView(viewId);
+            (await switchToView(viewId));
             closeMobileDrawer();
         });
     });
@@ -629,9 +629,9 @@ function setupModals() {
     }
 
     if (addUserForm) {
-        addUserForm.addEventListener('submit', (e) => {
+        addUserForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            handleAddUser();
+            await handleAddUser();
         });
     }
 
@@ -987,58 +987,64 @@ function escapeCsvCell(value) {
     return text;
 }
 
-function downloadBulkCredentialsCsv(credentialRows) {
+async function downloadBulkCredentialsCsv(credentialRows) {
     if (!Array.isArray(credentialRows) || credentialRows.length === 0) return;
+    return window.AppLoadingOverlay.run('Preparing export...', async function () {
 
-    const header = ['name', 'email', 'role', 'campus', 'employee_or_student_number', 'password'];
-    const lines = [header.join(',')];
-    credentialRows.forEach(row => {
-        lines.push([
-            escapeCsvCell(row.name),
-            escapeCsvCell(row.email),
-            escapeCsvCell(row.role),
-            escapeCsvCell(row.campus),
-            escapeCsvCell(row.idNumber),
-            escapeCsvCell(row.password)
-        ].join(','));
+        const header = ['name', 'email', 'role', 'campus', 'employee_or_student_number', 'password'];
+        const lines = [header.join(',')];
+        (await window.AppLoadingOverlay.mapAsync(credentialRows, row => {
+            lines.push([
+                escapeCsvCell(row.name),
+                escapeCsvCell(row.email),
+                escapeCsvCell(row.role),
+                escapeCsvCell(row.campus),
+                escapeCsvCell(row.idNumber),
+                escapeCsvCell(row.password)
+            ].join(','));
+        }));
+
+        const csvContent = '\uFEFF' + lines.join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const stamp = SharedData.getNowIsoString().replace(/[:.]/g, '-');
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `bulk_register_credentials_${stamp}.csv`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(url);
+
     });
-
-    const csvContent = '\uFEFF' + lines.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const stamp = SharedData.getNowIsoString().replace(/[:.]/g, '-');
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `bulk_register_credentials_${stamp}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
 }
 
-function downloadBulkInvalidRowsCsv(rowErrors) {
+async function downloadBulkInvalidRowsCsv(rowErrors) {
     if (!Array.isArray(rowErrors) || rowErrors.length === 0) return;
+    return window.AppLoadingOverlay.run('Preparing export...', async function () {
 
-    const header = ['row', 'error'];
-    const lines = [header.join(',')];
-    rowErrors.forEach(item => {
-        lines.push([
-            escapeCsvCell(item && item.rowNumber ? item.rowNumber : ''),
-            escapeCsvCell(item && item.error ? item.error : '')
-        ].join(','));
+        const header = ['row', 'error'];
+        const lines = [header.join(',')];
+        (await window.AppLoadingOverlay.mapAsync(rowErrors, item => {
+            lines.push([
+                escapeCsvCell(item && item.rowNumber ? item.rowNumber : ''),
+                escapeCsvCell(item && item.error ? item.error : '')
+            ].join(','));
+        }));
+
+        const csvContent = '\uFEFF' + lines.join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const stamp = SharedData.getNowIsoString().replace(/[:.]/g, '-');
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `bulk_register_invalid_rows_${stamp}.csv`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(url);
+
     });
-
-    const csvContent = '\uFEFF' + lines.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const stamp = SharedData.getNowIsoString().replace(/[:.]/g, '-');
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `bulk_register_invalid_rows_${stamp}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
 }
 
 function resolveProtectedAdminEmail(users = []) {
@@ -1567,72 +1573,78 @@ function extractCredentialDistributorRows(rawRows) {
     return { rows, hasRecognizedColumn };
 }
 
-function downloadCredentialDistributorFailuresCsv(failures) {
+async function downloadCredentialDistributorFailuresCsv(failures) {
     if (!Array.isArray(failures) || failures.length === 0) return;
+    return window.AppLoadingOverlay.run('Preparing export...', async function () {
 
-    const header = ['row', 'email', 'reason'];
-    const lines = [header.join(',')];
-    failures.forEach(item => {
-        lines.push([
-            escapeCsvCell(item && item.rowNumber ? item.rowNumber : ''),
-            escapeCsvCell(item && item.email ? item.email : ''),
-            escapeCsvCell(item && item.reason ? item.reason : 'Unknown error')
-        ].join(','));
+        const header = ['row', 'email', 'reason'];
+        const lines = [header.join(',')];
+        (await window.AppLoadingOverlay.mapAsync(failures, item => {
+            lines.push([
+                escapeCsvCell(item && item.rowNumber ? item.rowNumber : ''),
+                escapeCsvCell(item && item.email ? item.email : ''),
+                escapeCsvCell(item && item.reason ? item.reason : 'Unknown error')
+            ].join(','));
+        }));
+
+        const csvContent = '\uFEFF' + lines.join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const stamp = SharedData.getNowIsoString().replace(/[:.]/g, '-');
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `credential_distribution_failures_${stamp}.csv`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(url);
+
     });
-
-    const csvContent = '\uFEFF' + lines.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const stamp = SharedData.getNowIsoString().replace(/[:.]/g, '-');
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `credential_distribution_failures_${stamp}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
 }
 
-function downloadCredentialTestGmailFailuresFile(failures) {
+async function downloadCredentialTestGmailFailuresFile(failures) {
     if (!Array.isArray(failures) || failures.length === 0) return;
+    return window.AppLoadingOverlay.run('Preparing export...', async function () {
 
-    const rows = failures.map((item, index) => ({
-        No: index + 1,
-        Email: item && item.email ? String(item.email) : '',
-        Reason: item && item.reason ? String(item.reason) : 'Unknown error'
-    }));
+        const rows = (await window.AppLoadingOverlay.mapAsync(failures, (item, index) => ({
+            No: index + 1,
+            Email: item && item.email ? String(item.email) : '',
+            Reason: item && item.reason ? String(item.reason) : 'Unknown error'
+        })));
 
-    const stamp = SharedData.getNowIsoString().replace(/[:.]/g, '-');
+        const stamp = SharedData.getNowIsoString().replace(/[:.]/g, '-');
 
-    const parser = getExcelParser();
-    if (parser && parser.utils && parser.writeFile) {
-        const worksheet = parser.utils.json_to_sheet(rows);
-        const workbook = parser.utils.book_new();
-        parser.utils.book_append_sheet(workbook, worksheet, 'Failed Emails');
-        parser.writeFile(workbook, `test_gmail_failed_emails_${stamp}.xlsx`);
-        return;
-    }
+        const parser = getExcelParser();
+        if (parser && parser.utils && parser.writeFile) {
+            const worksheet = parser.utils.json_to_sheet(rows);
+            const workbook = parser.utils.book_new();
+            parser.utils.book_append_sheet(workbook, worksheet, 'Failed Emails');
+            parser.writeFile(workbook, `test_gmail_failed_emails_${stamp}.xlsx`);
+            return;
+        }
 
-    const header = ['No', 'Email', 'Reason'];
-    const lines = [header.join(',')];
-    rows.forEach(row => {
-        lines.push([
-            escapeCsvCell(row.No),
-            escapeCsvCell(row.Email),
-            escapeCsvCell(row.Reason)
-        ].join(','));
+        const header = ['No', 'Email', 'Reason'];
+        const lines = [header.join(',')];
+        (await window.AppLoadingOverlay.mapAsync(rows, row => {
+            lines.push([
+                escapeCsvCell(row.No),
+                escapeCsvCell(row.Email),
+                escapeCsvCell(row.Reason)
+            ].join(','));
+        }));
+
+        const csvContent = '\uFEFF' + lines.join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `test_gmail_failed_emails_${stamp}.csv`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(url);
+
     });
-
-    const csvContent = '\uFEFF' + lines.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `test_gmail_failed_emails_${stamp}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
 }
 
 function setCredentialDistributorFeedback(type, message) {
@@ -1713,7 +1725,7 @@ function setCredentialDistributorLoadingState(isLoading, message, progressText, 
     }
 }
 
-function setupCredentialDistributor() {
+async function setupCredentialDistributor() {
     const selectFileBtn = document.getElementById('credential-distributor-select-btn');
     const fileInput = document.getElementById('credential-distributor-input');
     const fileNameLabel = document.getElementById('credential-distributor-file-name');
@@ -1826,9 +1838,9 @@ function setupCredentialDistributor() {
         );
     }
 
-    function loadCredentialSmtpConfig() {
+    async function loadCredentialSmtpConfig() {
         try {
-            const config = SharedData.getCredentialDistributorConfig(actor);
+            const config = (await SharedData.getCredentialDistributorConfig(actor));
             applyCredentialSmtpConfig(config);
         } catch (error) {
             console.error('[AdminPanel] Failed to load SMTP config.');
@@ -1837,7 +1849,7 @@ function setupCredentialDistributor() {
     }
 
     if (saveConfigBtn && hostInput && portInput && encryptionInput && authInput && usernameInput && timeoutInput && fromEmailInput && fromNameInput && passwordInput) {
-        saveConfigBtn.addEventListener('click', () => {
+        saveConfigBtn.addEventListener('click', async () => {
             const host = String(hostInput.value || '').trim();
             const port = String(portInput.value || '').trim();
             const encryption = String(encryptionInput.value || '').trim();
@@ -1876,7 +1888,7 @@ function setupCredentialDistributor() {
                     payload.password = password;
                 }
 
-                const saved = SharedData.saveCredentialDistributorConfig(payload, actor);
+                const saved = (await SharedData.saveCredentialDistributorConfig(payload, actor));
                 applyCredentialSmtpConfig(saved);
                 setCredentialDistributorFeedback('success', 'SMTP configuration saved successfully.');
             } catch (error) {
@@ -1889,7 +1901,7 @@ function setupCredentialDistributor() {
     }
 
     if (clearPasswordBtn && hostInput && portInput && encryptionInput && authInput && usernameInput && timeoutInput && fromEmailInput && fromNameInput) {
-        clearPasswordBtn.addEventListener('click', () => {
+        clearPasswordBtn.addEventListener('click', async () => {
             const host = String(hostInput.value || '').trim();
             const fromEmail = String(fromEmailInput.value || '').trim();
             if (!host) {
@@ -1906,7 +1918,7 @@ function setupCredentialDistributor() {
             setCredentialDistributorBusyState(true);
             setCredentialConfigStatus('Clearing saved SMTP password...', 'info');
             try {
-                const saved = SharedData.saveCredentialDistributorConfig({
+                const saved = (await SharedData.saveCredentialDistributorConfig({
                     host,
                     port: String(portInput.value || '').trim(),
                     encryption: String(encryptionInput.value || '').trim(),
@@ -1917,7 +1929,7 @@ function setupCredentialDistributor() {
                     fromName: String(fromNameInput.value || '').trim() || 'NAAP Evaluation System',
                     password: '',
                     clearPassword: true
-                }, actor);
+                }, actor));
                 applyCredentialSmtpConfig(saved);
                 setCredentialDistributorFeedback('info', 'Saved SMTP password cleared.');
             } catch (error) {
@@ -1929,7 +1941,7 @@ function setupCredentialDistributor() {
         });
     }
 
-    loadCredentialSmtpConfig();
+    (await loadCredentialSmtpConfig());
 
     function clearFailures() {
         credentialDistributorFailures = [];
@@ -2026,9 +2038,9 @@ function setupCredentialDistributor() {
         );
 
         // Use setTimeout so the loading overlay renders before the synchronous XHR blocks
-        setTimeout(() => {
+        setTimeout(async () => {
             try {
-                const response = SharedData.bulkDistributeCredentials(credentialDistributorParsedRows, actor);
+                const response = (await SharedData.bulkDistributeCredentials(credentialDistributorParsedRows, actor));
                 const summary = response && response.summary ? response.summary : { total: 0, sent: 0, failed: 0 };
                 const failures = Array.isArray(response && response.failures) ? response.failures : [];
                 credentialDistributorFailures = failures;
@@ -2068,9 +2080,9 @@ function setupCredentialDistributor() {
     });
 
     if (downloadFailuresBtn) {
-        downloadFailuresBtn.addEventListener('click', () => {
+        downloadFailuresBtn.addEventListener('click', async () => {
             if (!credentialDistributorFailures.length) return;
-            downloadCredentialDistributorFailuresCsv(credentialDistributorFailures);
+            (await downloadCredentialDistributorFailuresCsv(credentialDistributorFailures));
         });
     }
 }
@@ -2154,9 +2166,9 @@ function setupCredentialTestSmtpComposer() {
             'Sending Test Email'
         );
 
-        setTimeout(() => {
+        setTimeout(async () => {
             try {
-                const response = SharedData.sendTestSmtpEmail(recipientEmail, subject, message, actor);
+                const response = (await SharedData.sendTestSmtpEmail(recipientEmail, subject, message, actor));
                 setCredentialTestSmtpFeedback(
                     response && response.success ? 'success' : 'error',
                     String(response && response.message || 'SMTP test email completed.')
@@ -2172,7 +2184,7 @@ function setupCredentialTestSmtpComposer() {
     });
 }
 
-function setupGeminiConfig() {
+async function setupGeminiConfig() {
     const modelInput = document.getElementById('gemini-model');
     const timeoutInput = document.getElementById('gemini-timeout-ms');
     const apiKeyInput = document.getElementById('gemini-api-key');
@@ -2310,9 +2322,9 @@ function setupGeminiConfig() {
         );
     }
 
-    function loadGeminiConfig() {
+    async function loadGeminiConfig() {
         try {
-            const config = SharedData.getOpenAiConfig ? SharedData.getOpenAiConfig(actor) : SharedData.getGeminiConfig(actor);
+            const config = SharedData.getOpenAiConfig ? (await SharedData.getOpenAiConfig(actor)) : (await SharedData.getGeminiConfig(actor));
             applyGeminiConfig(config);
         } catch (error) {
             console.error('[AdminPanel] Failed to load OpenAI config.');
@@ -2326,7 +2338,7 @@ function setupGeminiConfig() {
         });
     }
 
-    saveBtn.addEventListener('click', () => {
+    saveBtn.addEventListener('click', async () => {
         const model = String(modelInput.value || '').trim() || 'gpt-5.6-luna';
         const timeoutMs = String(timeoutInput.value || '').trim() || '30000';
         const apiKey = String(apiKeyInput.value || '').trim();
@@ -2343,7 +2355,7 @@ function setupGeminiConfig() {
                 payload.apiKey = apiKey;
             }
 
-            const saved = SharedData.saveOpenAiConfig ? SharedData.saveOpenAiConfig(payload, actor) : SharedData.saveGeminiConfig(payload, actor);
+            const saved = SharedData.saveOpenAiConfig ? (await SharedData.saveOpenAiConfig(payload, actor)) : (await SharedData.saveGeminiConfig(payload, actor));
             applyGeminiConfig(saved);
         } catch (error) {
             console.error('[AdminPanel] Failed to save OpenAI config.');
@@ -2374,7 +2386,7 @@ function setupGeminiConfig() {
         }
     });
 
-    loadGeminiConfig();
+    (await loadGeminiConfig());
 }
 
 function buildBulkUserFromRow(row, rowNumber, fileEmailSet, campusMap, departmentMap, programMap, importSeed, importIndex) {
@@ -2694,7 +2706,7 @@ function setupBulkRegister() {
             }
 
             if (usersToPersist.length === 0) {
-                downloadBulkInvalidRowsCsv(rowErrors);
+                (await downloadBulkInvalidRowsCsv(rowErrors));
                 const previewErrors = rowErrors
                     .slice(0, 20)
                     .map(item => `- ${item.error}`);
@@ -2792,11 +2804,11 @@ function setupBulkRegister() {
             }
 
             if (rowErrors.length > 0) {
-                downloadBulkInvalidRowsCsv(rowErrors);
+                (await downloadBulkInvalidRowsCsv(rowErrors));
             }
 
             if (credentialRows.length > 0) {
-                downloadBulkCredentialsCsv(credentialRows);
+                (await downloadBulkCredentialsCsv(credentialRows));
             }
 
             const failedTotal = importSummary.failed + saveSummary.failed;
@@ -2971,10 +2983,10 @@ function setupCampusFilter() {
     refreshCampusSelects();
     const campusSelect = document.getElementById('campus-filter-select');
     if (campusSelect) {
-        campusSelect.addEventListener('change', () => {
+        campusSelect.addEventListener('change', async () => {
             refreshAdminUserFilterOptions();
             adminUsersPage = 1;
-            loadUsersByOrganization(getActiveCampusFilter());
+            await loadUsersByOrganization(getActiveCampusFilter());
         });
     }
 }
@@ -2989,8 +3001,8 @@ function openCampusManagerModal() {
     modal.classList.add('active');
 }
 
-function persistAdminCampusData(nextCampuses) {
-    const persisted = SharedData.setCampuses(nextCampuses);
+async function persistAdminCampusData(nextCampuses) {
+    const persisted = (await SharedData.setCampuses(nextCampuses));
     campusData = Array.isArray(persisted) ? persisted : nextCampuses;
     return campusData;
 }
@@ -3015,7 +3027,7 @@ function setupCampusManager() {
         });
     }
     if (addForm) {
-        addForm.addEventListener('submit', (e) => {
+        addForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const nameInput = document.getElementById('new-campus-name');
             const deptInput = document.getElementById('new-campus-departments');
@@ -3028,7 +3040,7 @@ function setupCampusManager() {
                 return;
             }
             try {
-                persistAdminCampusData(campusData.concat({ id, name, departments }));
+                (await persistAdminCampusData(campusData.concat({ id, name, departments })));
                 selectedCampusId = id;
                 if (nameInput) nameInput.value = '';
                 if (deptInput) deptInput.value = '';
@@ -3058,7 +3070,7 @@ function setupCampusManager() {
     }
 
     if (campusDetail) {
-        campusDetail.addEventListener('click', (e) => {
+        campusDetail.addEventListener('click', async (e) => {
             const target = e.target;
             if (target.classList.contains('remove-dept-btn')) {
                 const campusId = target.getAttribute('data-campus-id');
@@ -3071,7 +3083,7 @@ function setupCampusManager() {
                         })
                         : item);
                     try {
-                        persistAdminCampusData(nextCampuses);
+                        (await persistAdminCampusData(nextCampuses));
                         renderCampusDetails();
                     } catch (error) {
                         alert('Unable to remove department: ' + (error.message || 'Unknown error'));
@@ -3091,7 +3103,7 @@ function setupCampusManager() {
                         })
                         : item);
                     try {
-                        persistAdminCampusData(nextCampuses);
+                        (await persistAdminCampusData(nextCampuses));
                         input.value = '';
                         renderCampusDetails();
                     } catch (error) {
@@ -3103,12 +3115,12 @@ function setupCampusManager() {
                 const campusId = target.getAttribute('data-campus-id');
                 const nextCampuses = campusData.filter(c => c.id === 'all' || c.id !== campusId);
                 try {
-                    persistAdminCampusData(nextCampuses);
+                    (await persistAdminCampusData(nextCampuses));
                     selectedCampusId = campusData.find(c => c.id !== 'all')?.id || null;
                     refreshCampusSelects();
                     renderCampusList();
                     renderCampusDetails();
-                    loadUsersByOrganization(getActiveCampusFilter());
+                    await loadUsersByOrganization(getActiveCampusFilter());
                 } catch (error) {
                     alert('Unable to remove campus: ' + (error.message || 'Unknown error'));
                 }
@@ -3235,12 +3247,12 @@ function setupProgramManager() {
         renderProgramRows();
     }
 
-    function refreshViewsAfterProgramChange() {
-        loadUsersByOrganization(getActiveCampusFilter());
+    async function refreshViewsAfterProgramChange() {
+        await loadUsersByOrganization(getActiveCampusFilter());
         renderProfessorDepartmentOptions();
         renderProfessorDepartmentTabs();
         if (typeof refreshSubjectManagementView === 'function') {
-            refreshSubjectManagementView();
+            await refreshSubjectManagementView();
         }
     }
 
@@ -3271,7 +3283,7 @@ function setupProgramManager() {
         resetProgramForm();
     });
 
-    form.addEventListener('submit', (event) => {
+    form.addEventListener('submit', async (event) => {
         event.preventDefault();
 
         const campusSlug = String(campusSelect.value || '').trim();
@@ -3286,16 +3298,16 @@ function setupProgramManager() {
         }
 
         try {
-            SharedData.upsertProgram({
+            (await SharedData.upsertProgram({
                 id: Number.isFinite(parsedId) ? parsedId : undefined,
                 campusSlug,
                 departmentCode,
                 programCode,
                 programName,
-            });
+            }));
             refreshProgramManager(campusSlug, departmentCode);
             resetProgramForm();
-            refreshViewsAfterProgramChange();
+            await refreshViewsAfterProgramChange();
         } catch (error) {
             alert('Unable to save program: ' + (error.message || 'Unknown error'));
         }
@@ -3305,7 +3317,7 @@ function setupProgramManager() {
         cancelEditBtn.addEventListener('click', () => resetProgramForm());
     }
 
-    listBody.addEventListener('click', (event) => {
+    listBody.addEventListener('click', async (event) => {
         const button = event.target.closest('button[data-action]');
         if (!button) return;
 
@@ -3340,12 +3352,12 @@ function setupProgramManager() {
                 return;
             }
             try {
-                SharedData.deleteProgram(program.id);
+                (await SharedData.deleteProgram(program.id));
                 refreshProgramManager(program.campusSlug, program.departmentCode);
                 if (parseInt(idInput.value, 10) === program.id) {
                     resetProgramForm();
                 }
-                refreshViewsAfterProgramChange();
+                await refreshViewsAfterProgramChange();
             } catch (error) {
                 alert('Unable to delete program: ' + (error.message || 'Unknown error'));
             }
@@ -3588,22 +3600,22 @@ function setupUserSearch() {
     const searchBtn = document.getElementById('user-search-btn');
     if (!searchInput) return;
 
-    const triggerSearch = () => {
+    const triggerSearch = async () => {
         activeUserSearchTerm = searchInput.value.trim().toLowerCase();
         adminUsersPage = 1;
-        loadUsersByOrganization(getActiveCampusFilter());
+        await loadUsersByOrganization(getActiveCampusFilter());
     };
 
-    searchInput.addEventListener('keydown', (event) => {
+    searchInput.addEventListener('keydown', async (event) => {
         if (event.key === 'Enter') {
             event.preventDefault();
-            triggerSearch();
+            await triggerSearch();
         }
     });
 
     if (searchBtn) {
-        searchBtn.addEventListener('click', () => {
-            triggerSearch();
+        searchBtn.addEventListener('click', async () => {
+            await triggerSearch();
         });
     }
 }
@@ -3685,12 +3697,12 @@ function setupUserManagementFilters() {
     ['user-role-filter', 'user-department-filter', 'user-status-filter', 'user-program-filter'].forEach(id => {
         const select = document.getElementById(id);
         if (!select) return;
-        select.addEventListener('change', () => {
+        select.addEventListener('change', async () => {
             if (id === 'user-department-filter') {
                 refreshAdminUserFilterOptions();
             }
             adminUsersPage = 1;
-            loadUsersByOrganization(getActiveCampusFilter());
+            await loadUsersByOrganization(getActiveCampusFilter());
         });
     });
 }
@@ -4882,7 +4894,7 @@ function loadActivityLog() {
         `).join('');
     };
 
-    const runSearch = () => {
+    const runSearch = async () => {
         const filters = {
             type: normalizeType(typeSelect ? typeSelect.value : 'all'),
             term: String(searchInput ? searchInput.value : '').trim(),
@@ -4892,7 +4904,7 @@ function loadActivityLog() {
         };
 
         try {
-            const rows = SharedData.searchActivityLog ? SharedData.searchActivityLog(filters) : [];
+            const rows = SharedData.searchActivityLog ? (await SharedData.searchActivityLog(filters)) : [];
             renderRows(Array.isArray(rows) ? rows : []);
         } catch (error) {
             console.error('[AdminPanel] Failed to search activity log.', error);
@@ -4926,7 +4938,7 @@ function getActivityIcon(type) {
 function loadUsersByOrganization(campusFilter = 'all', options = {}) {
     // Fetch from API then render
     const loadOptions = options && typeof options === 'object' ? options : {};
-    fetchUsersFromApi(campusFilter, getUserSearchTerm(), {
+    return fetchUsersFromApi(campusFilter, getUserSearchTerm(), {
         page: loadOptions.page || adminUsersPage,
     }).then(() => {
         renderOrganizationView(campusFilter);
@@ -4994,27 +5006,27 @@ function renderAdminUsersPagination() {
     const next = document.getElementById('admin-user-next-page');
     const sizeSelect = document.getElementById('admin-user-page-size');
     if (sizeSelect) {
-        sizeSelect.addEventListener('change', () => {
+        sizeSelect.addEventListener('change', async () => {
             const nextSize = normalizeAdminUserPageSize(sizeSelect.value);
             if (String(nextSize) === String(adminUsersPageSize)) return;
             adminUsersPageSize = nextSize;
             adminUsersPage = 1;
             adminUsersPageMeta = { total: 0, limit: isAdminUserCompletePageSize(adminUsersPageSize) ? 0 : getAdminUserRequestLimit(), offset: 0, page: 1, hasMore: false, complete: isAdminUserCompletePageSize(adminUsersPageSize) };
-            loadUsersByOrganization(getActiveCampusFilter(), { page: adminUsersPage });
+            await loadUsersByOrganization(getActiveCampusFilter(), { page: adminUsersPage });
         });
     }
     if (prev) {
-        prev.addEventListener('click', () => {
+        prev.addEventListener('click', async () => {
             if (!hasPrevious) return;
             adminUsersPage = Math.max(1, page - 1);
-            loadUsersByOrganization(getActiveCampusFilter(), { page: adminUsersPage });
+            await loadUsersByOrganization(getActiveCampusFilter(), { page: adminUsersPage });
         });
     }
     if (next) {
-        next.addEventListener('click', () => {
+        next.addEventListener('click', async () => {
             if (!hasNext) return;
             adminUsersPage = page + 1;
-            loadUsersByOrganization(getActiveCampusFilter(), { page: adminUsersPage });
+            await loadUsersByOrganization(getActiveCampusFilter(), { page: adminUsersPage });
         });
     }
 }
@@ -5347,7 +5359,7 @@ function createSearchResultRow(user) {
 
 function setupUserCardActions() {
     if (adminUserCardActionsBound) return;
-    document.addEventListener('click', event => {
+    document.addEventListener('click', async event => {
         const editButton = event.target.closest('.user-actions-compact .edit-btn[data-user-id]');
         if (editButton) {
             event.preventDefault();
@@ -5358,7 +5370,7 @@ function setupUserCardActions() {
         const statusButton = event.target.closest('.user-actions-compact .status-btn[data-user-email]');
         if (statusButton) {
             event.preventDefault();
-            toggleUserStatus(statusButton, statusButton.getAttribute('data-user-email') || '');
+            await toggleUserStatus(statusButton, statusButton.getAttribute('data-user-email') || '');
         }
     });
     adminUserCardActionsBound = true;
@@ -5458,9 +5470,9 @@ function setupEditUserModal() {
         cancelBtn.addEventListener('click', closeEditUserModal);
     }
     if (form) {
-        form.addEventListener('submit', (event) => {
+        form.addEventListener('submit', async (event) => {
             event.preventDefault();
-            handleEditUserSave();
+            await handleEditUserSave();
         });
     }
     const syncEditPrograms = () => {
@@ -5728,9 +5740,9 @@ function setupQuickActions() {
     const quickActionBtns = document.querySelectorAll('.quick-action-btn');
 
     quickActionBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
             const action = btn.getAttribute('data-action');
-            handleQuickAction(action);
+            (await handleQuickAction(action));
         });
     });
 }
@@ -5740,14 +5752,14 @@ function setupDashboardHeroActions() {
     const openSettingsBtn = document.getElementById('heroOpenSettingsBtn');
 
     if (openUsersBtn) {
-        openUsersBtn.addEventListener('click', () => {
-            switchToView('users');
+        openUsersBtn.addEventListener('click', async () => {
+            (await switchToView('users'));
         });
     }
 
     if (openSettingsBtn) {
-        openSettingsBtn.addEventListener('click', () => {
-            switchToView('system');
+        openSettingsBtn.addEventListener('click', async () => {
+            (await switchToView('system'));
         });
     }
 }
@@ -5902,7 +5914,7 @@ function openAnnouncementComposerModal() {
     if (titleInput) titleInput.focus();
 }
 
-function handleAnnouncementComposeSubmit(event) {
+async function handleAnnouncementComposeSubmit(event) {
     if (event) event.preventDefault();
 
     const titleInput = document.getElementById('announcement-compose-title');
@@ -5942,7 +5954,7 @@ function handleAnnouncementComposeSubmit(event) {
     };
 
     try {
-        SharedData.addAnnouncement({
+        (await SharedData.addAnnouncement({
             title: title,
             message: message,
             audience: audience,
@@ -5951,7 +5963,7 @@ function handleAnnouncementComposeSubmit(event) {
             createdByRole: normalizeAnnouncementComposerToken(session.role || 'admin') || 'admin',
             createdByUserId: String(session.userId || '').trim(),
             read: false,
-        });
+        }));
 
         closeAnnouncementComposerModal();
         alert('Announcement published successfully.');
@@ -6006,8 +6018,8 @@ function showAdminLoginAnnouncements() {
 function setupActivityLogButton() {
     const activityTriggers = document.querySelectorAll('#open-activity-log, .js-open-activity-log');
     activityTriggers.forEach(activityBtn => {
-        activityBtn.addEventListener('click', () => {
-            switchToView('activity-log');
+        activityBtn.addEventListener('click', async () => {
+            (await switchToView('activity-log'));
         });
     });
 }
@@ -6185,26 +6197,26 @@ function setupGeneralSettings() {
     }
 }
 
-function setupSecuritySettings() {
+async function setupSecuritySettings() {
     const backupBtn = document.getElementById('backup-last-24-btn');
     const historyBody = document.getElementById('backup-history-body');
     if (!backupBtn || !historyBody || backupManagementReady) return;
 
     backupBtn.addEventListener('click', runManualEncryptedBackup);
-    historyBody.addEventListener('click', event => {
+    historyBody.addEventListener('click', async event => {
         const button = event.target.closest('button[data-backup-action]');
         if (!button || backupOperationInFlight) return;
         const backupId = String(button.dataset.backupId || '').trim();
         if (!backupId) return;
         if (button.dataset.backupAction === 'test') {
-            runBackupRestorationTest(backupId, button);
+            (await runBackupRestorationTest(backupId, button));
         } else if (button.dataset.backupAction === 'download') {
-            downloadEncryptedBackup(backupId, button);
+            (await downloadEncryptedBackup(backupId, button));
         }
     });
     setupBackupUploadUI();
     backupManagementReady = true;
-    loadBackupHistory();
+    (await loadBackupHistory());
 }
 
 function setBackupFeedback(message, type) {
@@ -6254,8 +6266,8 @@ async function requestBackupApi(action, payload = {}, endpoint = 'backup_api.php
     return data;
 }
 
-function requestBackupUploadApi(action, payload = {}) {
-    return requestBackupApi(action, payload, 'backup_upload_api.php');
+async function requestBackupUploadApi(action, payload = {}) {
+    return (await requestBackupApi(action, payload, 'backup_upload_api.php'));
 }
 
 function setupBackupUploadUI() {
@@ -6727,7 +6739,7 @@ function renderSystemHealthHistoryRows(history) {
     `).join('');
 }
 
-function loadSystemHealthVerification() {
+async function loadSystemHealthVerification() {
     if (!document.getElementById('system-health-history-body')) return;
     if (!SharedData.listSystemHealthChecks) {
         renderSystemHealthOverview(null);
@@ -6737,7 +6749,7 @@ function loadSystemHealthVerification() {
     }
 
     try {
-        const response = SharedData.listSystemHealthChecks(10);
+        const response = (await SharedData.listSystemHealthChecks(10));
         const history = Array.isArray(response && response.history) ? response.history : [];
         renderSystemHealthOverview(response && response.latest ? response.latest : (history[0] || null));
         renderSystemHealthHistoryRows(history);
@@ -6763,9 +6775,9 @@ function runSystemHealthVerification() {
     }
     setSystemHealthFeedback('Running read-only verification checks...', '');
 
-    window.setTimeout(() => {
+    window.setTimeout(async () => {
         try {
-            const response = SharedData.runSystemHealthCheck();
+            const response = (await SharedData.runSystemHealthCheck());
             const result = response && response.result ? response.result : null;
             const history = Array.isArray(response && response.history) ? response.history : [];
             renderSystemHealthOverview(result);
@@ -6795,16 +6807,16 @@ function setupSystemHealthVerification() {
 /**
  * Handle quick action clicks
  */
-function handleQuickAction(action) {
+async function handleQuickAction(action) {
     switch (action) {
         case 'add-user':
             openAddUserModal();
             break;
         case 'manage-users':
-            switchToView('users');
+            (await switchToView('users'));
             break;
         case 'manage-subjects':
-            switchToView('subject-management');
+            (await switchToView('subject-management'));
             break;
         case 'manage-campus':
             openCampusManagerModal();
@@ -6813,14 +6825,14 @@ function handleQuickAction(action) {
             openAnnouncementComposerModal();
             break;
         case 'system-backup':
-            switchToView('system');
+            (await switchToView('system'));
             window.setTimeout(() => {
                 const group = document.getElementById('backup-management-group');
                 if (group) group.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }, 50);
             break;
         case 'system-settings':
-            switchToView('system');
+            (await switchToView('system'));
             break;
     }
 }
@@ -6828,7 +6840,7 @@ function handleQuickAction(action) {
 /**
  * Switch to a specific view
  */
-function switchToView(viewId) {
+async function switchToView(viewId) {
     const safeViewId = viewId || 'dashboard';
     if (adminCurrentViewId === safeViewId && isContentViewVisible(safeViewId + '-view')) {
         return;
@@ -6847,7 +6859,7 @@ function switchToView(viewId) {
 
     setActiveNav(safeViewId);
     adminCurrentViewId = safeViewId;
-    handleViewShown(safeViewId);
+    (await handleViewShown(safeViewId));
 }
 
 function setActiveNav(viewId) {
@@ -6862,7 +6874,7 @@ function isContentViewVisible(viewId) {
     return !!(view && view.style.display !== 'none');
 }
 
-function handleViewShown(viewId) {
+async function handleViewShown(viewId) {
     if (viewId === 'dashboard') {
         updateOverviewCards();
         initializeCharts();
@@ -6882,10 +6894,10 @@ function handleViewShown(viewId) {
         loadActivityLog();
     }
     if (viewId === 'system') {
-        loadSystemHealthVerification();
+        (await loadSystemHealthVerification());
     }
     if (viewId === 'subject-management') {
-        refreshSubjectManagementView();
+        await refreshSubjectManagementView();
     }
 }
 
@@ -6926,7 +6938,7 @@ function normalizeBulkProfessorEmployeeId(value) {
     return normalizeBulkText(value);
 }
 
-function setupSubjectManagement() {
+async function setupSubjectManagement() {
     const subjectCampusFilter = document.getElementById('subject-campus-filter');
     const subjectDepartmentFilter = document.getElementById('subject-department-filter');
     const addSubjectBtn = document.getElementById('add-subject-btn');
@@ -7011,23 +7023,23 @@ function setupSubjectManagement() {
     }
 
     if (offeringCampus) {
-        offeringCampus.addEventListener('change', () => {
+        offeringCampus.addEventListener('change', async () => {
             populateOfferingDepartmentSelect();
             populateOfferingProgramSelect();
             populateOfferingSubjectSelect();
-            populateOfferingProfessorSelect();
+            await populateOfferingProfessorSelect();
         });
     }
     if (offeringDepartment) {
-        offeringDepartment.addEventListener('change', () => {
+        offeringDepartment.addEventListener('change', async () => {
             populateOfferingProgramSelect();
             populateOfferingSubjectSelect();
-            populateOfferingProfessorSelect();
+            await populateOfferingProfessorSelect();
         });
     }
     if (offeringProgram) {
-        offeringProgram.addEventListener('change', () => {
-            populateOfferingProfessorSelect();
+        offeringProgram.addEventListener('change', async () => {
+            await populateOfferingProfessorSelect();
         });
     }
     if (offeringSemester) {
@@ -7046,16 +7058,16 @@ function setupSubjectManagement() {
     }
 
     if (offeringListBody) {
-        offeringListBody.addEventListener('click', (event) => {
+        offeringListBody.addEventListener('click', async (event) => {
             const button = event.target.closest('button[data-action]');
             if (!button) return;
             const action = button.getAttribute('data-action');
             const offeringId = parseInt(button.getAttribute('data-offering-id'), 10);
             if (action === 'manage-offering-students') {
-                openOfferingStudentsModal(offeringId);
+                await openOfferingStudentsModal(offeringId);
             }
             if (action === 'deactivate-offering') {
-                deactivateOffering(offeringId);
+                (await deactivateOffering(offeringId));
             }
         });
     }
@@ -7085,7 +7097,7 @@ function setupSubjectManagement() {
         }
     });
 
-    SharedData.onDataChange(function (key) {
+    SharedData.onDataChange(async function (key) {
         if (
             key === SharedData.KEYS.SUBJECT_MANAGEMENT ||
             key === SharedData.KEYS.CAMPUSES ||
@@ -7093,11 +7105,11 @@ function setupSubjectManagement() {
             key === SharedData.KEYS.CURRENT_SEMESTER ||
             key === SharedData.KEYS.SEMESTER_LIST
         ) {
-            refreshSubjectManagementView();
+            await refreshSubjectManagementView();
         }
     });
 
-    refreshSubjectManagementView();
+    await refreshSubjectManagementView();
 }
 
 function normalizeSubjectManagementState(snapshot) {
@@ -7115,7 +7127,7 @@ function refreshSubjectManagementData() {
     );
 }
 
-function refreshSubjectManagementView() {
+async function refreshSubjectManagementView() {
     const view = document.getElementById('subject-management-view');
     if (!view) return;
 
@@ -7128,7 +7140,7 @@ function refreshSubjectManagementView() {
     populateOfferingDepartmentSelect();
     populateOfferingProgramSelect();
     populateOfferingSubjectSelect();
-    populateOfferingProfessorSelect();
+    await populateOfferingProfessorSelect();
     renderOfferingsTable();
 }
 
@@ -7279,7 +7291,7 @@ function populateSubjectDepartmentSelect(selectedDepartment) {
     }
 }
 
-function handleSubjectFormSubmit(event) {
+async function handleSubjectFormSubmit(event) {
     event.preventDefault();
 
     const idValue = (document.getElementById('subject-id') || {}).value || '';
@@ -7294,15 +7306,15 @@ function handleSubjectFormSubmit(event) {
     }
 
     try {
-        SharedData.upsertSubject({
+        (await SharedData.upsertSubject({
             id: idValue || undefined,
             campusSlug,
             departmentCode,
             subjectCode,
             subjectName,
-        });
+        }));
         closeSubjectModal();
-        refreshSubjectManagementView();
+        await refreshSubjectManagementView();
     } catch (error) {
         alert('Unable to save subject: ' + (error.message || 'Unknown error'));
     }
@@ -7386,8 +7398,8 @@ async function handleBulkSubjectImport(event) {
             return;
         }
 
-        const result = SharedData.importSubjects(payloadRows);
-        refreshSubjectManagementView();
+        const result = (await SharedData.importSubjects(payloadRows));
+        await refreshSubjectManagementView();
 
         const summaryLines = [
             'Subject import complete.',
@@ -7543,8 +7555,8 @@ async function handleBulkOfferingImport(event) {
             return;
         }
 
-        const result = SharedData.importCourseOfferings(payloadRows, { replaceExisting: true });
-        refreshSubjectManagementView();
+        const result = (await SharedData.importCourseOfferings(payloadRows, { replaceExisting: true }));
+        await refreshSubjectManagementView();
         updateOverviewCards();
 
         const summaryLines = [
@@ -7604,8 +7616,8 @@ async function handleBulkExcessLoadImport(event) {
             return;
         }
 
-        const result = SharedData.markExcessCourseOfferings(payloadRows);
-        refreshSubjectManagementView();
+        const result = (await SharedData.markExcessCourseOfferings(payloadRows));
+        await refreshSubjectManagementView();
         updateOverviewCards();
 
         const summaryLines = [
@@ -7805,7 +7817,7 @@ async function populateOfferingProfessorSelect() {
         : String(professors[0].employeeId);
 }
 
-function handleOfferingFormSubmit(event) {
+async function handleOfferingFormSubmit(event) {
     event.preventDefault();
     const semesterSlug = ((document.getElementById('offering-semester') || {}).value || '').trim();
     const subjectId = ((document.getElementById('offering-subject') || {}).value || '').trim();
@@ -7824,17 +7836,17 @@ function handleOfferingFormSubmit(event) {
     }
 
     try {
-        SharedData.upsertCourseOffering({
+        (await SharedData.upsertCourseOffering({
             semesterSlug,
             subjectId,
             programCode,
             professorEmployeeId,
             sectionName,
             isActive: true,
-        });
+        }));
         const sectionInput = document.getElementById('offering-section');
         if (sectionInput) sectionInput.value = '';
-        refreshSubjectManagementView();
+        await refreshSubjectManagementView();
         updateOverviewCards();
     } catch (error) {
         alert('Unable to save offering assignment: ' + (error.message || 'Unknown error'));
@@ -8131,7 +8143,7 @@ async function saveOfferingStudentsSelection() {
         if (saveBtn) saveBtn.disabled = true;
         await SharedData.setCourseOfferingStudents(selectedOfferingForStudents.id, studentUserIds);
         closeOfferingStudentsModal();
-        refreshSubjectManagementView();
+        await refreshSubjectManagementView();
         updateOverviewCards();
     } catch (error) {
         alert('Unable to save assigned students: ' + (error.message || 'Unknown error'));
@@ -8142,13 +8154,13 @@ async function saveOfferingStudentsSelection() {
     }
 }
 
-function deactivateOffering(offeringId) {
+async function deactivateOffering(offeringId) {
     if (!confirm('Deactivate this offering? Assigned students will keep history, but no new assignments should use it.')) {
         return;
     }
     try {
-        SharedData.deactivateCourseOffering(offeringId);
-        refreshSubjectManagementView();
+        (await SharedData.deactivateCourseOffering(offeringId));
+        await refreshSubjectManagementView();
         updateOverviewCards();
     } catch (error) {
         alert('Unable to deactivate offering: ' + (error.message || 'Unknown error'));
@@ -8232,20 +8244,20 @@ function setupHrChangePasswordForm() {
     const cancelBtn = document.getElementById('cancelPasswordBtn');
     if (!form) return;
 
-    form.addEventListener('submit', (e) => {
+    form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        handleHrChangePassword();
+        (await handleHrChangePassword());
     });
 
     if (cancelBtn) {
-        cancelBtn.addEventListener('click', () => {
+        cancelBtn.addEventListener('click', async () => {
             form.reset();
-            switchToView('dashboard');
+            (await switchToView('dashboard'));
         });
     }
 }
 
-function handleHrChangePassword() {
+async function handleHrChangePassword() {
     const currentPassword = document.getElementById('currentPassword').value.trim();
     const newPassword = document.getElementById('newPassword').value.trim();
     const confirmPassword = document.getElementById('confirmPassword').value.trim();
@@ -8266,7 +8278,7 @@ function handleHrChangePassword() {
     }
 
     try {
-        SharedData.changeOwnPassword(currentPassword, newPassword);
+        (await SharedData.changeOwnPassword(currentPassword, newPassword));
         alert('Password updated successfully.');
     } catch (error) {
         console.error('[AdminPanel] Failed to update password.', error);
@@ -8335,7 +8347,7 @@ function setupAdminProfilePhotoUpload() {
         }
     });
 
-    input.addEventListener('change', function () {
+    input.addEventListener('change', async function () {
         const file = input.files && input.files[0];
         if (!file) return;
 
@@ -8359,11 +8371,11 @@ function setupAdminProfilePhotoUpload() {
 
         if (typeof SharedData.uploadProfilePhoto !== 'function') {
             const reader = new FileReader();
-            reader.onload = function () {
+            reader.onload = async function () {
                 preview.src = reader.result;
                 preview.classList.add('active');
                 placeholder.style.display = 'none';
-                SharedData.setProfilePhoto('admin', reader.result);
+                (await SharedData.setProfilePhoto('admin', reader.result));
                 URL.revokeObjectURL(localPreviewUrl);
                 input.value = '';
             };
@@ -8381,7 +8393,7 @@ function setupAdminProfilePhotoUpload() {
         try {
             uploadPromise = typeof SharedData.uploadProfilePhotoAsync === 'function'
                 ? SharedData.uploadProfilePhotoAsync(file, { message: 'Uploading profile photo...' })
-                : Promise.resolve(SharedData.uploadProfilePhoto(file));
+                : Promise.resolve((await SharedData.uploadProfilePhoto(file)));
         } catch (error) {
             handleUploadError(error);
             URL.revokeObjectURL(localPreviewUrl);
@@ -8503,13 +8515,13 @@ function setupAdminChangeEmailForm() {
     const form = document.getElementById('adminChangeEmailForm');
     if (!form) return;
 
-    form.addEventListener('submit', function (e) {
+    form.addEventListener('submit', async function (e) {
         e.preventDefault();
-        handleAdminChangeEmail();
+        (await handleAdminChangeEmail());
     });
 }
 
-function handleAdminChangeEmail() {
+async function handleAdminChangeEmail() {
     const form = document.getElementById('adminChangeEmailForm');
     const currentEmail = document.getElementById('adminCurrentEmail').value.trim();
     const newEmail = document.getElementById('adminNewEmail').value.trim();
@@ -8537,7 +8549,7 @@ function handleAdminChangeEmail() {
     }
 
     try {
-        const result = SharedData.changeOwnEmail(currentEmail, newEmail);
+        const result = (await SharedData.changeOwnEmail(currentEmail, newEmail));
         const nextEmail = String(result && result.email || newEmail).trim();
         showFormMessage(form, 'Email updated successfully.', 'success');
 
@@ -8566,13 +8578,13 @@ function setupAdminProfilePasswordForm() {
     const form = document.getElementById('adminChangePasswordForm');
     if (!form) return;
 
-    form.addEventListener('submit', function (e) {
+    form.addEventListener('submit', async function (e) {
         e.preventDefault();
-        handleAdminProfilePasswordChange();
+        (await handleAdminProfilePasswordChange());
     });
 }
 
-function handleAdminProfilePasswordChange() {
+async function handleAdminProfilePasswordChange() {
     const form = document.getElementById('adminChangePasswordForm');
     const currentPassword = document.getElementById('adminCurrentPassword').value.trim();
     const newPassword = document.getElementById('adminNewPassword').value.trim();
@@ -8595,7 +8607,7 @@ function handleAdminProfilePasswordChange() {
     }
 
     try {
-        SharedData.changeOwnPassword(currentPassword, newPassword);
+        (await SharedData.changeOwnPassword(currentPassword, newPassword));
         showFormMessage(form, 'Password updated successfully.', 'success');
     } catch (error) {
         console.error('[AdminPanel] Failed to update password.', error);
@@ -9220,7 +9232,7 @@ async function refreshAdminAcknowledgementPapersForProfessor(professor) {
     }
 
     if (SharedData.listFacultyPapers) {
-        return SharedData.listFacultyPapers(filters);
+        return (await SharedData.listFacultyPapers(filters));
     }
 
     return SharedData.getFacultyPapers ? SharedData.getFacultyPapers() : [];
@@ -9759,8 +9771,8 @@ function openAdminProfessorIferFlow(professorId) {
         selectedLoadType: 'main',
         showLoadType: true,
         confirmLabel: 'Download',
-        onConfirm: function (semesterId, loadType) {
-            downloadAdminProfessorIferReport(professor, semesterId, loadType);
+        onConfirm: async function (semesterId, loadType) {
+            await downloadAdminProfessorIferReport(professor, semesterId, loadType);
         },
     });
 }
@@ -9786,8 +9798,8 @@ function openAdminProfessorSasrFlow(professorId) {
         selectedLoadType: 'main',
         showLoadType: true,
         confirmLabel: 'Download',
-        onConfirm: function (semesterId, loadType) {
-            downloadAdminProfessorSasrReport(professor, semesterId, loadType);
+        onConfirm: async function (semesterId, loadType) {
+            await downloadAdminProfessorSasrReport(professor, semesterId, loadType);
         },
     });
 }
@@ -9819,7 +9831,7 @@ function openAdminProfessorAcknowledgementFlow(professorId, sourcePapers) {
             return buildAdminAcknowledgementSemesterChoices(professor, loadType, sourcePapers);
         },
         confirmLabel: 'Preview PDF',
-        onConfirm: function (semesterId, loadType) {
+        onConfirm: async function (semesterId, loadType) {
             const selectedLoadType = normalizeAdminReportLoadType(loadType);
             const selectedOptions = buildAdminAcknowledgementSemesterChoices(professor, selectedLoadType, sourcePapers);
             const selected = selectedOptions.find(option => option.id === semesterId);
@@ -9827,7 +9839,7 @@ function openAdminProfessorAcknowledgementFlow(professorId, sourcePapers) {
                 alert(`Stored ${getAdminReportLoadTypeLabel(selectedLoadType).toLowerCase()} acknowledgement PDF is unavailable for this semester.`);
                 return;
             }
-            openAdminStoredFacultyPaperPreview(professor, selected.paper);
+            await openAdminStoredFacultyPaperPreview(professor, selected.paper);
         },
     });
 }
@@ -10830,10 +10842,10 @@ function setupAdminProfessorFilters() {
     ['professor-status-filter', 'professor-program-filter'].forEach(id => {
         const select = document.getElementById(id);
         if (!select) return;
-        select.addEventListener('change', () => {
+        select.addEventListener('change', async () => {
             adminProfessorPage = 1;
             if (hasProfessorSearchRun) {
-                refreshAdminProfessorPage();
+                await refreshAdminProfessorPage();
             } else {
                 renderProfessors();
             }
@@ -10878,13 +10890,13 @@ function setupProfessorManagement() {
     // Department tabs
     const deptTabs = document.querySelectorAll('.dept-tab');
     deptTabs.forEach(tab => {
-        tab.addEventListener('click', function () {
+        tab.addEventListener('click', async function () {
             deptTabs.forEach(t => t.classList.remove('active'));
             this.classList.add('active');
             currentDepartmentFilter = this.getAttribute('data-department');
             adminProfessorPage = 1;
             if (hasProfessorSearchRun) {
-                refreshAdminProfessorPage();
+                await refreshAdminProfessorPage();
             } else {
                 renderProfessors();
             }
@@ -10914,12 +10926,12 @@ function setupProfessorManagement() {
 
     const campusFilter = document.getElementById('professor-campus-filter');
     if (campusFilter) {
-        campusFilter.addEventListener('change', function () {
+        campusFilter.addEventListener('change', async function () {
             currentProfessorCampusFilter = this.value || 'all';
             adminProfessorPage = 1;
             populateAdminProfessorProgramFilter();
             if (hasProfessorSearchRun) {
-                refreshAdminProfessorPage();
+                await refreshAdminProfessorPage();
             } else {
                 renderProfessors();
             }
@@ -11061,17 +11073,17 @@ function renderAdminProfessorPagination() {
     const prev = document.getElementById('admin-professor-prev-page');
     const next = document.getElementById('admin-professor-next-page');
     if (prev) {
-        prev.addEventListener('click', () => {
+        prev.addEventListener('click', async () => {
             if (!hasPrevious) return;
             adminProfessorPage = page - 1;
-            refreshAdminProfessorPage({ page: adminProfessorPage });
+            await refreshAdminProfessorPage({ page: adminProfessorPage });
         });
     }
     if (next) {
-        next.addEventListener('click', () => {
+        next.addEventListener('click', async () => {
             if (!hasNext) return;
             adminProfessorPage = page + 1;
-            refreshAdminProfessorPage({ page: adminProfessorPage });
+            await refreshAdminProfessorPage({ page: adminProfessorPage });
         });
     }
 }
@@ -11201,7 +11213,7 @@ function renderProfessors() {
     // Add event listeners to action buttons
     const actionButtons = professorsList.querySelectorAll('.action-btn');
     actionButtons.forEach(button => {
-        button.addEventListener('click', function (e) {
+        button.addEventListener('click', async function (e) {
             e.preventDefault();
             e.stopPropagation();
 
@@ -11223,13 +11235,13 @@ function renderProfessors() {
                     break;
                 case 'analytics':
                     console.log('Calling viewProfessorAnalytics with ID:', professorId);
-                    viewProfessorAnalytics(professorId);
+                    await viewProfessorAnalytics(professorId);
                     break;
                 case 'edit':
                     editProfessor(professorId);
                     break;
                 case 'files':
-                    openAdminProfessorFileOptions(professorId);
+                    (await openAdminProfessorFileOptions(professorId));
                     break;
                 default:
                     console.error('Unknown action:', action);
@@ -11890,8 +11902,8 @@ async function viewProfessorAnalytics(professorId) {
         const aiAnalyticsBtn = content.querySelector('#ai-analytics-btn');
         const aiInsightOutput = content.querySelector('#admin-ai-insight-output');
         if (aiAnalyticsBtn && aiInsightOutput) {
-            aiAnalyticsBtn.addEventListener('click', function () {
-                runAdminAiAnalyticsForProfessor(
+            aiAnalyticsBtn.addEventListener('click', async function () {
+                await runAdminAiAnalyticsForProfessor(
                     professor.id,
                     currentAnalyticsSemester || normalizedSemester,
                     aiInsightOutput,
@@ -12654,7 +12666,7 @@ async function runAdminAiAnalyticsForProfessor(professorId, semesterId, outputEl
     const canUseOverlay = loadingOverlay
         && typeof loadingOverlay.show === 'function'
         && typeof loadingOverlay.hide === 'function';
-    if (canUseOverlay) loadingOverlay.show('Analyzing all eligible ratings and comments...');
+    const releaseLoading = canUseOverlay ? loadingOverlay.show('Analyzing all eligible ratings and comments...') : null;
 
     try {
         // The server constructs the complete dataset in one request.
@@ -12678,7 +12690,10 @@ async function runAdminAiAnalyticsForProfessor(professorId, semesterId, outputEl
         console.error('[Admin] AI analytics request failed.', error);
         renderAdminAiInsightState(outputEl, 'error', error.message || 'Unable to load analytics. Please try again.');
     } finally {
-        if (canUseOverlay) loadingOverlay.hide();
+        if (canUseOverlay) {
+            if (typeof releaseLoading === 'function') releaseLoading();
+            else loadingOverlay.hide();
+        }
         if (btnEl) {
             btnEl.disabled = false;
             btnEl.innerHTML = originalText || 'AI Analytics';
@@ -13608,7 +13623,7 @@ function setupEvalPeriods() {
     // Wire up Save Evaluation Periods button
     const saveBtn = document.getElementById('save-eval-periods-btn');
     if (saveBtn) {
-        saveBtn.addEventListener('click', () => {
+        saveBtn.addEventListener('click', async () => {
             for (const type of PERIOD_TYPES) {
                 if (!validatePeriod(type)) {
                     const startEl = document.getElementById(type + '-start');
@@ -13628,7 +13643,7 @@ function setupEvalPeriods() {
                     end: endEl ? endEl.value : ''
                 };
             });
-            SharedData.setEvalPeriods(periods);
+            (await SharedData.setEvalPeriods(periods));
             alert('Evaluation periods saved successfully!');
         });
     }
@@ -13769,7 +13784,7 @@ function setupSemesterSettings() {
 
     const addTermBtn = document.getElementById('btn-add-term');
     if (addTermBtn) {
-        addTermBtn.addEventListener('click', () => {
+        addTermBtn.addEventListener('click', async () => {
             const startYear = Number(yearStartSelect.value);
             const endYear = Number(yearEndSelect.value);
             const semesterType = semesterTypeSelect.value;
@@ -13796,7 +13811,7 @@ function setupSemesterSettings() {
             }
 
             try {
-                SharedData.addSemester(value, label);
+                (await SharedData.addSemester(value, label));
             } catch (error) {
                 alert('Failed to add semester: ' + (error.message || 'Unknown error'));
                 return;
@@ -13809,7 +13824,7 @@ function setupSemesterSettings() {
 
     const saveBtn = document.getElementById('save-current-semester-btn');
     if (saveBtn) {
-        saveBtn.addEventListener('click', () => {
+        saveBtn.addEventListener('click', async () => {
             const value = semesterSelect.value;
             if (!value) {
                 alert('Please add a semester first.');
@@ -13817,14 +13832,14 @@ function setupSemesterSettings() {
             }
             let result;
             try {
-                result = SharedData.setCurrentSemester(value);
+                result = (await SharedData.setCurrentSemester(value));
             } catch (error) {
                 alert('Failed to save current semester: ' + (error.message || 'Unknown error'));
                 return;
             }
             refreshSemesterPicker();
             adminUsersPage = 1;
-            loadUsersByOrganization(getActiveCampusFilter());
+            await loadUsersByOrganization(getActiveCampusFilter());
             const label = semesterSelect.options[semesterSelect.selectedIndex].textContent;
             const activationMessage = result && result.changed
                 ? `\n${Number(result.deactivatedCount) || 0} account(s) set to inactive. HR and Admin accounts are exempt.\nReactivate users through Bulk Register or User Management.`
@@ -13893,11 +13908,11 @@ function applyQuestionnaireEditMode(editable) {
         });
 }
 
-function persistQuestionsData() {
+async function persistQuestionsData() {
     if (!activeSemester) return false;
     collectQuestionnairePrivacySettings();
     questionnairesBySemester[activeSemester] = questionsData;
-    const savedQuestionnaires = SharedData.setQuestionnaires(questionnairesBySemester);
+    const savedQuestionnaires = (await SharedData.setQuestionnaires(questionnairesBySemester));
     if (!savedQuestionnaires) return false;
 
     questionnairesBySemester = savedQuestionnaires;
@@ -14248,10 +14263,10 @@ function renderQuestions() {
                         </div>
                     </div>
                     <div class="section-actions">
-                        <button class="action-btn edit" onclick="editSection(${sectionIdLiteral})" title="Edit Section">
+                        <button class="action-btn edit" onclick="return editSection(${sectionIdLiteral})" title="Edit Section">
                             <i class="fas fa-edit"></i>
                         </button>
-                        <button class="action-btn delete" onclick="deleteSection(${sectionIdLiteral})" title="Delete Section">
+                        <button class="action-btn delete" onclick="return deleteSection(${sectionIdLiteral})" title="Delete Section">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
@@ -14276,16 +14291,16 @@ function renderQuestions() {
                         }
                                         </div>
                                         <div class="question-actions">
-                                            <button class="action-btn edit" onclick="editQuestion(${questionIdLiteral})" title="Edit">
+                                            <button class="action-btn edit" onclick="return editQuestion(${questionIdLiteral})" title="Edit">
                                                 <i class="fas fa-edit"></i>
                                             </button>
-                                            <button class="action-btn delete" onclick="deleteQuestion(${questionIdLiteral})" title="Delete">
+                                            <button class="action-btn delete" onclick="return deleteQuestion(${questionIdLiteral})" title="Delete">
                                                 <i class="fas fa-trash"></i>
                                             </button>
-                                            ${idx > 0 ? `<button class="action-btn move-up" onclick="moveQuestion(${questionIdLiteral}, 'up')" title="Move Up">
+                                            ${idx > 0 ? `<button class="action-btn move-up" onclick="return moveQuestion(${questionIdLiteral}, 'up')" title="Move Up">
                                                 <i class="fas fa-arrow-up"></i>
                                             </button>` : ''}
-                                            ${idx < sectionQuestions.length - 1 ? `<button class="action-btn move-down" onclick="moveQuestion(${questionIdLiteral}, 'down')" title="Move Down">
+                                            ${idx < sectionQuestions.length - 1 ? `<button class="action-btn move-down" onclick="return moveQuestion(${questionIdLiteral}, 'down')" title="Move Down">
                                                 <i class="fas fa-arrow-down"></i>
                                             </button>` : ''}
                                         </div>
@@ -14322,10 +14337,10 @@ function renderQuestions() {
                 }
                         </div>
                         <div class="question-actions">
-                            <button class="action-btn edit" onclick="editQuestion(${questionIdLiteral})" title="Edit">
+                            <button class="action-btn edit" onclick="return editQuestion(${questionIdLiteral})" title="Edit">
                                 <i class="fas fa-edit"></i>
                             </button>
-                            <button class="action-btn delete" onclick="deleteQuestion(${questionIdLiteral})" title="Delete">
+                            <button class="action-btn delete" onclick="return deleteQuestion(${questionIdLiteral})" title="Delete">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -14690,7 +14705,7 @@ function moveQuestion(questionId, direction) {
 /**
  * Save questionnaire
  */
-function saveQuestionnaire() {
+async function saveQuestionnaire() {
     if (!ensureQuestionnaireEditable()) return;
     const currentData = questionsData[currentQuestionnaireType] || { sections: [], questions: [] };
     const sections = Array.isArray(currentData.sections) ? currentData.sections : [];
@@ -14700,7 +14715,7 @@ function saveQuestionnaire() {
         return;
     }
 
-    const saved = persistQuestionsData();
+    const saved = (await persistQuestionsData());
     if (saved) {
         alert('Questionnaire saved successfully!');
         return;

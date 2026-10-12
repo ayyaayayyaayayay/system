@@ -1,4 +1,5 @@
 'use strict';
+const { findSourceMarker } = require('./helpers/js-source');
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -11,9 +12,9 @@ const sharedDataSource = fs.readFileSync(path.join(root, 'JsScrip', 'db-data.js'
 const html = fs.readFileSync(path.join(root, 'html', 'adminpanel.html'), 'utf8');
 
 function sourceBetween(source, startMarker, endMarker) {
-    const start = source.indexOf(startMarker);
+    const start = findSourceMarker(source, startMarker);
     assert.notEqual(start, -1, `Missing source marker: ${startMarker}`);
-    const end = source.indexOf(endMarker, start + startMarker.length);
+    const end = findSourceMarker(source, endMarker, start + startMarker.length);
     assert.notEqual(end, -1, `Missing source marker: ${endMarker}`);
     return source.slice(start, end);
 }
@@ -30,6 +31,7 @@ assert.equal(
     'Evaluation periods must have exactly one Save-button binding.'
 );
 
+async function main() {
 const evalSource = sourceBetween(panelSource, 'function setupEvalPeriods()', 'function setupSemesterSettings()');
 const saveHandlers = [];
 const savedPayloads = [];
@@ -42,7 +44,7 @@ const values = {
     'supervisor-professor-start': '',
     'supervisor-professor-end': '',
 };
-const elements = Object.fromEntries(Object.entries(values).map(([id, value]) => [id, { value }]));
+const elements = Object.fromEntries(Object.entries(values).map(([id, value]) => [id, { value, addEventListener() {}, setCustomValidity() {}, reportValidity() {}, focus() {}, validity: { valid: true } }]));
 elements['save-eval-periods-btn'] = {
     addEventListener(type, handler) {
         if (type === 'click') saveHandlers.push(handler);
@@ -64,7 +66,7 @@ vm.createContext(context);
 vm.runInContext(`${evalSource}\nthis.setupEvalPeriods = setupEvalPeriods;`, context);
 context.setupEvalPeriods();
 assert.equal(saveHandlers.length, 1);
-saveHandlers[0]();
+await saveHandlers[0]();
 assert.equal(savedPayloads.length, 1);
 assert.equal(alerts.length, 1);
 assert.deepEqual(
@@ -86,12 +88,13 @@ assert.ok(generalSettingsSource.includes('SharedData.KEYS.SETTINGS'));
 assert.ok(generalSettingsSource.includes('campusInput.appendChild(option)'));
 
 const setCampusesSource = sourceBetween(sharedDataSource, 'function setCampuses(', 'function upsertProgram(');
-assert.ok(setCampusesSource.indexOf("syncRequest('POST', 'setCampuses'") < setCampusesSource.indexOf('state.campuses ='));
+assert.ok(setCampusesSource.indexOf("requestJson('POST', 'setCampuses'") >= 0);
+assert.ok(setCampusesSource.indexOf("requestJson('POST', 'setCampuses'") < setCampusesSource.indexOf('state.campuses ='));
 assert.ok(setCampusesSource.includes('return state.campuses'));
 assert.doesNotMatch(setCampusesSource, /Failed to persist campuses/);
 
-assert.match(html, /db-data\.js\?[^"']*idle=20261007b/);
-assert.ok(html.includes('adminpanel.js?v=20261006cmo'));
+assert.match(html, /db-data\.js\?[^"']*loading=20261010b/);
+assert.match(html, /adminpanel\.js\?[^"']*loading=20261010b/);
 
 const userFilterSource = sourceBetween(panelSource, 'function setSelectOptions(', 'function getUserSearchTerm()');
 const filterElements = Object.fromEntries([
@@ -262,3 +265,6 @@ userFilterContext.renderOrganizationView('all');
 assert.equal(filterElements['hr-user-list'].innerHTML, 'u2:inactive', 'Inactive accounts must still render in their organization group.');
 
 console.log('Admin panel bug-fix regression tests passed.');
+
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,4 +1,5 @@
 'use strict';
+const { findSourceMarker } = require('./helpers/js-source');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -6,8 +7,8 @@ const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
 const source = fs.readFileSync(path.join(__dirname, '..', 'JsScrip', 'hrpanel.js'), 'utf8');
 function between(start, end) {
-    const from = source.indexOf(start);
-    const to = source.indexOf(end, from + start.length);
+    const from = findSourceMarker(source, start);
+    const to = findSourceMarker(source, end, from + start.length);
     assert.ok(from >= 0 && to > from, start);
     return source.slice(from, to);
 }
@@ -43,6 +44,7 @@ const sandbox = {
 };
 vm.createContext(sandbox);
 vm.runInContext([
+    between('function runHrWithGlobalLoading(', '\nfunction runAiBiasDetection('),
     'let hrDiscrepancyAnalysisRequestId = 0;',
     between('function normalizeHrToken(', '\nfunction getHrQuestionnaireTypeCode('),
     between('function isHrEvaluationInSemester(', '\nfunction buildHrEvaluationContext('),

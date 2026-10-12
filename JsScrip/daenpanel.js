@@ -9,10 +9,10 @@ let deanFacultyPaperState = {
 let deanFacultyPaperListRequestDepth = 0;
 
 // Wait for DOM to be fully loaded
-document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', async function () {
     applySupervisorPanelCopy();
     // Check authentication
-    if (!checkAuthentication()) {
+    if (!(await checkAuthentication())) {
         redirectToLogin();
         return;
     }
@@ -22,7 +22,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // Initialize the dashboard
-    initializeDashboard();
+    (await initializeDashboard());
 });
 
 let supervisorSectionFlow = {
@@ -45,6 +45,8 @@ let deanFacultyFeedbackState = {
     selectedProfessorId: '',
     selectedProfessorName: '',
     selectedSourceView: 'student',
+    selectedSemesterId: '',
+    selectedSemesterLabel: '',
     loadedComments: [],
     lastTrendRows: []
 };
@@ -482,132 +484,55 @@ function resolveTargetProfessorFromEvaluation(evaluation, lookup) {
 
 function collectEvaluationComments(evaluation) {
     const comments = [];
-    const note = String(evaluation && evaluation.comments || '').trim();
-    if (note) comments.push(note);
+    const note = String(evaluation && evaluation.comments || '');
+    if (note.trim()) comments.push(note);
 
     const qualitative = evaluation && typeof evaluation.qualitative === 'object' && evaluation.qualitative
         ? evaluation.qualitative
         : {};
     Object.keys(qualitative).forEach(key => {
-        const value = String(qualitative[key] || '').trim();
-        if (value) comments.push(value);
+        const value = String(qualitative[key] || '');
+        if (value.trim()) comments.push(value);
     });
     return comments;
 }
 
 function classifyDeanFeedbackCommentBiasByRules(text) {
-    const value = String(text || '').trim().replace(/\s+/g, ' ');
-    if (!value) return { label: 'Neutral' };
-
-    const lower = value.toLowerCase();
-    const words = lower.split(/\s+/).filter(Boolean);
-    const wordCount = words.length;
-
-    const biasedKeywords = [
-        'hate', 'terror', 'worst', 'stupid', 'dumb', 'useless', 'bobo', 'idiot', 'trash', 'awful', 'pangit',
-        'bwisit', 'gago', 'bobo prof', 'i hate', 'not related', 'irrelevant', 'nonsense',
-    ];
-    for (let i = 0; i < biasedKeywords.length; i += 1) {
-        const keyword = biasedKeywords[i];
-        if (keyword && lower.includes(keyword)) {
-            return { label: 'Biased' };
-        }
-    }
-
-    const constructiveKeywords = [
-        'needs', 'need', 'should', 'improve', 'improvement', 'examples', 'explain', 'explains',
-        'clearer', 'clarify', 'better', 'more', 'less', 'pace', 'feedback',
-    ];
-    let hasConstructiveSignal = false;
-    for (let i = 0; i < constructiveKeywords.length; i += 1) {
-        const keyword = constructiveKeywords[i];
-        if (keyword && lower.includes(keyword)) {
-            hasConstructiveSignal = true;
-            break;
-        }
-    }
-
-    if (hasConstructiveSignal && wordCount >= 4) return { label: 'Constructive' };
-
-    const neutralKeywords = ['ok', 'okay', 'fine', 'good', 'nice', 'average', 'pwede'];
-    if (neutralKeywords.includes(lower)) return { label: 'Neutral' };
-    if (wordCount <= 3) return { label: 'Neutral' };
-
-    return { label: 'Neutral' };
+    return SharedData.classifyFeedbackCommentByRules(text);
 }
 
 function getDeanCommentBiasTagClass(label) {
-    if (label === 'Constructive') return 'constructive';
-    if (label === 'Biased') return 'biased';
-    return 'neutral';
-}
-
-function getSupervisorOpenAiPanelAccess() {
-    try {
-        if (typeof SharedData !== 'undefined' && typeof SharedData.getOpenAiPanelAccess === 'function') {
-            return SharedData.getOpenAiPanelAccess({ role: SUPERVISOR_ROLE });
-        }
-    } catch (error) {
-        console.warn('[SupervisorPanel] Failed to load OpenAI panel access.', error);
-    }
-    return { role: SUPERVISOR_ROLE, enabled: true };
-}
-
-function isSupervisorOpenAiPanelEnabled() {
-    const access = getSupervisorOpenAiPanelAccess();
-    return !access || access.enabled !== false;
+    return ['Constructive', 'Positive', 'Neutral', 'Critical', 'Biased'].includes(label) ? label.toLowerCase() : 'neutral';
 }
 
 function setDeanCommentsAiSummary(message, type = 'info') {
     const summaryEl = document.getElementById('facultyCommentsAiSummary');
     if (!summaryEl) return;
-
+    summaryEl.setAttribute('aria-busy', 'false');
     summaryEl.classList.remove('warning', 'error', 'success', 'is-generated');
-    if (type === 'warning' || type === 'error' || type === 'success') {
-        summaryEl.classList.add(type);
-    }
-
+    if (['warning', 'error', 'success'].includes(type)) summaryEl.classList.add(type);
     if (message && typeof message === 'object') {
-        const topics = Array.isArray(message.topics) ? message.topics : [];
-        const sourceNote = getDeanFeedbackAiSummarySourceNote(message);
+        const state = typeof deanFacultyFeedbackState !== 'undefined' ? deanFacultyFeedbackState : {};
+        const evaluationLabel = state.selectedSourceView === 'peer' ? 'Professor Evaluation'
+            : state.selectedSourceView === 'supervisor' ? 'Supervisor Evaluation' : 'Student Evaluation';
+        const fallback = buildDeanFeedbackAiSummary(state.loadedComments, { evaluationLabel });
         summaryEl.classList.add('is-generated');
-        summaryEl.innerHTML = `
-            <div class="faculty-comments-ai-kicker">AI Summary</div>
-            <div class="faculty-comments-ai-headline">${escapeHTML(message.summaryLine || '')}</div>
-            <div class="faculty-comments-ai-tone">${escapeHTML(message.toneLine || '')}</div>
-            <div class="faculty-comments-ai-stats" aria-label="Feedback classification counts">
-                <span><strong>${Number(message.total || 0)}</strong> Comments</span>
-                <span><strong>${Number(message.constructive || 0)}</strong> Actionable</span>
-                <span><strong>${Number(message.neutral || 0)}</strong> General</span>
-                <span><strong>${Number(message.biased || 0)}</strong> Needs review</span>
-            </div>
-            ${topics.length ? `
-                <div class="faculty-comments-ai-topics">
-                    ${topics.slice(0, 3).map(topic => `<span>${escapeHTML(topic.label)} (${Number(topic.count || 0)})</span>`).join('')}
-                </div>
-            ` : ''}
-            ${sourceNote ? `<div class="faculty-comments-ai-source">${escapeHTML(sourceNote)}</div>` : ''}
-        `;
+        summaryEl.innerHTML = SharedData.renderFeedbackIntelligence(message, {
+            fallback, evaluationLabel,
+            professorName: state.selectedProfessorName,
+            semesterLabel: state.selectedSemesterLabel,
+            idPrefix: 'deanFeedback',
+        });
         return;
     }
-
     summaryEl.textContent = String(message || '').trim();
 }
 
 function getDeanFeedbackAiSummarySourceNote(message) {
     const source = normalizeDeanToken(message && message.source);
-    const warning = String(message && message.warning || '').trim();
-    if (source === 'openai') {
-        const model = String(message && (message.aiModel || message.model) || '').trim();
-        return model ? `Generated with OpenAI (${model}).` : 'Generated with OpenAI.';
-    }
-    if (source === 'openai+rule' || source === 'gemini+rule') {
-        return warning || 'Generated with OpenAI and completed with rule fallback.';
-    }
-    if (source === 'rule') {
-        return warning || 'Rule-based summary generated.';
-    }
-    return warning;
+    if (['openai', 'gemini'].includes(source)) return 'AI generated';
+    if (['openai+rule', 'gemini+rule'].includes(source)) return 'AI assisted';
+    return 'Rule-based';
 }
 
 function setDeanCommentsListVisibility(isVisible) {
@@ -617,78 +542,43 @@ function setDeanCommentsListVisibility(isVisible) {
 }
 
 function detectDeanFeedbackTopics(comments) {
-    const topicRules = [
-        {
-            label: 'lack of learning materials',
-            keywords: ['material', 'materials', 'module', 'modules', 'learning material', 'handout', 'handouts', 'slides', 'references', 'resources'],
-        },
-        {
-            label: 'need clearer explanations',
-            keywords: ['clear', 'clearer', 'clarify', 'explains', 'explain', 'explanation', 'understand'],
-        },
-        {
-            label: 'need more examples',
-            keywords: ['example', 'examples', 'sample', 'samples'],
-        },
-        {
-            label: 'class pace is too fast',
-            keywords: ['pace', 'fast', 'quick', 'rushed'],
-        },
-        {
-            label: 'want more interactive discussions',
-            keywords: ['interactive', 'discussion', 'engaging', 'participate', 'interaction'],
-        },
-    ];
-
-    const counts = topicRules.map(rule => ({ label: rule.label, count: 0 }));
-    comments.forEach(comment => {
-        const lower = String(comment || '').toLowerCase();
-        topicRules.forEach((rule, index) => {
-            const matched = rule.keywords.some(keyword => lower.includes(keyword));
-            if (matched) counts[index].count += 1;
-        });
-    });
-
-    return counts
-        .filter(item => item.count > 0)
-        .sort((a, b) => b.count - a.count);
+    return SharedData.detectFeedbackCommentTopics(comments);
 }
 
 function buildDeanFeedbackAiSummary(items, options = {}) {
-    const comments = (Array.isArray(items) ? items : [])
-        .map(item => String(item && item.text || '').trim())
-        .filter(Boolean);
+    const prepared = SharedData.prepareFeedbackSummaryComments(items);
+    const comments = prepared.comments
+        .map(item => String(item && item.text || ''))
+        .filter(text => text.trim());
     if (!comments.length) {
         return {
             total: 0,
             constructive: 0,
+            positive: 0,
             neutral: 0,
+            critical: 0,
             biased: 0,
             topics: [],
             summaryLine: 'No comments available to summarize.',
             toneLine: '',
             source: 'rule',
             warning: '',
+            teachingImprovements: [],
+            availableComments: prepared.available,
+            excludedRepetitiveComments: prepared.excludedRepetitiveComments,
         };
     }
 
     const evaluationLabel = String(options && options.evaluationLabel || 'evaluation').trim() || 'evaluation';
     const commentLabel = evaluationLabel.toLowerCase().replace(/\s+evaluation$/, '').trim() || 'evaluation';
 
-    let constructive = 0;
-    let neutral = 0;
-    let biased = 0;
-    comments.forEach(text => {
-        const label = classifyDeanFeedbackCommentBiasByRules(text).label;
-        if (label === 'Constructive') constructive += 1;
-        else if (label === 'Biased') biased += 1;
-        else neutral += 1;
-    });
+    const counts = { constructive: 0, positive: 0, neutral: 0, critical: 0, biased: 0 };
+    comments.forEach(text => { counts[classifyDeanFeedbackCommentBiasByRules(text).label.toLowerCase()] += 1; });
 
     const topics = detectDeanFeedbackTopics(comments);
     const top = topics[0] || null;
     const second = topics[1] || null;
-    const threshold = Math.ceil(comments.length * 0.4);
+    const threshold = Math.floor(comments.length / 2) + 1;
 
     let summaryLine = `Summary of ${comments.length} ${commentLabel} comments: feedback is varied.`;
     if (top && top.count >= threshold) {
@@ -699,23 +589,19 @@ function buildDeanFeedbackAiSummary(items, options = {}) {
         summaryLine = `Summary of ${comments.length} ${commentLabel} comments: a common point is ${top.label}.`;
     }
 
-    let toneLine = 'Overall tone is mostly neutral.';
-    if (constructive >= neutral && constructive >= biased) {
-        toneLine = 'Overall tone is mostly constructive.';
-    } else if (biased > constructive && biased >= neutral) {
-        toneLine = 'Overall tone includes notable biased comments.';
-    }
+    const toneLine = SharedData.getFeedbackClassificationTone(counts);
 
     return {
         total: comments.length,
-        constructive,
-        neutral,
-        biased,
+        ...counts,
         topics,
         summaryLine,
         toneLine,
         source: 'rule',
         warning: '',
+        teachingImprovements: SharedData.buildFeedbackTeachingImprovements(prepared.comments),
+        availableComments: prepared.available,
+        excludedRepetitiveComments: prepared.excludedRepetitiveComments,
     };
 }
 
@@ -733,7 +619,10 @@ function buildDeanCommentIdentityFields(evaluation) {
 
 function buildDeanCommentRecord(evaluation, text, sourceLabel) {
     return {
-        text: String(text || '').trim(),
+        text: String(text || ''),
+        commentRepetitiveFlag: [true, 1, '1'].includes(evaluation && evaluation.commentRepetitiveFlag)
+            || [true, 1, '1'].includes(evaluation && evaluation.credibilityComponents && evaluation.credibilityComponents.behaviorDetails && evaluation.credibilityComponents.behaviorDetails.commentRepetitiveFlag)
+            || [true, 1, '1'].includes(evaluation && evaluation.behaviorRepetition && evaluation.behaviorRepetition.commentRepetitiveFlag),
         source: String(sourceLabel || '').trim(),
         date: String(evaluation && (evaluation.submittedAt || evaluation.timestamp) || '').trim(),
         ...buildDeanCommentIdentityFields(evaluation)
@@ -1472,8 +1361,8 @@ function buildDeanEvaluationAggregates(context, evaluationType, semesterId) {
  * Check if user is authenticated and is a dean
  * @returns {boolean} - True if user is authenticated as dean
  */
-function checkAuthentication() {
-    const session = SharedData.requireSession(SUPERVISOR_ROLE);
+async function checkAuthentication() {
+    const session = (await SharedData.requireSession(SUPERVISOR_ROLE));
     if (!session) {
         return false;
     }
@@ -1623,7 +1512,7 @@ function redirectToLogin() {
 /**
  * Initialize the dean dashboard
  */
-function initializeDashboard() {
+async function initializeDashboard() {
     loadUserInfo();
     renderDeanAnnouncementPanels();
     showDeanLoginAnnouncements();
@@ -1635,11 +1524,11 @@ function initializeDashboard() {
     setupTableActions();
     setupDeanViewportRefresh();
     loadFacultySummary({ evaluationType: 'student' });
-    loadProfessorCount();
-    setupFacultyResponseView();
-    setupDepartmentFacultyReportAccessControl();
-    setupDeanIferDirectory();
-    setupPeerManagementView();
+    (await loadProfessorCount());
+    await setupFacultyResponseView();
+    await setupDepartmentFacultyReportAccessControl();
+    (await setupDeanIferDirectory());
+    (await setupPeerManagementView());
     setupDeanFacultyPaperInbox();
     updateSummaryCards();
     setupPeerEvaluationForm();
@@ -1664,19 +1553,19 @@ function showDeanLoginAnnouncements() {
 function setupDeanDataSync() {
     if (!SharedData || typeof SharedData.onDataChange !== 'function' || !SharedData.KEYS) return;
 
-    SharedData.onDataChange(function (key) {
+    SharedData.onDataChange(async function (key) {
         if (key === SharedData.KEYS.USERS) {
             enforceActiveDeanAccount({ inline: false });
             loadUserInfo();
             renderDeanAnnouncementPanels();
             populatePeerProfessorOptions();
-            loadProfessorCount();
-            refreshDeanIferDirectory();
+            (await loadProfessorCount());
+            (await refreshDeanIferDirectory());
             if (!deanFacultyResponseDataPromise && isDeanFacultyResponseViewActive() && typeof deanFacultyResponseRefreshHandler === 'function') {
                 deanFacultyResponseRefreshHandler({ force: true });
             }
             if (typeof deanPeerManagementRefreshHandler === 'function') {
-                deanPeerManagementRefreshHandler({ silent: true });
+                (await deanPeerManagementRefreshHandler({ silent: true }));
             }
             if (!isDeanFacultyResponseViewActive() && deanSummaryState.selectedEvaluationType) {
                 loadFacultySummary({
@@ -1703,7 +1592,7 @@ function setupDeanDataSync() {
 
         if (refreshKeys.has(key)) {
             populatePeerProfessorOptions();
-            loadProfessorCount();
+            (await loadProfessorCount());
             if (!deanFacultyResponseDataPromise && isDeanFacultyResponseViewActive() && typeof deanFacultyResponseRefreshHandler === 'function') {
                 deanFacultyResponseRefreshHandler({ force: true });
             } else if (!isDeanFacultyResponseViewActive()) {
@@ -1713,14 +1602,14 @@ function setupDeanDataSync() {
                 });
             }
             if (key === SharedData.KEYS.PROGRAMS && typeof deanPeerManagementRefreshHandler === 'function') {
-                deanPeerManagementRefreshHandler({ silent: true });
+                (await deanPeerManagementRefreshHandler({ silent: true }));
             }
-            refreshDeanIferDirectory();
+            (await refreshDeanIferDirectory());
         }
 
         if (key === SharedData.KEYS.FACULTY_PAPERS) {
             if (deanFacultyPaperListRequestDepth > 0) return;
-            refreshDeanIferDirectory();
+            (await refreshDeanIferDirectory());
         }
     });
 }
@@ -1876,7 +1765,7 @@ function setupNavigation() {
     const navLinks = document.querySelectorAll('.nav-link:not(.logout)');
 
     navLinks.forEach(link => {
-        link.addEventListener('click', function (e) {
+        link.addEventListener('click', async function (e) {
             e.preventDefault();
 
             // Get view to show
@@ -1890,7 +1779,7 @@ function setupNavigation() {
 
             // Handle navigation (for future implementation)
             if (view) {
-                handleNavigation(view);
+                (await handleNavigation(view));
                 closeMobileDrawer();
             }
         });
@@ -1901,25 +1790,25 @@ function setupNavigation() {
  * Handle navigation to different sections
  * @param {string} section - Section name
  */
-function handleNavigation(section) {
+async function handleNavigation(section) {
     switch (section) {
         case 'dashboard':
-            switchView('dashboard');
+            (await switchView('dashboard'));
             break;
         case 'peerEvaluation':
-            switchView('peerEvaluation');
+            (await switchView('peerEvaluation'));
             break;
         case 'facultyPaperInbox':
-            switchView('facultyPaperInbox');
+            (await switchView('facultyPaperInbox'));
             break;
         case 'profile':
-            switchView('profile');
+            (await switchView('profile'));
             break;
         case 'facultyResponse':
-            switchView('facultyResponse');
+            (await switchView('facultyResponse'));
             break;
         case 'peerManagement':
-            switchView('peerManagement');
+            (await switchView('peerManagement'));
             break;
         default:
             break;
@@ -1930,7 +1819,7 @@ function handleNavigation(section) {
  * Switch between dashboard and reports views
  * @param {string} viewName - Name of the view to show ('dashboard' or 'reports')
  */
-function switchView(viewName) {
+async function switchView(viewName) {
     closeMobileDrawer();
     const dashboardView = document.getElementById('dashboardView');
     const peerEvaluationView = document.getElementById('peerEvaluationView');
@@ -1975,7 +1864,7 @@ function switchView(viewName) {
         if (peerManagementView) peerManagementView.style.display = 'none';
         window.scrollTo(0, 0);
         closeAllPanels();
-        renderDeanFacultyPaperInbox();
+        (await renderDeanFacultyPaperInbox());
     } else if (viewName === 'facultyResponse') {
         if (dashboardView) dashboardView.style.display = 'none';
         if (peerEvaluationView) peerEvaluationView.style.display = 'none';
@@ -1998,7 +1887,7 @@ function switchView(viewName) {
         window.scrollTo(0, 0);
         closeAllPanels();
         if (typeof deanPeerManagementRefreshHandler === 'function') {
-            deanPeerManagementRefreshHandler({ silent: true });
+            (await deanPeerManagementRefreshHandler({ silent: true }));
         }
     }
 
@@ -2174,22 +2063,22 @@ function setupDeanHeroActions() {
     const facultyPaperButton = document.getElementById('heroOpenFacultyPaperBtn');
 
     if (evaluationButton) {
-        evaluationButton.addEventListener('click', function () {
-            switchView('peerEvaluation');
+        evaluationButton.addEventListener('click', async function () {
+            (await switchView('peerEvaluation'));
             updateNavigation('peerEvaluation');
         });
     }
 
     if (facultyResponseButton) {
-        facultyResponseButton.addEventListener('click', function () {
-            switchView('facultyResponse');
+        facultyResponseButton.addEventListener('click', async function () {
+            (await switchView('facultyResponse'));
             updateNavigation('facultyResponse');
         });
     }
 
     if (facultyPaperButton) {
-        facultyPaperButton.addEventListener('click', function () {
-            switchView('facultyPaperInbox');
+        facultyPaperButton.addEventListener('click', async function () {
+            (await switchView('facultyPaperInbox'));
             updateNavigation('facultyPaperInbox');
         });
     }
@@ -2252,7 +2141,7 @@ function resolveCurrentDeanActorUserId() {
     return normalizeDeanUserIdToken(deanUser.id);
 }
 
-function listDeanFacultyPapersForSupervisor(actorUserId) {
+async function listDeanFacultyPapersForSupervisor(actorUserId) {
     const resolvedActorId = normalizeDeanUserIdToken(actorUserId || resolveCurrentDeanActorUserId());
     if (!resolvedActorId || typeof SharedData === 'undefined' || !SharedData || typeof SharedData.listFacultyPapers !== 'function') {
         return [];
@@ -2260,7 +2149,7 @@ function listDeanFacultyPapersForSupervisor(actorUserId) {
 
     deanFacultyPaperListRequestDepth += 1;
     try {
-        return SharedData.listFacultyPapers(SUPERVISOR_ROLE, resolvedActorId);
+        return (await SharedData.listFacultyPapers(SUPERVISOR_ROLE, resolvedActorId));
     } finally {
         deanFacultyPaperListRequestDepth = Math.max(0, deanFacultyPaperListRequestDepth - 1);
     }
@@ -2537,8 +2426,8 @@ function buildDeanIferCommentKey(source, evaluation, field, questionKey, index) 
 
 function collectDeanIferEvaluationCommentItems(evaluation, source) {
     const items = [];
-    const commentText = String(evaluation && evaluation.comments || '').trim();
-    if (commentText) {
+    const commentText = String(evaluation && evaluation.comments || '');
+    if (commentText.trim()) {
         items.push({
             key: buildDeanIferCommentKey(source, evaluation, 'comments', '-', 0),
             text: commentText,
@@ -2552,8 +2441,8 @@ function collectDeanIferEvaluationCommentItems(evaluation, source) {
         : {};
     let index = 0;
     Object.keys(qualitative).forEach(questionKey => {
-        const text = String(qualitative[questionKey] || '').trim();
-        if (!text) return;
+        const text = String(qualitative[questionKey] || '');
+        if (!text.trim()) return;
         items.push({
             key: buildDeanIferCommentKey(source, evaluation, 'qualitative', questionKey, index),
             text,
@@ -2851,7 +2740,7 @@ function renderDeanFacultyPaperDetail(paper) {
     }
 }
 
-function renderDeanFacultyPaperInbox() {
+async function renderDeanFacultyPaperInbox() {
     const tableBody = document.getElementById('deanFacultyPaperTableBody');
     if (!tableBody) return;
 
@@ -2865,7 +2754,7 @@ function renderDeanFacultyPaperInbox() {
 
     let papers = [];
     try {
-        papers = listDeanFacultyPapersForSupervisor(actorUserId);
+        papers = (await listDeanFacultyPapersForSupervisor(actorUserId));
     } catch (error) {
         tableBody.innerHTML = '<tr class="mobile-card-empty-row"><td colspan="6">Failed to load faculty papers.</td></tr>';
         renderDeanFacultyPaperDetail(null);
@@ -2900,11 +2789,11 @@ function renderDeanFacultyPaperInbox() {
     }).join('');
 
     tableBody.querySelectorAll('.dean-paper-open-btn').forEach(button => {
-        button.addEventListener('click', () => {
+        button.addEventListener('click', async () => {
             deanFacultyPaperState.selectedId = button.getAttribute('data-paper-id') || '';
             const selected = sentPapers.find(item => String(item.id || '') === deanFacultyPaperState.selectedId) || null;
             renderDeanFacultyPaperDetail(selected);
-            renderDeanFacultyPaperInbox();
+            (await renderDeanFacultyPaperInbox());
         });
     });
 
@@ -2915,7 +2804,7 @@ function renderDeanFacultyPaperInbox() {
 function setupDeanFacultyPaperInbox() {
     const form = document.getElementById('deanFacultyPaperSectionCForm');
     if (form) {
-        form.addEventListener('submit', function (event) {
+        form.addEventListener('submit', async function (event) {
             event.preventDefault();
             const actorUserId = deanFacultyPaperState.actorUserId || resolveCurrentDeanActorUserId();
             if (!actorUserId) {
@@ -2936,7 +2825,7 @@ function setupDeanFacultyPaperInbox() {
             const approvalDatesAutoFillInput = document.getElementById('deanFpApprovalDatesAutoFillInput');
 
             try {
-                const response = SharedData.saveFacultyPaperSectionC({
+                const response = (await SharedData.saveFacultyPaperSectionC({
                     actor_role: SUPERVISOR_ROLE,
                     actor_user_id: actorUserId,
                     paper_id: paperId,
@@ -2947,12 +2836,12 @@ function setupDeanFacultyPaperInbox() {
                         approval_supervisor_name_auto_fill: approvalNamesAutoFillInput ? approvalNamesAutoFillInput.checked : false,
                         approval_supervisor_date_auto_fill: approvalDatesAutoFillInput ? approvalDatesAutoFillInput.checked : false,
                     }
-                });
+                }));
                 if (!response || response.success === false) {
                     throw new Error((response && response.error) || 'Failed to save Section C.');
                 }
-                renderDeanFacultyPaperInbox();
-                refreshDeanIferDirectory();
+                (await renderDeanFacultyPaperInbox());
+                (await refreshDeanIferDirectory());
                 alert('Paper completed successfully and removed from the Faculty Paper Inbox.');
             } catch (error) {
                 alert(error && error.message ? error.message : 'Failed to save Section C.');
@@ -3055,9 +2944,9 @@ function setupPeerEvaluationForm() {
     if (targetLabel) targetLabel.textContent = 'Select Employee';
     if (endpoint) endpoint.textContent = 'Evaluations are saved securely to the system.';
 
-    form.addEventListener('submit', function (e) {
+    form.addEventListener('submit', async function (e) {
         e.preventDefault();
-        handlePeerEvaluation();
+        (await handlePeerEvaluation());
     });
 
     if (peerSearchInput) {
@@ -3073,10 +2962,10 @@ function setupPeerEvaluationForm() {
     }
 
     if (cancelBtn) {
-        cancelBtn.addEventListener('click', function () {
+        cancelBtn.addEventListener('click', async function () {
             form.reset();
             syncSupervisorTargetFromInput();
-            switchView('dashboard');
+            (await switchView('dashboard'));
             updateNavigation('dashboard');
         });
     }
@@ -3245,7 +3134,9 @@ function refreshSupervisorTargetLockState() {
  */
 async function handlePeerEvaluation() {
     const form = document.getElementById('peerEvaluationForm');
-    if (!form || form.dataset.submitting === 'true') return;
+    if (!form || form.dataset.submitting === 'true' || form.dataset.checkingSubmission === 'true') return;
+    form.dataset.checkingSubmission = 'true';
+    try {
 
     syncSupervisorTargetFromInput();
 
@@ -3325,7 +3216,7 @@ async function handlePeerEvaluation() {
     const session = SharedData.getSession() || {};
     const semesterId = getSupervisorSemesterId();
     const targetProfessorId = formData.get('peerProfessor') || '';
-    if (!ensureQuestionnairePrivacyConsentForSubmission('supervisor-to-professor', semesterId, form)) {
+    if (!(await ensureQuestionnairePrivacyConsentForSubmission('supervisor-to-professor', semesterId, form))) {
         return;
     }
     const evaluationKey = buildSupervisorEvaluationKey(session.username || '', semesterId, targetProfessorId);
@@ -3376,13 +3267,16 @@ async function handlePeerEvaluation() {
     const evaluationTypeInput = document.getElementById('evaluationType');
     if (evaluationTypeInput) evaluationTypeInput.value = evaluationType;
     refreshSupervisorTargetLockState();
-    switchView('peerEvaluation');
+    (await switchView('peerEvaluation'));
     updateNavigation('peerEvaluation');
     showFormMessage(
         form,
         'Supervisor evaluation submitted successfully.',
         'success'
     );
+    } finally {
+        delete form.dataset.checkingSubmission;
+    }
 }
 
 /**
@@ -3648,7 +3542,7 @@ function escapeHTML(str) {
     );
 }
 
-function ensureQuestionnairePrivacyConsentForSubmission(questionnaireType, semesterId, form) {
+async function ensureQuestionnairePrivacyConsentForSubmission(questionnaireType, semesterId, form) {
     const notice = SharedData.getDataPrivacyConsentNotice
         ? SharedData.getDataPrivacyConsentNotice(questionnaireType)
         : null;
@@ -3681,10 +3575,10 @@ function ensureQuestionnairePrivacyConsentForSubmission(questionnaireType, semes
         if (!SharedData.recordStudentDataPrivacyConsent) {
             throw new Error('Privacy consent saving is not available.');
         }
-        SharedData.recordStudentDataPrivacyConsent({
+        (await SharedData.recordStudentDataPrivacyConsent({
             semesterId: semesterId,
             questionnaireType: questionnaireType
-        });
+        }));
         return true;
     } catch (error) {
         showFormMessage(form, error && error.message ? error.message : 'Privacy consent could not be saved. Please try again.', 'error');
@@ -3804,7 +3698,7 @@ function setupProfilePhotoUpload() {
         }
     });
 
-    input.addEventListener('change', function () {
+    input.addEventListener('change', async function () {
         const file = input.files && input.files[0];
         if (!file) return;
 
@@ -3828,11 +3722,11 @@ function setupProfilePhotoUpload() {
 
         if (typeof SharedData.uploadProfilePhoto !== 'function') {
             const reader = new FileReader();
-            reader.onload = function () {
+            reader.onload = async function () {
                 preview.src = reader.result;
                 preview.classList.add('active');
                 placeholder.style.display = 'none';
-                SharedData.setProfilePhoto('dean', reader.result);
+                (await SharedData.setProfilePhoto('dean', reader.result));
                 URL.revokeObjectURL(localPreviewUrl);
                 input.value = '';
             };
@@ -3850,7 +3744,7 @@ function setupProfilePhotoUpload() {
         try {
             uploadPromise = typeof SharedData.uploadProfilePhotoAsync === 'function'
                 ? SharedData.uploadProfilePhotoAsync(file, { message: 'Uploading profile photo...' })
-                : Promise.resolve(SharedData.uploadProfilePhoto(file));
+                : Promise.resolve((await SharedData.uploadProfilePhoto(file)));
         } catch (error) {
             handleUploadError(error);
             URL.revokeObjectURL(localPreviewUrl);
@@ -3891,24 +3785,24 @@ function buildInitials(name) {
     return (first + last).toUpperCase();
 }
 
-function loadProfessorCount() {
+async function loadProfessorCount() {
     const session = getUserSession() || {};
     const deanId = session.username || '';
     const semesterId = resolveSelectedSemesterId(deanSummaryState.selectedSemesterId);
     const assignedInstitutes = getDeanAssignedInstitutes(session);
 
-    return fetchDeanProfessorResultsFromSql({
+    return (await (((fetchDeanProfessorResultsFromSql({
         deanId,
         assignedInstitutes,
         semesterId,
         evaluationType: 'student'
-    }).then(results => {
+    }))).then(results => {
         deanProfessorCount = Array.isArray(results) ? results.length : 0;
         updateSummaryCards();
-    }).catch(() => {
+    })).catch(() => {
         deanProfessorCount = 0;
         updateSummaryCards();
-    });
+    }));
 }
 
 /**
@@ -4143,16 +4037,16 @@ function setupChangePasswordForm() {
     const form = document.getElementById('changePasswordForm');
     if (!form) return;
 
-    form.addEventListener('submit', function (e) {
+    form.addEventListener('submit', async function (e) {
         e.preventDefault();
-        handleChangePassword();
+        (await handleChangePassword());
     });
 }
 
 /**
  * Change password handler
  */
-function handleChangePassword() {
+async function handleChangePassword() {
     const form = document.getElementById('changePasswordForm');
     if (!form) return;
 
@@ -4174,7 +4068,7 @@ function handleChangePassword() {
     }
 
     try {
-        SharedData.changeOwnPassword(currentPassword, newPassword);
+        (await SharedData.changeOwnPassword(currentPassword, newPassword));
         showFormMessage(form, 'Password updated successfully.', 'success');
         form.reset();
     } catch (error) {
@@ -4232,7 +4126,7 @@ function formatDisplayDate(dateString) {
 /**
  * Setup dean-only professor evaluation visibility by institute
  */
-function setupDeanEvaluationResults() {
+async function setupDeanEvaluationResults() {
     const instituteFilter = document.getElementById('deanInstituteFilter');
     const table = document.getElementById('deanProfessorResultsTable');
     if (!instituteFilter || !table) return;
@@ -4240,12 +4134,12 @@ function setupDeanEvaluationResults() {
     const deanId = session.username || '';
     const semesterId = resolveSelectedSemesterId(deanSummaryState.selectedSemesterId);
     const assignedInstitutes = getDeanAssignedInstitutes(session);
-    fetchDeanProfessorResultsFromSql({
+    (await (((fetchDeanProfessorResultsFromSql({
         deanId,
         assignedInstitutes,
         semesterId,
         evaluationType: 'student'
-    }).then(results => {
+    }))).then(results => {
         const institutes = Array.from(new Set(results.map(item => item.institute))).sort();
         instituteFilter.innerHTML = `<option value="all">${isProgramScopedSupervisorPanel() ? 'Program scope' : 'Department scope'}</option>` + institutes.map(institute =>
             '<option value="' + escapeHTML(institute) + '">' + escapeHTML(institute) + '</option>'
@@ -4254,11 +4148,11 @@ function setupDeanEvaluationResults() {
         instituteFilter.addEventListener('change', function () {
             renderDeanProfessorResults(results, this.value);
         });
-    }).catch(() => {
+    })).catch(() => {
         const tbody = table.querySelector('tbody');
         if (!tbody) return;
         tbody.innerHTML = '<tr><td colspan="8">No professor evaluation results available.</td></tr>';
-    });
+    }));
 }
 
 /**
@@ -4274,7 +4168,7 @@ function getDeanAssignedInstitutes(sessionOrUsername) {
     return department ? [department] : [];
 }
 
-function buildDeanPeerRequiredCountMap(semesterId) {
+async function buildDeanPeerRequiredCountMap(semesterId) {
     const requiredByProfessor = {};
     const detailMethod = getSupervisorPeerMethodName('details');
     if (!SharedData || typeof SharedData[detailMethod] !== 'function') {
@@ -4283,7 +4177,7 @@ function buildDeanPeerRequiredCountMap(semesterId) {
 
     const selectedSemester = resolveSelectedSemesterId(semesterId);
     try {
-        const response = SharedData[detailMethod]({ semesterId: selectedSemester });
+        const response = (await SharedData[detailMethod]({ semesterId: selectedSemester }));
         const responseSemester = String(response && response.currentSemester || '').trim();
         if (!responseSemester || (selectedSemester && responseSemester !== selectedSemester)) {
             return requiredByProfessor;
@@ -4305,7 +4199,7 @@ function buildDeanPeerRequiredCountMap(semesterId) {
     return requiredByProfessor;
 }
 
-function buildDeanProfessorResultRows(query, typeOverride) {
+async function buildDeanProfessorResultRows(query, typeOverride) {
     const context = buildDeanPanelContext();
     const evaluationType = getDeanEvaluationTypeMeta(typeOverride || (query && query.evaluationType) || 'student').id;
     const semesterId = resolveSelectedSemesterId(
@@ -4325,7 +4219,7 @@ function buildDeanProfessorResultRows(query, typeOverride) {
     const normalizedType = evaluationType;
     const deanEvaluatorToken = normalizeRoleToken(query && query.deanId);
     const peerRequiredByProfessor = normalizedType === 'professor'
-        ? buildDeanPeerRequiredCountMap(semesterId)
+        ? (await buildDeanPeerRequiredCountMap(semesterId))
         : {};
     const filteredByType = evaluations.filter(evaluation =>
         resolveEvaluationTypeToken(evaluation) === normalizedType &&
@@ -4429,8 +4323,8 @@ function buildDeanProfessorResultRows(query, typeOverride) {
 /**
  * SQL-ready fetch for dean-level professor results
  */
-function fetchDeanProfessorResultsFromSql(query) {
-    return Promise.resolve(buildDeanProfessorResultRows(query, 'student'));
+async function fetchDeanProfessorResultsFromSql(query) {
+    return Promise.resolve((await buildDeanProfessorResultRows(query, 'student')));
 }
 /**
  * Render dean view table and metrics
@@ -4513,7 +4407,7 @@ function renderDeanProfessorResults(results, selectedInstitute) {
     if (scopeBadge) scopeBadge.textContent = 'Scope: ' + (selectedInstitute === 'all' ? (isProgramScopedSupervisorPanel() ? 'Program scope' : 'Department scope') : selectedInstitute);
 }
 
-function buildDeanIferDirectoryRecords() {
+async function buildDeanIferDirectoryRecords() {
     const context = buildDeanPanelContext();
     const session = getUserSession() || {};
     const assignedInstitutes = getDeanAssignedInstitutes(session);
@@ -4523,7 +4417,7 @@ function buildDeanIferDirectoryRecords() {
             .filter(Boolean)
     );
     const professors = Array.isArray(context && context.scopedProfessors) ? context.scopedProfessors : [];
-    const acknowledgementReportsByProfessor = buildDeanCompletedAcknowledgementReportMap();
+    const acknowledgementReportsByProfessor = (await buildDeanCompletedAcknowledgementReportMap());
 
     return professors
         .filter(professor => {
@@ -4615,7 +4509,7 @@ function hasDeanStoredAcknowledgementPdf(paper) {
         || (Array.isArray(paper.versions) && paper.versions.length > 0);
 }
 
-function buildDeanCompletedAcknowledgementReportMap() {
+async function buildDeanCompletedAcknowledgementReportMap() {
     const reportsByProfessor = new Map();
     const actorUserId = resolveCurrentDeanActorUserId();
     const semesterId = getDeanIferActiveSemesterId();
@@ -4623,7 +4517,7 @@ function buildDeanCompletedAcknowledgementReportMap() {
 
     let papers = [];
     try {
-        papers = listDeanFacultyPapersForSupervisor(actorUserId);
+        papers = (await listDeanFacultyPapersForSupervisor(actorUserId));
     } catch (error) {
         console.warn('[DeanPanel] Failed to reload faculty acknowledgement reports.', error);
         if (typeof SharedData !== 'undefined' && SharedData && typeof SharedData.getFacultyPapers === 'function') {
@@ -4773,11 +4667,11 @@ function renderDeanIferDirectory() {
     }).join('');
 
     tableBody.querySelectorAll('.dean-ifer-open-btn').forEach(button => {
-        button.addEventListener('click', function () {
+        button.addEventListener('click', async function () {
             const professorKey = String(button.getAttribute('data-professor-key') || '').trim();
             const record = filtered.find(item => String(item.recordKey || '').trim() === professorKey)
                 || null;
-            openDeanIferTemplatePreview(record);
+            await openDeanIferTemplatePreview(record);
         });
     });
 
@@ -4804,9 +4698,9 @@ function renderDeanIferDirectory() {
     });
 }
 
-function refreshDeanIferDirectory() {
+async function refreshDeanIferDirectory() {
     populateDeanIferSemesterFilter();
-    deanIferDirectoryState.records = buildDeanIferDirectoryRecords();
+    deanIferDirectoryState.records = (await buildDeanIferDirectoryRecords());
     renderDeanIferDirectory();
 }
 
@@ -4848,7 +4742,7 @@ function populateDeanIferSemesterFilter() {
     deanIferDirectoryState.semesterId = resolveSelectedSemesterId(semesterSelect.value || fallbackId);
 }
 
-function setupDeanIferDirectory() {
+async function setupDeanIferDirectory() {
     const searchInput = document.getElementById('deanIferSearchInput');
     const searchBtn = document.getElementById('deanIferSearchBtn');
     const resetBtn = document.getElementById('deanIferResetBtn');
@@ -4877,20 +4771,20 @@ function setupDeanIferDirectory() {
             renderDeanIferDirectory();
         });
 
-        semesterSelect.addEventListener('change', function () {
+        semesterSelect.addEventListener('change', async function () {
             deanIferDirectoryState.semesterId = resolveSelectedSemesterId(semesterSelect.value);
-            refreshDeanIferDirectory();
+            (await refreshDeanIferDirectory());
         });
     }
 
     searchInput.value = deanIferDirectoryState.query;
-    refreshDeanIferDirectory();
+    (await refreshDeanIferDirectory());
 }
 
 /**
  * Setup faculty response rate view search and table rendering
  */
-function setupDepartmentFacultyReportAccessControl() {
+async function setupDepartmentFacultyReportAccessControl() {
     const panel = document.getElementById('departmentReportAccessPanel');
     const statusEl = document.getElementById('departmentReportAccessStatus');
     const descriptionEl = document.getElementById('departmentReportAccessDescription');
@@ -4974,10 +4868,10 @@ function setupDepartmentFacultyReportAccessControl() {
         ? SharedData.getFacultyReportAccess()
         : currentAccess;
     render(cached);
-    refresh();
+    await refresh();
 }
 
-function setupFacultyResponseView() {
+async function setupFacultyResponseView() {
     const searchInput = document.getElementById('facultySearchInput');
     const searchBtn = document.getElementById('facultySearchBtn');
     const resetBtn = document.getElementById('facultyResetBtn');
@@ -4993,6 +4887,7 @@ function setupFacultyResponseView() {
     const commentsList = document.getElementById('facultyCommentsList');
     const commentsAiBtn = document.getElementById('facultyCommentsAiSummarize');
     const commentsAiSummary = document.getElementById('facultyCommentsAiSummary');
+    const commentsView = document.getElementById('facultyCommentsView');
     const commentsClose = document.getElementById('facultyCommentsClose');
     const trendStatus = document.getElementById('deanSemestralTrendStatus');
     const trendDelta = document.getElementById('deanSemestralTrendDelta');
@@ -5003,7 +4898,7 @@ function setupFacultyResponseView() {
     if (
         !searchInput || !searchBtn || !resetBtn || !semesterFilter
         || !resultEl || !table || !commentsPanel || !commentsTitle || !commentsMeta
-        || !commentsList || !commentsAiBtn || !commentsAiSummary || !commentsClose
+        || !commentsList || !commentsAiBtn || !commentsAiSummary || !commentsView || !commentsClose
         || !trendStatus || !trendDelta || !trendTableBody || !trendChart || !trendSection
     ) return;
 
@@ -5012,6 +4907,8 @@ function setupFacultyResponseView() {
     const assignedInstitutes = getDeanAssignedInstitutes(session);
     let currentView = 'student';
     let resultsRequestId = 0;
+    let feedbackRequestId = 0;
+    let feedbackLoading = false;
     let selectedSemesterId = resolveSelectedSemesterId(deanSummaryState.selectedSemesterId);
     let sourceData = [];
     let sourceDataView = currentView;
@@ -5031,9 +4928,11 @@ function setupFacultyResponseView() {
     }
 
     function applyCommentsAiAccessState() {
-        commentsAiBtn.disabled = false;
+        const hasSelection = !!feedbackState.selectedProfessorId;
+        commentsAiBtn.disabled = feedbackLoading || !hasSelection || !feedbackState.loadedComments.length;
+        commentsView.disabled = feedbackLoading || !hasSelection;
         commentsAiBtn.title = '';
-        return true;
+        return !commentsAiBtn.disabled;
     }
 
     function getFeedbackViewLabel(view) {
@@ -5064,13 +4963,19 @@ function setupFacultyResponseView() {
     }
 
     function resetFeedbackPanelState(hidePanel = false) {
+        feedbackRequestId += 1;
+        feedbackLoading = false;
         feedbackState.selectedProfessorUserId = '';
         feedbackState.selectedProfessorId = '';
         feedbackState.selectedProfessorName = '';
         feedbackState.selectedSourceView = currentView;
+        feedbackState.selectedSemesterId = '';
+        feedbackState.selectedSemesterLabel = '';
         feedbackState.loadedComments = [];
         feedbackState.lastTrendRows = [];
         commentsList.innerHTML = '<li class="faculty-comments-empty">No comments loaded yet.</li>';
+        setDeanCommentsListVisibility(true);
+        commentsAiBtn.innerHTML = '<i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> AI Summarize';
         applyCommentsAiAccessState();
         setDeanCommentsAiSummary('Click AI Summarize after opening a professor comments list.', 'info');
         resetDeanProfessorSemestralTrend();
@@ -5281,16 +5186,34 @@ function setupFacultyResponseView() {
         resetFeedbackPanelState(true);
     });
 
+    commentsView.addEventListener('click', function () {
+        if (feedbackLoading || !feedbackState.selectedProfessorId) return;
+        feedbackRequestId += 1;
+        commentsAiBtn.innerHTML = '<i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> AI Summarize';
+        renderTaggedComments(feedbackState.loadedComments);
+        setDeanCommentsAiSummary(feedbackState.loadedComments.length
+            ? 'Choose AI Summarize for insights into this professor’s feedback.'
+            : 'No comments available for this professor in the selected filters.',
+            feedbackState.loadedComments.length ? 'info' : 'warning');
+        applyCommentsAiAccessState();
+    });
+
     commentsAiBtn.addEventListener('click', async function () {
+        if (feedbackLoading || commentsAiBtn.disabled) return;
         if (!Array.isArray(feedbackState.loadedComments) || !feedbackState.loadedComments.length) {
             setDeanCommentsAiSummary('No comments loaded for the selected professor. Open a professor comments list first.', 'warning');
             return;
         }
 
+        const requestId = ++feedbackRequestId;
+        const items = feedbackState.loadedComments.slice();
+        const semesterId = feedbackState.selectedSemesterId;
         const originalHtml = commentsAiBtn.innerHTML;
         commentsAiBtn.disabled = true;
         commentsAiBtn.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Summarizing...';
         setDeanCommentsAiSummary('Generating AI summary...', 'info');
+        commentsAiSummary.setAttribute('aria-busy', 'true');
+        setDeanCommentsListVisibility(false);
 
         const viewLabel = getFeedbackViewLabel(feedbackState.selectedSourceView || currentView);
         try {
@@ -5300,14 +5223,18 @@ function setupFacultyResponseView() {
 
             const response = await SharedData.summarizeFeedbackComments({
                 evaluationLabel: viewLabel,
-                comments: feedbackState.loadedComments.map((item, index) => ({
+                semesterId,
+                includeTeachingImprovements: true,
+                comments: items.map((item, index) => ({
                     id: String(item && item.id || item && item.key || `comment_${index + 1}`),
-                    text: String(item && item.text || '').trim(),
-                })).filter(item => item.text)
+                    text: String(item && item.text || ''),
+                    commentRepetitiveFlag: !!(item && item.commentRepetitiveFlag),
+                })).filter(item => item.text.trim())
             }, { role: SUPERVISOR_ROLE });
 
+            if (requestId !== feedbackRequestId) return;
             if (response && response.disabled) {
-                const fallbackSummary = buildDeanFeedbackAiSummary(feedbackState.loadedComments, { evaluationLabel: viewLabel });
+                const fallbackSummary = buildDeanFeedbackAiSummary(items, { evaluationLabel: viewLabel });
                 setDeanCommentsAiSummary(fallbackSummary, 'success');
                 return;
             }
@@ -5318,45 +5245,47 @@ function setupFacultyResponseView() {
 
             const summaryData = response.summary && typeof response.summary === 'object'
                 ? response.summary
-                : buildDeanFeedbackAiSummary(feedbackState.loadedComments, { evaluationLabel: viewLabel });
+                : buildDeanFeedbackAiSummary(items, { evaluationLabel: viewLabel });
             const source = normalizeDeanToken(summaryData.source || response.source);
             setDeanCommentsAiSummary(summaryData, source === 'openai+rule' || source === 'gemini+rule' ? 'warning' : 'success');
         } catch (error) {
+            if (requestId !== feedbackRequestId) return;
             console.error('[SupervisorPanel] Feedback summary failed, using local rule-based summary.', error);
-            const fallbackSummary = buildDeanFeedbackAiSummary(feedbackState.loadedComments, {
+            const fallbackSummary = buildDeanFeedbackAiSummary(items, {
                 evaluationLabel: viewLabel
             });
             fallbackSummary.source = 'rule';
             setDeanCommentsAiSummary(fallbackSummary, 'success');
         } finally {
-            commentsAiBtn.innerHTML = originalHtml || '<i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> AI Summarize';
-            applyCommentsAiAccessState();
+            if (requestId === feedbackRequestId) {
+                commentsAiBtn.innerHTML = originalHtml || '<i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> AI Summarize';
+                applyCommentsAiAccessState();
+            }
         }
-        setDeanCommentsListVisibility(false);
     });
 
-    semesterFilter.addEventListener('change', function () {
+    semesterFilter.addEventListener('change', async function () {
         selectedSemesterId = resolveSelectedSemesterId(semesterFilter.value || selectedSemesterId);
         deanSummaryState.selectedSemesterId = selectedSemesterId;
         deanSummaryState.selectedSemesterLabel = getSemesterLabelById(selectedSemesterId);
-        setResultsView(currentView, { force: true });
+        await setResultsView(currentView, { force: true });
     });
 
     if (studentResultsBtn) {
-        studentResultsBtn.addEventListener('click', function () {
-            setResultsView('student');
+        studentResultsBtn.addEventListener('click', async function () {
+            await setResultsView('student');
         });
     }
 
     if (peerResultsBtn) {
-        peerResultsBtn.addEventListener('click', function () {
-            setResultsView('peer');
+        peerResultsBtn.addEventListener('click', async function () {
+            await setResultsView('peer');
         });
     }
 
     if (supervisorResultsBtn) {
-        supervisorResultsBtn.addEventListener('click', function () {
-            setResultsView('supervisor');
+        supervisorResultsBtn.addEventListener('click', async function () {
+            await setResultsView('supervisor');
         });
     }
 
@@ -5372,8 +5301,12 @@ function setupFacultyResponseView() {
                 );
                 if (!professor) return;
 
+                resetFeedbackPanelState();
+                const requestId = feedbackRequestId;
+                feedbackLoading = true;
                 commentsTitle.textContent = 'Comments for ' + professor.professorName;
-                commentsMeta.textContent = professor.professorId + ' | ' + professor.institute + ' | ' + getFeedbackViewLabel(currentView);
+                commentsMeta.textContent = professor.professorId + ' | ' + professor.institute + ' | ' + getFeedbackViewLabel(currentView)
+                    + ' | ' + getSemesterLabelById(selectedSemesterId);
 
                 let professorUserId = professorUserIdToken || normalizeUserIdToken(professor && professor.professorUserId);
                 if (!professorUserId) {
@@ -5388,6 +5321,12 @@ function setupFacultyResponseView() {
                 feedbackState.selectedProfessorId = String(professor.professorId || '').trim();
                 feedbackState.selectedProfessorName = String(professor.professorName || '').trim();
                 feedbackState.selectedSourceView = currentView;
+                feedbackState.selectedSemesterId = selectedSemesterId;
+                feedbackState.selectedSemesterLabel = getSemesterLabelById(selectedSemesterId);
+                commentsList.innerHTML = '<li class="faculty-comments-empty">Loading comments...</li>';
+                setDeanCommentsAiSummary('Loading this professor’s feedback...', 'info');
+                applyCommentsAiAccessState();
+                commentsPanel.classList.add('active');
                 setDeanSemestralTrendVisibility(true);
 
                 fetchFacultyCommentsFromSql({
@@ -5397,6 +5336,8 @@ function setupFacultyResponseView() {
                     semesterId: selectedSemesterId,
                     source: currentView
                 }).then(comments => {
+                    if (requestId !== feedbackRequestId) return;
+                    feedbackLoading = false;
                     const normalized = Array.isArray(comments) ? comments : [];
                     feedbackState.loadedComments = normalized;
 
@@ -5406,12 +5347,16 @@ function setupFacultyResponseView() {
                         setDeanCommentsAiSummary('No comments available for this professor in the selected filters.', 'warning');
                     } else {
                         applyCommentsAiAccessState();
-                        setDeanCommentsAiSummary('Comments loaded. Click AI Summarize to summarize this professor comments.', 'info');
+                        setDeanCommentsAiSummary('Choose AI Summarize for insights or View to read this professor’s feedback.', 'info');
                     }
+                    applyCommentsAiAccessState();
                     commentsPanel.classList.add('active');
                 }).catch(() => {
+                    if (requestId !== feedbackRequestId) return;
+                    feedbackLoading = false;
                     commentsList.innerHTML = '<li class="faculty-comments-empty">Unable to load comments.</li>';
                     feedbackState.loadedComments = [];
+                    applyCommentsAiAccessState();
                     setDeanCommentsAiSummary('Unable to load comments for summarization.', 'error');
                     renderDeanProfessorSemestralTrend(feedbackState.selectedProfessorUserId, selectedSemesterId);
                     commentsPanel.classList.add('active');
@@ -5425,7 +5370,7 @@ function setupFacultyResponseView() {
     deanFacultyResponseRefreshHandler = function (options = {}) {
         return setResultsView(currentView, options);
     };
-    setResultsView(currentView);
+    await setResultsView(currentView);
 }
 
 /**
@@ -5492,7 +5437,8 @@ function fetchFacultyCommentsFromSql(query) {
     );
     if (row && row.rowKey && summary.commentBuckets && Array.isArray(summary.commentBuckets[row.rowKey])) {
         const bucket = summary.commentBuckets[row.rowKey].map(item => ({
-            text: String(item && item.text || '').trim(),
+            text: String(item && item.text || ''),
+            commentRepetitiveFlag: !!(item && item.commentRepetitiveFlag),
             source: String(item && item.source || '').trim(),
             date: String(item && item.date || '').trim(),
             evaluatorStudentNumber: String(item && item.evaluatorStudentNumber || '').trim(),
@@ -5502,7 +5448,7 @@ function fetchFacultyCommentsFromSql(query) {
             evaluatorId: String(item && item.evaluatorId || '').trim(),
             evaluatorUsername: String(item && item.evaluatorUsername || '').trim(),
             evaluatorName: String(item && item.evaluatorName || '').trim()
-        })).filter(item => item.text);
+        })).filter(item => item.text.trim());
         return Promise.resolve(bucket);
     }
 
@@ -5559,21 +5505,21 @@ function updateFacultySearchResult(count, total, keyword, view, semesterId) {
 /**
  * SQL-ready placeholder for peer evaluation results
  */
-function fetchDeanPeerEvaluationResultsFromSql(query) {
-    return Promise.resolve(buildDeanProfessorResultRows(query, 'professor'));
+async function fetchDeanPeerEvaluationResultsFromSql(query) {
+    return Promise.resolve((await buildDeanProfessorResultRows(query, 'professor')));
 }
 
 /**
  * SQL-ready placeholder for supervisor evaluation results (single record)
  */
-function fetchDeanSupervisorEvaluationResultsFromSql(query) {
-    return Promise.resolve(buildDeanProfessorResultRows(query, 'supervisor'));
+async function fetchDeanSupervisorEvaluationResultsFromSql(query) {
+    return Promise.resolve((await buildDeanProfessorResultRows(query, 'supervisor')));
 }
 
 /**
  * Setup dean program-based peer assignment management.
  */
-function setupPeerManagementView() {
+async function setupPeerManagementView() {
     const programSelect = document.getElementById('peerMgmtProgramSelect');
     const professorCountInput = document.getElementById('peerMgmtProfessorCount');
     const createRoomBtn = document.getElementById('peerMgmtCreateRoomBtn');
@@ -5774,7 +5720,7 @@ function setupPeerManagementView() {
         ).join('');
     }
 
-    function loadProgramSummaries(options = {}) {
+    async function loadProgramSummaries(options = {}) {
         const requestId = ++peerSummaryRequestId;
         const silent = !!(options && options.silent);
         const preferredProgramCode = normalizeProgramCode(options && options.preferredProgramCode);
@@ -5791,16 +5737,16 @@ function setupPeerManagementView() {
             }
         };
 
-        const runLoad = function () {
+        const runLoad = async function () {
             if (requestId !== peerSummaryRequestId) return;
-            const response = SharedData[getSupervisorPeerMethodName('list')]({});
+            const response = (await SharedData[getSupervisorPeerMethodName('list')]({}));
             if (requestId !== peerSummaryRequestId) return;
             renderProgramsTable(response || {});
             renderPrograms();
             const selectedCode = preferredProgramCode || normalizeProgramCode(programSelect.value || selectedProgramCode);
             if (selectedCode) {
                 setSelectedProgram(selectedCode);
-                loadAssignmentDetails(selectedCode, { silent: true });
+                (await loadAssignmentDetails(selectedCode, { silent: true }));
             } else {
                 renderAssignmentDetails({
                     emptyMessage: 'Select a program to view assignment details.'
@@ -5817,20 +5763,19 @@ function setupPeerManagementView() {
         };
 
         if (SharedData && typeof SharedData.refreshBootstrap === 'function') {
-            SharedData.refreshBootstrap(false)
+            return SharedData.refreshBootstrap(false)
                 .then(runLoad)
                 .catch(handleError);
-            return;
         }
 
         try {
-            runLoad();
+            (await runLoad());
         } catch (error) {
             handleError(error);
         }
     }
 
-    function loadAssignmentDetails(programCode, options = {}) {
+    async function loadAssignmentDetails(programCode, options = {}) {
         const silent = !!(options && options.silent);
         const normalizedCode = normalizeProgramCode(programCode || selectedProgramCode || programSelect.value);
         if (!normalizedCode) {
@@ -5842,9 +5787,9 @@ function setupPeerManagementView() {
         }
 
         try {
-            const response = SharedData[getSupervisorPeerMethodName('details')]({
+            const response = (await SharedData[getSupervisorPeerMethodName('details')]({
                 programCode: normalizedCode
-            });
+            }));
             setSelectedProgram(normalizedCode);
             renderAssignmentDetails(response || {});
             if (!silent) {
@@ -5869,7 +5814,7 @@ function setupPeerManagementView() {
         professorCountInput.value = '5';
     }
 
-    createRoomBtn.addEventListener('click', function () {
+    createRoomBtn.addEventListener('click', async function () {
         const programCode = normalizeProgramCode(programSelect.value);
         const peerCount = parseInt(String(professorCountInput.value || '').trim(), 10);
         if (!programCode) {
@@ -5883,15 +5828,15 @@ function setupPeerManagementView() {
 
         createRoomBtn.disabled = true;
         try {
-            const response = SharedData[getSupervisorPeerMethodName('generate')]({
+            const response = (await SharedData[getSupervisorPeerMethodName('generate')]({
                 programCode,
                 peerCount
-            });
+            }));
             const summary = response && response.summary ? response.summary : null;
             const type = summary && summary.status === 'generated' ? 'success' : 'info';
             setMessage(String(summary && summary.statusMessage || 'Peer assignments generated.'), type);
             setSelectedProgram(programCode);
-            loadProgramSummaries({ silent: true, preferredProgramCode: programCode });
+            (await loadProgramSummaries({ silent: true, preferredProgramCode: programCode }));
         } catch (error) {
             setMessage(String(error && error.message || 'Failed to generate peer assignments.'), 'error');
         } finally {
@@ -5908,16 +5853,16 @@ function setupPeerManagementView() {
         setMessage('', 'info');
     });
 
-    viewAssignmentsBtn.addEventListener('click', function () {
+    viewAssignmentsBtn.addEventListener('click', async function () {
         const programCode = normalizeProgramCode(selectedProgramCode || programSelect.value);
         if (!programCode) {
             setMessage('Select a program first.', 'error');
             return;
         }
-        loadAssignmentDetails(programCode);
+        (await loadAssignmentDetails(programCode));
     });
 
-    programSelect.addEventListener('change', function () {
+    programSelect.addEventListener('change', async function () {
         const programCode = normalizeProgramCode(this.value);
         if (!programCode) {
             setSelectedProgram('');
@@ -5927,10 +5872,10 @@ function setupPeerManagementView() {
             return;
         }
         setSelectedProgram(programCode);
-        loadAssignmentDetails(programCode, { silent: true });
+        (await loadAssignmentDetails(programCode, { silent: true }));
     });
 
-    programsTable.addEventListener('click', function (event) {
+    programsTable.addEventListener('click', async function (event) {
         const target = event.target;
         if (!(target instanceof HTMLElement)) return;
         const viewBtn = target.closest('.peer-mgmt-program-view-btn');
@@ -5939,19 +5884,19 @@ function setupPeerManagementView() {
         const programCode = normalizeProgramCode(viewBtn.getAttribute('data-program-code'));
         if (!programCode) return;
         setSelectedProgram(programCode);
-        loadAssignmentDetails(programCode);
+        (await loadAssignmentDetails(programCode));
     });
 
-    deanPeerManagementRefreshHandler = function (options = {}) {
+    deanPeerManagementRefreshHandler = async function (options = {}) {
         renderPrograms();
-        loadProgramSummaries(options);
+        (await loadProgramSummaries(options));
     };
 
     renderPrograms();
     renderAssignmentDetails({
         emptyMessage: 'Select a program to view assignment details.'
     });
-    loadProgramSummaries();
+    (await loadProgramSummaries());
 }
 
 /**

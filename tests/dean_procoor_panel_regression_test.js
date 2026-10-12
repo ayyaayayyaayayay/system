@@ -1,3 +1,4 @@
+const { findSourceMarker } = require('./helpers/js-source');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -13,8 +14,8 @@ const deanHtml = read('html/daenpanel.html');
 const coordinatorHtml = read('html/procoorpanel.html');
 
 function sourceBetween(source, startMarker, endMarker) {
-    const start = source.indexOf(startMarker);
-    const end = source.indexOf(endMarker, start + startMarker.length);
+    const start = findSourceMarker(source, startMarker);
+    const end = findSourceMarker(source, endMarker, start + startMarker.length);
     assert(start >= 0 && end > start, `Unable to extract ${startMarker}.`);
     return source.slice(start, end);
 }

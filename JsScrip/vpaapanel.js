@@ -1093,8 +1093,8 @@ function refreshVpaaDashboardDataForSemester(semesterValue, sourceUsers) {
     return vpaaDashboardDataRefreshPromise;
 }
 
-function init() {
-    if (!checkAuthentication()) {
+async function init() {
+    if (!(await checkAuthentication())) {
         window.location.href = 'mainpage.html';
         return;
     }
@@ -3369,7 +3369,7 @@ function setupProfilePhotoUpload() {
         }
     });
 
-    input.addEventListener("change", function () {
+    input.addEventListener("change", async function () {
         const file = input.files && input.files[0];
         if (!file) return;
 
@@ -3393,11 +3393,11 @@ function setupProfilePhotoUpload() {
 
         if (typeof SharedData.uploadProfilePhoto !== "function") {
             const reader = new FileReader();
-            reader.onload = function () {
+            reader.onload = async function () {
                 preview.src = reader.result;
                 preview.classList.add("active");
                 placeholder.style.display = "none";
-                SharedData.setProfilePhoto('vpaa', reader.result);
+                (await SharedData.setProfilePhoto('vpaa', reader.result));
                 URL.revokeObjectURL(localPreviewUrl);
                 input.value = "";
             };
@@ -3415,7 +3415,7 @@ function setupProfilePhotoUpload() {
         try {
             uploadPromise = typeof SharedData.uploadProfilePhotoAsync === "function"
                 ? SharedData.uploadProfilePhotoAsync(file, { message: "Uploading profile photo..." })
-                : Promise.resolve(SharedData.uploadProfilePhoto(file));
+                : Promise.resolve((await SharedData.uploadProfilePhoto(file)));
         } catch (error) {
             handleUploadError(error);
             URL.revokeObjectURL(localPreviewUrl);
@@ -3526,13 +3526,13 @@ function setupChangeEmailForm() {
     const form = document.getElementById("changeEmailForm");
     if (!form) return;
 
-    form.addEventListener("submit", function (e) {
+    form.addEventListener("submit", async function (e) {
         e.preventDefault();
-        handleChangeEmail();
+        (await handleChangeEmail());
     });
 }
 
-function handleChangeEmail() {
+async function handleChangeEmail() {
     const form = document.getElementById("changeEmailForm");
     const currentEmail = document.getElementById("currentEmail").value.trim();
     const newEmail = document.getElementById("newEmail").value.trim();
@@ -3559,7 +3559,7 @@ function handleChangeEmail() {
     }
 
     try {
-        const result = SharedData.changeOwnEmail(currentEmail, newEmail);
+        const result = (await SharedData.changeOwnEmail(currentEmail, newEmail));
         const nextEmail = String(result && result.email || newEmail).trim();
 
         const profileEmail = document.getElementById("profileEmail");
@@ -3585,13 +3585,13 @@ function setupChangePasswordForm() {
     const form = document.getElementById("changePasswordForm");
     if (!form) return;
 
-    form.addEventListener("submit", function (e) {
+    form.addEventListener("submit", async function (e) {
         e.preventDefault();
-        handleChangePassword();
+        (await handleChangePassword());
     });
 }
 
-function handleChangePassword() {
+async function handleChangePassword() {
     const form = document.getElementById("changePasswordForm");
     const currentPassword = document.getElementById("currentPassword").value.trim();
     const newPassword = document.getElementById("newPassword").value.trim();
@@ -3613,7 +3613,7 @@ function handleChangePassword() {
     }
 
     try {
-        SharedData.changeOwnPassword(currentPassword, newPassword);
+        (await SharedData.changeOwnPassword(currentPassword, newPassword));
     } catch (error) {
         console.error("[VPAA] Failed to update password.", error);
         showFormMessage(form, error && error.message ? error.message : "Failed to update password.", "error");
@@ -4294,7 +4294,7 @@ function setupReportModalEvents() {
         }
     });
 
-    elements.reportModalBody.addEventListener("click", (event) => {
+    elements.reportModalBody.addEventListener("click", async (event) => {
         const fileBtn = event.target.closest("[data-vpaa-action='faculty-files']");
         if (fileBtn) {
             const professorId = String(fileBtn.getAttribute("data-professor-id") || "").trim();
@@ -4307,7 +4307,7 @@ function setupReportModalEvents() {
         const profId = String(analyticsBtn.getAttribute("data-prof-id") || "");
         const scope = analyticsBtn.closest(".analytics-view");
         const outputEl = scope ? scope.querySelector("[data-ai-insight-output]") : null;
-        runAiAnalyticsForProfessor(profId, outputEl, analyticsBtn);
+        await runAiAnalyticsForProfessor(profId, outputEl, analyticsBtn);
     });
 
     elements.reportModalBody.addEventListener("change", (event) => {
@@ -5355,8 +5355,8 @@ function openVpaaProfessorIferFlow(professorId) {
         selectedLoadType: "main",
         showLoadType: true,
         confirmLabel: "Download",
-        onConfirm: function (semesterId, loadType) {
-            openVpaaIferTemplateDownload(professor, semesterId, loadType);
+        onConfirm: async function (semesterId, loadType) {
+            await openVpaaIferTemplateDownload(professor, semesterId, loadType);
         }
     });
 }
@@ -5382,8 +5382,8 @@ function openVpaaProfessorSasrFlow(professorId) {
         selectedLoadType: "main",
         showLoadType: true,
         confirmLabel: "Download",
-        onConfirm: function (semesterId, loadType) {
-            openVpaaSasrTemplateDownload(professor, semesterId, loadType);
+        onConfirm: async function (semesterId, loadType) {
+            await openVpaaSasrTemplateDownload(professor, semesterId, loadType);
         }
     });
 }
@@ -5415,7 +5415,7 @@ function openVpaaProfessorAcknowledgementFlow(professorId) {
             return buildVpaaAcknowledgementSemesterChoices(professor, loadType);
         },
         confirmLabel: "Preview PDF",
-        onConfirm: function (semesterId, loadType) {
+        onConfirm: async function (semesterId, loadType) {
             const selectedLoadType = normalizeVpaaReportLoadType(loadType);
             const selectedOptions = buildVpaaAcknowledgementSemesterChoices(professor, selectedLoadType);
             const selected = selectedOptions.find(function (option) {
@@ -5425,7 +5425,7 @@ function openVpaaProfessorAcknowledgementFlow(professorId) {
                 alert(`Stored ${getVpaaReportLoadTypeLabel(selectedLoadType).toLowerCase()} acknowledgement PDF is unavailable for this semester.`);
                 return;
             }
-            openVpaaStoredFacultyPaperPreview(professor, selected.paper);
+            await openVpaaStoredFacultyPaperPreview(professor, selected.paper);
         }
     });
 }
@@ -6079,7 +6079,7 @@ async function runAiAnalyticsForProfessor(profId, outputEl, btnEl) {
     const canUseOverlay = loadingOverlay
         && typeof loadingOverlay.show === 'function'
         && typeof loadingOverlay.hide === 'function';
-    if (canUseOverlay) loadingOverlay.show('Analyzing all eligible ratings and comments...');
+    const releaseLoading = canUseOverlay ? loadingOverlay.show('Analyzing all eligible ratings and comments...') : null;
 
     try {
         // The server constructs the complete dataset in one request.
@@ -6103,7 +6103,10 @@ async function runAiAnalyticsForProfessor(profId, outputEl, btnEl) {
         console.error('[VPAA] AI analytics request failed.', error);
         renderAiInsightState(outputEl, 'error', error.message || 'Unable to load analytics. Please try again.');
     } finally {
-        if (canUseOverlay) loadingOverlay.hide();
+        if (canUseOverlay) {
+            if (typeof releaseLoading === 'function') releaseLoading();
+            else loadingOverlay.hide();
+        }
         if (btnEl) {
             btnEl.disabled = false;
             btnEl.textContent = originalText || 'AI Analytics';
@@ -6154,8 +6157,8 @@ function getInitials(name) {
  * Check if user is authenticated and is a VPAA
  * @returns {boolean} - True if user is authenticated as VPAA
  */
-function checkAuthentication() {
-    const session = SharedData.requireSession('vpaa');
+async function checkAuthentication() {
+    const session = (await SharedData.requireSession('vpaa'));
     if (!session) {
         return false;
     }
@@ -6167,4 +6170,6 @@ function checkAuthentication() {
     }
 }
 
-init();
+AppLoadingOverlay.run('Loading your workspace...', init).catch(error => {
+    console.error('[VPAAPanel] Failed to initialize workspace.', error);
+});

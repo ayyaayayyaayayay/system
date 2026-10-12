@@ -8,8 +8,9 @@
     <link rel="icon" type="image/png" sizes="32x32" href="../design/favicon-32x32.png">
     <link rel="apple-touch-icon" href="../design/apple-touch-icon.png">
     <title>Professor Dashboard - National Aviation Academy of the Philippines</title>
-    <link rel="stylesheet" href="../css/panel-theme.css?v=20260907a">
-    <link rel="stylesheet" href="../css/profesorpanel.css?v=20261008trend">
+    <link rel="stylesheet" href="../css/panel-theme.css?v=20261009loading1&loading=20261010b">
+    <link rel="stylesheet" href="../css/profesorpanel.css?v=20261011feedback2">
+    <link rel="stylesheet" href="../css/feedback-intelligence.css?v=20261011feedback2">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
 </head>
@@ -402,51 +403,49 @@
                         <div class="section-header">
                             <div class="section-title">
                                 <h2>Faculty Response Rate & Counts</h2>
-                                <p>Evaluations are grouped by subject. Section Count shows how many sections are handled per subject.</p>
+                                <p>Student Evaluation of Teaching (SET) per course and section. Ratings use a 100-point scale.</p>
                                 <p class="semester-display">Showing: <span id="selectedEvalType">Student
                                         Evaluation</span> — <span id="selectedSemester">Selected semester</span></p>
                             </div>
                             <div class="filters-row">
-                                <div class="eval-type-filter">
-                                    <label for="evaluationTypeFilter">Evaluation</label>
-                                    <select id="evaluationTypeFilter">
-                                        <option value="student" selected>Student Evaluation</option>
-                                        <option value="professor">Professor Evaluation</option>
-                                        <option value="supervisor">Supervisor Evaluation</option>
-                                    </select>
-                                </div>
                                 <div class="semester-filter">
                                     <label for="semesterFilter">Semester</label>
                                     <select id="semesterFilter"></select>
                                 </div>
                             </div>
                         </div>
+                        <div class="prof-report-status" id="professorReportsStatus" aria-live="polite" hidden>
+                            <span id="professorReportsStatusText"></span>
+                            <button type="button" class="btn-cancel" id="professorReportsRetry" hidden>Retry</button>
+                        </div>
 
                         <div class="table-container faculty-breakdown-table-wrap reports-breakdown-table-wrap">
-                            <table class="faculty-breakdown-table mobile-card-table mobile-card-table--reports" id="facultyBreakdownTable">
+                            <table class="faculty-breakdown-table summary-table faculty-set-table mobile-card-table mobile-card-table--reports" id="facultyBreakdownTable">
                                 <thead>
                                     <tr>
-                                        <th>Subject</th>
-                                        <th>Section Count</th>
-                                        <th>Evaluations Received</th>
-                                        <th>Response Rate</th>
-                                        <th>Avg Rating</th>
+                                        <th scope="col">Seq</th>
+                                        <th scope="col">(1)<br>Course Code</th>
+                                        <th scope="col">(2)<br>Year/Section</th>
+                                        <th scope="col">(3)<br>No. of Students</th>
+                                        <th scope="col">(4)<br>Average SET Rating</th>
+                                        <th scope="col">(3 × 4)<br>Weighted SET Score</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <tr>
-                                        <td colspan="5">No evaluation data available.</td>
+                                        <td colspan="6">No evaluation data available.</td>
                                     </tr>
                                 </tbody>
+                                <tfoot></tfoot>
                             </table>
                         </div>
+                        <p class="prof-set-calculation-note" id="profSetCalculationNote" aria-live="polite" hidden></p>
 
                         <div class="faculty-comments-panel" id="profSubjectCommentsPanel" aria-live="polite">
                             <div class="faculty-comments-header">
                                 <div>
                                     <h3 id="profSubjectCommentsTitle">Anonymous Feedback</h3>
-                                    <p class="faculty-comments-meta" id="profSubjectCommentsMeta">Press View to load
-                                        all anonymized comments for the selected filters.</p>
+                                    <p class="faculty-comments-meta" id="profSubjectCommentsMeta">View anonymous comments or generate insights for the selected semester.</p>
                                 </div>
                                 <div class="faculty-comments-actions">
                                     <button type="button" class="btn-submit faculty-comments-ai-btn"
@@ -458,7 +457,7 @@
                                 </div>
                             </div>
                             <div class="faculty-comments-ai-summary" id="profSubjectCommentsAiSummary" aria-live="polite">
-                                Click <strong>AI Summarize</strong> after loading comments to generate a student-feedback summary.
+                                Choose <strong>AI Summarize</strong> for insights or <strong>View</strong> to read anonymous comments.
                             </div>
                             <ul class="faculty-comments-list" id="profSubjectCommentsList">
                                 <li class="faculty-comments-empty">Press View to load feedback.</li>
@@ -466,12 +465,37 @@
                         </div>
                     </section>
 
+                    <section class="analytics-section peer-supervisor-analytics" id="peerSupervisorAnalytics" aria-labelledby="peerSupervisorAnalyticsTitle">
+                        <div class="section-header">
+                            <div class="section-title">
+                                <h2 id="peerSupervisorAnalyticsTitle">Peer &amp; Supervisor Analytics</h2>
+                                <p>Compare peer-to-peer and supervisor evaluation results for <span id="peerSupervisorSemester">Selected semester</span>. Average scores use the 1–5 scale.</p>
+                            </div>
+                        </div>
+                        <div class="table-container peer-supervisor-summary-wrap">
+                            <table class="summary-table mobile-card-table mobile-card-table--peer-supervisor">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Evaluation</th>
+                                        <th scope="col">Evaluations Received</th>
+                                        <th scope="col">Average Rating (1–5)</th>
+                                        <th scope="col">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="peerSupervisorSummaryBody">
+                                    <tr class="mobile-card-empty-row"><td colspan="4">No evaluation data available.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                </section>
+
                     <!-- Faculty Summary Section -->
                     <section class="faculty-summary-section">
                         <div class="section-header">
                             <div class="section-title">
                                 <h2>Faculty Dashboard: Response Rate & Counts</h2>
-                                <p>Evaluations are grouped by subject. Section Count shows how many sections are handled per subject.</p>
+                                <p>Summary ratings and evaluation counts for the selected filters.</p>
                             </div>
                         </div>
 
@@ -565,53 +589,9 @@
                         </div>
                     </div>
 
-                    <!-- Peer Evaluation Charts -->
-                    <div class="charts-section">
-                        <div class="chart-card">
-                            <div class="chart-header">
-                                <h3>Peer Evaluation - Average Scores</h3>
-                                <p>Professor-to-professor evaluation averages</p>
-                            </div>
-                            <div class="chart-container graph-chart-container">
-                                <canvas id="peerBarChart"></canvas>
-                            </div>
-                        </div>
+                    </section>
 
-                        <div class="chart-card">
-                            <div class="chart-header">
-                                <h3>Peer Evaluation - Rating Distribution</h3>
-                                <p>Distribution of peer ratings</p>
-                            </div>
-                            <div class="chart-container rating-chart-container">
-                                <canvas id="peerPieChart"></canvas>
-                            </div>
-                        </div>
-                    </div>
 
-                    <!-- Supervisor Evaluation Charts -->
-                    <div class="charts-section">
-                        <div class="chart-card">
-                            <div class="chart-header">
-                                <h3>Supervisor Evaluation - Average Scores</h3>
-                                <p>Supervisor-assessed performance across criteria</p>
-                            </div>
-                            <div class="chart-container graph-chart-container">
-                                <canvas id="supervisorBarChart"></canvas>
-                            </div>
-                        </div>
-
-                        <div class="chart-card">
-                            <div class="chart-header">
-                                <h3>Supervisor Evaluation - Rating Distribution</h3>
-                                <p>Breakdown of supervisor ratings</p>
-                            </div>
-                            <div class="chart-container rating-chart-container">
-                                <canvas id="supervisorPieChart"></canvas>
-                            </div>
-                        </div>
-                    </div>
-
-                </section>
 
                 </div>
             </div>
@@ -978,12 +958,12 @@
         </main>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <script src="../JsScrip/db-data.js?v=20261008reportgate&idle=20261007b"></script>
+    <script src="../JsScrip/db-data.js?v=20261011feedback2&loading=20261010b&idle=20261007b"></script>
     <script src="../JsScrip/set-calculation.js?v=20261006cmo"></script>
     <script src="../JsScrip/system-report.js?v=20260907a"></script>
     <script src="../JsScrip/panel-branding.js?v=20260802b"></script>
     <script src="../JsScrip/evaluation-text-limits.js?v=20261007words400"></script>
-    <script src="../JsScrip/profesorpanel.js?v=20261008excessrating&flow=20261007"></script>
+    <script src="../JsScrip/profesorpanel.js?v=20261011feedback2&loading=20261010b"></script>
 </body>
 
 </html>

@@ -1,11 +1,13 @@
+const { findSourceMarker } = require('./helpers/js-source');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
+async function main() {
 for (const panel of ['adminpanel', 'hrpanel']) {
     const source = fs.readFileSync(`${__dirname}/../JsScrip/${panel}.js`, 'utf8');
-    const start = source.indexOf('function setupEvalPeriods() {');
-    const end = source.indexOf('function setupSemesterSettings()', start);
+    const start = findSourceMarker(source, 'function setupEvalPeriods() {');
+    const end = findSourceMarker(source, 'function setupSemesterSettings()', start);
     const elements = {};
     const types = ['student-professor', 'professor-professor', 'supervisor-professor'];
     let saves = 0;
@@ -45,20 +47,20 @@ for (const panel of ['adminpanel', 'hrpanel']) {
         endInput.change();
         assert.match(endInput.message, /End date cannot be earlier/);
         assert.equal(endInput.reports, 1);
-        save();
+        await save();
         assert.equal(saves, before, `${panel}: reversed ${type} must not save`);
         assert.equal(alerts, saves, 'Invalid ranges must not announce success');
         endInput.value = '2026-01-10';
         endInput.input();
-        save();
+        await save();
         assert.equal(saves, before + 1, 'Same-day periods are allowed');
         startInput.value = '2026-01-11';
-        save();
+        await save();
         assert.equal(saves, before + 1, 'Save revalidates even without an input event');
         startInput.value = '2025-12-31';
         startInput.input();
         assert.equal(endInput.message, '');
-        save();
+        await save();
         assert.equal(saves, before + 2, 'Corrected cross-year periods are allowed');
         endInput.value = '';
         endInput.input();
@@ -66,3 +68,6 @@ for (const panel of ['adminpanel', 'hrpanel']) {
     }
 }
 console.log('Evaluation period validation UI tests passed.');
+
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });

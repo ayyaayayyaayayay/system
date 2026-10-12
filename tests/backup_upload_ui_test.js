@@ -1,3 +1,4 @@
+const { findSourceMarker } = require('./helpers/js-source');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -36,8 +37,8 @@ const context = {
         return { success: true };
     },
 };
-const start = source.indexOf('function setupBackupUploadUI() {');
-const end = source.indexOf('function normalizeBackupBadgeStatus(', start);
+const start = findSourceMarker(source, 'function setupBackupUploadUI() {');
+const end = findSourceMarker(source, 'function normalizeBackupBadgeStatus(', start);
 vm.runInNewContext(source.slice(start, end), context);
 context.setupBackupUploadUI();
 const file = elements['backup-upload-file'];
@@ -86,8 +87,8 @@ const confirm = () => { ack.checked = true; ack.change(); confirmation.value = '
     const transportCalls = [];
     const transport = { FormData: TestFormData, SharedData: { getSession: () => ({ csrfToken: 'csrf' }) },
         async fetch(url, options) { transportCalls.push({ url, options }); return { ok: true, text: async () => '{"success":true}' }; } };
-    const transportStart = source.indexOf('function getBackupSession()');
-    const transportEnd = source.indexOf('function setupBackupUploadUI()', transportStart);
+    const transportStart = findSourceMarker(source, 'function getBackupSession()');
+    const transportEnd = findSourceMarker(source, 'function setupBackupUploadUI()', transportStart);
     vm.runInNewContext(source.slice(transportStart, transportEnd), transport);
     await transport.requestBackupUploadApi('upload', new TestFormData());
     assert.match(transportCalls[0].url, /backup_upload_api\.php\?action=upload/);

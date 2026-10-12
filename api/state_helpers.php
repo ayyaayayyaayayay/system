@@ -4480,7 +4480,7 @@ function buildEvaluationsSnapshotFromTables(PDO $pdo, $evaluationId = null, arra
             'courseOfferingId' => $courseOfferingToken,
             'ratings' => [],
             'qualitative' => [],
-            'comments' => trim((string) ($row['general_comments'] ?? '')),
+            'comments' => (string) ($row['general_comments'] ?? ''),
             'submittedAt' => $submittedAt,
             'status' => strtolower(trim((string) ($row['status'] ?? 'submitted'))),
             'campus' => trim((string) ($row['campus_slug'] ?? '')),
@@ -4571,8 +4571,8 @@ function buildEvaluationsSnapshotFromTables(PDO $pdo, $evaluationId = null, arra
             continue;
         }
 
-        $textValue = trim((string) ($row['text_value'] ?? ''));
-        if ($textValue !== '') {
+        $textValue = (string) ($row['text_value'] ?? '');
+        if (trim($textValue) !== '') {
             $snapshotByEvaluationId[$evaluationId]['qualitative'][$questionId] = $textValue;
             continue;
         }

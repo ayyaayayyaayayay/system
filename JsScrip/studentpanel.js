@@ -1,9 +1,9 @@
 // Student Panel JavaScript - Dashboard Functionality
 
 // Wait for DOM to be fully loaded
-document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', async function () {
     // Check authentication
-    if (!checkAuthentication()) {
+    if (!(await checkAuthentication())) {
         redirectToLogin();
         return;
     }
@@ -52,8 +52,8 @@ let studentLastHeaderScrollY = 0;
  * Check if user is authenticated
  * @returns {boolean} - True if user is authenticated
  */
-function checkAuthentication() {
-    const session = SharedData.requireSession('student');
+async function checkAuthentication() {
+    const session = (await SharedData.requireSession('student'));
     if (!session) {
         return false;
     }
@@ -465,7 +465,7 @@ function setupStudentDataPrivacyGate() {
     }
 
     if (continueBtn) {
-        continueBtn.addEventListener('click', function () {
+        continueBtn.addEventListener('click', async function () {
             if (!checkbox || !checkbox.checked) {
                 setStudentPrivacyGateMessage('Please check the agreement box before continuing.', 'error');
                 return;
@@ -481,7 +481,7 @@ function setupStudentDataPrivacyGate() {
                 if (!SharedData.recordStudentDataPrivacyConsent) {
                     throw new Error('Privacy consent saving is not available.');
                 }
-                SharedData.recordStudentDataPrivacyConsent({ semesterId, questionnaireType: 'student-to-professor' });
+                (await SharedData.recordStudentDataPrivacyConsent({ semesterId, questionnaireType: 'student-to-professor' }));
                 setStudentPrivacyGateMessage('Agreement recorded.', 'success');
                 updateStudentDataPrivacyGateUi({ keepMessage: true });
                 if (typeof loadDynamicQuestionnaire === 'function') {
@@ -1412,7 +1412,7 @@ function openStudentProofModal(options) {
     modal.setAttribute('aria-hidden', 'false');
 }
 
-function handleStudentProofFormSubmit(event) {
+async function handleStudentProofFormSubmit(event) {
     event.preventDefault();
 
     const reasonEl = document.getElementById('studentProofReason');
@@ -1453,7 +1453,7 @@ function handleStudentProofFormSubmit(event) {
             throw new Error('Proof submission service is unavailable.');
         }
 
-        const response = SharedData.submitStudentEvaluationProof({
+        const response = (await SharedData.submitStudentEvaluationProof({
             studentUserId: completion.studentUserId,
             studentNumber: completion.studentNumber,
             studentName: completion.studentName,
@@ -1462,7 +1462,7 @@ function handleStudentProofFormSubmit(event) {
             semesterId: completion.semesterId,
             reason: reason,
             proofDriveLink: proofDriveLink,
-        });
+        }));
 
         if (!response || response.success !== true) {
             throw new Error((response && response.error) || 'Failed to submit proof request.');
@@ -2756,8 +2756,8 @@ function persistEvaluationDraft(options) {
         evaluationDraftState.queuedWhilePending = false;
         evaluationDraftState.queuedShowToast = false;
         if (shouldSaveQueued && !evaluationDraftState.clearRequested) {
-            setTimeout(function () {
-                persistEvaluationDraft({ silent: !showQueuedToast, source: 'queued' });
+            setTimeout(async function () {
+                await persistEvaluationDraft({ silent: !showQueuedToast, source: 'queued' });
             }, 0);
         }
     });
@@ -2785,9 +2785,9 @@ function queueDraftAutosave() {
     evaluationDraftState.localVersion += 1;
     evaluationDraftState.lastDraftKey = context.draftKey;
     updateDraftStatusIndicator({ state: 'pending' });
-    evaluationDraftState.autosaveTimer = setTimeout(() => {
+    evaluationDraftState.autosaveTimer = setTimeout(async () => {
         evaluationDraftState.autosaveTimer = null;
-        persistEvaluationDraft({ silent: true, source: 'autosave' });
+        await persistEvaluationDraft({ silent: true, source: 'autosave' });
     }, 900);
 }
 
@@ -2881,7 +2881,8 @@ function restoreDraftForCurrentTarget() {
 }
 
 function handleManualDraftSave() {
-    persistEvaluationDraft({ silent: false, source: 'manual' });
+    const operation = function () { return persistEvaluationDraft({ silent: false, source: 'manual' }); };
+    return window.AppLoadingOverlay.run('Saving evaluation draft...', operation);
 }
 
 function setupDraftSaveButton() {
@@ -3245,16 +3246,16 @@ function setupSectionFlow() {
     const backBtn = document.getElementById('student-prev-btn');
     const nextBtn = document.getElementById('student-next-btn');
     if (backBtn) {
-        backBtn.onclick = () => {
-            persistEvaluationDraft({ silent: true, source: 'step-nav' });
+        backBtn.onclick = async () => {
+            await persistEvaluationDraft({ silent: true, source: 'step-nav' });
             goToSectionStep(evaluationSectionFlow.activeIndex - 1);
         };
     }
 
     if (nextBtn) {
-        nextBtn.onclick = () => {
+        nextBtn.onclick = async () => {
             if (!validateCurrentStep()) return;
-            persistEvaluationDraft({ silent: true, source: 'step-nav' });
+            await persistEvaluationDraft({ silent: true, source: 'step-nav' });
             goToSectionStep(evaluationSectionFlow.activeIndex + 1);
         };
     }
@@ -3394,12 +3395,12 @@ function setupChangePasswordForm() {
     const form = document.getElementById('changePasswordForm');
     if (!form) return;
 
-    form.addEventListener('submit', function (e) {
+    form.addEventListener('submit', async function (e) {
         e.preventDefault();
-        handleChangePassword().catch(function (error) {
+        (await ((handleChangePassword())).catch(function (error) {
             console.error('[StudentPanel] Unexpected password update failure.', error);
             setChangePasswordFeedback('Failed to update password. Please try again.', 'error');
-        });
+        }));
     });
     form.addEventListener('reset', function () {
         setChangePasswordFeedback('', '');
@@ -3476,7 +3477,7 @@ async function handleChangePassword() {
     try {
         const result = SharedData.changeOwnPasswordAsync
             ? await SharedData.changeOwnPasswordAsync(currentPassword, newPassword)
-            : SharedData.changeOwnPassword(currentPassword, newPassword);
+            : (await SharedData.changeOwnPassword(currentPassword, newPassword));
         if (!result || result.success !== true || result.updated !== true) {
             throw new Error('The password was not updated. Please try again.');
         }
@@ -3998,9 +3999,9 @@ function setupCancelButton() {
     const cancelBtn = document.getElementById('cancelBtn');
     if (!cancelBtn) return;
 
-    cancelBtn.addEventListener('click', function () {
+    cancelBtn.addEventListener('click', async function () {
         if (confirm('Are you sure you want to cancel? All unsaved changes will be lost.')) {
-            clearCurrentEvaluationDraft({ silent: true });
+            await clearCurrentEvaluationDraft({ silent: true });
             const form = document.getElementById('evaluationForm');
             if (form) {
                 form.reset();

@@ -24,7 +24,10 @@
         el('cred-review-reject').disabled = !selected.size;
         el('cred-review-selection').textContent = selected.size + ' selected';
     }
-    async function refresh() {
+    async function refresh(options = {}) {
+        if (!options.background && !options.loading) {
+            return window.AppLoadingOverlay.run('Loading credibility decisions...', () => refresh({ loading: true }));
+        }
         const sequence = ++requestNumber;
         selected.clear();
         el('cred-review-list').innerHTML = '';
@@ -53,9 +56,12 @@
             el('cred-review-prev').disabled = offset === 0;
             el('cred-review-next').disabled = offset + response.items.length >= response.filteredTotal;
             updateSelection();
-        } catch (error) { el('cred-review-feedback').textContent = error.message || 'Unable to load credibility review.'; }
+        } catch (error) {
+            if (sequence === requestNumber) el('cred-review-feedback').textContent = error.message || 'Unable to load credibility review.';
+        }
     }
-    async function review(id) {
+    async function review(id, loading = false) {
+        if (!loading) return window.AppLoadingOverlay.run('Loading evaluation details...', () => review(id, true));
         el('cred-review-feedback').textContent = 'Loading evaluation details…';
         try {
             const result = await SharedData.getCredibilityReview(id);
@@ -104,7 +110,9 @@
         button.textContent = `${accept ? 'Accept' : 'Reject'} ${ids.length} Evaluations`;
         button.disabled = false;
         button.onclick = async () => {
+            if (button.disabled) return;
             button.disabled = true;
+            const release = window.AppLoadingOverlay.show('Saving credibility decision...');
             try {
                 const result = await SharedData.reviewCredibilityEvaluations(ids, decision, note);
                 confirmDialog.close(); el('cred-review-dialog').close();
@@ -116,7 +124,7 @@
                 confirmDialog.close(); el('cred-review-dialog').close();
                 await refresh();
                 el('cred-review-feedback').textContent = error.message || 'Review failed. No decision was changed.';
-            } finally { button.disabled = false; }
+            } finally { release(); button.disabled = false; }
         };
         confirmDialog.showModal();
     }
@@ -127,7 +135,7 @@
             if (id) { event.target.checked ? selected.add(id) : selected.delete(id); updateSelection(); }
         });
         el('cred-review-list').addEventListener('click', event => {
-            const button = event.target.closest('[data-review]'); if (button) review(button.dataset.review);
+            const button = event.target.closest('[data-review]'); if (button) return review(button.dataset.review);
         });
         el('cred-review-check-all').addEventListener('change', event => {
             document.querySelectorAll('#cred-review-list input[data-select]').forEach(box => {
@@ -140,11 +148,11 @@
         el('cred-review-close').onclick = () => el('cred-review-dialog').close();
         el('cred-review-confirm-cancel').onclick = () => el('cred-review-confirm').close();
         el('cred-review-confirm-close').onclick = () => el('cred-review-confirm').close();
-        el('cred-review-prev').onclick = () => { offset = Math.max(0, offset - 50); refresh(); };
-        el('cred-review-next').onclick = () => { offset += 50; refresh(); };
-        el('cred-review-refresh').onclick = () => { offset = 0; refresh(); };
-        ['status','type','semester'].forEach(key => el('cred-review-' + key).addEventListener('change', () => { offset = 0; refresh(); }));
-        el('cred-review-search').addEventListener('keydown', event => { if (event.key === 'Enter') { offset = 0; refresh(); } });
+        el('cred-review-prev').onclick = () => { offset = Math.max(0, offset - 50); return refresh(); };
+        el('cred-review-next').onclick = () => { offset += 50; return refresh(); };
+        el('cred-review-refresh').onclick = () => { offset = 0; return refresh(); };
+        ['status','type','semester'].forEach(key => el('cred-review-' + key).addEventListener('change', () => { offset = 0; return refresh(); }));
+        el('cred-review-search').addEventListener('keydown', event => { if (event.key === 'Enter') { offset = 0; return refresh(); } });
         const view = el('ai-insights-view');
         const onVisible = () => {
             if (view.style.display === 'none') return;
@@ -159,6 +167,6 @@
         };
         new MutationObserver(onVisible).observe(view, { attributes: true, attributeFilter: ['style'] });
         onVisible();
-        setInterval(() => { if (view.style.display !== 'none' && !selected.size && !el('cred-review-dialog').open && !el('cred-review-confirm').open) refresh(); }, 60000);
+        setInterval(() => { if (view.style.display !== 'none' && !selected.size && !el('cred-review-dialog').open && !el('cred-review-confirm').open) refresh({ background: true }); }, 60000);
     });
 })();

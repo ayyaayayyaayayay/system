@@ -1124,15 +1124,15 @@ function buildBiasDetectionCommentItems(array $evaluations, $semesterId = '', $l
         }
 
         $commentTexts = [];
-        $generalComment = normalizeBiasDetectionText($evaluation['comments'] ?? '');
-        if ($generalComment !== '') {
+        $generalComment = (string) ($evaluation['comments'] ?? '');
+        if (trim($generalComment) !== '') {
             $commentTexts[] = ['text' => $generalComment, 'field' => 'comments'];
         }
 
         $qualitative = is_array($evaluation['qualitative'] ?? null) ? $evaluation['qualitative'] : [];
         foreach ($qualitative as $questionId => $value) {
-            $text = normalizeBiasDetectionText($value);
-            if ($text === '') {
+            $text = (string) $value;
+            if (trim($text) === '') {
                 continue;
             }
             $commentTexts[] = [
@@ -1173,31 +1173,15 @@ function buildBiasDetectionCommentItems(array $evaluations, $semesterId = '', $l
 }
 
 function buildGeminiBiasDetectionPrompt(array $batch) {
-    $batch = filterAiCommentItems($batch)['items'];
     $input = [];
-    foreach ($batch as $item) {
-        $input[] = [
-            'id' => (string) ($item['id'] ?? ''),
-            'comment' => (string) ($item['comment'] ?? ''),
-        ];
+    foreach (filterAiCommentItems($batch)['items'] as $item) {
+        $input[] = ['id'=>(string)($item['id'] ?? ''), 'comment'=>(string)($item['comment'] ?? '')];
     }
-
-    return "You are a strict feedback moderation classifier.\n"
-        . "Classify each feedback comment into exactly one label: Constructive, Neutral, or Biased.\n"
-        . "Use the strictest defensible label.\n"
-        . "Rules:\n"
-        . "- Constructive: specific teaching-related feedback stated respectfully AND it must include a clear improvement direction, request, or suggestion such as should, needs to, could, please, more examples, clearer instructions, better pacing, or provide guidance.\n"
-        . "- Neutral: very short, vague, or factual feedback without a clear improvement signal and without hostility.\n"
-        . "- Biased: insults, profanity, ridicule, contempt, demeaning tone, personal attacks, blanket accusations, mocking language, or non-constructive attacks.\n"
-        . "- Do NOT label a comment Constructive just because it mentions real classroom problems.\n"
-        . "- If a comment only complains, blames, or accuses without an explicit improvement suggestion, label it Biased when the tone is strong, absolute, or emotionally loaded.\n"
-        . "- If a comment mixes a real classroom issue with insulting or hostile wording, label it Biased.\n"
-        . "- Comments accusing a professor of relying too much on ChatGPT, not teaching, making students report or teach themselves, lacking guidance, or giving unclear instruction should usually be Biased unless rewritten as calm suggestion-focused feedback.\n"
-        . "- Comments like \"this professor sucks\" or \"doesn't teach anything\" are Biased, not Neutral.\n"
-        . "Return JSON only with this shape:\n"
-        . "{ \"items\": [ { \"id\": \"...\", \"label\": \"Constructive|Neutral|Biased\", \"reason\": \"short reason\" } ] }\n"
-        . "Input:\n"
-        . json_encode($input, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+    return buildFeedbackClassificationInstructions()
+        . "\nReturn valid JSON only, without Markdown or extra explanations.\n"
+        . "Every input ID must appear exactly once. Do not return unknown IDs.\n"
+        . '{ "items": [ { "id": "...", "label": "Constructive|Positive|Neutral|Critical|Biased", "reason": "Brief explanation in English" } ] }'
+        . "\nInput:\n" . json_encode($input, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
 }
 
 function extractJsonObjectFromGeminiText($value) {
@@ -1266,7 +1250,7 @@ function buildOpenAiBiasDetectionSchema(): array
                     'type' => 'object',
                     'properties' => [
                         'id' => ['type' => 'string'],
-                        'label' => ['type' => 'string', 'enum' => ['Constructive', 'Neutral', 'Biased']],
+                        'label' => ['type' => 'string', 'enum' => ['Constructive', 'Positive', 'Neutral', 'Critical', 'Biased']],
                         'reason' => ['type' => 'string'],
                     ],
                     'required' => ['id', 'label', 'reason'],
@@ -1567,6 +1551,8 @@ function classifyBiasCommentsWithGeminiBatch(array $batch, $apiKey, $model, $tim
     $batch = $filtered['items'];
     if (!$batch) return ['items'=>[], 'status'=>0, 'error'=>'', 'model'=>(string)$model,
         'excludedRepetitiveComments'=>$filtered['excludedCount']];
+    $fallback = [];
+    foreach ($batch as $item) $fallback[(string)$item['id']] = classifyBiasCommentByRules($item['comment'] ?? '');
     $request = requestGeminiGenerateContent(
         buildGeminiBiasDetectionPrompt($batch),
         $apiKey,
@@ -1578,7 +1564,7 @@ function classifyBiasCommentsWithGeminiBatch(array $batch, $apiKey, $model, $tim
 
     if (($request['success'] ?? false) !== true) {
         return [
-            'items' => [],
+            'items' => $fallback,
             'status' => (int) ($request['status'] ?? 0),
             'error' => normalizeBiasDetectionText($request['error'] ?? 'OpenAI request failed.'),
             'model' => (string) ($request['model'] ?? ''),
@@ -1588,7 +1574,7 @@ function classifyBiasCommentsWithGeminiBatch(array $batch, $apiKey, $model, $tim
     $candidateText = trim((string) ($request['raw'] ?? ''));
     if ($candidateText === '') {
         return [
-            'items' => [],
+            'items' => $fallback,
             'status' => (int) ($request['status'] ?? 0),
             'error' => 'OpenAI returned an empty bias-classification response.',
             'model' => (string) ($request['model'] ?? ''),
@@ -1598,7 +1584,7 @@ function classifyBiasCommentsWithGeminiBatch(array $batch, $apiKey, $model, $tim
     $parsed = extractJsonObjectFromGeminiText($candidateText);
     if (!is_array($parsed)) {
         return [
-            'items' => [],
+            'items' => $fallback,
             'status' => (int) ($request['status'] ?? 0),
             'error' => 'OpenAI returned bias output that could not be parsed as JSON.',
             'model' => (string) ($request['model'] ?? ''),
@@ -1608,42 +1594,35 @@ function classifyBiasCommentsWithGeminiBatch(array $batch, $apiKey, $model, $tim
     $rows = is_array($parsed['items'] ?? null) ? $parsed['items'] : [];
     if (count($rows) === 0) {
         return [
-            'items' => [],
+            'items' => $fallback,
             'status' => (int) ($request['status'] ?? 0),
             'error' => 'OpenAI returned no bias-classification items.',
             'model' => (string) ($request['model'] ?? ''),
         ];
     }
 
-    $byId = [];
+    $byId = $fallback;
+    $frequencies = [];
     foreach ($rows as $row) {
-        if (!is_array($row)) {
-            continue;
-        }
-        $id = trim((string) ($row['id'] ?? ''));
-        if ($id === '') {
-            continue;
-        }
-        $byId[$id] = [
-            'label' => normalizeBiasLabel($row['label'] ?? ''),
-            'reason' => normalizeBiasDetectionText($row['reason'] ?? 'Model-generated classification.'),
-            'source' => 'openai',
-        ];
+        if (!is_array($row) || !is_string($row['id'] ?? null)) continue;
+        $id = $row['id'];
+        if (array_key_exists($id, $fallback)) $frequencies[$id] = ($frequencies[$id] ?? 0) + 1;
     }
-
-    if (count($byId) === 0) {
-        return [
-            'items' => [],
-            'status' => (int) ($request['status'] ?? 0),
-            'error' => 'OpenAI returned bias items without valid identifiers.',
-            'model' => (string) ($request['model'] ?? ''),
-        ];
+    $valid = 0;
+    foreach ($rows as $row) {
+        if (!is_array($row) || !is_string($row['id'] ?? null)) continue;
+        $id = $row['id'];
+        if (!array_key_exists($id, $fallback) || ($frequencies[$id] ?? 0) !== 1
+            || !in_array($row['label'] ?? null, getFeedbackClassificationPolicy()['labels'], true)
+            || !is_string($row['reason'] ?? null) || trim($row['reason']) === '') continue;
+        $byId[$id] = ['label'=>$row['label'], 'reason'=>normalizeBiasDetectionText($row['reason']), 'source'=>'openai'];
+        $valid++;
     }
 
     return [
         'items' => $byId,
         'status' => (int) ($request['status'] ?? 0),
-        'error' => '',
+        'error' => $valid < count($fallback) ? 'OpenAI returned missing, duplicate, or invalid classifications. Rule fallback filled affected items.' : '',
         'model' => (string) ($request['model'] ?? ''),
     ];
 }
@@ -1662,7 +1641,9 @@ function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = [], bool $allowO
             'summary' => [
                 'total' => 0,
                 'constructive' => 0,
+                'positive' => 0,
                 'neutral' => 0,
+                'critical' => 0,
                 'biased' => 0,
                 'source' => 'rule',
             ],
@@ -1693,7 +1674,7 @@ function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = [], bool $allowO
         $geminiItems = is_array($geminiResult['items'] ?? null) ? $geminiResult['items'] : [];
         if (count($geminiItems) > 0) {
             foreach ($geminiItems as $id => $classified) {
-                $modelResultsById[$id] = $classified;
+                if (($classified['source'] ?? '') === 'openai') $modelResultsById[$id] = $classified;
             }
             $hasGeminiCoverageGap = count($modelResultsById) < count($commentItems);
         }
@@ -1707,7 +1688,9 @@ function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = [], bool $allowO
     $summary = [
         'total' => 0,
         'constructive' => 0,
+        'positive' => 0,
         'neutral' => 0,
+        'critical' => 0,
         'biased' => 0,
         'source' => 'rule',
         'warning' => '',
@@ -1749,20 +1732,14 @@ function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = [], bool $allowO
             $reason = 'No reason provided.';
         }
 
-        if ($label === 'Constructive') {
-            $summary['constructive'] += 1;
-        } elseif ($label === 'Biased') {
-            $summary['biased'] += 1;
-        } else {
-            $summary['neutral'] += 1;
-        }
+        $summary[strtolower($label)] += 1;
 
         $items[] = [
             'id' => $id,
             'comment' => (string) ($item['comment'] ?? ''),
             'label' => $label,
             'reason' => $reason,
-            'source' => 'rule',
+            'source' => $classified['source'] ?? 'rule',
             'date' => (string) ($item['date'] ?? ''),
             'studentName' => (string) ($item['studentName'] ?? ''),
             'submissionId' => (string) ($item['submissionId'] ?? ''),
@@ -1794,10 +1771,6 @@ function analyzeBiasCommentsSnapshot(PDO $pdo, array $filters = [], bool $allowO
     }
     $summary['geminiStatus'] = $geminiStatus;
     $summary['aiStatus'] = $geminiStatus;
-    foreach ($items as &$itemRow) {
-        $itemRow['source'] = $summary['source'];
-    }
-    unset($itemRow);
 
     return [
         'summary' => $summary,
@@ -1832,8 +1805,8 @@ function normalizeFeedbackSummaryComments($items): array
     $filtered = filterAiCommentItems(is_array($items) ? $items : []);
     foreach ($filtered['items'] as $index => $item) {
         $source = is_array($item) ? $item : ['text' => $item];
-        $text = normalizeBiasDetectionText($source['text'] ?? ($source['comment'] ?? ''));
-        if ($text === '') {
+        $text = (string) ($source['text'] ?? ($source['comment'] ?? ''));
+        if (trim($text) === '') {
             continue;
         }
         $rows[] = [
@@ -1847,87 +1820,68 @@ function normalizeFeedbackSummaryComments($items): array
     return $rows;
 }
 
-function detectFeedbackSummaryTopicsByRules(array $comments): array
-{
-    $topicRules = [
-        [
-            'label' => 'lack of learning materials',
-            'keywords' => ['material', 'materials', 'module', 'modules', 'learning material', 'handout', 'handouts', 'slides', 'references', 'resources'],
-        ],
-        [
-            'label' => 'need clearer explanations',
-            'keywords' => ['clear', 'clearer', 'clarify', 'explains', 'explain', 'explanation', 'understand'],
-        ],
-        [
-            'label' => 'need more examples',
-            'keywords' => ['example', 'examples', 'sample', 'samples'],
-        ],
-        [
-            'label' => 'class pace is too fast',
-            'keywords' => ['pace', 'fast', 'quick', 'rushed'],
-        ],
-        [
-            'label' => 'want more interactive discussions',
-            'keywords' => ['interactive', 'discussion', 'engaging', 'participate', 'interaction'],
-        ],
-    ];
-
-    $counts = [];
-    foreach ($topicRules as $index => $rule) {
-        $counts[$index] = [
-            'label' => (string) ($rule['label'] ?? 'topic'),
-            'count' => 0,
-        ];
-    }
-
-    foreach ($comments as $comment) {
-        $lower = strtolower((string) ($comment['text'] ?? ''));
-        foreach ($topicRules as $index => $rule) {
-            $matched = false;
+function detectFeedbackSummaryTopicsByRules(array $comments): array {
+    $topics = [];
+    foreach (getFeedbackClassificationPolicy()['topics'] as $rule) {
+        $count = 0;
+        foreach ($comments as $comment) {
+            $text = ' ' . normalizeBiasDetectionLexiconText($comment['text'] ?? '') . ' ';
             foreach ($rule['keywords'] as $keyword) {
-                if ($keyword !== '' && strpos($lower, (string) $keyword) !== false) {
-                    $matched = true;
-                    break;
-                }
-            }
-            if ($matched) {
-                $counts[$index]['count'] += 1;
+                if (strpos($text, ' ' . $keyword . ' ') !== false) { $count++; break; }
             }
         }
+        if ($count > 0) $topics[] = ['label'=>$rule['label'], 'count'=>$count];
     }
-
-    $topics = array_values(array_filter($counts, function ($item) {
-        return (int) ($item['count'] ?? 0) > 0;
-    }));
-    usort($topics, function ($a, $b) {
-        return ((int) ($b['count'] ?? 0)) <=> ((int) ($a['count'] ?? 0));
-    });
+    usort($topics, fn($a, $b)=>$b['count'] <=> $a['count']);
     return array_slice($topics, 0, 5);
 }
 
-function buildFeedbackSummaryByRules(array $comments, string $commentLabel): array
+function buildFeedbackTeachingImprovementsByRules(array $comments): array
+{
+    $concerns = array_values(array_filter($comments, function ($comment) {
+        return in_array(classifyBiasCommentByRules($comment['text'] ?? '')['label'], ['Constructive', 'Critical'], true);
+    }));
+    $suggestions = [
+        'learning materials' => 'Provide clear, organized learning materials before class.',
+        'lesson explanations' => 'Explain complex topics step by step and check students’ understanding.',
+        'examples and practice' => 'Include worked examples and guided practice linked to the lesson.',
+        'class pacing' => 'Adjust lesson pacing and pause for questions before moving on.',
+        'class discussion and participation' => 'Use guided class discussions and invite students to participate.',
+    ];
+    $result = [];
+    foreach (detectFeedbackSummaryTopicsByRules($concerns) as $topic) {
+        if (isset($suggestions[$topic['label']])) $result[] = $suggestions[$topic['label']];
+        if (count($result) === 3) break;
+    }
+    return $result;
+}
+
+function normalizeFeedbackTeachingImprovements($rows): array
+{
+    $result = [];
+    foreach (is_array($rows) ? $rows : [] as $row) {
+        if (!is_string($row)) continue;
+        $text = normalizeFeedbackSummaryText(strip_tags($row), 240);
+        if ($text === '' || in_array($text, $result, true)) continue;
+        $result[] = $text;
+        if (count($result) === 3) break;
+    }
+    return $result;
+}
+
+function buildFeedbackSummaryByRules(array $comments, string $commentLabel, bool $includeTeachingImprovements = false): array
 {
     $total = count($comments);
-    $constructive = 0;
-    $neutral = 0;
-    $biased = 0;
-
+    $counts = array_fill_keys(['constructive', 'positive', 'neutral', 'critical', 'biased'], 0);
     foreach ($comments as $comment) {
         $classified = classifyBiasCommentByRules($comment['text'] ?? '');
-        $label = normalizeBiasLabel($classified['label'] ?? '');
-        if ($label === 'Constructive') {
-            $constructive += 1;
-        } elseif ($label === 'Biased') {
-            $biased += 1;
-        } else {
-            $neutral += 1;
-        }
+        $counts[strtolower($classified['label'])]++;
     }
 
     $topics = detectFeedbackSummaryTopicsByRules($comments);
     $top = $topics[0] ?? null;
     $second = $topics[1] ?? null;
-    $threshold = (int) ceil(max(1, $total) * 0.4);
+    $threshold = (int) floor($total / 2) + 1;
 
     $summaryLine = 'Summary of ' . $total . ' ' . $commentLabel . ' comments: feedback is varied.';
     if (is_array($top) && (int) ($top['count'] ?? 0) >= $threshold) {
@@ -1938,18 +1892,15 @@ function buildFeedbackSummaryByRules(array $comments, string $commentLabel): arr
         $summaryLine = 'Summary of ' . $total . ' ' . $commentLabel . ' comments: a common point is ' . $top['label'] . '.';
     }
 
-    $toneLine = 'Overall tone is mostly neutral.';
-    if ($constructive >= $neutral && $constructive >= $biased) {
-        $toneLine = 'Overall tone is mostly constructive.';
-    } elseif ($biased > $constructive && $biased >= $neutral) {
-        $toneLine = 'Overall tone includes notable comments needing review.';
-    }
+    $toneLine = getFeedbackClassificationTone($counts);
 
-    return [
+    $summary = [
         'total' => $total,
-        'constructive' => $constructive,
-        'neutral' => $neutral,
-        'biased' => $biased,
+        'constructive' => $counts['constructive'],
+        'positive' => $counts['positive'],
+        'neutral' => $counts['neutral'],
+        'critical' => $counts['critical'],
+        'biased' => $counts['biased'],
         'topics' => $topics,
         'summaryLine' => $summaryLine,
         'toneLine' => $toneLine,
@@ -1958,11 +1909,15 @@ function buildFeedbackSummaryByRules(array $comments, string $commentLabel): arr
         'aiStatus' => 0,
         'aiModel' => '',
     ];
+    if ($includeTeachingImprovements) {
+        $summary['teachingImprovements'] = buildFeedbackTeachingImprovementsByRules($comments);
+    }
+    return $summary;
 }
 
-function buildOpenAiFeedbackSummarySchema(): array
+function buildOpenAiFeedbackSummarySchema(bool $includeTeachingImprovements = false): array
 {
-    return [
+    $schema = [
         'type' => 'object',
         'properties' => [
             'summaryLine' => ['type' => 'string'],
@@ -1971,10 +1926,12 @@ function buildOpenAiFeedbackSummarySchema(): array
                 'type' => 'object',
                 'properties' => [
                     'constructive' => ['type' => 'integer'],
+                    'positive' => ['type' => 'integer'],
                     'neutral' => ['type' => 'integer'],
+                    'critical' => ['type' => 'integer'],
                     'biased' => ['type' => 'integer'],
                 ],
-                'required' => ['constructive', 'neutral', 'biased'],
+                'required' => ['constructive', 'positive', 'neutral', 'critical', 'biased'],
                 'additionalProperties' => false,
             ],
             'topics' => [
@@ -1993,35 +1950,31 @@ function buildOpenAiFeedbackSummarySchema(): array
         'required' => ['summaryLine', 'toneLine', 'counts', 'topics'],
         'additionalProperties' => false,
     ];
+    if ($includeTeachingImprovements) {
+        $schema['properties']['teachingImprovements'] = [
+            'type' => 'array', 'items' => ['type' => 'string'], 'maxItems' => 3,
+        ];
+        $schema['required'][] = 'teachingImprovements';
+    }
+    return $schema;
 }
 
-function buildOpenAiFeedbackSummaryPrompt(array $comments, string $commentLabel): string
-{
+function buildOpenAiFeedbackSummaryPrompt(array $comments, string $commentLabel, bool $includeTeachingImprovements = false): string {
     $comments = filterAiCommentItems($comments)['items'];
-    $input = [
-        'commentLabel' => $commentLabel,
-        'comments' => array_map(function ($comment) {
-            return [
-                'id' => (string) ($comment['id'] ?? ''),
-                'text' => (string) ($comment['text'] ?? ''),
-            ];
-        }, $comments),
-    ];
+    $input = ['commentLabel'=>$commentLabel, 'comments'=>array_map(function ($comment) {
+        return ['id'=>(string)($comment['id'] ?? ''), 'text'=>(string)($comment['text'] ?? '')];
+    }, $comments)];
     $total = count($comments);
-
-    return "You are an assistant summarizing faculty evaluation comments for a school dashboard.\n"
-        . "Use only the provided anonymized comments. Do not invent details or mention student identity.\n"
-        . "Return concise JSON for the UI.\n"
-        . "Definitions for counts:\n"
-        . "- constructive: actionable, respectful improvement feedback.\n"
-        . "- neutral: general, vague, factual, or short feedback without a clear improvement request.\n"
-        . "- biased: hostile, insulting, irrelevant, unfairly personal, or otherwise needing human review.\n"
-        . "The three counts must add up to exactly " . $total . ".\n"
+    return buildFeedbackClassificationInstructions()
+        . "\nSummarize these anonymized comments for a school dashboard using only the provided evidence. Do not mention student identity or invent details.\n"
+        . "Return concise JSON with summaryLine, toneLine, counts, and topics. All summary text and topic labels must be in English.\n"
+        . "counts must contain constructive, positive, neutral, critical, and biased: nonnegative integers adding up to exactly " . $total . ". Use the same definitions and priority rules above.\n"
         . "summaryLine must start with: Summary of " . $total . " " . $commentLabel . " comments:\n"
-        . "toneLine must be one short sentence.\n"
-        . "topics must contain up to 5 repeated themes with counts.\n"
-        . "Input:\n"
-        . json_encode($input, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+        . "toneLine must be one short sentence. topics must contain up to 5 themes, each with label and count.\n"
+        . ($includeTeachingImprovements
+            ? "Also return teachingImprovements: up to 3 concise English teaching suggestions, each at most 240 characters. Use only explicit suggestions or teaching concerns in these comments. Do not treat praise as a problem, use personal attacks as teaching evidence, or invent course details. Return an empty array if no improvement is supported.\n"
+            : '')
+        . "Input:\n" . json_encode($input, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
 }
 
 function normalizeFeedbackSummaryTopicRows($rows, int $total): array
@@ -2059,15 +2012,13 @@ function mergeOpenAiFeedbackSummaryWithRule(array $parsed, array $ruleSummary, s
     $summaryLine = normalizeFeedbackSummaryText($parsed['summaryLine'] ?? '', 260);
     $toneLine = normalizeFeedbackSummaryText($parsed['toneLine'] ?? '', 180);
     $counts = is_array($parsed['counts'] ?? null) ? $parsed['counts'] : [];
-    $constructive = max(0, (int) ($counts['constructive'] ?? -1));
-    $neutral = max(0, (int) ($counts['neutral'] ?? -1));
-    $biased = max(0, (int) ($counts['biased'] ?? -1));
     $usedRule = false;
-
-    if (($constructive + $neutral + $biased) !== $total) {
-        $constructive = (int) ($ruleSummary['constructive'] ?? 0);
-        $neutral = (int) ($ruleSummary['neutral'] ?? 0);
-        $biased = (int) ($ruleSummary['biased'] ?? 0);
+    $validCounts = true;
+    foreach (['constructive', 'positive', 'neutral', 'critical', 'biased'] as $key) {
+        if (!isset($counts[$key]) || !is_int($counts[$key]) || $counts[$key] < 0) $validCounts = false;
+    }
+    if (!$validCounts || array_sum(array_intersect_key($counts, array_flip(['constructive', 'positive', 'neutral', 'critical', 'biased']))) !== $total) {
+        $counts = array_intersect_key($ruleSummary, array_flip(['constructive', 'positive', 'neutral', 'critical', 'biased']));
         $usedRule = true;
     }
 
@@ -2086,11 +2037,27 @@ function mergeOpenAiFeedbackSummaryWithRule(array $parsed, array $ruleSummary, s
         $usedRule = true;
     }
 
-    return [
+    $teachingImprovements = [];
+    if (array_key_exists('teachingImprovements', $ruleSummary)) {
+        $teachingImprovements = normalizeFeedbackTeachingImprovements($parsed['teachingImprovements'] ?? []);
+        if (!is_array($parsed['teachingImprovements'] ?? null)
+            || (!$teachingImprovements && $ruleSummary['teachingImprovements'])) {
+            $teachingImprovements = $ruleSummary['teachingImprovements'];
+            $usedRule = true;
+        }
+        if ((int) ($ruleSummary['constructive'] ?? 0) + (int) ($ruleSummary['critical'] ?? 0) === 0) {
+            if ($teachingImprovements) $usedRule = true;
+            $teachingImprovements = [];
+        }
+    }
+
+    $summary = [
         'total' => $total,
-        'constructive' => $constructive,
-        'neutral' => $neutral,
-        'biased' => $biased,
+        'constructive' => $counts['constructive'],
+        'positive' => $counts['positive'],
+        'neutral' => $counts['neutral'],
+        'critical' => $counts['critical'],
+        'biased' => $counts['biased'],
         'topics' => $topics,
         'summaryLine' => $summaryLine,
         'toneLine' => $toneLine,
@@ -2099,6 +2066,10 @@ function mergeOpenAiFeedbackSummaryWithRule(array $parsed, array $ruleSummary, s
         'aiStatus' => $status,
         'aiModel' => $model,
     ];
+    if (array_key_exists('teachingImprovements', $ruleSummary)) {
+        $summary['teachingImprovements'] = $teachingImprovements;
+    }
+    return $summary;
 }
 
 function buildAiCommentReferenceForActor(PDO $pdo, array $actor, array $payload): array {
@@ -2143,7 +2114,8 @@ function summarizeFeedbackCommentsSnapshot(PDO $pdo, array $payload = [], bool $
     $filtered = filterAiCommentItems(is_array($payload['comments'] ?? null) ? $payload['comments'] : [],
         buildAiCommentReferenceForActor($pdo, $actor, $payload));
     $comments = normalizeFeedbackSummaryComments($filtered['items']);
-    $ruleSummary = buildFeedbackSummaryByRules($comments, $commentLabel);
+    $includeTeachingImprovements = ($payload['includeTeachingImprovements'] ?? false) === true;
+    $ruleSummary = buildFeedbackSummaryByRules($comments, $commentLabel, $includeTeachingImprovements);
     $ruleSummary['excludedRepetitiveComments'] = $filtered['excludedCount'];
 
     if (count($comments) === 0) {
@@ -2168,11 +2140,11 @@ function summarizeFeedbackCommentsSnapshot(PDO $pdo, array $payload = [], bool $
     }
 
     $request = requestGeminiGenerateContent(
-        buildOpenAiFeedbackSummaryPrompt($comments, $commentLabel),
+        buildOpenAiFeedbackSummaryPrompt($comments, $commentLabel, $includeTeachingImprovements),
         $geminiKey,
         $geminiModel,
         $geminiTimeout,
-        buildOpenAiFeedbackSummarySchema(),
+        buildOpenAiFeedbackSummarySchema($includeTeachingImprovements),
         'feedback_summary'
     );
 
@@ -4409,7 +4381,9 @@ try {
             $summary = is_array($result['summary'] ?? null) ? $result['summary'] : [
                 'total' => 0,
                 'constructive' => 0,
+                'positive' => 0,
                 'neutral' => 0,
+                'critical' => 0,
                 'biased' => 0,
                 'source' => 'rule',
             ];

@@ -1,4 +1,5 @@
 'use strict';
+const { findSourceMarker } = require('./helpers/js-source');
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -6,8 +7,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 function between(source, start, end) {
-    const offset = source.indexOf(start);
-    const endOffset = source.indexOf(end, offset);
+    const offset = findSourceMarker(source, start);
+    const endOffset = findSourceMarker(source, end, offset);
     assert(offset >= 0 && endOffset > offset, `Missing marker: ${start}`);
     return source.slice(offset, endOffset);
 }
@@ -128,7 +129,7 @@ async function main() {
         };
         vm.createContext(supervisor);
         vm.runInContext(between(supervisorSource, 'function renderDeanFacultyPaperDetail(', '\n/**\n * Setup table actions'), supervisor);
-        supervisor.renderDeanFacultyPaperInbox();
+        await supervisor.renderDeanFacultyPaperInbox();
         assert(ui.nodes.deanFacultyPaperTableBody.innerHTML.includes('SENT'));
         assert(!ui.nodes.deanFacultyPaperTableBody.innerHTML.includes('COMPLETED'), 'Completed papers must leave the inbox.');
         assert(!ui.nodes.deanFacultyPaperTableBody.innerHTML.includes('ARCHIVED'));
@@ -140,18 +141,18 @@ async function main() {
             assert.equal(ui.nodes.deanFacultyPaperSaveBtn.disabled, true, 'UI must honor API permission.');
         }
 
-        supervisor.renderDeanFacultyPaperInbox();
+        await supervisor.renderDeanFacultyPaperInbox();
         supervisor.setupDeanFacultyPaperInbox();
         ui.nodes.deanSectionCAreas.value = 'Supervisor recommendation';
         saveFails = true;
-        ui.nodes.deanFacultyPaperSectionCForm.submit({ preventDefault() {} });
+        await ui.nodes.deanFacultyPaperSectionCForm.submit({ preventDefault() {} });
         assert.equal(papers[0].status, 'sent', 'A failed save must keep the paper pending.');
         assert.equal(supervisor.deanFacultyPaperState.selectedId, 'SENT');
         assert.equal(reportRefreshes, 0);
         assert.equal(notifications.at(-1), 'Save failed.');
 
         saveFails = false;
-        ui.nodes.deanFacultyPaperSectionCForm.submit({ preventDefault() {} });
+        await ui.nodes.deanFacultyPaperSectionCForm.submit({ preventDefault() {} });
         assert.equal(submissions.at(-1).actor_role, role);
         assert.equal(submissions.at(-1).section_c.areas, 'Supervisor recommendation');
         assert.equal(papers[0].status, 'completed');
@@ -160,8 +161,8 @@ async function main() {
         assert.equal(reportRefreshes, 1, 'Completed reports must refresh after saving.');
         assert.match(notifications.at(-1), /Paper completed successfully/);
 
-        ui.nodes.deanFacultyPaperSectionCForm.submit({ preventDefault() {} });
-        supervisor.renderDeanFacultyPaperInbox();
+        await ui.nodes.deanFacultyPaperSectionCForm.submit({ preventDefault() {} });
+        await supervisor.renderDeanFacultyPaperInbox();
         assert.equal(supervisor.deanFacultyPaperState.selectedId, '');
         assert.equal(ui.nodes.deanFacultyPaperDetailCard.style.display, 'none', 'Hide the detail when no papers remain.');
         assert.match(ui.nodes.deanFacultyPaperTableBody.innerHTML, /No faculty papers assigned/);

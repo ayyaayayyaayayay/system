@@ -1,4 +1,5 @@
 'use strict';
+const { findSourceMarker } = require('./helpers/js-source');
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -6,8 +7,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '../JsScrip/profesorpanel.js'), 'utf8');
-const start = source.indexOf('function refreshProfessorReportAccessState()');
-const end = source.indexOf('\nfunction setReportsNavVisibility(', start);
+const start = findSourceMarker(source, 'function refreshProfessorReportAccessState()');
+const end = findSourceMarker(source, '\nfunction setReportsNavVisibility(', start);
 assert.ok(start >= 0 && end > start);
 
 function createPanel(initialAccess, serverAccess) {
@@ -23,6 +24,7 @@ function createPanel(initialAccess, serverAccess) {
     };
     const context = {
         professorReportAccessVerified: false,
+        professorFeedbackFiltersLoading: false,
         professorReportAccessRefreshPromise: null,
         console,
         getProfessorFacultyReportAccessState: () => state.access,
@@ -71,6 +73,11 @@ async function run() {
     assert.equal(panel.context.professorReportAccessRefreshPromise, null);
     await panel.context.refreshProfessorReportAccessState();
     assert.equal(panel.state.fetches, 1, 'An unchanged verified access check should reuse loaded evaluations.');
+    const rebuilds = panel.state.rebuilds;
+    panel.context.professorFeedbackFiltersLoading = true;
+    await panel.context.refreshProfessorReportAccessState();
+    assert.equal(panel.state.rebuilds, rebuilds, 'Access checks must not rebuild the dropdown during a semester change.');
+    panel.context.professorFeedbackFiltersLoading = false;
 
     const closing = createPanel({ enabled: true, evaluationPeriodsComplete: false }, enabled);
     await closing.context.refreshProfessorReportAccessState();

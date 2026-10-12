@@ -4,351 +4,295 @@
  */
 
 (function initAppLoadingOverlay() {
-    if (typeof window === 'undefined' || window.AppLoadingOverlay) {
-        return;
-    }
+    if (typeof window === 'undefined' || window.AppLoadingOverlay) return;
 
     const DEFAULT_MESSAGE = 'Loading, please wait...';
-    const NETWORK_MESSAGE = 'Processing request...';
-    const NETWORK_OVERLAY_DELAY_MS = 350;
     const DEDICATED_OVERLAY_IDS = ['bulk-register-loading', 'credential-distributor-loading'];
+    const activities = new Map();
+    const manualActivities = [];
+    let nextId = 0;
+    let overlayEl;
+    let textEl;
+    let previousBusy;
+    let busy = false;
+    let foregroundDispatchDepth = 0;
 
     function buildHourglassMarkup(size) {
-        const normalizedSize = String(size || 'compact').trim().toLowerCase();
-        const allowedSize = ['compact', 'small', 'tiny'].indexOf(normalizedSize) !== -1
-            ? normalizedSize
-            : 'compact';
-        return [
-            '<div class="loading-hourglass-frame loading-hourglass-frame--' + allowedSize + '">',
-            '  <div class="hourglassBackground">',
-            '    <div class="hourglassContainer">',
-            '      <div class="hourglassCurves"></div>',
-            '      <div class="hourglassCapTop"></div>',
-            '      <div class="hourglassGlassTop"></div>',
-            '      <div class="hourglassSand"></div>',
-            '      <div class="hourglassSandStream"></div>',
-            '      <div class="hourglassCapBottom"></div>',
-            '      <div class="hourglassGlass"></div>',
-            '    </div>',
-            '  </div>',
-            '</div>'
-        ].join('');
-    }
-
-    const HOURGLASS_MARKUP = buildHourglassMarkup('compact');
-
-    const state = {
-        manualInFlight: 0,
-        networkInFlight: 0,
-        networkVisible: false,
-        manualMessage: '',
-        networkMessage: NETWORK_MESSAGE,
-    };
-
-    let overlayEl = null;
-    let textEl = null;
-    let networkOverlayTimer = null;
-    let dedicatedOverlayObserver = null;
-
-    function normalizeMessage(value, fallback) {
-        const message = String(value || '').trim();
-        return message || fallback;
-    }
-
-    function isDedicatedOverlayActive() {
-        return DEDICATED_OVERLAY_IDS.some(function (id) {
-            const element = document.getElementById(id);
-            return !!(element && element.classList && element.classList.contains('active'));
-        });
+        const allowedSize = ['compact', 'small', 'tiny'].includes(size) ? size : 'compact';
+        return '<div class="loading-hourglass-frame loading-hourglass-frame--' + allowedSize + '" aria-hidden="true">'
+            + '<div class="hourglassBackground"><div class="hourglassContainer">'
+            + '<div class="hourglassCurves"></div><div class="hourglassCapTop"></div>'
+            + '<div class="hourglassGlassTop"></div><div class="hourglassSand"></div>'
+            + '<div class="hourglassSandStream"></div><div class="hourglassCapBottom"></div>'
+            + '<div class="hourglassGlass"></div></div></div></div>';
     }
 
     function ensureOverlayElement() {
-        if (overlayEl && document.body && document.body.contains(overlayEl)) {
-            return overlayEl;
-        }
-        if (!document.body) {
-            return null;
-        }
-
-        overlayEl = document.getElementById('app-global-loading-overlay');
-        if (!overlayEl) {
-            overlayEl = document.createElement('div');
-            overlayEl.id = 'app-global-loading-overlay';
-            overlayEl.className = 'app-loading-overlay';
-            overlayEl.setAttribute('aria-hidden', 'true');
-            overlayEl.innerHTML = [
-                '<div class="app-loading-overlay-card" role="status" aria-live="polite" aria-label="Loading in progress">',
-                HOURGLASS_MARKUP,
-                '  <p class="app-loading-overlay-text" id="app-global-loading-text">Loading, please wait...</p>',
-                '</div>'
-            ].join('');
-            document.body.appendChild(overlayEl);
-        }
-
+        if (!document.body) return null;
+        if (overlayEl && document.body.contains(overlayEl)) return overlayEl;
+        overlayEl = document.createElement('dialog');
+        overlayEl.id = 'app-global-loading-overlay';
+        overlayEl.className = 'app-loading-overlay';
+        overlayEl.setAttribute('aria-label', 'Operation in progress');
+        overlayEl.setAttribute('aria-describedby', 'app-global-loading-text');
+        overlayEl.setAttribute('aria-hidden', 'true');
+        overlayEl.tabIndex = -1;
+        overlayEl.innerHTML = '<div class="app-loading-overlay-card" role="status" aria-live="polite" aria-atomic="true">'
+            + buildHourglassMarkup('compact')
+            + '<p class="app-loading-overlay-text" id="app-global-loading-text"></p></div>';
+        overlayEl.addEventListener('cancel', function (event) { event.preventDefault(); });
+        document.body.appendChild(overlayEl);
         textEl = overlayEl.querySelector('#app-global-loading-text');
         return overlayEl;
     }
 
     function renderOverlay() {
         const overlay = ensureOverlayElement();
-        if (!overlay) {
-            return;
+        if (!overlay) return;
+        const hasActivity = activities.size > 0;
+        if (hasActivity && !busy) {
+            previousBusy = document.body.getAttribute('aria-busy');
+            document.body.setAttribute('aria-busy', 'true');
+            busy = true;
+        } else if (!hasActivity && busy) {
+            if (previousBusy === null) document.body.removeAttribute('aria-busy');
+            else document.body.setAttribute('aria-busy', previousBusy);
+            busy = false;
         }
-
-        const hasActivity = state.manualInFlight > 0 || (state.networkInFlight > 0 && state.networkVisible);
-        const shouldShow = hasActivity && !isDedicatedOverlayActive();
-        const message = state.manualMessage || state.networkMessage || DEFAULT_MESSAGE;
-
+        const dedicated = DEDICATED_OVERLAY_IDS.some(function (id) {
+            const element = document.getElementById(id);
+            return element && element.classList.contains('active');
+        });
+        const shouldShow = hasActivity && !dedicated;
+        const current = Array.from(activities.values());
+        const explicit = current.filter(function (activity) { return activity.explicit; });
+        const latest = explicit.length ? explicit[explicit.length - 1] : current[current.length - 1];
+        textEl.textContent = latest ? latest.message : DEFAULT_MESSAGE;
         overlay.classList.toggle('active', shouldShow);
         overlay.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
-        if (textEl) {
-            textEl.textContent = normalizeMessage(message, DEFAULT_MESSAGE);
-        }
+        if (shouldShow && !overlay.open) overlay.showModal();
+        else if (!shouldShow && overlay.open) overlay.close();
+    }
+
+    function acquire(message, explicit) {
+        const id = ++nextId;
+        activities.set(id, { message: String(message || DEFAULT_MESSAGE).trim() || DEFAULT_MESSAGE, explicit: explicit });
+        renderOverlay();
+        let released = false;
+        return function release() {
+            if (released) return;
+            released = true;
+            activities.delete(id);
+            renderOverlay();
+        };
     }
 
     function show(message) {
-        state.manualInFlight += 1;
-        if (typeof message === 'string' && message.trim() !== '') {
-            state.manualMessage = message.trim();
-        }
-        renderOverlay();
+        const releaseActivity = acquire(message, true);
+        const release = function () {
+            const index = manualActivities.indexOf(release);
+            if (index !== -1) manualActivities.splice(index, 1);
+            releaseActivity();
+        };
+        manualActivities.push(release);
+        return release;
     }
 
     function hide() {
-        state.manualInFlight = Math.max(0, state.manualInFlight - 1);
-        if (state.manualInFlight === 0) {
-            state.manualMessage = '';
-        }
-        renderOverlay();
+        const release = manualActivities.pop();
+        if (release) release();
     }
 
-    function beginNetworkRequest(url) {
-        if (isDedicatedOverlayActive()) {
-            return false;
-        }
-        state.networkInFlight += 1;
-        state.networkMessage = NETWORK_MESSAGE;
-        if (!state.networkVisible && !networkOverlayTimer) {
-            networkOverlayTimer = setTimeout(function () {
-                networkOverlayTimer = null;
-                if (state.networkInFlight > 0) {
-                    state.networkVisible = true;
-                    renderOverlay();
-                }
-            }, NETWORK_OVERLAY_DELAY_MS);
-        }
-        renderOverlay();
-        return true;
-    }
-
-    function endNetworkRequest() {
-        state.networkInFlight = Math.max(0, state.networkInFlight - 1);
-        if (state.networkInFlight === 0) {
-            if (networkOverlayTimer) {
-                clearTimeout(networkOverlayTimer);
-                networkOverlayTimer = null;
+    function yieldToBrowser() {
+        return new Promise(function (resolve) {
+            if (document.hidden || typeof window.requestAnimationFrame !== 'function') {
+                setTimeout(resolve, 0);
+            } else {
+                window.requestAnimationFrame(function () { window.requestAnimationFrame(resolve); });
             }
-            state.networkVisible = false;
-            state.networkMessage = NETWORK_MESSAGE;
-        }
-        renderOverlay();
+        });
     }
 
-    function resolveRequestUrl(input) {
-        if (typeof input === 'string') {
-            return input;
-        }
-        if (input && typeof input.url === 'string') {
-            return input.url;
-        }
-        return '';
-    }
-
-    function isApiRequestUrl(url) {
-        const raw = String(url || '').trim();
-        if (!raw) {
-            return false;
-        }
+    async function run(message, callback) {
+        const release = acquire(message, true);
         try {
-            const parsed = new URL(raw, window.location.href);
-            if (parsed.searchParams.get('_heartbeat') === '1') {
-                return false;
-            }
-            if (parsed.searchParams.get('_background') === '1') {
-                return false;
-            }
-            return /\/api\//i.test(parsed.pathname);
-        } catch (_error) {
-            if (/[?&]_background=1(?:&|$)/.test(raw) || /[?&]_heartbeat=1(?:&|$)/.test(raw)) {
-                return false;
-            }
-            return /\/api\//i.test(raw);
+            await yieldToBrowser();
+            return await callback();
+        } finally {
+            release();
         }
     }
+
+    async function mapAsync(items, callback) {
+        const result = [];
+        let started = Date.now();
+        for (let index = 0; index < items.length; index += 1) {
+            result.push(await callback(items[index], index, items));
+            if (Date.now() - started >= 16) {
+                await yieldToBrowser();
+                started = Date.now();
+            }
+        }
+        return result;
+    }
+
+    function isForegroundApi(input) {
+        try {
+            const url = new URL(typeof input === 'string' ? input : input && (input.url || input.href), window.location.href);
+            return url.origin === window.location.origin && /\/api\//i.test(url.pathname)
+                && (url.searchParams.get('_background') !== '1' || foregroundDispatchDepth > 0)
+                && url.searchParams.get('_heartbeat') !== '1';
+        } catch (_error) { return false; }
+    }
+
+    function beginNetworkRequest() { return acquire('Processing request...', false); }
+    function endNetworkRequest(release) { if (typeof release === 'function') release(); }
 
     function patchFetch() {
         const nativeFetch = window.fetch;
-        if (typeof nativeFetch !== 'function' || nativeFetch.__appLoadingPatched) {
-            return;
-        }
-
-        const patchedFetch = function () {
-            const url = resolveRequestUrl(arguments[0]);
-            const shouldTrack = isApiRequestUrl(url);
-            const tracked = shouldTrack ? beginNetworkRequest(url) : false;
-
-            let requestPromise;
-            try {
-                requestPromise = nativeFetch.apply(this, arguments);
-            } catch (error) {
-                if (tracked) {
-                    endNetworkRequest();
-                }
-                throw error;
-            }
-
-            if (!tracked) {
-                return requestPromise;
-            }
-
-            return Promise.resolve(requestPromise).finally(function () {
-                endNetworkRequest();
-            });
+        if (typeof nativeFetch !== 'function' || nativeFetch.__appLoadingPatched) return;
+        window.fetch = function (input, options) {
+            if (!isForegroundApi(input)) return nativeFetch.apply(this, arguments);
+            const release = beginNetworkRequest();
+            let promise;
+            try { promise = nativeFetch.apply(this, arguments); }
+            catch (error) { release(); throw error; }
+            return Promise.resolve(promise).then(function (response) {
+                // Fetch resolves at headers; keep feedback through the body reader.
+                let reading = false;
+                ['text', 'json', 'blob', 'arrayBuffer', 'formData'].forEach(function (method) {
+                    if (typeof response[method] !== 'function') return;
+                    const nativeReader = response[method].bind(response);
+                    response[method] = function () {
+                        reading = true;
+                        const releaseBody = acquire('Processing request...', false);
+                        return Promise.resolve().then(nativeReader).finally(function () { releaseBody(); release(); });
+                    };
+                });
+                // Status-only responses do not have to consume their body.
+                setTimeout(function () { if (!reading) release(); }, 0);
+                return response;
+            }, function (error) { release(); throw error; });
         };
-
-        patchedFetch.__appLoadingPatched = true;
-        window.fetch = patchedFetch;
-    }
-
-    function finalizeTrackedXhr(xhr) {
-        if (!xhr || !xhr.__appLoadingTracked || xhr.__appLoadingCompleted) {
-            return;
-        }
-
-        xhr.__appLoadingCompleted = true;
-        if (typeof xhr.__appLoadingCleanup === 'function') {
-            xhr.__appLoadingCleanup();
-        }
-        xhr.__appLoadingCleanup = null;
-        endNetworkRequest();
+        window.fetch.__appLoadingPatched = true;
     }
 
     function patchXmlHttpRequest() {
-        const xhrProto = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
-        if (!xhrProto || xhrProto.__appLoadingPatched) {
-            return;
-        }
-
-        const nativeOpen = xhrProto.open;
-        const nativeSend = xhrProto.send;
-        const nativeAbort = xhrProto.abort;
-
-        xhrProto.open = function (method, url, async) {
-            this.__appLoadingUrl = url;
-            this.__appLoadingShouldTrack = isApiRequestUrl(url);
-            this.__appLoadingTracked = false;
-            this.__appLoadingCompleted = false;
-            this.__appLoadingAsync = async !== false;
+        const prototype = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
+        if (!prototype || prototype.__appLoadingPatched) return;
+        const nativeOpen = prototype.open;
+        const nativeSend = prototype.send;
+        prototype.open = function (method, url) {
+            if (this.__appLoadingRelease) this.__appLoadingRelease();
+            this.__appLoadingForeground = isForegroundApi(url);
             return nativeOpen.apply(this, arguments);
         };
-
-        xhrProto.send = function () {
-            if (this.__appLoadingShouldTrack && !this.__appLoadingTracked) {
-                this.__appLoadingTracked = beginNetworkRequest(this.__appLoadingUrl);
-
-                if (this.__appLoadingTracked) {
-                    const xhr = this;
-                    const onLoadEnd = function () {
-                        finalizeTrackedXhr(xhr);
-                    };
-                    const onError = function () {
-                        finalizeTrackedXhr(xhr);
-                    };
-                    const onAbort = function () {
-                        finalizeTrackedXhr(xhr);
-                    };
-
-                    xhr.addEventListener('loadend', onLoadEnd);
-                    xhr.addEventListener('error', onError);
-                    xhr.addEventListener('abort', onAbort);
-
-                    xhr.__appLoadingCleanup = function () {
-                        xhr.removeEventListener('loadend', onLoadEnd);
-                        xhr.removeEventListener('error', onError);
-                        xhr.removeEventListener('abort', onAbort);
-                    };
-                }
+        prototype.send = function () {
+            if (this.__appLoadingForeground) {
+                const release = beginNetworkRequest();
+                this.__appLoadingRelease = release;
+                this.addEventListener('loadend', release, { once: true });
+                try { return nativeSend.apply(this, arguments); }
+                catch (error) { release(); throw error; }
             }
-
-            try {
-                const result = nativeSend.apply(this, arguments);
-                if (this.__appLoadingTracked && this.__appLoadingAsync === false && this.readyState === 4) {
-                    finalizeTrackedXhr(this);
-                }
-                return result;
-            } catch (error) {
-                finalizeTrackedXhr(this);
-                throw error;
-            }
+            return nativeSend.apply(this, arguments);
         };
-
-        xhrProto.abort = function () {
-            try {
-                return nativeAbort.apply(this, arguments);
-            } finally {
-                finalizeTrackedXhr(this);
-            }
-        };
-
-        xhrProto.__appLoadingPatched = true;
+        prototype.__appLoadingPatched = true;
     }
 
-    function watchDedicatedOverlays() {
-        if (typeof MutationObserver === 'undefined') {
-            return;
-        }
-        if (dedicatedOverlayObserver) {
-            dedicatedOverlayObserver.disconnect();
-        }
-
-        dedicatedOverlayObserver = new MutationObserver(function () {
-            renderOverlay();
-        });
-
-        DEDICATED_OVERLAY_IDS.forEach(function (id) {
-            const element = document.getElementById(id);
-            if (element) {
-                dedicatedOverlayObserver.observe(element, {
-                    attributes: true,
-                    attributeFilter: ['class', 'aria-hidden'],
+    // Follow complete asynchronous user handlers, including helpers whose network
+    // requests are normally silent. Synchronous validation runs before loading.
+    function patchUserEvents() {
+        const prototype = window.EventTarget && window.EventTarget.prototype;
+        if (!prototype || prototype.__appLoadingPatched) return;
+        const nativeAdd = prototype.addEventListener;
+        const nativeRemove = prototype.removeEventListener;
+        const wrapped = new WeakMap();
+        const events = ['click', 'change', 'submit', 'keydown', 'DOMContentLoaded'];
+        const propertyWrappers = new WeakSet();
+        function invoke(listener, target, event, type) {
+            const foreground = type !== 'keydown' || event.key === 'Enter';
+            let result;
+            if (foreground) foregroundDispatchDepth += 1;
+            try {
+                result = typeof listener === 'function' ? listener.call(target, event) : listener.handleEvent(event);
+            } finally {
+                if (foreground) foregroundDispatchDepth -= 1;
+            }
+            if (foreground && result && typeof result.then === 'function') {
+                const control = type === 'submit' ? event.submitter
+                    : event.target && event.target.closest ? event.target.closest('button, select, input[type="file"]') : null;
+                const ownsControl = control && !control.disabled && !control.classList.contains('btn-submit');
+                if (ownsControl) control.disabled = true;
+                function restoreControl() { if (ownsControl) control.disabled = false; }
+                let release;
+                let settled = false;
+                Promise.resolve(result).then(function () { settled = true; restoreControl(); if (release) release(); }, function (error) {
+                    settled = true;
+                    restoreControl();
+                    if (release) release();
+                    console.error('[Loading] Action failed.', error);
+                });
+                Promise.resolve().then(function () {
+                    if (!settled) release = acquire(type === 'DOMContentLoaded' ? 'Loading your workspace...' : 'Processing, please wait...', false);
                 });
             }
+            return result;
+        }
+        prototype.addEventListener = function (type, listener, options) {
+            if (!listener || !events.includes(type)) return nativeAdd.apply(this, arguments);
+            let listeners = wrapped.get(listener);
+            if (!listeners) { listeners = new Map(); wrapped.set(listener, listeners); }
+            if (!listeners.has(type)) {
+                listeners.set(type, function (event) {
+                    return invoke(listener, this, event, type);
+                });
+            }
+            return nativeAdd.call(this, type, listeners.get(type), options);
+        };
+        // Existing property and inline handlers participate in the same lifecycle.
+        // Capture runs before these handlers, including on dynamically rendered rows.
+        events.filter(function (type) { return type !== 'DOMContentLoaded'; }).forEach(function (type) {
+            nativeAdd.call(document, type, function (event) {
+                event.composedPath().forEach(function (target) {
+                    const property = 'on' + type;
+                    const listener = target[property];
+                    if (typeof listener !== 'function' || propertyWrappers.has(listener)) return;
+                    const wrapper = function (currentEvent) { return invoke(listener, this, currentEvent, type); };
+                    propertyWrappers.add(wrapper);
+                    target[property] = wrapper;
+                });
+            }, true);
         });
+        prototype.removeEventListener = function (type, listener, options) {
+            const listeners = listener && wrapped.get(listener);
+            return nativeRemove.call(this, type, listeners && listeners.get(type) || listener, options);
+        };
+        prototype.__appLoadingPatched = true;
     }
 
-    window.AppLoadingOverlay = {
-        show: show,
-        hide: hide,
-        _trackNetworkStart: beginNetworkRequest,
-        _trackNetworkEnd: endNetworkRequest,
-    };
+    window.AppLoadingOverlay = { show: show, hide: hide, run: run, yieldToBrowser: yieldToBrowser, mapAsync: mapAsync,
+        _trackNetworkStart: beginNetworkRequest, _trackNetworkEnd: endNetworkRequest };
     window.AppHourglassMarkup = buildHourglassMarkup;
-
     patchFetch();
     patchXmlHttpRequest();
+    patchUserEvents();
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function () {
-            ensureOverlayElement();
-            watchDedicatedOverlays();
-            renderOverlay();
-        });
-    } else {
+    function ready() {
         ensureOverlayElement();
-        watchDedicatedOverlays();
+        if (typeof MutationObserver === 'function') {
+            const observer = new MutationObserver(renderOverlay);
+            DEDICATED_OVERLAY_IDS.forEach(function (id) {
+                const element = document.getElementById(id);
+                if (element) observer.observe(element, { attributes: true, attributeFilter: ['class'] });
+            });
+        }
         renderOverlay();
     }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready);
+    else ready();
 })();
+
 
 window.StudentEvaluationReminderSettings = window.StudentEvaluationReminderSettings || (() => {
     const DEFAULT_CONFIG = {
@@ -1774,7 +1718,7 @@ const SharedData = (() => {
         if (method === 'GET') {
             url += '&_ts=' + Date.now();
         }
-        if (opts.background === true) {
+        if (opts.background === true || (opts.background !== false && /^(?:list|get)(?!Now)/.test(action))) {
             url += '&_background=1';
         }
         const requestSessionGeneration = sessionClearGeneration;
@@ -1823,6 +1767,7 @@ const SharedData = (() => {
                     }
                     const error = new Error(message);
                     error.status = response.status;
+                    error.response = parsed;
                     throw error;
                 }
 
@@ -1835,51 +1780,7 @@ const SharedData = (() => {
         });
     }
 
-    function syncRequest(method, action, payload) {
-        const xhr = new XMLHttpRequest();
-        let url = API_URL + '?action=' + encodeURIComponent(action);
-        if (method === 'GET') {
-            url += '&_ts=' + Date.now();
-        }
-        const requestSessionGeneration = sessionClearGeneration;
-        xhr.open(method, url, false);
-        xhr.setRequestHeader('Content-Type', 'application/json');
-        if (method !== 'GET') {
-            const session = getSession();
-            const csrfToken = String(session && session.csrfToken || '').trim();
-            if (csrfToken) {
-                xhr.setRequestHeader('X-CSRF-Token', csrfToken);
-            }
-        }
-        xhr.send(payload ? JSON.stringify(payload) : null);
 
-        if (xhr.status < 200 || xhr.status >= 300) {
-            let message = 'Request failed with status ' + xhr.status;
-            let parsedError = {};
-            if (xhr.responseText) {
-                try {
-                    parsedError = JSON.parse(xhr.responseText);
-                    message = parsedError && parsedError.error ? String(parsedError.error) : xhr.responseText;
-                } catch (_error) {
-                    message = xhr.responseText;
-                }
-            }
-            if (responseEndedAuthenticatedSession(xhr.status, parsedError)) {
-                handleRequestAuthFailure();
-            }
-            const error = new Error(message);
-            error.status = xhr.status;
-            error.response = parsedError;
-            throw error;
-        }
-
-        const response = xhr.responseText ? JSON.parse(xhr.responseText) : {};
-        setClockReference(response);
-        if (requestSessionGeneration === sessionClearGeneration && !sessionLogoutInProgress && response && response.session) {
-            storeSessionPayload(response.session);
-        }
-        return response;
-    }
 
     function asyncRequest(method, action, payload, options) {
         startBootstrap(false);
@@ -1991,31 +1892,7 @@ const SharedData = (() => {
         dispatchChange('profilePhoto', state.profilePhotos);
     }
 
-    function uploadProfilePhoto(file) {
-        startBootstrap(false);
-
-        if (!file) {
-            throw new Error('Please choose an image file to upload.');
-        }
-
-        let session = getSessionWithCsrfTokenSync();
-        let response;
-        try {
-            response = sendProfilePhotoUploadRequest(file, session.csrfToken);
-        } catch (error) {
-            if (isInvalidCsrfResponse(error && error.status, error && error.message)) {
-                session = getSessionWithCsrfTokenSync(true);
-                response = sendProfilePhotoUploadRequest(file, session.csrfToken);
-            } else {
-                if (error && responseEndedAuthenticatedSession(error.status, error.response)) {
-                    handleRequestAuthFailure();
-                }
-                throw error;
-            }
-        }
-
-        return applyProfilePhotoUploadResponse(response);
-    }
+    function uploadProfilePhoto(file) { return uploadProfilePhotoAsync(file); }
 
     function uploadProfilePhotoAsync(file, options) {
         startBootstrap(false);
@@ -2030,16 +1907,14 @@ const SharedData = (() => {
             && loadingOverlay
             && typeof loadingOverlay.show === 'function'
             && typeof loadingOverlay.hide === 'function';
-        if (useOverlay) {
-            loadingOverlay.show(opts.message || 'Uploading profile photo...');
-        }
+        const releaseLoading = useOverlay ? loadingOverlay.show(opts.message || 'Uploading profile photo...') : null;
 
         return new Promise(function (resolve) {
             setTimeout(resolve, 0);
-        }).then(function () {
-            const session = getSessionWithCsrfTokenSync();
+        }).then(async function () {
+            const session = (await getSessionWithCsrfTokenAsync());
             return sendProfilePhotoUploadRequestAsync(file, session.csrfToken)
-                .catch(function (error) {
+                .catch(async function (error) {
                     if (!isInvalidCsrfResponse(error && error.status, error && error.message)) {
                         if (error && responseEndedAuthenticatedSession(error.status, error.response)) {
                             handleRequestAuthFailure();
@@ -2047,14 +1922,15 @@ const SharedData = (() => {
                         throw error;
                     }
 
-                    const refreshedSession = getSessionWithCsrfTokenSync(true);
+                    const refreshedSession = (await getSessionWithCsrfTokenAsync(true));
                     return sendProfilePhotoUploadRequestAsync(file, refreshedSession.csrfToken);
                 });
         }).then(function (response) {
             return applyProfilePhotoUploadResponse(response);
         }).finally(function () {
             if (useOverlay) {
-                loadingOverlay.hide();
+                if (typeof releaseLoading === 'function') releaseLoading();
+                else loadingOverlay.hide();
             }
         });
     }
@@ -2127,7 +2003,7 @@ const SharedData = (() => {
         return base + (base.indexOf('?') >= 0 ? '&' : '?') + '_profile_ts=' + encodeURIComponent(version) + hash;
     }
 
-    function getSessionWithCsrfTokenSync(forceRefresh) {
+    async function getSessionWithCsrfTokenAsync(forceRefresh) {
         const force = forceRefresh === true;
         let session = getSession();
         if (!force && session && session.isAuthenticated === true && String(session.csrfToken || '').trim()) {
@@ -2135,7 +2011,7 @@ const SharedData = (() => {
         }
 
         try {
-            session = refreshSession(true);
+            session = (await refreshSession(true));
         } catch (error) {
             throw error;
         }
@@ -2147,40 +2023,7 @@ const SharedData = (() => {
         throw new Error('Authentication token is not ready. Please refresh and sign in again.');
     }
 
-    function sendProfilePhotoUploadRequest(file, csrfToken) {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', PROFILE_IMAGE_UPLOAD_URL, false);
 
-        const token = String(csrfToken || '').trim();
-        if (token) {
-            xhr.setRequestHeader('X-CSRF-Token', token);
-        }
-
-        const formData = new FormData();
-        formData.append('profile_image', file);
-        xhr.send(formData);
-
-        let parsed = {};
-        if (xhr.responseText) {
-            try {
-                parsed = JSON.parse(xhr.responseText);
-            } catch (_error) {
-                parsed = {};
-            }
-        }
-
-        if (xhr.status < 200 || xhr.status >= 300) {
-            const message = parsed && parsed.error
-                ? String(parsed.error)
-                : (xhr.responseText || ('Upload failed with status ' + xhr.status));
-            const error = new Error(message);
-            error.status = xhr.status;
-            error.response = parsed;
-            throw error;
-        }
-
-        return parsed;
-    }
 
     function sendProfilePhotoUploadRequestAsync(file, csrfToken) {
         const token = String(csrfToken || '').trim();
@@ -2223,13 +2066,13 @@ const SharedData = (() => {
         });
     }
 
-    function setProfilePhoto(role, dataUrl) {
+    async function setProfilePhoto(role, dataUrl) {
         if (typeof File !== 'undefined' && dataUrl instanceof File) {
-            return uploadProfilePhoto(dataUrl);
+            return (await uploadProfilePhoto(dataUrl));
         }
 
         if (dataUrl && typeof dataUrl === 'object' && typeof dataUrl.name === 'string') {
-            return uploadProfilePhoto(dataUrl);
+            return (await uploadProfilePhoto(dataUrl));
         }
 
         startBootstrap(false);
@@ -2237,7 +2080,7 @@ const SharedData = (() => {
         state.profilePhotos = dataUrl || '';
         dispatchChange('profilePhoto', state.profilePhotos);
         try {
-            const response = syncRequest('POST', 'setProfilePhoto', { dataUrl: dataUrl || '' });
+            const response = (await requestJson('POST', 'setProfilePhoto', { dataUrl: dataUrl || '' }));
             if (response && Object.prototype.hasOwnProperty.call(response, 'profilePhoto')) {
                 profilePhotoStateVersion += 1;
                 state.profilePhotos = appendProfilePhotoCacheBust(response.profilePhoto || '');
@@ -2349,7 +2192,7 @@ const SharedData = (() => {
         }
         return logoutPromise;
     }
-    
+
 
     function applySubjectManagementSnapshot(payload) {
         const snapshot = payload && payload.subjectManagement ? payload.subjectManagement : payload;
@@ -2368,18 +2211,18 @@ const SharedData = (() => {
         return state.subjectManagement;
     }
 
-    function refreshSession(forceRefresh) {
+    async function refreshSession(forceRefresh, options = {}) {
         const cached = getSession();
         if (cached && !forceRefresh) {
             return cached;
         }
 
-        const xhr = new XMLHttpRequest();
-        xhr.open('GET', SESSION_URL + '&_ts=' + Date.now(), false);
-        xhr.send(null);
+        const response = await fetch(SESSION_URL + '&_ts=' + Date.now()
+            + (options.background ? '&_background=1' : ''), { credentials: 'same-origin' });
+        const responseText = await response.text();
 
-        if (xhr.status >= 200 && xhr.status < 300) {
-            const payload = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+        if (response.status >= 200 && response.status < 300) {
+            const payload = responseText ? JSON.parse(responseText) : {};
             setClockReference(payload);
             if (payload && payload.authenticated === false) {
                 clearSessionCache();
@@ -2395,7 +2238,7 @@ const SharedData = (() => {
             return storeSessionPayload(sessionPayload);
         }
 
-        if (xhr.status === 401 || xhr.status === 403) {
+        if (response.status === 401 || response.status === 403) {
             initialized = false;
             usersLastSyncedAt = 0;
             evaluationsLastSyncedAt = 0;
@@ -2405,22 +2248,22 @@ const SharedData = (() => {
             return null;
         }
 
-        let message = 'Session validation failed with status ' + xhr.status;
-        if (xhr.responseText) {
+        let message = 'Session validation failed with status ' + response.status;
+        if (responseText) {
             try {
-                const parsed = JSON.parse(xhr.responseText);
+                const parsed = JSON.parse(responseText);
                 message = parsed && parsed.error ? String(parsed.error) : message;
             } catch (_error) {
-                message = xhr.responseText;
+                message = responseText;
             }
         }
         throw new Error(message);
     }
 
-    function requireSession(expectedRole) {
+    async function requireSession(expectedRole) {
         let session = null;
         try {
-            session = refreshSession(true);
+            session = (await refreshSession(true));
         } catch (error) {
             console.warn('[DBData] Session validation failed.', error);
             return null;
@@ -2614,12 +2457,12 @@ const SharedData = (() => {
         return state.profileData || null;
     }
 
-    function setProfileData(role, data) {
+    async function setProfileData(role, data) {
         startBootstrap(false);
         state.profileData = data && typeof data === 'object' ? data : null;
         dispatchChange('profileData', deepClone(state.profileData));
         try {
-            const response = syncRequest('POST', 'setProfileData', { data: data || null });
+            const response = (await requestJson('POST', 'setProfileData', { data: data || null }));
             if (response && Object.prototype.hasOwnProperty.call(response, 'profileData')) {
                 state.profileData = response.profileData && typeof response.profileData === 'object'
                     ? response.profileData
@@ -2984,12 +2827,12 @@ const SharedData = (() => {
         return state.campuses;
     }
 
-    function setCampuses(campuses) {
+    async function setCampuses(campuses) {
         startBootstrap(false);
         const requestedCampuses = Array.isArray(campuses)
             ? deepClone(campuses)
             : deepClone(state.campuses);
-        const response = syncRequest('POST', 'setCampuses', { campuses: requestedCampuses });
+        const response = (await requestJson('POST', 'setCampuses', { campuses: requestedCampuses }));
         state.campuses = response && Array.isArray(response.campuses)
             ? response.campuses
             : requestedCampuses;
@@ -2997,9 +2840,9 @@ const SharedData = (() => {
         return state.campuses;
     }
 
-    function upsertProgram(program) {
+    async function upsertProgram(program) {
         startBootstrap(false);
-        const response = syncRequest('POST', 'upsertProgram', { program: program || {} });
+        const response = (await requestJson('POST', 'upsertProgram', { program: program || {} }));
         if (response && Array.isArray(response.programs)) {
             state.programs = response.programs;
             dispatchChange(KEYS.PROGRAMS, deepClone(state.programs));
@@ -3011,9 +2854,9 @@ const SharedData = (() => {
         return response || {};
     }
 
-    function deleteProgram(programId) {
+    async function deleteProgram(programId) {
         startBootstrap(false);
-        const response = syncRequest('POST', 'deleteProgram', { programId: programId });
+        const response = (await requestJson('POST', 'deleteProgram', { programId: programId }));
         if (response && Array.isArray(response.programs)) {
             state.programs = response.programs;
             dispatchChange(KEYS.PROGRAMS, deepClone(state.programs));
@@ -3063,9 +2906,9 @@ const SharedData = (() => {
         return state.currentSemester || '';
     }
 
-    function setCurrentSemester(value) {
+    async function setCurrentSemester(value) {
         startBootstrap(false);
-        const response = syncRequest('POST', 'setCurrentSemester', { value: value || '' });
+        const response = (await requestJson('POST', 'setCurrentSemester', { value: value || '' }));
         state.currentSemester = response.currentSemester || value || '';
         writeLocalFallbackJSON(KEYS.CURRENT_SEMESTER, state.currentSemester);
         if (response.changed) {
@@ -3088,13 +2931,13 @@ const SharedData = (() => {
         return state.questionnaires || {};
     }
 
-    function setQuestionnaires(data) {
+    async function setQuestionnaires(data) {
         startBootstrap(false);
         state.questionnaires = data || {};
         writeLocalFallbackJSON(KEYS.QUESTIONNAIRES, state.questionnaires);
         dispatchChange(KEYS.QUESTIONNAIRES, deepClone(state.questionnaires));
         try {
-            const response = syncRequest('POST', 'setQuestionnaires', { data: state.questionnaires });
+            const response = (await requestJson('POST', 'setQuestionnaires', { data: state.questionnaires }));
             if (response && response.success && response.questionnaires) {
                 state.questionnaires = response.questionnaires || {};
                 if (response.dataPrivacyConsentNotice && typeof response.dataPrivacyConsentNotice === 'object') {
@@ -3214,14 +3057,14 @@ const SharedData = (() => {
         return state.evaluations || [];
     }
 
-    function persistEvaluations() {
+    async function persistEvaluations() {
         try {
             const session = getSession() || {};
-            syncRequest('POST', 'setEvaluations', {
+            (await requestJson('POST', 'setEvaluations', {
                 evaluations: state.evaluations,
                 allowBulkWrite: true,
                 actorRole: session.role || '',
-            });
+            }));
             dispatchChange(KEYS.EVALUATIONS, deepClone(state.evaluations));
         } catch (error) {
             console.error('[DBData] Failed to persist evaluations.', error);
@@ -3244,11 +3087,11 @@ const SharedData = (() => {
         return payload;
     }
 
-    function addEvaluation(evalData) {
+    async function addEvaluation(evalData) {
         startBootstrap(false);
         const payload = buildEvaluationPayload(evalData);
 
-        const response = syncRequest('POST', 'addEvaluation', { evaluation: payload });
+        const response = (await requestJson('POST', 'addEvaluation', { evaluation: payload }));
         if (!response || response.success !== true || !response.evaluation) {
             throw new Error(response && response.error ? response.error : 'Failed to save evaluation.');
         }
@@ -3400,9 +3243,9 @@ const SharedData = (() => {
         });
     }
 
-    function recordStudentDataPrivacyConsent(payload) {
+    async function recordStudentDataPrivacyConsent(payload) {
         startBootstrap(false);
-        const response = syncRequest('POST', 'recordStudentDataPrivacyConsent', payload || {});
+        const response = (await requestJson('POST', 'recordStudentDataPrivacyConsent', payload || {}));
         if (Array.isArray(response && response.studentDataPrivacyConsents)) {
             state.studentDataPrivacyConsents = response.studentDataPrivacyConsents;
         } else if (response && response.consent) {
@@ -3496,10 +3339,10 @@ const SharedData = (() => {
         });
     }
 
-    function upsertOsaStudentClearance(record) {
+    async function upsertOsaStudentClearance(record) {
         startBootstrap(false);
         const body = Object.assign({ record: record || {} }, buildActorPayload(record || {}));
-        const response = syncRequest('POST', 'upsertOsaStudentClearance', body);
+        const response = (await requestJson('POST', 'upsertOsaStudentClearance', body));
         if (Array.isArray(response && response.osaStudentClearances)) {
             state.osaStudentClearances = response.osaStudentClearances;
             markBootstrapDatasetComplete('osaStudentClearances');
@@ -3563,10 +3406,10 @@ const SharedData = (() => {
         });
     }
 
-    function submitStudentEvaluationProof(record) {
+    async function submitStudentEvaluationProof(record) {
         startBootstrap(false);
         const body = Object.assign({ record: record || {} }, buildActorPayload(record || {}));
-        const response = syncRequest('POST', 'submitStudentEvaluationProof', body);
+        const response = (await requestJson('POST', 'submitStudentEvaluationProof', body));
 
         if (Array.isArray(response && response.studentEvaluationProofRequests)) {
             state.studentEvaluationProofRequests = response.studentEvaluationProofRequests;
@@ -3582,10 +3425,10 @@ const SharedData = (() => {
         return response || {};
     }
 
-    function reviewStudentEvaluationProof(payload) {
+    async function reviewStudentEvaluationProof(payload) {
         startBootstrap(false);
         const body = Object.assign({ payload: payload || {} }, buildActorPayload(payload || {}));
-        const response = syncRequest('POST', 'reviewStudentEvaluationProof', body);
+        const response = (await requestJson('POST', 'reviewStudentEvaluationProof', body));
 
         if (Array.isArray(response && response.studentEvaluationProofRequests)) {
             state.studentEvaluationProofRequests = response.studentEvaluationProofRequests;
@@ -3694,43 +3537,43 @@ const SharedData = (() => {
         return refreshPromises.adminDashboardSummary;
     }
 
-    function upsertSubject(subject) {
+    async function upsertSubject(subject) {
         startBootstrap(false);
-        const response = syncRequest('POST', 'upsertSubject', { subject: subject || {} });
+        const response = (await requestJson('POST', 'upsertSubject', { subject: subject || {} }));
         applySubjectManagementSnapshot(response);
         return response;
     }
 
-    function importSubjects(rows) {
+    async function importSubjects(rows) {
         startBootstrap(false);
-        const response = syncRequest('POST', 'importSubjects', { rows: Array.isArray(rows) ? rows : [] });
+        const response = (await requestJson('POST', 'importSubjects', { rows: Array.isArray(rows) ? rows : [] }));
         applySubjectManagementSnapshot(response);
         return response;
     }
 
-    function upsertCourseOffering(offering) {
+    async function upsertCourseOffering(offering) {
         startBootstrap(false);
-        const response = syncRequest('POST', 'upsertCourseOffering', { offering: offering || {} });
+        const response = (await requestJson('POST', 'upsertCourseOffering', { offering: offering || {} }));
         applySubjectManagementSnapshot(response);
         return response;
     }
 
-    function importCourseOfferings(rows, options) {
+    async function importCourseOfferings(rows, options) {
         startBootstrap(false);
         const payload = {
             rows: Array.isArray(rows) ? rows : [],
             replaceExisting: !!(options && options.replaceExisting),
         };
-        const response = syncRequest('POST', 'importCourseOfferings', payload);
+        const response = (await requestJson('POST', 'importCourseOfferings', payload));
         applySubjectManagementSnapshot(response);
         return response;
     }
 
-    function markExcessCourseOfferings(rows) {
+    async function markExcessCourseOfferings(rows) {
         startBootstrap(false);
-        const response = syncRequest('POST', 'markExcessCourseOfferings', {
+        const response = (await requestJson('POST', 'markExcessCourseOfferings', {
             rows: Array.isArray(rows) ? rows : [],
-        });
+        }));
         applySubjectManagementSnapshot(response);
         return response;
     }
@@ -3746,11 +3589,11 @@ const SharedData = (() => {
         });
     }
 
-    function deactivateCourseOffering(courseOfferingId) {
+    async function deactivateCourseOffering(courseOfferingId) {
         startBootstrap(false);
-        const response = syncRequest('POST', 'deactivateCourseOffering', {
+        const response = (await requestJson('POST', 'deactivateCourseOffering', {
             courseOfferingId: courseOfferingId,
-        });
+        }));
         applySubjectManagementSnapshot(response);
         return response;
     }
@@ -3760,18 +3603,18 @@ const SharedData = (() => {
         return state.activityLog || [];
     }
 
-    function searchActivityLog(filters) {
+    async function searchActivityLog(filters) {
         startBootstrap(false);
-        const response = syncRequest('POST', 'searchActivityLog', {
+        const response = (await requestJson('POST', 'searchActivityLog', {
             filters: Object.assign({}, filters || {}),
-        });
+        }));
         return Array.isArray(response && response.activityLog) ? response.activityLog : [];
     }
 
-    function getCredentialDistributorConfig(actor) {
+    async function getCredentialDistributorConfig(actor) {
         startBootstrap(false);
         const body = buildActorPayload(actor || {});
-        const response = syncRequest('POST', 'getCredentialDistributorConfig', body);
+        const response = (await requestJson('POST', 'getCredentialDistributorConfig', body));
         const config = response && response.config ? response.config : {};
         return {
             host: String(config.host || ''),
@@ -3789,12 +3632,12 @@ const SharedData = (() => {
         };
     }
 
-    function saveCredentialDistributorConfig(config, actor) {
+    async function saveCredentialDistributorConfig(config, actor) {
         startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             config: Object.assign({}, config || {}),
         });
-        const response = syncRequest('POST', 'saveCredentialDistributorConfig', body);
+        const response = (await requestJson('POST', 'saveCredentialDistributorConfig', body));
         const savedConfig = response && response.config ? response.config : {};
         return {
             host: String(savedConfig.host || ''),
@@ -3830,10 +3673,10 @@ const SharedData = (() => {
         return defaults;
     }
 
-    function getOpenAiConfig(actor) {
+    async function getOpenAiConfig(actor) {
         startBootstrap(false);
         const body = buildActorPayload(actor || {});
-        const response = syncRequest('POST', 'getOpenAiConfig', body);
+        const response = (await requestJson('POST', 'getOpenAiConfig', body));
         const config = response && response.config ? response.config : {};
         return {
             model: String(config.model || 'gpt-5.6-luna'),
@@ -3846,12 +3689,12 @@ const SharedData = (() => {
         };
     }
 
-    function saveOpenAiConfig(config, actor) {
+    async function saveOpenAiConfig(config, actor) {
         startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             config: Object.assign({}, config || {}),
         });
-        const response = syncRequest('POST', 'saveOpenAiConfig', body);
+        const response = (await requestJson('POST', 'saveOpenAiConfig', body));
         const savedConfig = response && response.config ? response.config : {};
         return {
             model: String(savedConfig.model || 'gpt-5.6-luna'),
@@ -3867,9 +3710,9 @@ const SharedData = (() => {
     const getGeminiConfig = getOpenAiConfig;
     const saveGeminiConfig = saveOpenAiConfig;
 
-    function getOpenAiPanelAccess(actor) {
+    async function getOpenAiPanelAccess(actor) {
         startBootstrap(false);
-        const response = syncRequest('POST', 'getOpenAiPanelAccess', buildActorPayload(actor || {}));
+        const response = (await requestJson('POST', 'getOpenAiPanelAccess', buildActorPayload(actor || {})));
         const access = response && response.access && typeof response.access === 'object'
             ? response.access
             : {};
@@ -3899,39 +3742,39 @@ const SharedData = (() => {
         });
     }
 
-    function bulkDistributeCredentials(rows, actor) {
+    async function bulkDistributeCredentials(rows, actor) {
         startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             rows: Array.isArray(rows) ? rows : [],
         });
-        const response = syncRequest('POST', 'bulkDistributeCredentials', body);
+        const response = (await requestJson('POST', 'bulkDistributeCredentials', body));
         return {
             summary: response && response.summary ? response.summary : { total: 0, sent: 0, failed: 0 },
             failures: Array.isArray(response && response.failures) ? response.failures : [],
         };
     }
 
-    function sendBulkTestGmail(subject, message, actor) {
+    async function sendBulkTestGmail(subject, message, actor) {
         startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             subject: String(subject || ''),
             message: String(message || ''),
         });
-        const response = syncRequest('POST', 'sendBulkTestGmail', body);
+        const response = (await requestJson('POST', 'sendBulkTestGmail', body));
         return {
             summary: response && response.summary ? response.summary : { total: 0, sent: 0, failed: 0 },
             failures: Array.isArray(response && response.failures) ? response.failures : [],
         };
     }
 
-    function sendTestSmtpEmail(recipientEmail, subject, message, actor) {
+    async function sendTestSmtpEmail(recipientEmail, subject, message, actor) {
         startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             recipientEmail: String(recipientEmail || ''),
             subject: String(subject || ''),
             message: String(message || ''),
         });
-        const response = syncRequest('POST', 'sendTestSmtpEmail', body);
+        const response = (await requestJson('POST', 'sendTestSmtpEmail', body));
         return {
             success: response && response.success === true,
             message: String(response && response.message || ''),
@@ -3953,11 +3796,11 @@ const SharedData = (() => {
             });
     }
 
-    function listSystemHealthChecks(limit) {
+    async function listSystemHealthChecks(limit) {
         startBootstrap(false);
-        const response = syncRequest('POST', 'listSystemHealthChecks', {
+        const response = (await requestJson('POST', 'listSystemHealthChecks', {
             limit: Math.max(1, Math.min(50, Number(limit) || 10)),
-        });
+        }));
         return {
             success: response && response.success === true,
             latest: response && response.latest ? response.latest : null,
@@ -3965,9 +3808,9 @@ const SharedData = (() => {
         };
     }
 
-    function runSystemHealthCheck() {
+    async function runSystemHealthCheck() {
         startBootstrap(false);
-        const response = syncRequest('POST', 'runSystemHealthCheck', {});
+        const response = (await requestJson('POST', 'runSystemHealthCheck', {}));
         return {
             success: response && response.success === true,
             result: response && response.result ? response.result : null,
@@ -3975,16 +3818,344 @@ const SharedData = (() => {
         };
     }
 
-    function analyzeBiasComments(filters, actor) {
+    // Mirror api/feedback_classification_policy.json. Verified by multilingual parity tests.
+    const feedbackClassificationPolicy = {
+    "version": "multilingual-feedback-v1",
+    "labels": [
+        "Constructive",
+        "Positive",
+        "Neutral",
+        "Critical",
+        "Biased"
+    ],
+    "rules": {
+        "Biased": [
+            "\\b(?:professor|prof|teacher|instructor|sir|ma am|maam|mam|guro|he|she|you|siya|ka) (?:(?:is|are|looks|look|ay|po|opo|so|very|really|extremely|such|a|an|talaga|ang|napaka|not|never|hindi|di|isn t|is not) )*(?:stupid|dumb|idiot|useless|incompetent|ugly|pangit|hideous|unattractive|bobo|gago|tanga|inutil|epal|walang kwenta|trash|a joke)\\b",
+            "\\b(?:stupid|dumb|idiot|useless|incompetent|ugly|pangit|hideous|unattractive|bobo|gago|tanga|inutil|epal|walang kwenta|trash|a joke) (?:po |opo |na |ang |si |ni |yung |itong |ng |naman si )*(?:professor|prof|teacher|instructor|sir|ma am|maam|mam|guro|he|she|you|siya|ka)\\b",
+            "\\b(?:fuck you|tangina mo|putang ina mo|putangina mo|gago ka|bobo ka|tanga ka)\\b",
+            "\\b(?:fuck|putangina|tangina|fucking) (?:this |that |the |si |mo |po |our )*(?:professor|prof|teacher|instructor|sir|ma am|maam|mam|guro|he|she|you|siya|ka)\\b",
+            "\\b(?:professor|prof|teacher|instructor|sir|ma am|maam|mam|guro|he|she|you|siya|ka) (?:is |ay )?(?:a |such a )?(?:piece of shit|waste of space|disgusting looking)\\b",
+            "\\b(?:i hate|we hate|hate ko|hate namin) (?:this |the |our |si |ang )*(?:professor|prof|teacher|instructor|sir|ma am|maam|mam|guro|he|she|you|siya|ka)\\b",
+            "^(?:po )?(?:bobo|gago|tanga|idiot|useless|walang kwenta|stupid)(?: po)?$",
+            "\\b(?:professor|prof|teacher|instructor|sir|ma am|maam) sucks\\b"
+        ],
+        "Discriminatory": [
+            "\\b(?:professor|prof|teacher|instructor|sir|ma am|maam|mam|guro|he|she|you|siya|ka) (?:should not|shouldn t|must not|cannot|can t) teach because (?:he|she|they) (?:is|are) (?:a woman|female|gay|disabled|muslim)\\b",
+            "\\b(?:bawal|hindi dapat) (?:magturo|mag teach) (?:ang |siya kasi |siya dahil )?(?:babae|bakla|muslim)\\b"
+        ],
+        "Constructive": [
+            "\\b(?:should|could|needs? to|please|pls|plz|kindly|sana|dapat|paki|pakisuyo|pwede po bang|puwede po bang|pwede bang|puwede bang|pde po bang|pwedeng|mas okay kung|mas ok kung|mas maganda kung|would help to|would be better to) (?:po |naman |sana |si sir |si ma am |ang prof |na |hindi |di |not |you |he |she |the professor |the instructor )*(?:explain|provide|give|clarify|improve|use|add|reduce|slow|avoid|stop|include|prepare|be more|make|magbigay|mag bigay|dagdagan|dagdag|bawasan|bagalan|linawin|ipaliwanag|magpaliwanag|mag explain|mag discuss|mag discuss|i explain|i discuss|magturo|mag turo|gumamit|gawing|mas maraming|mas malinaw|mas mabagal|more examples|more guidance|clearer instructions)\\b",
+            "\\b(?:more|additional) (?:worked )?(?:examples|guidance|feedback|explanations|practice|learning materials) (?:please|pls|plz|would help|would be helpful|are needed|is needed)\\b",
+            "\\b(?:need|needs|want|request) (?:po |namin |ko |ng |nang |a |some )*(?:more|clearer|better|additional) (?:examples|guidance|instructions|explanations|feedback|pacing|materials)\\b",
+            "\\b(?:please |pls |paki)?(?:pakilinaw|pakibagalan|pakidagdagan|pakibawasan|pakipaliwanag|paki explain|paki provide|paki bigay)\\b",
+            "\\b(?:magbigay|dagdagan|bawasan|bagalan|linawin|ipaliwanag) (?:po |naman |pa |ng |ang |yung )*(?:halimbawa|examples|instructions|pacing|discussion|lesson|lessons|gawain|workload|feedback)\\b",
+            "\\b(?:sana|dapat) (?:po |naman |ay |na )*(?:may|merong|magkaroon ng) (?:mas |more |additional )?(?:examples|halimbawa|guidance|feedback|explanation|paliwanag)\\b",
+            "\\b(?:don t|do not|stop) (?:just |only )?(?:assign|assigning|give|giving|rely on|rush|skip)\\b",
+            "\\b(?:sana|dapat|mas okay kung|mas maganda kung) (?:po |naman |ay |na )*(?:mas malinaw|mas mabagal|hindi puro|di puro) (?:po |ang |yung |na |lang )*(?:paliwanag|explanation|discussion|instructions|reporting|report|chatgpt)\\b",
+            "^(?:please |pls |plz )?(?:give|provide|explain|clarify|add|reduce|slow down|improve) (?:po |us |the |some |more |worked |clearer |additional )*(?:examples|guidance|feedback|lessons|lesson|rubric|instructions|workload|pacing|teaching|slides|materials)\\b",
+            "^(?:more|additional|clearer|better) (?:worked )?(?:examples|guidance|instructions|explanations|feedback|pacing|materials)(?: po| please| pls)?$",
+            "\\b(?:mas okay kung|mas ok kung|mas maganda kung|sana|dapat) (?:po |naman |na )*(?:may|merong|magkaroon ng) (?:mas |more |additional |malinaw na )?(?:examples|halimbawa|guidance|feedback|explanation|paliwanag|rubrics|instructions)\\b",
+            "\\b(?:sana|dapat) (?:po |siya |sya |ay )*(?:hindi|di) (?:po |siya |sya |palaging |laging )*(?:late|absent)\\b"
+        ],
+        "Critical": [
+            "\\b(?:unclear|confusing|unprepared|unfair|frustrating|frustrated|disappointing|disappointed|nakakainis|nakakafrustrate|nakakalito|magulo|malabo|mabilis masyado|sobrang bilis|sobrang dami)\\b",
+            "\\b(?:rarely|barely|never|seldom) (?:explains?|teaches?|provides? feedback)\\b",
+            "\\b(?:too fast|too much homework|too much workload|relies too much on chatgpt|rely too much on chatgpt|teaching ourselves|teach ourselves|students are the ones reporting|students are the ones teaching)\\b",
+            "\\b(?:student reporting|assigned as student reports|puro reporting|puro report|puro chatgpt|kami lang nagtuturo|kami lang nagrereport|kami kami lang|reporting lang|chatgpt lang)\\b",
+            "\\b(?:pangit|ugly|stupid|terrible|awful|walang kwenta) (?:ang |ng |yung |the |na )*(?:slides|materials|instructions|lecture|lesson|lessons|pagtuturo|paliwanag|discussion)\\b",
+            "\\b(?:slides|materials|instructions|lecture|lesson|lessons|pagtuturo|paliwanag|discussion) (?:are |is |ay |ang |very |so |napaka |talagang )*(?:ugly|pangit|terrible|awful|confusing|stupid|walang kwenta)\\b",
+            "\\b(?:laging late|palaging late|always late|frequently late|often late|rarely available|doesn t teach anything|does not teach anything)\\b",
+            "\\b(?:calls?|called) (?:us|students|the students) (?:stupid|dumb|idiots|bobo|tanga)\\b",
+            "\\b(?:pagtuturo|teaching|paliwanag|explanation|instructions|discussion|grading|grades|rubric|materials|slides) (?:is |are |ay |ang |po |very |so |sobrang )*(?:poor|bad|terrible|awful|confusing|unclear|unfair|malabo|magulo|pangit|useless)\\b",
+            "\\b(?:pangit|malabo|magulo|mabilis|nakakalito) (?:po |siya |talaga )*(?:magturo|magpaliwanag|mag explain)\\b",
+            "\\b(?:laging|palaging|madalas) (?:po |siya |sya )?absent\\b",
+            "\\b(?:ang|sobrang|masyadong) (?:bilis|bagal)\\b"
+        ],
+        "Positive": [
+            "\\b(?:explains?|teaches?) (?:the |our |difficult |complex )*(?:lessons|topics|concepts)? ?(?:very |really |so )?(?:well|clearly)\\b",
+            "\\b(?:clear|helpful|excellent|great|effective|engaging|good|nice|patient|approachable|organized|knowledgeable) (?:and |very |classroom )*(?:teaching|teacher|professor|prof|instructor|lessons|discussions|explanations|examples|feedback|guidance|materials)\\b",
+            "\\b(?:professor|prof|teacher|instructor|sir|ma am|maam|mam|guro|he|she|you|siya|ka) (?:is |are |ay |very |so |really |po |both )*(?:patient|approachable|helpful|excellent|great|kind|knowledgeable|magaling|mabait|mahusay)\\b",
+            "\\b(?:malinaw|maayos|magaling|mahusay) (?:po |talaga |siya )*(?:magpaliwanag|magturo|ang paliwanag|ang pagtuturo|ang explanation|ang discussion)\\b",
+            "\\b(?:magaling|mabait|mahusay|approachable|patient) (?:po |talaga |ang |si |naman si )*(?:sir|ma am|maam|mam|prof|professor|guro|instructor)\\b",
+            "\\b(?:thank you|thanks|salamat|appreciate) (?:po |sir |ma am |for |sa )*(?:teaching|help|guidance|pagtuturo|tulong|paliwanag|effort)\\b",
+            "\\b(?:madaling|daling) (?:po )?(?:maintindihan|intindihin)\\b",
+            "^(?:excellent|great|good|nice|salamat|thank you|thanks|magaling|mahusay)(?: po)?$",
+            "\\b(?:sobrang|super|ang) (?:galing|husay) (?:po |naman |talaga )?(?:niya|ni sir|ni ma am|ni prof|magturo|magpaliwanag)\\b",
+            "\\b(?:thank you|thanks|salamat) (?:po |very much |so much )*(?:sir|ma am|maam|mam|prof|professor|teacher)\\b",
+            "\\b(?:very |so |really )?(?:helpful|patient|approachable) (?:and )?(?:helpful|patient|approachable)\\b"
+        ],
+        "CriticalNegative": [
+            "\\b(?:not|never|no|without|doesn t|does not|isn t|is not|aren t|are not|hindi|di|wala|walang|kulang|kulang sa) (?:po |siya |sya |kami |ko |namin |ako |talaga |masyadong |proper |any |enough |really |even |clear |clearer |malinaw |nag |mag )*(?:teach|teaches|teaching|explain|explains|explaining|provide|provides|explanation|guidance|instructions|feedback|learning|helpful|organized|patient|approachable|interesting|engaging|effective|prepared|malinaw|maintindihan|naiintindihan|nagtuturo|nag tuturo|magturo|mag turo|nagpapaliwanag|nag explain|nag eexplain|magpaliwanag|paliwanag|matuto|natututo|magaling|maayos|tinuturo|nagbibigay|makasunod)\\b",
+            "\\b(?:wala|walang|kulang) (?:po |kaming |kami |ng |sa )*(?:natutunan|natututunan|halimbawa|examples|guidance|feedback)\\b",
+            "\\b(?:no|zero) effort (?:in |sa )?(?:teaching|pagtuturo|explaining)\\b",
+            "\\b(?:hindi|di|d) (?:po |kami |ko |namin )*(?:gets|get|maintindihan)\\b"
+        ]
+    },
+    "reasons": {
+        "Constructive": "Requests a specific improvement to teaching or classroom support.",
+        "Positive": "Expresses praise or appreciation for teaching or support.",
+        "Neutral": "No clear praise, teaching concern, improvement request, or personal attack.",
+        "Critical": "Expresses a teaching concern or dissatisfaction without an actionable suggestion.",
+        "Biased": "Contains a direct personal insult, abusive attack, or discriminatory remark."
+    },
+    "topics": [
+        {
+            "label": "learning materials",
+            "keywords": [
+                "materials",
+                "material",
+                "module",
+                "modules",
+                "handout",
+                "handouts",
+                "slides",
+                "resources",
+                "references",
+                "kagamitan"
+            ]
+        },
+        {
+            "label": "lesson explanations",
+            "keywords": [
+                "explain",
+                "explains",
+                "explanation",
+                "explanations",
+                "clarify",
+                "clearer",
+                "understand",
+                "paliwanag",
+                "ipaliwanag",
+                "magpaliwanag",
+                "malinaw",
+                "maintindihan",
+                "nagpapaliwanag",
+                "nag eexplain"
+            ]
+        },
+        {
+            "label": "examples and practice",
+            "keywords": [
+                "example",
+                "examples",
+                "sample",
+                "samples",
+                "halimbawa",
+                "practice",
+                "pagsasanay"
+            ]
+        },
+        {
+            "label": "class pacing",
+            "keywords": [
+                "pace",
+                "pacing",
+                "fast",
+                "rushed",
+                "bilis",
+                "mabilis",
+                "mabagal",
+                "bagalan"
+            ]
+        },
+        {
+            "label": "class discussion and participation",
+            "keywords": [
+                "interactive",
+                "discussion",
+                "discussions",
+                "engaging",
+                "participate",
+                "interaction",
+                "reporting",
+                "talakayan",
+                "nagrereport"
+            ]
+        }
+    ]
+};
+
+    function classifyFeedbackCommentByRules(value) {
+        const policy = feedbackClassificationPolicy;
+        const raw = String(value == null ? '' : value);
+        const normalize = text => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+        const clauses = raw.split(/[.!?;]+|\b(?:but|pero|however|because|dahil)\b/iu).map(normalize).filter(Boolean);
+        function matches(patterns, guardNegation, inputClauses = clauses) {
+            return inputClauses.some(clause => patterns.some(pattern => {
+                const regex = new RegExp(pattern, 'gu');
+                for (const match of clause.matchAll(regex)) {
+                    // Negation near the descriptor applies only within this clause.
+                    const scope = (clause.slice(0, match.index) + ' ' + match[0]).trim().split(/\s+/).slice(-8).join(' ');
+                    if (!guardNegation || !/\b(?:not|never|no|hindi|di|isn t|aren t|wasn t|don t|doesn t)\b/.test(scope)) return true;
+                }
+                return false;
+            }));
+        }
+        let label = 'Neutral';
+        if (matches(policy.rules.Biased, true) || matches(policy.rules.Discriminatory, false, [normalize(raw)])) label = 'Biased';
+        else if (matches(policy.rules.Constructive, false)) label = 'Constructive';
+        else if (matches(policy.rules.CriticalNegative, false) || matches(policy.rules.Critical, true)) label = 'Critical';
+        else if (matches(policy.rules.Positive, true)) label = 'Positive';
+        return { label, reason: raw.trim() ? policy.reasons[label] : 'Empty or missing feedback.', source: 'rule' };
+    }
+
+    function detectFeedbackCommentTopics(comments) {
+        const texts = comments.map(value => String(value || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim());
+        return feedbackClassificationPolicy.topics.map(rule => ({
+            label: rule.label,
+            count: texts.filter(text => rule.keywords.some(keyword => (' ' + text + ' ').includes(' ' + keyword + ' '))).length,
+        })).filter(topic => topic.count > 0).sort((a, b) => b.count - a.count).slice(0, 5);
+    }
+
+    function getFeedbackClassificationTone(counts) {
+        const labels = ['neutral', 'constructive', 'positive', 'critical', 'biased'];
+        const dominant = labels.reduce((best, label) => Number(counts[label] || 0) > Number(counts[best] || 0) ? label : best, 'neutral');
+        return dominant === 'biased' ? 'Overall tone includes notable comments needing review.' : `Overall tone is mostly ${dominant}.`;
+    }
+
+    function prepareFeedbackSummaryComments(items) {
+        const groups = new Map();
+        const encoder = new TextEncoder();
+        const rows = (Array.isArray(items) ? items : []).filter(item => String(item && item.text || '').trim());
+        rows.forEach(item => {
+            const fingerprint = String(item.text).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ');
+            if (!fingerprint) return;
+            if (!groups.has(fingerprint)) {
+                const words = fingerprint.split(' ');
+                groups.set(fingerprint, {
+                    items: [], excluded: false,
+                    tokens: new Set(words.filter(word => encoder.encode(word).length >= 3)),
+                    negation: ['not','never','no','without','hindi','wala'].filter(word => words.includes(word)).join('|'),
+                });
+            }
+            const group = groups.get(fingerprint);
+            group.items.push(item);
+            if ([true, 1, '1'].includes(item.commentRepetitiveFlag)) group.excluded = true;
+        });
+        const values = Array.from(groups.values());
+        const postings = new Map();
+        values.forEach((group, index) => {
+            if (group.items.length > 1) group.excluded = true;
+            if (group.tokens.size >= 5) group.tokens.forEach(token => {
+                if (!postings.has(token)) postings.set(token, []);
+                postings.get(token).push(index);
+            });
+        });
+        values.forEach((group, index) => {
+            if (group.tokens.size < 5) return;
+            const overlaps = new Map();
+            group.tokens.forEach(token => postings.get(token).forEach(other => {
+                if (other > index) overlaps.set(other, (overlaps.get(other) || 0) + 1);
+            }));
+            overlaps.forEach((overlap, otherIndex) => {
+                const other = values[otherIndex];
+                if (group.negation !== other.negation) return;
+                if (overlap >= 5 && overlap / Math.max(group.tokens.size, other.tokens.size) >= 0.9) {
+                    group.excluded = true;
+                    other.excluded = true;
+                }
+            });
+        });
+        const eligible = new Set(values.filter(group => !group.excluded).flatMap(group => group.items));
+        const comments = rows.filter(row => eligible.has(row));
+        return {
+            comments: comments.slice(0, 160),
+            available: rows.length,
+            excludedRepetitiveComments: values.filter(group => group.excluded).reduce((sum, group) => sum + group.items.length, 0),
+        };
+    }
+
+    function buildFeedbackTeachingImprovements(items) {
+        const concerns = (Array.isArray(items) ? items : []).map(item => String(item && item.text || ''))
+            .filter(text => ['Constructive', 'Critical'].includes(classifyFeedbackCommentByRules(text).label));
+        const suggestions = {
+            'learning materials': 'Provide clear, organized learning materials before class.',
+            'lesson explanations': 'Explain complex topics step by step and check students’ understanding.',
+            'examples and practice': 'Include worked examples and guided practice linked to the lesson.',
+            'class pacing': 'Adjust lesson pacing and pause for questions before moving on.',
+            'class discussion and participation': 'Use guided class discussions and invite students to participate.',
+        };
+        return detectFeedbackCommentTopics(concerns).map(topic => suggestions[topic.label]).filter(Boolean).slice(0, 3);
+    }
+
+    function renderFeedbackIntelligence(message, options = {}) {
+        const fallback = options.fallback || { teachingImprovements: [] };
+        const prefix = options.idPrefix || 'feedbackIntelligence';
+        const normalizeToken = value => String(value || '').trim().toLowerCase();
+        const escapeHTML = value => String(value == null ? '' : value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+        const data = { ...fallback, ...message };
+        const total = Math.max(0, Math.floor(Number(data.total) || 0));
+        const recurring = (Array.isArray(data.topics) ? data.topics : [])
+            .filter(topic => topic && typeof topic.label === 'string' && topic.label.trim() && Number(topic.count) >= 2)
+            .map(topic => ({ label: topic.label, count: Math.min(total, Math.floor(Number(topic.count) || 0)) }))
+            .filter(topic => topic.count >= 2).sort((a, b) => b.count - a.count);
+        const improvements = (Array.isArray(data.teachingImprovements) ? data.teachingImprovements : [])
+            .filter(text => typeof text === 'string' && text.trim()).map(text => text.trim().slice(0, 240));
+        const suggestions = Number(data.constructive || 0) + Number(data.critical || 0) > 0
+            ? Array.from(new Set(improvements.length ? improvements : fallback.teachingImprovements)).slice(0, 3) : [];
+        if ((!Array.isArray(message.teachingImprovements) || (!improvements.length && fallback.teachingImprovements.length))
+            && ['openai', 'gemini'].includes(normalizeToken(data.source))) {
+            data.source = `${normalizeToken(data.source)}+rule`;
+        }
+        const subtitle = [options.professorName, `${options.evaluationLabel || 'Student evaluation'} analysis`, options.semesterLabel || 'Selected semester'].filter(Boolean).join(' · ');
+        const available = Math.max(total, Number(options.availableComments || fallback.availableComments) || 0);
+        const source = normalizeToken(data.source);
+        const sourceNote = ['openai','gemini'].includes(source) ? 'AI generated' : ['openai+rule','gemini+rule'].includes(source) ? 'AI assisted' : 'Rule-based';
+        const count = key => Math.min(total, Math.max(0, Math.floor(Number(data[key]) || 0)));
+        const metrics = [
+            ['Comments analyzed', total, 'Number of comment entries included in this analysis.'],
+            ['Actionable feedback', count('constructive'), 'Comments classified as Constructive.'],
+            ['Recurring themes', recurring.length, 'Themes mentioned in at least two analyzed comments.'],
+            ['Needs review', count('biased'), 'Biased comments containing personal attacks or discriminatory remarks.'],
+        ];
+        return `
+            <div class="feedback-intelligence-header">
+                <div><h4><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> Feedback Intelligence</h4>
+                    <p>${escapeHTML(subtitle)}</p></div>
+                <span class="feedback-intelligence-status">Analysis ready</span>
+            </div>
+            <div class="feedback-intelligence-metrics" aria-label="Feedback analysis metrics">
+                ${metrics.map(([label, value, description]) => `<div class="feedback-intelligence-metric" title="${escapeHTML(description)}">
+                    <strong>${value.toLocaleString('en-US')}</strong><span>${label}</span>
+                    <span class="feedback-intelligence-sr-only">${escapeHTML(description)}</span></div>`).join('')}
+            </div>
+            <section class="feedback-intelligence-card" aria-labelledby="${prefix}ExecutiveTitle">
+                <h5 id="${prefix}ExecutiveTitle"><i class="fas fa-brain" aria-hidden="true"></i> Executive Summary</h5>
+                <p>${escapeHTML(data.summaryLine || fallback.summaryLine || 'No comments remain available for analysis.')}</p>
+                ${data.toneLine ? `<p class="feedback-intelligence-muted">${escapeHTML(data.toneLine)}</p>` : ''}
+            </section>
+            <section class="feedback-intelligence-card" aria-labelledby="${prefix}ThemesTitle">
+                <h5 id="${prefix}ThemesTitle">Top recurring themes</h5>
+                ${recurring.length ? recurring.slice(0, 3).map(topic => {
+                    const percentage = total ? topic.count / total * 100 : 0;
+                    const label = percentage.toFixed(1).replace(/\.0$/, '');
+                    return `<div class="feedback-intelligence-theme"><div class="feedback-intelligence-theme-label">
+                        <span>${escapeHTML(topic.label)}</span><span>${topic.count} mentions · ${label}%</span></div>
+                        <progress max="${total}" value="${topic.count}" aria-label="${escapeHTML(topic.label)}: ${topic.count} of ${total} comments (${label}%)"></progress></div>`;
+                }).join('') : '<p class="feedback-intelligence-muted">No recurring themes found. A theme must appear in at least two comments.</p>'}
+                ${recurring.length ? `<p class="feedback-intelligence-muted">Percentages use ${total} analyzed comments. Themes may overlap.</p>` : ''}
+            </section>
+            <section class="feedback-intelligence-card" aria-labelledby="${prefix}ImprovementsTitle">
+                <h5 id="${prefix}ImprovementsTitle"><i class="far fa-lightbulb" aria-hidden="true"></i> Suggested Teaching Improvements</h5>
+                ${suggestions.length ? `<ul class="feedback-intelligence-suggestions">${suggestions.map(text => `<li><i class="far fa-check-circle" aria-hidden="true"></i><span>${escapeHTML(text)}</span></li>`).join('')}</ul>`
+                    : '<p class="feedback-intelligence-muted">No specific teaching improvement is supported by the analyzed feedback.</p>'}
+            </section>
+            <div class="feedback-intelligence-footer"><span>${total < available
+                ? `Analysis includes ${total} of ${available} available comment entries; repetitive-comment filtering and analysis limits apply.`
+                : 'Based on the selected feedback.'}</span><span class="feedback-intelligence-source">${escapeHTML(sourceNote)}</span></div>
+        `;
+    }
+
+    async function analyzeBiasComments(filters, actor) {
         startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             filters: Object.assign({}, filters || {}),
         });
-        const response = syncRequest('POST', 'analyzeBiasComments', body);
+        const response = (await requestJson('POST', 'analyzeBiasComments', body));
         return {
             success: response && response.success === true,
             auditId: String(response && response.auditId || ''),
-            summary: response && response.summary ? response.summary : { total: 0, constructive: 0, neutral: 0, biased: 0, source: 'rule' },
+            summary: response && response.summary ? response.summary : { total: 0, constructive: 0, positive: 0, neutral: 0, critical: 0, biased: 0, source: 'rule' },
             items: Array.isArray(response && response.items) ? response.items : [],
         };
     }
@@ -3998,8 +4169,8 @@ const SharedData = (() => {
     function reviewCredibilityEvaluations(evaluationIds, decision, note) {
         return requestJson('POST', 'reviewCredibilityEvaluations', { evaluationIds, decision, note: note || '' });
     }
-    function getProfessorAnalyticsPayload(payload) {
-        return syncRequest('POST', 'getProfessorAnalyticsPayload', { payload }).payload;
+    async function getProfessorAnalyticsPayload(payload) {
+        return (await requestJson('POST', 'getProfessorAnalyticsPayload', { payload })).payload;
     }
     function evaluationTimingKey(type, target, semester) {
         const session = getSession() || {};
@@ -4067,9 +4238,9 @@ const SharedData = (() => {
         };
     }
 
-    function generateFacultyPaperSectionCRecommendations(payload) {
+    async function generateFacultyPaperSectionCRecommendations(payload) {
         startBootstrap(false);
-        const response = syncRequest('POST', 'generateFacultyPaperSectionCRecommendations', payload || {});
+        const response = (await requestJson('POST', 'generateFacultyPaperSectionCRecommendations', payload || {}));
         return {
             success: response && response.success === true,
             auditId: String(response && response.auditId || ''),
@@ -4450,10 +4621,10 @@ const SharedData = (() => {
         });
     }
 
-    function persistAnnouncements() {
+    async function persistAnnouncements() {
         try {
             state.announcements = normalizeAnnouncementList(state.announcements || []);
-            const response = syncRequest('POST', 'setAnnouncements', { announcements: state.announcements });
+            const response = (await requestJson('POST', 'setAnnouncements', { announcements: state.announcements }));
             if (response && Array.isArray(response.announcements)) {
                 state.announcements = normalizeAnnouncementList(response.announcements);
             }
@@ -4463,7 +4634,7 @@ const SharedData = (() => {
         }
     }
 
-    function addAnnouncement(announcement) {
+    async function addAnnouncement(announcement) {
         startBootstrap(false);
         const session = getSession() || {};
         const nowIso = getNowIsoString();
@@ -4492,11 +4663,11 @@ const SharedData = (() => {
         if (state.announcements.length > 50) {
             state.announcements.length = 50;
         }
-        persistAnnouncements();
+        (await persistAnnouncements());
         return deepClone(normalizedEntry);
     }
 
-    function markAnnouncementsRead(ids) {
+    async function markAnnouncementsRead(ids) {
         startBootstrap(false);
         const targetIds = (Array.isArray(ids) ? ids : [ids])
             .map(function (id) { return String(id || '').trim(); })
@@ -4520,7 +4691,7 @@ const SharedData = (() => {
         });
 
         try {
-            const response = syncRequest('POST', 'markAnnouncementsRead', { ids: targetIds });
+            const response = (await requestJson('POST', 'markAnnouncementsRead', { ids: targetIds }));
             if (response && Array.isArray(response.announcements)) {
                 state.announcements = normalizeAnnouncementList(response.announcements);
             }
@@ -4532,8 +4703,8 @@ const SharedData = (() => {
         return getAnnouncementsForCurrentUser();
     }
 
-    function markAnnouncementRead(id) {
-        return markAnnouncementsRead([id]);
+    async function markAnnouncementRead(id) {
+        return (await markAnnouncementsRead([id]));
     }
 
     function getUnreadAnnouncementCount() {
@@ -4647,10 +4818,10 @@ const SharedData = (() => {
             }).join('');
         }
 
-        modal.__announcementDismiss = function () {
+        modal.__announcementDismiss = async function () {
             modal.hidden = true;
             modal.classList.remove('is-open');
-            markAnnouncementsRead(ids);
+            (await markAnnouncementsRead(ids));
             if (typeof cfg.onDismiss === 'function') {
                 cfg.onDismiss();
             }
@@ -4690,13 +4861,13 @@ const SharedData = (() => {
         return Object.assign({}, state.settings);
     }
 
-    function updateSettings(partial) {
+    async function updateSettings(partial) {
         startBootstrap(false);
         state.settings = Object.assign({}, state.settings, partial || {});
         writeLocalFallbackJSON(KEYS.SETTINGS, state.settings);
         dispatchChange(KEYS.SETTINGS, deepClone(state.settings));
         try {
-            const response = syncRequest('POST', 'updateSettings', { settings: partial || {} });
+            const response = (await requestJson('POST', 'updateSettings', { settings: partial || {} }));
             if (response && response.settings && typeof response.settings === 'object') {
                 state.settings = Object.assign({}, state.settings, response.settings);
                 writeLocalFallbackJSON(KEYS.SETTINGS, state.settings);
@@ -4758,13 +4929,13 @@ const SharedData = (() => {
         return Object.assign({}, state.evalPeriods);
     }
 
-    function setEvalPeriods(periods) {
+    async function setEvalPeriods(periods) {
         startBootstrap(false);
         state.evalPeriods = Object.assign({}, state.evalPeriods, periods || {});
         writeLocalFallbackJSON(KEYS.EVAL_PERIODS, state.evalPeriods);
         dispatchChange(KEYS.EVAL_PERIODS, deepClone(state.evalPeriods));
         try {
-            syncRequest('POST', 'setEvalPeriods', { periods: state.evalPeriods });
+            (await requestJson('POST', 'setEvalPeriods', { periods: state.evalPeriods }));
         } catch (error) {
             console.error('[DBData] Failed to persist evaluation periods.', error);
         }
@@ -4796,10 +4967,10 @@ const SharedData = (() => {
         dispatchChange(KEYS.SEMESTER_LIST, deepClone(state.semesterList));
     }
 
-    function addSemester(value, label) {
+    async function addSemester(value, label) {
         startBootstrap(false);
         if (!state.semesterList.find(function (item) { return item.value === value; })) {
-            syncRequest('POST', 'addSemester', { value, label });
+            (await requestJson('POST', 'addSemester', { value, label }));
             state.semesterList.push({ value, label });
             writeLocalFallbackJSON(KEYS.SEMESTER_LIST, state.semesterList);
             dispatchChange(KEYS.SEMESTER_LIST, deepClone(state.semesterList));
@@ -4863,14 +5034,14 @@ const SharedData = (() => {
         dispatchChange(KEYS.USERS, deepClone(state.users));
     }
 
-    function changeOwnEmail(currentEmail, newEmail, actor) {
+    async function changeOwnEmail(currentEmail, newEmail, actor) {
         startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             currentEmail: String(currentEmail || '').trim(),
             newEmail: String(newEmail || '').trim(),
         });
 
-        const response = syncRequest('POST', 'changeOwnEmail', body);
+        const response = (await requestJson('POST', 'changeOwnEmail', body));
         const updatedUser = response && response.user && typeof response.user === 'object'
             ? response.user
             : null;
@@ -4936,13 +5107,13 @@ const SharedData = (() => {
         });
     }
 
-    function changeOwnPassword(currentPassword, newPassword, actor) {
+    async function changeOwnPassword(currentPassword, newPassword, actor) {
         startBootstrap(false);
         const body = Object.assign({}, buildActorPayload(actor || {}), {
             currentPassword: String(currentPassword || ''),
             newPassword: String(newPassword || ''),
         });
-        const response = syncRequest('POST', 'changeOwnPassword', body);
+        const response = (await requestJson('POST', 'changeOwnPassword', body));
         return {
             success: !!(response && response.success !== false),
             updated: !!(response && response.updated),
@@ -4963,54 +5134,54 @@ const SharedData = (() => {
         });
     }
 
-    function generateDeanProgramPeerAssignments(payload) {
+    async function generateDeanProgramPeerAssignments(payload) {
         startBootstrap(false);
         const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
-        return syncRequest('POST', 'generateDeanProgramPeerAssignments', body);
+        return (await requestJson('POST', 'generateDeanProgramPeerAssignments', body));
     }
 
-    function generateCoordinatorProgramPeerAssignments(payload) {
+    async function generateCoordinatorProgramPeerAssignments(payload) {
         startBootstrap(false);
         const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
-        return syncRequest('POST', 'generateCoordinatorProgramPeerAssignments', body);
+        return (await requestJson('POST', 'generateCoordinatorProgramPeerAssignments', body));
     }
 
-    function listDeanProgramPeerAssignmentsCurrent(actor) {
+    async function listDeanProgramPeerAssignmentsCurrent(actor) {
         startBootstrap(false);
-        return syncRequest('POST', 'listDeanProgramPeerAssignmentsCurrent', buildActorPayload(actor || {}));
+        return (await requestJson('POST', 'listDeanProgramPeerAssignmentsCurrent', buildActorPayload(actor || {})));
     }
 
-    function listCoordinatorProgramPeerAssignmentsCurrent(actor) {
+    async function listCoordinatorProgramPeerAssignmentsCurrent(actor) {
         startBootstrap(false);
-        return syncRequest('POST', 'listCoordinatorProgramPeerAssignmentsCurrent', buildActorPayload(actor || {}));
+        return (await requestJson('POST', 'listCoordinatorProgramPeerAssignmentsCurrent', buildActorPayload(actor || {})));
     }
 
-    function listDeanProgramPeerAssignmentDetailsCurrent(payload) {
-        startBootstrap(false);
-        const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
-        return syncRequest('POST', 'listDeanProgramPeerAssignmentDetailsCurrent', body);
-    }
-
-    function listCoordinatorProgramPeerAssignmentDetailsCurrent(payload) {
+    async function listDeanProgramPeerAssignmentDetailsCurrent(payload) {
         startBootstrap(false);
         const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
-        return syncRequest('POST', 'listCoordinatorProgramPeerAssignmentDetailsCurrent', body);
+        return (await requestJson('POST', 'listDeanProgramPeerAssignmentDetailsCurrent', body));
     }
 
-    function autoGeneratePeerRoom(payload) {
+    async function listCoordinatorProgramPeerAssignmentDetailsCurrent(payload) {
         startBootstrap(false);
         const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
-        return syncRequest('POST', 'autoGeneratePeerRoom', body);
+        return (await requestJson('POST', 'listCoordinatorProgramPeerAssignmentDetailsCurrent', body));
     }
 
-    function listDeanPeerRoomsCurrent(actor) {
+    async function autoGeneratePeerRoom(payload) {
         startBootstrap(false);
-        return syncRequest('POST', 'listDeanPeerRoomsCurrent', buildActorPayload(actor || {}));
+        const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
+        return (await requestJson('POST', 'autoGeneratePeerRoom', body));
     }
 
-    function listProfessorPeerAssignmentsCurrent(actor) {
+    async function listDeanPeerRoomsCurrent(actor) {
         startBootstrap(false);
-        return syncRequest('POST', 'listProfessorPeerAssignmentsCurrent', buildActorPayload(actor || {}));
+        return (await requestJson('POST', 'listDeanPeerRoomsCurrent', buildActorPayload(actor || {})));
+    }
+
+    async function listProfessorPeerAssignmentsCurrent(actor) {
+        startBootstrap(false);
+        return (await requestJson('POST', 'listProfessorPeerAssignmentsCurrent', buildActorPayload(actor || {})));
     }
 
     function fetchVpaaPeerAssignmentCounts(filters) {
@@ -5018,34 +5189,34 @@ const SharedData = (() => {
         return requestJson('POST', 'getVpaaPeerAssignmentCounts', Object.assign({}, filters || {}), { background: true });
     }
 
-    function listDeanPeerRoomMembersCurrent(actor, roomId) {
+    async function listDeanPeerRoomMembersCurrent(actor, roomId) {
         startBootstrap(false);
         const body = Object.assign({ roomId: roomId }, buildActorPayload(actor || {}));
-        return syncRequest('POST', 'listDeanPeerRoomMembersCurrent', body);
+        return (await requestJson('POST', 'listDeanPeerRoomMembersCurrent', body));
     }
 
-    function listDeanPeerRoomEligibleProfessorsCurrent(actor, roomId) {
+    async function listDeanPeerRoomEligibleProfessorsCurrent(actor, roomId) {
         startBootstrap(false);
         const body = Object.assign({ roomId: roomId }, buildActorPayload(actor || {}));
-        return syncRequest('POST', 'listDeanPeerRoomEligibleProfessorsCurrent', body);
+        return (await requestJson('POST', 'listDeanPeerRoomEligibleProfessorsCurrent', body));
     }
 
-    function addDeanPeerRoomMembers(payload) {
+    async function addDeanPeerRoomMembers(payload) {
         startBootstrap(false);
         const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
-        return syncRequest('POST', 'addDeanPeerRoomMembers', body);
+        return (await requestJson('POST', 'addDeanPeerRoomMembers', body));
     }
 
-    function removeDeanPeerRoomMember(payload) {
+    async function removeDeanPeerRoomMember(payload) {
         startBootstrap(false);
         const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
-        return syncRequest('POST', 'removeDeanPeerRoomMember', body);
+        return (await requestJson('POST', 'removeDeanPeerRoomMember', body));
     }
 
-    function dismantleDeanPeerRoom(payload) {
+    async function dismantleDeanPeerRoom(payload) {
         startBootstrap(false);
         const body = Object.assign({}, payload || {}, buildActorPayload(payload || {}));
-        return syncRequest('POST', 'dismantleDeanPeerRoom', body);
+        return (await requestJson('POST', 'dismantleDeanPeerRoom', body));
     }
 
     function normalizeFacultyReportAccess(value) {
@@ -5156,12 +5327,12 @@ const SharedData = (() => {
         return refreshPromises.facultyPapers;
     }
 
-    function listFacultyPapers(actorRole, actorUserId) {
+    async function listFacultyPapers(actorRole, actorUserId) {
         startBootstrap(false);
         const filters = actorRole && typeof actorRole === 'object'
             ? actorRole
             : (arguments.length >= 3 && arguments[2] && typeof arguments[2] === 'object' ? arguments[2] : {});
-        const response = syncRequest('POST', 'listFacultyPapers', { filters });
+        const response = (await requestJson('POST', 'listFacultyPapers', { filters }));
         applyFacultyPapersResponse(response || {});
         return deepClone(state.facultyAcknowledgementPapers);
     }
@@ -5177,18 +5348,18 @@ const SharedData = (() => {
         return deepClone(state.facultyAcknowledgementPapers);
     }
 
-    function upsertFacultyPaperDraft(payload) {
+    async function upsertFacultyPaperDraft(payload) {
         startBootstrap(false);
-        const response = syncRequest('POST', 'upsertFacultyPaperDraft', payload || {});
+        const response = (await requestJson('POST', 'upsertFacultyPaperDraft', payload || {}));
         if (response && response.paper) {
             dispatchChange(KEYS.FACULTY_PAPERS, response.paper);
         }
         return response || {};
     }
 
-    function archiveFacultyPaper(payload) {
+    async function archiveFacultyPaper(payload) {
         startBootstrap(false);
-        const response = syncRequest('POST', 'archiveFacultyPaper', payload || {});
+        const response = (await requestJson('POST', 'archiveFacultyPaper', payload || {}));
         if (Array.isArray(response && response.papers)) {
             state.facultyAcknowledgementPapers = response.papers;
             dispatchChange(KEYS.FACULTY_PAPERS, deepClone(state.facultyAcknowledgementPapers));
@@ -5196,9 +5367,9 @@ const SharedData = (() => {
         return response || {};
     }
 
-    function sendFacultyPaper(payload) {
+    async function sendFacultyPaper(payload) {
         startBootstrap(false);
-        const response = syncRequest('POST', 'sendFacultyPaper', payload || {});
+        const response = (await requestJson('POST', 'sendFacultyPaper', payload || {}));
         if (Array.isArray(response && response.papers)) {
             state.facultyAcknowledgementPapers = response.papers;
             dispatchChange(KEYS.FACULTY_PAPERS, deepClone(state.facultyAcknowledgementPapers));
@@ -5206,9 +5377,9 @@ const SharedData = (() => {
         return response || {};
     }
 
-    function saveFacultyPaperSectionC(payload) {
+    async function saveFacultyPaperSectionC(payload) {
         startBootstrap(false);
-        const response = syncRequest('POST', 'saveFacultyPaperSectionC', payload || {});
+        const response = (await requestJson('POST', 'saveFacultyPaperSectionC', payload || {}));
         if (response && response.paper) {
             dispatchChange(KEYS.FACULTY_PAPERS, response.paper);
         }
@@ -5340,6 +5511,12 @@ const SharedData = (() => {
         submitSystemReport,
         listSystemHealthChecks,
         runSystemHealthCheck,
+        classifyFeedbackCommentByRules,
+        getFeedbackClassificationTone,
+        detectFeedbackCommentTopics,
+        prepareFeedbackSummaryComments,
+        buildFeedbackTeachingImprovements,
+        renderFeedbackIntelligence,
         analyzeBiasComments,
         listCredibilityReviews, getCredibilityReview, reviewCredibilityEvaluations, getProfessorAnalyticsPayload,
         startEvaluationTiming, buildEvaluationTiming, clearEvaluationTiming,

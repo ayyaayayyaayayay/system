@@ -1,12 +1,13 @@
 'use strict';
+const { findSourceMarker } = require('./helpers/js-source');
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../JsScrip/profesorpanel.js'), 'utf8');
-const start = source.indexOf('function resolveEvaluationWindowGateState()');
-const end = source.indexOf('function clearRestrictedProfessorReportData()', start);
+const start = findSourceMarker(source, 'function resolveEvaluationWindowGateState()');
+const end = findSourceMarker(source, 'function clearRestrictedProfessorReportData()', start);
 let today = '2026-10-08';
 let periods;
 let access = { enabled: true, evaluationPeriodsComplete: true };

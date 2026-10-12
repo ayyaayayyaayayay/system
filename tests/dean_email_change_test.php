@@ -39,8 +39,8 @@ foreach ([$deanHtml, $coordinatorHtml] as $html) {
         'The email form must expose its submit button for request-state handling.'
     );
     deanEmailAssert(
-        str_contains($html, 'db-data.js?v=20261004a')
-            && str_contains($html, 'daenpanel.js?v=20261006cmo'),
+        preg_match('/db-data\.js\?[^"\']*loading=20261010b/', $html) === 1
+            && preg_match('/daenpanel\.js\?[^"\']*loading=20261010b/', $html) === 1,
         'The account-action scripts must be cache-busted.'
     );
 }

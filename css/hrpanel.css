@@ -7879,3 +7879,19 @@ textarea.reminder-template-control {
         overflow-wrap: anywhere;
     }
 }
+
+/* Five feedback categories are distinct from credibility risk levels. */
+.ai-insights-tag.feedback-constructive { color: #166534; background: #ecfdf5; border-color: #bbf7d0; }
+.ai-insights-tag.feedback-positive { color: #065f46; background: #d1fae5; border-color: #6ee7b7; }
+.ai-insights-tag.feedback-neutral { color: #1d4ed8; background: #eff6ff; border-color: #bfdbfe; }
+.ai-insights-tag.feedback-critical { color: #92400e; background: #fffbeb; border-color: #fcd34d; }
+.ai-insights-tag.feedback-biased { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
+#hr-ai-bias-body tr:not(.hr-mobile-card-row) > td:first-child,
+#hr-ai-bias-body .feedback-comment-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+#hr-ai-bias-body .hr-mobile-card-field,
+#hr-ai-bias-body .hr-mobile-card-value { min-width: 0; }
+#hr-ai-bias-body .hr-mobile-card-value { white-space: normal; }
+.feedback-classification-table th:last-child { min-width: 80px; white-space: nowrap; word-break: normal; }
+
+.hr-panel .activity-log-table .feedback-classification-table.hr-mobile-card-table { min-width: 0; }

@@ -1,10 +1,10 @@
-document.addEventListener("DOMContentLoaded", function () {
-    if (!checkAuthentication()) {
+document.addEventListener("DOMContentLoaded", async function () {
+    if (!(await checkAuthentication())) {
         redirectToLogin();
         return;
     }
 
-    osaProfile = getProfileData();
+    osaProfile = (await getProfileData());
     loadUserInfo();
     renderProfileDetails();
     setupNavigation();
@@ -34,8 +34,8 @@ let osaAnalyticsUsers = [];
 let osaAnalyticsDataRefreshPromise = null;
 let osaAnalyticsDataRefreshSemester = "";
 
-function checkAuthentication() {
-    return !!SharedData.requireSession("osa");
+async function checkAuthentication() {
+    return !!(await SharedData.requireSession("osa"));
 }
 
 function redirectToLogin() {
@@ -1353,18 +1353,18 @@ function closeManualClearModal() {
     manualClearModalContext = null;
 }
 
-function persistManualClearRequest(context, manualReason) {
+async function persistManualClearRequest(context, manualReason) {
     if (!SharedData.upsertOsaStudentClearance) {
         throw new Error("Clearance persistence is unavailable.");
     }
 
-    const response = SharedData.upsertOsaStudentClearance({
+    const response = (await SharedData.upsertOsaStudentClearance({
         studentUserId: context.studentUserId,
         studentNumber: context.studentNumber,
         semesterId: context.semesterId,
         reason: manualReason,
         status: "cleared",
-    });
+    }));
 
     if (!response || response.success !== true) {
         throw new Error((response && response.error) || "Failed to save clearance.");
@@ -1376,7 +1376,7 @@ function persistManualClearRequest(context, manualReason) {
     };
 }
 
-function handleManualClearFormSubmit(event) {
+async function handleManualClearFormSubmit(event) {
     event.preventDefault();
     if (!manualClearModalContext) return;
 
@@ -1392,7 +1392,7 @@ function handleManualClearFormSubmit(event) {
 
     try {
         setManualClearModalBusy(true);
-        const result = persistManualClearRequest(manualClearModalContext, manualReason);
+        const result = (await persistManualClearRequest(manualClearModalContext, manualReason));
         closeManualClearModal();
         refreshStatusAndAnalytics();
 
@@ -1409,7 +1409,7 @@ function handleManualClearFormSubmit(event) {
     }
 }
 
-function handleProofReviewActionClick(event) {
+async function handleProofReviewActionClick(event) {
     const button = event.target.closest(".status-action-btn");
     if (!button) return;
 
@@ -1472,14 +1472,14 @@ function handleProofReviewActionClick(event) {
             throw new Error("Proof review persistence is unavailable.");
         }
 
-        const response = SharedData.reviewStudentEvaluationProof({
+        const response = (await SharedData.reviewStudentEvaluationProof({
             proofId: proofId,
             studentUserId: studentUserId,
             studentNumber: studentNumber,
             semesterId: semesterId,
             decision: action === "approve" ? "approved" : "rejected",
             reviewNote: reviewNote,
-        });
+        }));
 
         if (!response || response.success !== true) {
             throw new Error((response && response.error) || "Failed to review proof request.");
@@ -1541,7 +1541,7 @@ function setupProfilePhotoUpload() {
         }
     });
 
-    input.addEventListener("change", function () {
+    input.addEventListener("change", async function () {
         const file = input.files && input.files[0];
         if (!file) return;
 
@@ -1565,11 +1565,11 @@ function setupProfilePhotoUpload() {
 
         if (typeof SharedData.uploadProfilePhoto !== "function") {
             const reader = new FileReader();
-            reader.onload = function () {
+            reader.onload = async function () {
                 preview.src = reader.result;
                 preview.classList.add("active");
                 placeholder.style.display = "none";
-                SharedData.setProfilePhoto('osa', reader.result);
+                (await SharedData.setProfilePhoto('osa', reader.result));
                 URL.revokeObjectURL(localPreviewUrl);
                 input.value = "";
             };
@@ -1587,7 +1587,7 @@ function setupProfilePhotoUpload() {
         try {
             uploadPromise = typeof SharedData.uploadProfilePhotoAsync === "function"
                 ? SharedData.uploadProfilePhotoAsync(file, { message: "Uploading profile photo..." })
-                : Promise.resolve(SharedData.uploadProfilePhoto(file));
+                : Promise.resolve((await SharedData.uploadProfilePhoto(file)));
         } catch (error) {
             handleUploadError(error);
             URL.revokeObjectURL(localPreviewUrl);
@@ -1625,7 +1625,7 @@ function getUserSession() {
     return SharedData.getSession();
 }
 
-function getProfileData() {
+async function getProfileData() {
     const stored = SharedData.getProfileData('osa');
     if (stored) {
         if (!stored.passwordHash) {
@@ -1637,17 +1637,17 @@ function getProfileData() {
         if (!stored.email) {
             stored.email = "osa@naap.edu.ph";
         }
-        SharedData.setProfileData('osa', stored);
+        (await SharedData.setProfileData('osa', stored));
         return stored;
     }
 
     const fallback = createDefaultProfile();
-    saveProfileData(fallback);
+    (await saveProfileData(fallback));
     return fallback;
 }
 
-function saveProfileData(profile) {
-    SharedData.setProfileData('osa', profile);
+async function saveProfileData(profile) {
+    (await SharedData.setProfileData('osa', profile));
 }
 
 function createDefaultProfile() {
@@ -1714,9 +1714,9 @@ function setupProfileForms() {
     });
 
     if (gmailForm) {
-        gmailForm.addEventListener("submit", function (e) {
+        gmailForm.addEventListener("submit", async function (e) {
             e.preventDefault();
-            if (!osaProfile) osaProfile = getProfileData();
+            if (!osaProfile) osaProfile = (await getProfileData());
 
             const currentEmail = String((document.getElementById("currentEmail") || {}).value || "").trim().toLowerCase();
             const newEmail = (newEmailInput ? newEmailInput.value.trim() : "").toLowerCase();
@@ -1738,10 +1738,10 @@ function setupProfileForms() {
             }
 
             try {
-                const result = SharedData.changeOwnEmail(currentEmail, newEmail);
+                const result = (await SharedData.changeOwnEmail(currentEmail, newEmail));
                 const nextEmail = String(result && result.email || newEmail).trim().toLowerCase();
                 osaProfile.email = nextEmail;
-                saveProfileData(osaProfile);
+                (await saveProfileData(osaProfile));
                 renderProfileDetails();
                 showFormMessage(gmailMessage, "Gmail updated successfully.", "success");
             } catch (error) {
@@ -1760,7 +1760,7 @@ function setupProfileForms() {
     }
 
     if (passwordForm) {
-        passwordForm.addEventListener("submit", function (e) {
+        passwordForm.addEventListener("submit", async function (e) {
             e.preventDefault();
 
             const currentPassword = currentPasswordInput ? currentPasswordInput.value : "";
@@ -1792,7 +1792,7 @@ function setupProfileForms() {
             }
 
             try {
-                SharedData.changeOwnPassword(currentPassword, newPassword);
+                (await SharedData.changeOwnPassword(currentPassword, newPassword));
                 showFormMessage(passwordMessage, "Password updated successfully.", "success");
             } catch (error) {
                 console.error("[OSAPanel] Failed to update password.", error);
